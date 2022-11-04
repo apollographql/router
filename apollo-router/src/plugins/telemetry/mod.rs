@@ -56,8 +56,6 @@ use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
-use self::config::LoggingMode;
-use self::config::LoggingReqRes;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 #[cfg(not(feature = "console"))]
@@ -70,6 +68,7 @@ use crate::plugins::telemetry::config::default_display_filename;
 use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::filtering_layer::FilterSubscriber;
 use crate::plugins::telemetry::formatters::JsonFields;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -102,13 +101,11 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
+mod filtering_layer;
 pub(crate) mod formatters;
 mod metrics;
 mod otlp;
 mod tracing;
-// Logging consts
-pub(crate) const LOG_SUBGRAPH_REQUEST: &str = "apollo_telemetry::log_subgraph_request";
-pub(crate) const LOG_SUBGRAPH_RESPONSE: &str = "apollo_telemetry::log_subgraph_response";
 // Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
@@ -193,9 +190,6 @@ impl Plugin for Telemetry {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
-        let log_config = self.config.logging.clone();
-        let log_config_map_res = self.config.logging.clone();
-        let log_config_map_err = self.config.logging.clone();
         let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
@@ -212,53 +206,16 @@ impl Plugin for Telemetry {
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
-                let response_log_conf = log_config_map_res
-                    .as_ref()
-                    .and_then(|l| l.router.as_ref())
-                    .and_then(|l| l.response.as_ref())
-                    .map(|l| l.mode);
-                let log_response = response_log_conf
-                    .map(|resp_conf| resp_conf.is_enabled_from_status(&resp.response.status()))
-                    .unwrap_or_default();
-                if log_response {
-                    ::tracing::debug!("Router response headers: {:?}", resp.response.headers());
-                }
-
+                ::tracing::debug!(response_headers = ?resp.response.headers(), "Supergraph response headers");
                 resp.map_stream(move |gql_response| {
-                    let log_response = log_response
-                        && response_log_conf
-                            .map(|resp_conf| resp_conf.is_enabled_from_body(&gql_response))
-                            .unwrap_or_default();
-                    if log_response {
-                        ::tracing::debug!("Router GraphQL response: {:?}", gql_response)
-                    }
+                    ::tracing::debug!(response_body = ?gql_response, "Supergraph GraphQL response");
                     gql_response
                 })
-            })
-            .map_err(move |err| {
-                let response_log_enabled = log_config_map_err
-                    .as_ref()
-                    .and_then(|l| l.router.as_ref())
-                    .and_then(|l| l.response.as_ref())
-                    .map(|l| matches!(l.mode, LoggingMode::AlwaysOn | LoggingMode::OnError))
-                    .unwrap_or_default();
-                if response_log_enabled {
-                    ::tracing::error!("Router GraphQL error: {}", err);
-                }
-                err
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
-                    let log_request = log_config
-                        .as_ref()
-                        .and_then(|l| l.router.as_ref())
-                        .and_then(|l| l.request.as_ref())
-                        .map(|req_conf| req_conf.enabled)
-                        .unwrap_or_default();
-                    if log_request {
-                        ::tracing::debug!("Router request: {:?}", req.supergraph_request);
-                    }
+                    ::tracing::debug!(request = ?req.supergraph_request, "Supergraph request");
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
@@ -324,10 +281,7 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
-        let subgraph_logging_conf_req = self.create_subgraph_logging_conf(name);
-        let subgraph_logging_conf_resp = subgraph_logging_conf_req.clone();
         let name = name.to_owned();
-        let name_cloned = name.clone();
         let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
@@ -352,32 +306,7 @@ impl Plugin for Telemetry {
                     "apollo_private.ftv1" = field::Empty
                 )
             })
-            .map_request(move |mut req| {
-                req = apollo_handler.request_ftv1(req);
-                // Add keys for logging configuration
-                if (*subgraph_logging_conf_req)
-                    .as_ref()
-                    .and_then(|l| l.request.as_ref())
-                    .map(|lr| lr.enabled)
-                    .unwrap_or_default()
-                {
-                    req.context.insert_json_value(
-                        format!("{LOG_SUBGRAPH_REQUEST}_{name_cloned}"),
-                        Value::Bool(true),
-                    );
-                }
-                let logging_resp_mode = (*subgraph_logging_conf_resp)
-                    .as_ref()
-                    .and_then(|l| l.response.as_ref())
-                    .map(|lr| lr.mode)
-                    .unwrap_or_default();
-                let _ = req.context.insert(
-                    format!("{LOG_SUBGRAPH_RESPONSE}_{name_cloned}"),
-                    logging_resp_mode,
-                );
-
-                req
-            })
+            .map_request(move |req| apollo_handler.request_ftv1(req))
             .map_response(move |resp| apollo_handler.store_ftv1(resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
@@ -531,6 +460,11 @@ impl Telemetry {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
                 } else {
+                    let attributes_to_exclude = config
+                        .logging
+                        .as_ref()
+                        .map(|l| l.get_attributes_to_exclude());
+
                     match config
                         .logging
                         .as_ref()
@@ -540,10 +474,13 @@ impl Telemetry {
                         config::LoggingFormat::Pretty => {
                             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                            let subscriber = sub_builder
-                                .event_format(formatters::TextFormatter::new())
-                                .finish()
-                                .with(telemetry);
+                            let subscriber = FilterSubscriber::new(
+                                sub_builder
+                                    .event_format(formatters::TextFormatter::new())
+                                    .finish()
+                                    .with(telemetry),
+                                attributes_to_exclude,
+                            );
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
                             }
@@ -551,16 +488,19 @@ impl Telemetry {
                         config::LoggingFormat::Json => {
                             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                            let subscriber = sub_builder
-                                .map_event_format(|e| {
-                                    e.json()
-                                        .with_current_span(true)
-                                        .with_span_list(true)
-                                        .flatten_event(true)
-                                })
-                                .map_fmt_fields(|_f| JsonFields::new())
-                                .finish()
-                                .with(telemetry);
+                            let subscriber = FilterSubscriber::new(
+                                sub_builder
+                                    .map_event_format(|e| {
+                                        e.json()
+                                            .with_current_span(true)
+                                            .with_span_list(true)
+                                            .flatten_event(true)
+                                    })
+                                    .map_fmt_fields(|_f| JsonFields::new())
+                                    .finish()
+                                    .with(telemetry),
+                                attributes_to_exclude,
+                            );
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
                             }
@@ -1028,40 +968,6 @@ impl Telemetry {
                         errors: (errors.extensions.is_some() || errors.include_messages)
                             .then_some(errors),
                         context: (!context.is_empty()).then_some(context),
-                    }
-                }),
-        )
-    }
-
-    fn create_subgraph_logging_conf(&self, name: &str) -> Arc<Option<LoggingReqRes>> {
-        Arc::new(
-            self.config
-                .logging
-                .as_ref()
-                .and_then(|l| l.subgraph.as_ref())
-                .map(|subgraph_cfg| {
-                    let mut request_cfg = subgraph_cfg
-                        .all
-                        .as_ref()
-                        .and_then(|a| a.request.clone())
-                        .unwrap_or_default();
-                    let mut response_cfg = subgraph_cfg
-                        .all
-                        .as_ref()
-                        .and_then(|a| a.response.clone())
-                        .unwrap_or_default();
-                    let subgraph_cfg = subgraph_cfg.subgraphs.as_ref().and_then(|s| s.get(name));
-                    if let Some(subgraph_req_conf) = subgraph_cfg.and_then(|s| s.request.as_ref()) {
-                        request_cfg.enabled = subgraph_req_conf.enabled;
-                    }
-                    if let Some(subgraph_res_conf) = subgraph_cfg.and_then(|s| s.response.as_ref())
-                    {
-                        response_cfg.mode = subgraph_res_conf.mode;
-                    }
-
-                    LoggingReqRes {
-                        request: Some(request_cfg),
-                        response: Some(response_cfg),
                     }
                 }),
         )
@@ -1862,4 +1768,6 @@ mod tests {
         assert!(prom_metrics.contains(r#"apollo_router_http_requests_total{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400"} 1"#));
         assert!(prom_metrics.contains(r#"apollo_router_http_requests_error_total{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400"} 1"#))
     }
+
+    // TODO: add test for logging
 }

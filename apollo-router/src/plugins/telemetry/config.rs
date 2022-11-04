@@ -1,20 +1,22 @@
 //! Configuration for the telemetry plugin.
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+use std::collections::HashSet;
 
-use http::StatusCode;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde::Serialize;
 
+use super::filtering_layer::AttributesToExclude;
 use super::metrics::MetricsAttributesConf;
 use super::*;
-use crate::graphql;
 use crate::plugins::telemetry::metrics;
+
+// Specific attributes for logging
+pub(crate) const SPECIFIC_ATTRIBUTES: [&str; 3] = ["request", "response_headers", "response_body"];
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -49,7 +51,6 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
-    #[allow(dead_code)]
     pub(crate) logging: Option<Logging>,
     pub(crate) metrics: Option<Metrics>,
     pub(crate) tracing: Option<Tracing>,
@@ -100,8 +101,8 @@ pub(crate) struct Logging {
     pub(crate) display_filename: bool,
     #[serde(default = "default_display_line_number")]
     pub(crate) display_line_number: bool,
-    /// Log configuration at router level
-    pub(crate) router: Option<LoggingReqRes>,
+    /// Log configuration at supergraph level
+    pub(crate) supergraph: Option<LoggingIncludeAttrs>,
     /// Log configuration for subgraphs
     pub(crate) subgraph: Option<SubgraphLogging>,
 }
@@ -114,13 +115,78 @@ pub(crate) const fn default_display_line_number() -> bool {
     true
 }
 
+impl Logging {
+    pub(crate) fn get_attributes_to_exclude(&self) -> AttributesToExclude {
+        let (all_subgraphs_attrs_to_include, attrs_to_include_by_subg) = self
+            .subgraph
+            .clone()
+            .map(|s| s.get_attributes())
+            .unwrap_or_default();
+        let global_attrs_to_include = self
+            .supergraph
+            .clone()
+            .map(|s| s.include_attributes)
+            .unwrap_or_default();
+
+        let usual_attributes: HashSet<String> =
+            HashSet::from_iter(SPECIFIC_ATTRIBUTES.into_iter().map(|a| a.to_string()));
+        let global_attrs_to_exclude = global_attrs_to_include
+            .symmetric_difference(&usual_attributes)
+            .cloned()
+            .collect();
+
+        let all_subgraphs_attrs_to_exclude = all_subgraphs_attrs_to_include
+            .symmetric_difference(&usual_attributes)
+            .cloned()
+            .collect();
+        let attrs_to_exclude_by_subg = attrs_to_include_by_subg
+            .into_iter()
+            .map(|(k, mut v)| {
+                v = v.symmetric_difference(&usual_attributes).cloned().collect();
+
+                (k, v)
+            })
+            .collect();
+
+        AttributesToExclude {
+            supergraph: global_attrs_to_exclude,
+            all_subgraphs: all_subgraphs_attrs_to_exclude,
+            subgraphs: attrs_to_exclude_by_subg,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphLogging {
     // Apply to all subgraphs
-    pub(crate) all: Option<LoggingReqRes>,
+    pub(crate) all: Option<LoggingIncludeAttrs>,
     // Apply to specific subgraph
-    pub(crate) subgraphs: Option<HashMap<String, LoggingReqRes>>,
+    pub(crate) subgraphs: Option<HashMap<String, LoggingIncludeAttrs>>,
+}
+
+impl SubgraphLogging {
+    pub(crate) fn get_attributes(self) -> (HashSet<String>, HashMap<String, HashSet<String>>) {
+        let mut globals = HashSet::new();
+        let mut by_subgraph = HashMap::new();
+
+        if let Some(all) = self.all {
+            globals.extend(all.include_attributes);
+        }
+        if let Some(subgraphs) = self.subgraphs {
+            by_subgraph.extend(subgraphs.into_iter().map(|(k, v)| {
+                (
+                    k,
+                    v.include_attributes
+                        .into_iter()
+                        .chain(globals.clone())
+                        .collect::<HashSet<String>>(),
+                )
+            }));
+        }
+
+        (globals, by_subgraph)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
@@ -144,54 +210,9 @@ impl Default for LoggingFormat {
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct LoggingReqRes {
-    /// Request logging
-    pub(crate) request: Option<LoggingReq>,
-    /// Response logging
-    pub(crate) response: Option<LoggingRes>,
-}
-
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct LoggingReq {
-    /// Enable log
-    pub(crate) enabled: bool,
-}
-
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct LoggingRes {
-    /// Logging mode
-    pub(crate) mode: LoggingMode,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema, Default, Copy)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum LoggingMode {
-    #[default]
-    /// Never log
-    AlwaysOff,
-    /// Always log
-    AlwaysOn,
-    /// Log only on error
-    OnError,
-}
-
-impl LoggingMode {
-    pub(crate) fn is_enabled_from_status(&self, status: &StatusCode) -> bool {
-        match self {
-            config::LoggingMode::AlwaysOff => false,
-            config::LoggingMode::AlwaysOn => true,
-            config::LoggingMode::OnError => !status.is_success(),
-        }
-    }
-    pub(crate) fn is_enabled_from_body(&self, resp: &graphql::Response) -> bool {
-        match self {
-            config::LoggingMode::AlwaysOff => false,
-            config::LoggingMode::AlwaysOn => true,
-            config::LoggingMode::OnError => !resp.errors.is_empty(),
-        }
-    }
+pub(crate) struct LoggingIncludeAttrs {
+    /// Attributes to include in logs
+    pub(crate) include_attributes: HashSet<String>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
@@ -439,5 +460,93 @@ impl Conf {
                 (_, _) => 0.0,
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_attributes_to_exclude() {
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert(
+            "test_subgraph".to_string(),
+            LoggingIncludeAttrs {
+                include_attributes: vec!["request".to_string()].into_iter().collect(),
+            },
+        );
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            supergraph: Some(LoggingIncludeAttrs {
+                include_attributes: vec!["response_body".to_string()].into_iter().collect(),
+            }),
+            subgraph: Some(SubgraphLogging {
+                all: Some(LoggingIncludeAttrs {
+                    include_attributes: vec!["response_headers".to_string()].into_iter().collect(),
+                }),
+                subgraphs: subgraphs.into(),
+            }),
+        };
+
+        let expected = AttributesToExclude {
+            supergraph: vec!["request".to_string(), "response_headers".to_string()]
+                .into_iter()
+                .collect(),
+            all_subgraphs: vec!["response_body".to_string(), "request".to_string()]
+                .into_iter()
+                .collect(),
+            subgraphs: [(
+                "test_subgraph".to_string(),
+                vec!["response_body".to_string()].into_iter().collect(),
+            )]
+            .into(),
+        };
+
+        assert_eq!(expected, logging_conf.get_attributes_to_exclude());
+
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert(
+            "test_subgraph".to_string(),
+            LoggingIncludeAttrs {
+                include_attributes: vec!["request".to_string()].into_iter().collect(),
+            },
+        );
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            supergraph: Some(LoggingIncludeAttrs {
+                include_attributes: vec!["response_body".to_string()].into_iter().collect(),
+            }),
+            subgraph: Some(SubgraphLogging {
+                all: None,
+                subgraphs: subgraphs.into(),
+            }),
+        };
+
+        let expected = AttributesToExclude {
+            supergraph: vec!["request".to_string(), "response_headers".to_string()]
+                .into_iter()
+                .collect(),
+            all_subgraphs: vec![
+                "response_body".to_string(),
+                "response_headers".to_string(),
+                "request".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            subgraphs: [(
+                "test_subgraph".to_string(),
+                vec!["response_body".to_string(), "response_headers".to_string()]
+                    .into_iter()
+                    .collect(),
+            )]
+            .into(),
+        };
+
+        assert_eq!(expected, logging_conf.get_attributes_to_exclude());
     }
 }
