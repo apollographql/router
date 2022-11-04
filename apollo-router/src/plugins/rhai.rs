@@ -1056,7 +1056,8 @@ impl Rhai {
             .register_iterator::<HeaderMap>()
             // Register a contains function for HeaderMap so that "in" works
             .register_fn("contains", |x: &mut HeaderMap, key: &str| -> bool {
-                match HeaderName::from_str(key) {
+                let k = urlencoding::encode(key);
+                match HeaderName::from_str(&*k) {
                     Ok(hn) => x.contains_key(hn),
                     Err(_e) => false,
                 }
@@ -1078,21 +1079,28 @@ impl Rhai {
                 |_: &mut SharedMut<execution::DeferredResponse>| -> bool { false },
             )
             // Register a HeaderMap indexer so we can get/set headers
+            // urlencode/decode header key/values
             .register_indexer_get(
                 |x: &mut HeaderMap, key: &str| -> Result<String, Box<EvalAltResult>> {
+                    let k = urlencoding::encode(key);
                     let search_name =
-                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-                    Ok(x.get(search_name)
+                        HeaderName::from_str(&*k).map_err(|e: InvalidHeaderName| e.to_string())?;
+                    let v = x
+                        .get(search_name)
                         .ok_or("")?
                         .to_str()
-                        .map_err(|e| e.to_string())?
-                        .to_string())
+                        .map_err(|e| e.to_string())?;
+                    Ok(urlencoding::decode(v)
+                        .map(|x| x.into_owned())
+                        .map_err(|e| e.to_string())?)
                 },
             )
             .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
+                let k = urlencoding::encode(key);
+                let v = urlencoding::encode(value);
                 x.insert(
-                    HeaderName::from_str(key).map_err(|e| e.to_string())?,
-                    HeaderValue::from_str(value).map_err(|e| e.to_string())?,
+                    HeaderName::from_str(&*k).map_err(|e| e.to_string())?,
+                    HeaderValue::from_str(&*v).map_err(|e| e.to_string())?,
                 );
                 Ok(())
             })
