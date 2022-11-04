@@ -1,7 +1,6 @@
 //! Configuration for jaeger tracing.
 use std::time::Duration;
 
-use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
@@ -16,7 +15,7 @@ use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::SpanExporterExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -26,6 +25,7 @@ pub(crate) struct Config {
     #[schemars(schema_with = "endpoint_schema")]
     pub(crate) endpoint: Endpoint,
 
+    /// deprecated: this option has no effect now
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     pub(crate) scheduled_delay: Option<Duration>,
@@ -108,11 +108,6 @@ impl TracingConfigurator for Config {
                 .init_async_exporter(opentelemetry::runtime::Tokio)?,
         };
 
-        Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with(&self.scheduled_delay, |b, d| b.with_scheduled_delay(*d))
-                .build()
-                .filtered(),
-        ))
+        Ok(builder.with_simple_exporter(exporter.filtered()))
     }
 }

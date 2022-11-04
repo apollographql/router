@@ -1,4 +1,5 @@
 use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::sdk::trace::Span;
@@ -78,67 +79,77 @@ where
     Ok(AgentEndpoint::Url(url))
 }
 
+pub(crate) static APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
+
 #[derive(Debug)]
-struct ApolloFilterSpanProcessor<T: SpanProcessor> {
+struct ApolloFilterSpanExporter<T: SpanExporter> {
     delegate: T,
 }
 
-pub(crate) static APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
-
-impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
-    fn on_start(&self, span: &mut Span, cx: &Context) {
-        self.delegate.on_start(span, cx);
-    }
-
-    fn on_end(&self, span: SpanData) {
-        if span
-            .attributes
-            .iter()
-            .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-        {
-            let attributes_len = span.attributes.len();
-            let span = SpanData {
-                attributes: span
+impl<T: SpanExporter> SpanExporter for ApolloFilterSpanExporter<T> {
+    fn export<'life0, 'async_trait>(
+        &'life0 mut self,
+        mut batch: Vec<SpanData>,
+    ) -> core::pin::Pin<
+        Box<
+            dyn core::future::Future<Output = opentelemetry::sdk::export::trace::ExportResult>
+                + core::marker::Send
+                + 'async_trait,
+        >,
+    >
+    where
+        'life0: 'async_trait,
+        Self: 'async_trait,
+    {
+        let batch = batch
+            .drain(..)
+            .map(|span| {
+                if span
                     .attributes
-                    .into_iter()
-                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-                    .fold(
-                        EvictedHashMap::new(attributes_len as u32, attributes_len),
-                        |mut m, (k, v)| {
-                            m.insert(KeyValue::new(k, v));
-                            m
-                        },
-                    ),
-                ..span
-            };
+                    .iter()
+                    .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                {
+                    let attributes_len = span.attributes.len();
+                    SpanData {
+                        attributes: span
+                            .attributes
+                            .into_iter()
+                            .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                            .fold(
+                                EvictedHashMap::new(attributes_len as u32, attributes_len),
+                                |mut m, (k, v)| {
+                                    m.insert(KeyValue::new(k, v));
+                                    m
+                                },
+                            ),
+                        ..span
+                    }
+                } else {
+                    span
+                }
+            })
+            .collect();
 
-            self.delegate.on_end(span);
-        } else {
-            self.delegate.on_end(span);
-        }
+        self.delegate.export(batch)
     }
 
-    fn force_flush(&self) -> TraceResult<()> {
-        self.delegate.force_flush()
-    }
-
-    fn shutdown(&mut self) -> TraceResult<()> {
+    fn shutdown(&mut self) {
         self.delegate.shutdown()
     }
 }
 
-trait SpanProcessorExt
+trait SpanExporterExt
 where
-    Self: Sized + SpanProcessor,
+    Self: Sized + SpanExporter,
 {
-    fn filtered(self) -> ApolloFilterSpanProcessor<Self>;
+    fn filtered(self) -> ApolloFilterSpanExporter<Self>;
 }
 
-impl<T: SpanProcessor> SpanProcessorExt for T
+impl<T: SpanExporter> SpanExporterExt for T
 where
     Self: Sized,
 {
-    fn filtered(self) -> ApolloFilterSpanProcessor<Self> {
-        ApolloFilterSpanProcessor { delegate: self }
+    fn filtered(self) -> ApolloFilterSpanExporter<Self> {
+        ApolloFilterSpanExporter { delegate: self }
     }
 }

@@ -1,5 +1,4 @@
 //! Configuration for zipkin tracing.
-use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -12,7 +11,7 @@ use super::AgentDefault;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::tracing::SpanProcessorExt;
+use crate::plugins::telemetry::tracing::SpanExporterExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
@@ -63,10 +62,6 @@ impl TracingConfigurator for Config {
             })
             .init_exporter()?;
 
-        Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .build()
-                .filtered(),
-        ))
+        Ok(builder.with_simple_exporter(exporter.filtered()))
     }
 }

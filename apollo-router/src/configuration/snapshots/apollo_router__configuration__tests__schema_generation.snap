@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
 ---
 {
@@ -1751,6 +1751,7 @@ expression: "&schema"
               ],
               "properties": {
                 "scheduled_delay": {
+                  "description": "deprecated: this option has no effect now",
                   "default": null,
                   "type": "string"
                 }
