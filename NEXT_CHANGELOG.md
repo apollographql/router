@@ -93,6 +93,16 @@ When validating variables, we should use default values for object fields if app
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
+### Replace the BatchSpanProcessor with SimpleSpanProcessor ([Issue #2046](https://github.com/apollographql/router/issues/2046))
+
+The way telemetry processes span had scalability issues, due to batching spans before sending them.
+The processor is replaced with one that sends spans to the exporter as soon as they are created.
+The exporter is then tasked with aggregating or batching them as needed, according to its
+protocol.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2047
+
+
 ## 🛠 Maintenance
 
 ### Apply tower best practice to inner service cloning ([PR #2030](https://github.com/apollographql/router/pull/2030))
