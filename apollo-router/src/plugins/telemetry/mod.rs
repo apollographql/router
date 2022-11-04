@@ -216,6 +216,9 @@ impl Plugin for Telemetry {
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
                     ::tracing::debug!(request = ?req.supergraph_request, "Supergraph request");
+                    if let Some(operation_name) = &req.supergraph_request.body().operation_name {
+                        ::tracing::debug!(%operation_name,  "Supergraph request with operation_name");
+                    }
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {

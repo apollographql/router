@@ -6,7 +6,13 @@ use tracing::Level;
 use tracing::Subscriber;
 use tracing_core::Field;
 
-use super::config::SPECIFIC_ATTRIBUTES;
+// Specific attributes for logging
+pub(crate) const SPECIFIC_ATTRIBUTES: [&str; 4] = [
+    "request",
+    "response_headers",
+    "response_body",
+    "operation_name",
+];
 
 const SUBGRAPH_ATTRIBUTE_NAME: &str = "subgraph";
 

@@ -114,6 +114,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         Box::pin(async move {
             let (parts, body) = subgraph_request.into_parts();
 
+            if let Some(operation_name) = &body.operation_name {
+                tracing::debug!(%operation_name, subgraph = %service_name, "Request to subgraph {service_name:?} with operation_name");
+            }
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
             let compressed_body = compress(body, &parts.headers)
@@ -156,7 +159,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 }
             });
             tracing::debug!(request = ?request, subgraph = %service_name, "Request to subgraph {service_name:?}");
-            // TODO add new record in span
+
             let path = schema_uri.path().to_string();
             let response = client
                 .call(request)

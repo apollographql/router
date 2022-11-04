@@ -795,90 +795,23 @@ expression: "&schema"
                 "json"
               ]
             },
-            "router": {
-              "description": "Log configuration at router level",
-              "type": "object",
-              "properties": {
-                "request": {
-                  "description": "Request logging",
-                  "type": "object",
-                  "required": [
-                    "enabled"
-                  ],
-                  "properties": {
-                    "enabled": {
-                      "description": "Enable log",
-                      "type": "boolean"
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                },
-                "response": {
-                  "description": "Response logging",
-                  "type": "object",
-                  "required": [
-                    "mode"
-                  ],
-                  "properties": {
-                    "mode": {
-                      "description": "Logging mode",
-                      "type": "string",
-                      "enum": [
-                        "always_off",
-                        "always_on",
-                        "on_error"
-                      ]
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
             "subgraph": {
               "description": "Log configuration for subgraphs",
               "type": "object",
               "properties": {
                 "all": {
                   "type": "object",
+                  "required": [
+                    "include_attributes"
+                  ],
                   "properties": {
-                    "request": {
-                      "description": "Request logging",
-                      "type": "object",
-                      "required": [
-                        "enabled"
-                      ],
-                      "properties": {
-                        "enabled": {
-                          "description": "Enable log",
-                          "type": "boolean"
-                        }
+                    "include_attributes": {
+                      "description": "Attributes to include in logs",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
                       },
-                      "additionalProperties": false,
-                      "nullable": true
-                    },
-                    "response": {
-                      "description": "Response logging",
-                      "type": "object",
-                      "required": [
-                        "mode"
-                      ],
-                      "properties": {
-                        "mode": {
-                          "description": "Logging mode",
-                          "type": "string",
-                          "enum": [
-                            "always_off",
-                            "always_on",
-                            "on_error"
-                          ]
-                        }
-                      },
-                      "additionalProperties": false,
-                      "nullable": true
+                      "uniqueItems": true
                     }
                   },
                   "additionalProperties": false,
@@ -888,46 +821,41 @@ expression: "&schema"
                   "type": "object",
                   "additionalProperties": {
                     "type": "object",
+                    "required": [
+                      "include_attributes"
+                    ],
                     "properties": {
-                      "request": {
-                        "description": "Request logging",
-                        "type": "object",
-                        "required": [
-                          "enabled"
-                        ],
-                        "properties": {
-                          "enabled": {
-                            "description": "Enable log",
-                            "type": "boolean"
-                          }
+                      "include_attributes": {
+                        "description": "Attributes to include in logs",
+                        "type": "array",
+                        "items": {
+                          "type": "string"
                         },
-                        "additionalProperties": false,
-                        "nullable": true
-                      },
-                      "response": {
-                        "description": "Response logging",
-                        "type": "object",
-                        "required": [
-                          "mode"
-                        ],
-                        "properties": {
-                          "mode": {
-                            "description": "Logging mode",
-                            "type": "string",
-                            "enum": [
-                              "always_off",
-                              "always_on",
-                              "on_error"
-                            ]
-                          }
-                        },
-                        "additionalProperties": false,
-                        "nullable": true
+                        "uniqueItems": true
                       }
                     },
                     "additionalProperties": false
                   },
                   "nullable": true
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
+            "supergraph": {
+              "description": "Log configuration at supergraph level",
+              "type": "object",
+              "required": [
+                "include_attributes"
+              ],
+              "properties": {
+                "include_attributes": {
+                  "description": "Attributes to include in logs",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "uniqueItems": true
                 }
               },
               "additionalProperties": false,

@@ -11,12 +11,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::filtering_layer::AttributesToExclude;
+use super::filtering_layer::SPECIFIC_ATTRIBUTES;
 use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::plugins::telemetry::metrics;
-
-// Specific attributes for logging
-pub(crate) const SPECIFIC_ATTRIBUTES: [&str; 3] = ["request", "response_headers", "response_body"];
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -473,7 +471,9 @@ mod tests {
         subgraphs.insert(
             "test_subgraph".to_string(),
             LoggingIncludeAttrs {
-                include_attributes: vec!["request".to_string()].into_iter().collect(),
+                include_attributes: vec!["request".to_string(), "operation_name".to_string()]
+                    .into_iter()
+                    .collect(),
             },
         );
         let logging_conf = Logging {
@@ -481,11 +481,18 @@ mod tests {
             display_filename: false,
             display_line_number: false,
             supergraph: Some(LoggingIncludeAttrs {
-                include_attributes: vec!["response_body".to_string()].into_iter().collect(),
+                include_attributes: vec!["response_body".to_string(), "operation_name".to_string()]
+                    .into_iter()
+                    .collect(),
             }),
             subgraph: Some(SubgraphLogging {
                 all: Some(LoggingIncludeAttrs {
-                    include_attributes: vec!["response_headers".to_string()].into_iter().collect(),
+                    include_attributes: vec![
+                        "response_headers".to_string(),
+                        "operation_name".to_string(),
+                    ]
+                    .into_iter()
+                    .collect(),
                 }),
                 subgraphs: subgraphs.into(),
             }),
@@ -528,21 +535,30 @@ mod tests {
         };
 
         let expected = AttributesToExclude {
-            supergraph: vec!["request".to_string(), "response_headers".to_string()]
-                .into_iter()
-                .collect(),
+            supergraph: vec![
+                "request".to_string(),
+                "response_headers".to_string(),
+                "operation_name".to_string(),
+            ]
+            .into_iter()
+            .collect(),
             all_subgraphs: vec![
                 "response_body".to_string(),
                 "response_headers".to_string(),
                 "request".to_string(),
+                "operation_name".to_string(),
             ]
             .into_iter()
             .collect(),
             subgraphs: [(
                 "test_subgraph".to_string(),
-                vec!["response_body".to_string(), "response_headers".to_string()]
-                    .into_iter()
-                    .collect(),
+                vec![
+                    "response_body".to_string(),
+                    "response_headers".to_string(),
+                    "operation_name".to_string(),
+                ]
+                .into_iter()
+                .collect(),
             )]
             .into(),
         };
