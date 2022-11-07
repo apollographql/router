@@ -289,23 +289,13 @@ impl TrafficShaping {
                     })
                     .clone()
             });
-            /*let retry = self
-            .retry_policy
-            .as_ref()
-            .map(|policy| tower::retry::RetryLayer::new(policy.clone()));*/
-            /*let retry = tower::retry::RetryLayer::new(self.policy.clone().unwrap());
-            ServiceBuilder::new()*/
-            /*.layer(TimeoutLayer::new(
-                                    config
-                .timeout
-                .unwrap_or(DEFAULT_TIMEOUT),
-            ))
-            .option_layer(rate_limit)*/
-            //.option_layer(retry)
+            let retry = tower::retry::RetryLayer::new(self.retry_policy.clone().unwrap());
+
             Either::A(ServiceBuilder::new()
                 .option_layer(config.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
+                //.option_layer(Some(retry))
                     .layer(TimeoutLayer::new(
                         config
                         .timeout
