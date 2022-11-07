@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
+
+Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+
 ### Add support for dhat based heap profiling ([PR #1829](https://github.com/apollographql/router/pull/1829))
 
 [dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
