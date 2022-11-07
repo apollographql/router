@@ -1,0 +1,7 @@
+FROM node:18-bullseye
+
+WORKDIR /usr/src/app
+# TODO: use https://github.com/apollographql/federation-demo once PR #89 lands
+RUN git clone -b igni/use_introspect_and_compose https://github.com/o0Ignition0o/federation-demo.git . && \
+    npm install
+

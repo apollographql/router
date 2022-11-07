@@ -18,6 +18,7 @@ use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::deduplication::QueryDeduplicationLayer;
+use crate::plugins::traffic_shaping::is_deduplicate_query_enabled;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
@@ -29,6 +30,7 @@ use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
 
 #[derive(Clone)]
+/// A path and a handler to be exposed as a web_endpoint for plugins
 pub struct Endpoint {
     pub(crate) path: String,
     // Plugins need to be Send + Sync
@@ -45,6 +47,7 @@ impl std::fmt::Debug for Endpoint {
 }
 
 impl Endpoint {
+    /// Creates an Endpoint given a path and a Boxed Service
     pub fn new(path: String, handler: transport::BoxService) -> Self {
         Self {
             path,
@@ -117,14 +120,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
-
-        let deduplicate_queries = configuration
-            .as_ref()
-            .plugins()
-            .iter()
-            .find(|(name, _)| name == "apollo.traffic_shaping")
-            .and_then(|(_, shaping)| shaping.get("deduplicate_query"))
-            == Some(&serde_json::Value::Bool(true));
+        let deduplicate_queries = is_deduplicate_query_enabled(configuration.as_ref());
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);

@@ -31,8 +31,71 @@ use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 
+// Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
+// and variables identically to prevent this from happening.
+
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+pub(crate) static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg(feature = "dhat-heap")]
+pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+
+#[cfg(feature = "dhat-ad-hoc")]
+pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
+
 pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
+
+// Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
+// main completes, so don't use tracing, use println!() and eprintln!()..
+#[cfg(feature = "dhat-heap")]
+#[crate::_private::ctor::ctor]
+fn create_heap_profiler() {
+    unsafe {
+        match DHAT_HEAP_PROFILER.set(dhat::Profiler::new_heap()) {
+            Ok(p) => {
+                println!("heap profiler installed: {:?}", p);
+                libc::atexit(drop_heap_profiler);
+            }
+            Err(e) => eprintln!("heap profiler install failed: {:?}", e),
+        }
+    }
+}
+
+#[cfg(feature = "dhat-heap")]
+#[no_mangle]
+extern "C" fn drop_heap_profiler() {
+    unsafe {
+        if let Some(p) = DHAT_HEAP_PROFILER.take() {
+            drop(p);
+        }
+    }
+}
+
+#[cfg(feature = "dhat-ad-hoc")]
+#[crate::_private::ctor::ctor]
+fn create_ad_hoc_profiler() {
+    unsafe {
+        match DHAT_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
+            Ok(p) => {
+                println!("ad-hoc profiler installed: {:?}", p);
+                libc::atexit(drop_ad_hoc_profiler);
+            }
+            Err(e) => eprintln!("ad-hoc profiler install failed: {:?}", e),
+        }
+    }
+}
+
+#[cfg(feature = "dhat-ad-hoc")]
+#[no_mangle]
+extern "C" fn drop_ad_hoc_profiler() {
+    unsafe {
+        if let Some(p) = DHAT_AD_HOC_PROFILER.take() {
+            drop(p);
+        }
+    }
+}
 
 /// Options for the router
 #[derive(Parser, Debug)]

@@ -1,14 +1,15 @@
-name: CHANGELOG.md reminder
+name: NEXT_CHANGELOG.md reminder
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ dev ]
   workflow_dispatch:
 
 jobs:
   remind_missing_changelog:
     runs-on: ubuntu-latest
     steps:
-      - name: Missing Changelog Reminder
+      - name: Missing NEXT_CHANGELOG.md Reminder
         uses: mskelton/changelog-reminder-action@v2.0.0
         with:
           changelogRegex: NEXT_CHANGELOG.md
+          message: "@${{ github.actor }}, please add a `/NEXT_CHANGELOG.md` entry for this PR to the appropriate section!"

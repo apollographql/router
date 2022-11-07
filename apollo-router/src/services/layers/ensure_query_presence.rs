@@ -35,9 +35,7 @@ where
                 if query.is_none() || query.unwrap().trim().is_empty() {
                     let errors = vec![crate::error::Error {
                         message: "Must provide query string.".to_string(),
-                        locations: Default::default(),
-                        path: Default::default(),
-                        extensions: Default::default(),
+                        ..Default::default()
                     }];
 
                     //We do not copy headers from the request to the response as this may lead to leakable of sensitive data

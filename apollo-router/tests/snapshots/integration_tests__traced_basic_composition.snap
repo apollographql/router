@@ -155,6 +155,10 @@ expression: get_spans()
               [
                 "ftv1.do_not_sample_reason",
                 ""
+              ],
+              [
+                "message",
+                "dropping telemetry..."
               ]
             ],
             "metadata": {

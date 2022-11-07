@@ -11,7 +11,7 @@ BINARY_DOWNLOAD_PREFIX="https://github.com/apollographql/router/releases/downloa
 
 # Router version defined in apollo-router's Cargo.toml
 # Note: Change this line manually during the release steps.
-PACKAGE_VERSION="v1.1.0"
+PACKAGE_VERSION="v1.2.1"
 
 download_binary() {
     downloader --check
@@ -105,15 +105,6 @@ get_architecture() {
     fi
 
 
-    # If we are building a linux container on an M1 chip, let's
-    # download a86_64 binaries and assume the docker image is
-    # for amd64. We do this because we don't have router binaries
-    # for aarch64 for any OS right now. If this changes in the
-    # future, we'll need to re-visit this hack.
-    if [ "$_ostype" = "Linux" ] && [ "$_cputype" = "aarch64" ]; then
-        _cputype="x86_64"
-    fi
-
     case "$_ostype" in
         Linux)
             _ostype=unknown-linux-gnu
@@ -133,7 +124,7 @@ get_architecture() {
     esac
 
     case "$_cputype" in
-        x86_64 | x86-64 | x64 | amd64)
+        x86_64 | x86-64 | x64 | amd64 | aarch64)
             ;;
         *)
             err "no precompiled binaries available for CPU architecture: $_cputype"
