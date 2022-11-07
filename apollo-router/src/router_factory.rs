@@ -123,11 +123,6 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
-        println!(
-            "plugins list: {:?}",
-            plugins.iter().map(|i| i.0.as_str()).collect::<Vec<_>>()
-        );
-
         for (name, _) in schema.subgraphs() {
             let subgraph_service = match plugins
                 .iter()

@@ -606,7 +606,6 @@ mod test {
         mock_service.expect_clone().returning(|| {
             let mut mock_service = MockSupergraphService::new();
 
-            println!("cloning the supergraph");
             mock_service.expect_clone().returning(|| {
                 let mut mock_service = MockSupergraphService::new();
                 mock_service.expect_call().times(0..2).returning(move |_| {
