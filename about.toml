@@ -5,6 +5,7 @@ accepted = [
     "BSD-3-Clause",
     "CC0-1.0",
     "ISC",
+    "Elastic-2.0",
     "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
@@ -18,20 +19,6 @@ private = { ignore = true }
 ignore-dev-dependencies = true
 
 # apollographql licenses
-[xtask.clarify]
-license = "LicenseRef-ELv2"
-[[xtask.clarify.files]]
-path = 'LICENSE'
-license = 'LicenseRef-ELv2'
-checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
-
-[apollo-router.clarify]
-license = "LicenseRef-ELv2"
-[[apollo-router.clarify.files]]
-path = 'LICENSE'
-license = 'LicenseRef-ELv2'
-checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
-
 [router-bridge.clarify]
 license = "LicenseRef-ELv2"
 [[router-bridge.clarify.files]]
@@ -45,10 +32,3 @@ license = "LicenseRef-ring"
 path = "LICENSE"
 license = "LicenseRef-ring"
 checksum = '76b39f9b371688eac9d8323f96ee80b3aef5ecbc2217f25377bd4e4a615296a9'
-
-[apollo-spaceport.clarify]
-license = "LicenseRef-ELv2"
-[[apollo-spaceport.clarify.files]]
-path = 'LICENSE'
-license = 'LicenseRef-ELv2'
-checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
