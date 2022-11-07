@@ -25,71 +25,115 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
-
 ## ❗ BREAKING ❗
-
 ## 🚀 Features
+
+### Add support for dhat based heap profiling ([PR #1829](https://github.com/apollographql/router/pull/1829))
+
+[dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1829
+
+### Add `trace_id` in logs to identify all logs related to a specific request ([Issue #1981](https://github.com/apollographql/router/issues/1981))
+
+It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
+
+Example of logs in text:
+
+```logs
+2022-10-21T15:17:45.562553Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::services::subgraph_service: fetch_error="hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))"
+2022-10-21T15:17:45.565768Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::query_planner::execution: Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)
+```
+
+Example of logs in JSON:
+
+```logs
+{"timestamp":"2022-10-26T15:39:01.078260Z","level":"ERROR","fetch_error":"hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))","target":"apollo_router::services::subgraph_service","filename":"apollo-router/src/services/subgraph_service.rs","line_number":182,"span":{"name":"subgraph"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"},{"name":"fetch"},{"name":"subgraph"}]}
+{"timestamp":"2022-10-26T15:39:01.080259Z","level":"ERROR","message":"Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)","target":"apollo_router::query_planner::execution","filename":"apollo-router/src/query_planner/execution.rs","line_number":188,"span":{"name":"parallel"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"}]}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
+
+### Reload the configuration when receiving the SIGHUP signal ([Issue #35](https://github.com/apollographql/router/issues/35))
+
+This adds support for reloading configuration when receiving the SIGHUP signal. This only works on unix-like platforms,
+and only with the configuration file.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
+
 ## 🐛 Fixes
 
-### Fix --hot-reload in kubernetes and docker ([Issue #1476](https://github.com/apollographql/router/issues/1476))
+### Fix the deduplication logic in deduplication caching ([Issue #1984](https://github.com/apollographql/router/issues/1984))
 
---hot-reload now chooses a file event notification mechanism at runtime. The exact mechanism is determined by the `notify` crate.
+Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1964
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
 
-### Fix a coercion rule that failed to validate 64 bit integers ([PR #1951](https://github.com/apollographql/router/pull/1951))
+### Follow directives from Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
 
-Queries that passed 64 bit integers for Float values would (incorrectly) fail to validate.
+The Uplink API returns actionable info in its responses:
+- some error codes indicate an unrecoverable issue, for which the router should not retry the query (example: non-existing graph)
+- it can tell the router when it should retry the query
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1951
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
 
-### prometheus: make sure http_requests_error_total and http_requests_total are incremented. ([PR #1953](https://github.com/apollographql/router/pull/1953))
+### Fix the rhai SDL print function ([Issue #2005](https://github.com/apollographql/router/issues/2005))
 
-`http_requests_error_total` did only increment for requests that would be an `INTERNAL_SERVER_ERROR` in the router (the service stack returning a BoxError).
-What this means is that validation errors would not increment this counter.
+A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
 
-`http_requests_total` would only increment for successful requests, while the prometheus documentation mentions this key should be incremented regardless of whether the request succeeded or not.
+By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
 
-This PR makes sure we always increment `http_requests_total`, and we increment `http_requests_error_total` when the StatusCode is not 2XX.
+### Exports a missing strut (`router_factory::Endpoint`) that was preventing the `web_endpoints` trait from being implemented by Plugins
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1953
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2007
 
-### Set no_delay and keepalive on subgraph requests [Issue #1905](https://github.com/apollographql/router/issues/1905))
+### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
 
-It was incorrectly removed in a previous pull request.
+When validating variables, we should use default values for object fields if applicable.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1910
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
-## 🛠 Maintenance
+###  ([Issue #2036](https://github.com/apollographql/router/issues/2036))
 
-### Update docker-compose and Dockerfiles now that the submodules have been removed ([PR #1950](https://github.com/apollographql/router/pull/1950))
+Work around for [opentelemetry-rust#908](https://github.com/open-telemetry/opentelemetry-rust/issues/908)
+The default URL currently incorrectly uses https causing errors when connecting to a default localhost OTel Collector.
 
-We recently removed git submodules dependency, but we didn't update the global and the fuzzer `docker-compose.yml`.
+The router will detect and work around this by explicitly setting the correct endpoint URLs when not specified in config.
 
-This PR adds new Dockerfiles and updates `docker-compose.yml` so we can run integration tests and the fuzzer without needing to clone and set up the federation and fed2-demo repositories.
+In addition: 
+* basic TLS defaulting will occur when the endpoint scheme uses `https`.
+* a warning will be raised if the endpoint port is 443 but no TLS config is specified.
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/1950
-
-### Fix logic around Accept headers and multipart ([PR #1923](https://github.com/apollographql/router/pull/1923))
-
-If the Accept header contained `multipart/mixed`, even with other alternatives like `application/json`,
-a query with a single response was still sent as multipart, which made Explorer fail on the initial
-introspection query.
-
-This changes the logic so that:
-
-* if we accept application/json or wildcard and there's a single response, it comes as json
-* if there are multiple responses or we only accept multipart, send a multipart responses
-* otherwise return a HTTP 406 Not Acceptable
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1923
-
-### `@defer`: duplicated errors across incremental items ([Issue #1834](https://github.com/apollographql/router/issues/1834), [Issue #1818](https://github.com/apollographql/router/issues/1818))
-
-If a deferred response contains incremental responses, the errors should be dispatched in each increment according to the
-error's path.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1892
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#2048
 
 ## 🛠 Maintenance
+
+### Apply tower best practice to inner service cloning ([PR #2030](https://github.com/apollographql/router/pull/2030))
+
+Our service readiness checking can be improved by following tower project recommendations for cloning inner services.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
+
+### Split the configuration file management in multiple modules ([Issue #1790](https://github.com/apollographql/router/issues/1790))
+
+The file is becoming large and hard to modify.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
+
+### Apply traffic shaping on supergraph and subgraph directly [PR #2034](https://github.com/apollographql/router/issues/2034))
+
+The plugin infrastructure works on `BoxService` instances, and makes no guarantee on plugin ordering.
+The traffic shaping plugin needs a clonable inner service, and should run right before calling
+the underlying service. So this changes the traffic plugin application so it can work directly
+on the underlying service. It is still a plugin though, so it keeps the same configuration.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2034
+
 ## 📚 Documentation
+
+### Remove references to git submodules from DEVELOPMENT.md ([Issue #2012](https://github.com/apollographql/router/issues/2012))
+
+We don't need instructions about submodules since #1856. Let's remove them.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2045
+

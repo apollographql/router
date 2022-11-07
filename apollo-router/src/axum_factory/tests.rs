@@ -45,7 +45,7 @@ use tower::Service;
 use tower::ServiceExt;
 
 use super::*;
-use crate::configuration::Cors;
+use crate::configuration::cors::Cors;
 use crate::configuration::HealthCheck;
 use crate::configuration::Homepage;
 use crate::configuration::Sandbox;

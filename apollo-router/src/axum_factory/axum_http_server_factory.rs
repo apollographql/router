@@ -56,11 +56,13 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
+use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
+use crate::tracer::TraceId;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -301,6 +303,13 @@ where
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(PropagatingMakeSpan::new())
+                .on_request(|_: &Request<_>, span: &Span| {
+                    let trace_id = TraceId::maybe_new()
+                        .map(|t| t.to_string())
+                        .unwrap_or_default();
+
+                    span.record(TRACE_ID_FIELD_NAME, &trace_id.as_str());
+                })
                 .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
                     // Duration here is instant based
                     span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));

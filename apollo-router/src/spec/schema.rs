@@ -17,6 +17,7 @@ use crate::error::SchemaError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
+use crate::spec::query::parse_value;
 use crate::*;
 
 /// A GraphQL schema.
@@ -616,7 +617,7 @@ macro_rules! implement_input_object_type_or_interface {
         #[derive(Debug, Clone)]
         $visibility struct $name {
             name: String,
-            fields: HashMap<String, FieldType>,
+            fields: HashMap<String, (FieldType, Option<Value>)>,
         }
 
         impl $name {
@@ -625,11 +626,14 @@ macro_rules! implement_input_object_type_or_interface {
                 object: &Object,
                 schema: &Schema,
             ) -> Result<(), InvalidObject> {
-                self
+                 self
                     .fields
                     .iter()
-                    .try_for_each(|(name, ty)| {
-                        let value = object.get(name.as_str()).unwrap_or(&Value::Null);
+                    .try_for_each(|(name, (ty, default_value))| {
+                        let value = match object.get(name.as_str()) {
+                            Some(&Value::Null) | None => default_value.as_ref().unwrap_or(&Value::Null),
+                            Some(value) => value,
+                        };
                         ty.validate_input_value(value, schema)
                     })
                     .map_err(|_| InvalidObject)
@@ -672,7 +676,8 @@ macro_rules! implement_input_object_type_or_interface {
                                 )
                             })?
                             .try_into()?;
-                        Ok((name, ty))
+                        let default = x.default_value().and_then(|v| v.value()).as_ref().and_then(parse_value);
+                        Ok((name, (ty, default)))
                     })
                     .collect::<Result<_,_>>()?;
 

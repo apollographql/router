@@ -390,7 +390,7 @@ impl Plugin for Rhai {
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
-        scope.push_constant("apollo_sdl", sdl);
+        scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
 
         // Run the AST with our scope to put any global variables
@@ -1589,7 +1589,7 @@ mod tests {
         let mut guard = scope.lock().unwrap();
 
         // Call our function to make sure we can access the sdl
-        let sdl: Arc<String> = rhai_instance
+        let sdl: String = rhai_instance
             .engine
             .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
             .expect("can get sdl");

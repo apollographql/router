@@ -7,12 +7,13 @@
 //! * Rate limiting
 //!
 
-pub(crate) mod deduplication;
+mod deduplication;
 mod rate;
 mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
+use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -21,10 +22,14 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::util::Either;
+use tower::util::Oneshot;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
@@ -40,6 +45,8 @@ use crate::Configuration;
 use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
+
 trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
@@ -172,8 +179,39 @@ impl Plugin for TrafficShaping {
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
         })
     }
+}
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+impl TrafficShaping {
+    fn merge_config<T: Merge + Clone>(
+        all_config: Option<&T>,
+        subgraph_config: Option<&T>,
+    ) -> Option<T> {
+        let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
+        merged_subgraph_config.or_else(|| all_config.cloned())
+    }
+
+    pub(crate) fn supergraph_service_internal<S>(
+        &self,
+        service: S,
+    ) -> impl Service<
+        supergraph::Request,
+        Response = supergraph::Response,
+        Error = BoxError,
+        Future = timeout::future::ResponseFuture<
+            Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, supergraph::Request>,
+        >,
+    > + Clone
+           + Send
+           + Sync
+           + 'static
+    where
+        S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <S as Service<supergraph::Request>>::Future: std::marker::Send,
+    {
         ServiceBuilder::new()
             .layer(TimeoutLayer::new(
                 self.config
@@ -184,10 +222,52 @@ impl Plugin for TrafficShaping {
             ))
             .option_layer(self.rate_limit_router.clone())
             .service(service)
-            .boxed()
     }
 
-    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    pub(crate) fn subgraph_service_internal<S>(
+        &self,
+        name: &str,
+        service: S,
+    ) -> impl Service<
+        subgraph::Request,
+        Response = subgraph::Response,
+        Error = BoxError,
+        Future = tower::util::Either<
+            tower::util::Either<
+                Pin<
+                    Box<
+                        (dyn futures::Future<
+                            Output = std::result::Result<
+                                subgraph::Response,
+                                Box<
+                                    (dyn std::error::Error
+                                         + std::marker::Send
+                                         + std::marker::Sync
+                                         + 'static),
+                                >,
+                            >,
+                        > + std::marker::Send
+                             + 'static),
+                    >,
+                >,
+                timeout::future::ResponseFuture<
+                    Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, subgraph::Request>,
+                >,
+            >,
+            <S as Service<subgraph::Request>>::Future,
+        >,
+    > + Clone
+           + Send
+           + Sync
+           + 'static
+    where
+        S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <S as Service<subgraph::Request>>::Future: std::marker::Send,
+    {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
@@ -204,7 +284,10 @@ impl Plugin for TrafficShaping {
                     })
                     .clone()
             });
-            ServiceBuilder::new()
+            Either::A(ServiceBuilder::new()
+            .option_layer(config.deduplicate_query.unwrap_or_default().then(
+              QueryDeduplicationLayer::default
+            ))
                 .layer(TimeoutLayer::new(
                     config
                     .timeout
@@ -220,40 +303,20 @@ impl Plugin for TrafficShaping {
                     }
 
                     req
-                })
-                .boxed()
+                }))
         } else {
-            service
+            Either::B(service)
         }
-    }
-}
-
-impl TrafficShaping {
-    fn merge_config<T: Merge + Clone>(
-        all_config: Option<&T>,
-        subgraph_config: Option<&T>,
-    ) -> Option<T> {
-        let merged_subgraph_config = subgraph_config.map(|c| c.merge(all_config));
-        merged_subgraph_config.or_else(|| all_config.cloned())
     }
 }
 
 impl TrafficShaping {
     pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
         configuration
-            .plugin_configuration("apollo.traffic_shaping")
+            .plugin_configuration(APOLLO_TRAFFIC_SHAPING)
             .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
             .unwrap_or_default()
     }
-}
-
-pub(crate) fn is_deduplicate_query_enabled(conf: &Configuration) -> bool {
-    conf.plugins()
-        .iter()
-        .find(|(name, _)| name == "apollo.traffic_shaping")
-        .and_then(|(_, shaping)| shaping.get("all"))
-        .and_then(|all_shaping| all_shaping.get("deduplicate_query"))
-        == Some(&serde_json::Value::Bool(true))
 }
 
 register_plugin!("apollo", "traffic_shaping", TrafficShaping);
@@ -363,7 +426,7 @@ mod test {
             .with_configuration(Arc::new(config));
 
         let builder = builder
-            .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
+            .with_dyn_plugin(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -372,9 +435,9 @@ mod test {
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
-        // Build a redacting plugin
+        // Build a traffic shaping plugin
         crate::plugin::plugins()
-            .get("apollo.traffic_shaping")
+            .get(APOLLO_TRAFFIC_SHAPING)
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -389,7 +452,7 @@ mod test {
         "#,
         )
         .unwrap();
-        // Build a redacting plugin
+        // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
         execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
@@ -429,7 +492,10 @@ mod test {
         });
 
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service)
             .oneshot(request)
             .await
             .unwrap();
@@ -484,23 +550,39 @@ mod test {
         let test_service = MockSubgraph::new(HashMap::new());
 
         let _response = plugin
-            .subgraph_service("test", test_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
         let _response = plugin
-            .subgraph_service("test", test_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .expect_err("should be in error due to a timeout and rate limit");
         let _response = plugin
-            .subgraph_service("another", test_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("another", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Note: use `timeout` to guarantee 300ms has elapsed
+        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
+        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+            .await
+            .is_err());
         let _response = plugin
-            .subgraph_service("test", test_service.boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .subgraph_service_internal("test", test_service.clone())
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
@@ -524,17 +606,24 @@ mod test {
         mock_service.expect_clone().returning(|| {
             let mut mock_service = MockSupergraphService::new();
 
-            mock_service.expect_call().times(0..2).returning(move |_| {
-                Ok(SupergraphResponse::fake_builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .build()
-                    .unwrap())
+            mock_service.expect_clone().returning(|| {
+                let mut mock_service = MockSupergraphService::new();
+                mock_service.expect_call().times(0..2).returning(move |_| {
+                    Ok(SupergraphResponse::fake_builder()
+                        .data(json!({ "test": 1234_u32 }))
+                        .build()
+                        .unwrap())
+                });
+                mock_service
             });
             mock_service
         });
 
         let _response = plugin
-            .supergraph_service(mock_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
@@ -543,33 +632,28 @@ mod test {
             .unwrap();
 
         assert!(plugin
-            .supergraph_service(mock_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Note: use `timeout` to guarantee 300ms has elapsed
+        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
+        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
+            .await
+            .is_err());
         let _response = plugin
-            .supergraph_service(mock_service.clone().boxed())
+            .as_any()
+            .downcast_ref::<TrafficShaping>()
+            .unwrap()
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
             .next_response()
             .await
             .unwrap();
-    }
-
-    // This test is useful for supergraph service
-    #[tokio::test]
-    async fn test_is_deduplicated_query_enabled() {
-        let config: Configuration = serde_yaml::from_str(
-            r#"
-            plugins:
-                apollo.traffic_shaping:
-                    all:
-                        deduplicate_query: true
-        "#,
-        )
-        .unwrap();
-        assert!(is_deduplicate_query_enabled(&config));
     }
 }
