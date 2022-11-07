@@ -120,6 +120,27 @@ fn supergraph_service(service) {
 }
 ```
 
+## url encode/decode strings
+
+Your Rhai customization can use the functions `urlencode()` and `urldecode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = urlencode(original);
+    // encoded will be "alice%20and%20bob"
+    try {
+        let and_back = urldecode(encoded);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`urldecode error: ${err}`);
+    }
+}
+```
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place:

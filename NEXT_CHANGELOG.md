@@ -32,7 +32,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2053
 
 ### Add support for dhat based heap profiling ([PR #1829](https://github.com/apollographql/router/pull/1829))
 
