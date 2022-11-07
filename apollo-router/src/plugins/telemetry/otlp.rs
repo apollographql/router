@@ -39,9 +39,19 @@ impl Config {
     pub(crate) fn exporter<T: From<HttpExporterBuilder> + From<TonicExporterBuilder>>(
         &self,
     ) -> Result<T, BoxError> {
-        let endpoint = match &self.endpoint {
-            Endpoint::Default(_) => None,
-            Endpoint::Url(s) => Some(s),
+        let endpoint = match (self.endpoint.clone(), &self.protocol) {
+            // # https://github.com/apollographql/router/issues/2036
+            // Opentelemetry rust incorrectly defaults to https
+            // This will override the defaults to that of the spec
+            // https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/exporter.md
+            (Endpoint::Default(_), Some(Protocol::Http)) => {
+                Some(Url::parse("http://localhost:4318").expect("default url is valid"))
+            }
+            // Default is GRPC
+            (Endpoint::Default(_), _) => {
+                Some(Url::parse("http://localhost:4317").expect("default url is valid"))
+            }
+            (Endpoint::Url(s), _) => Some(s),
         };
         match self.protocol.clone().unwrap_or_default() {
             Protocol::Grpc => {
@@ -51,7 +61,7 @@ impl Config {
                     .with_env()
                     .with(&self.timeout, |b, t| b.with_timeout(*t))
                     .with(&endpoint, |b, e| b.with_endpoint(e.as_str()))
-                    .try_with(&grpc.tls_config.defaulted(endpoint), |b, t| {
+                    .try_with(&grpc.tls_config.defaulted(endpoint.as_ref()), |b, t| {
                         Ok(b.with_tls_config(t.try_into()?))
                     })?
                     .with(&grpc.metadata, |b, m| b.with_metadata(m.clone()))
@@ -139,7 +149,13 @@ impl TlsConfig {
     pub(crate) fn defaulted(mut self, endpoint: Option<&Url>) -> Option<TlsConfig> {
         if let Some(endpoint) = endpoint {
             if self.domain_name.is_none() {
-                self.domain_name = endpoint.host_str().map(|s| s.to_string())
+                // If the URL contains the https scheme then default the tls config to use the domain from the URL. We know it's TLS.
+                // If the URL contains no scheme and the port is 443 emit a warning suggesting that they may have forgotten to configure TLS domain.
+                if endpoint.scheme() == "https" {
+                    self.domain_name = endpoint.host_str().map(|s| s.to_string())
+                } else if endpoint.port() == Some(443) && endpoint.scheme() != "http" {
+                    tracing::warn!("telemetry otlp exporter has been configured with port 443 but TLS domain has not been set. This is likely a configuration error")
+                }
             }
         }
 
@@ -294,6 +310,12 @@ mod tests {
     fn endpoint_grpc_defaulting_no_scheme() {
         let url = Url::parse("api.apm.com:433").unwrap();
         let tls = TlsConfig::default().defaulted(Some(&url));
+        assert_eq!(tls, None);
+    }
+
+    #[test]
+    fn default_endpoint() {
+        let tls = TlsConfig::default().defaulted(None);
         assert_eq!(tls, None);
     }
 

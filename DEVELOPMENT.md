@@ -40,14 +40,7 @@ Use `cargo build --all-targets` to build the project.
 Some tests run against the existing Node.js implementation of the Apollo Router. This
 requires that the `federation-demo` project is running. 
 
-First, initialize and update required git submodules. 
-
-```
-git submodule init
-git submodule update
-```
-
-Then, start the service: 
+Start the service: 
 
 ```
 docker-compose up -d
@@ -56,7 +49,6 @@ docker-compose up -d
 **Note:** `-d` is for running into background. You can remove `-d` if you
 have issues and you want to see the logs or if you want to run the service
 in foreground.
-
 
 ### Run Apollo Router against the docker-compose or Node.js setup
 
@@ -85,6 +77,30 @@ The CI checks require `cargo-deny` and `cargo-about` which can both be installed
 
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.
+
+### Investigating memory usage
+
+There are two features: `dhat-heap` and `dhat-ad-hoc` which may be enabled for investigating memory issues
+with the router. You may enable either or both, depending on the kind of problem you are investigating.
+
+You have to build the router with your choice of feature flags and you must use the `release-dhat` profile.
+
+e.g.: heap and ad-hoc allocation tracing
+```shell
+# e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
+```
+
+e.g.: heap allocation tracing
+```shell
+cargo build --profile release-dhat --features dhat-heap 
+```
+
+This will create a router in `./target/release-dhat`.
+
+When you run your binary, on termination you will get `dhat-heap.json` and/or `dhat-ad-hoc.json` files which can
+be examined using standard DHAT tooling.
+
+For more details on interpreting these files and running tests, see the [dhat-rs](https://docs.rs/dhat/latest/dhat/#running) crate documentation.
 
 ### Troubleshoot
 
