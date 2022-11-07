@@ -1,15 +1,19 @@
-use std::{
-    future::{ready, Ready},
-    pin::Pin,
-    task::{Context, Poll},
-};
+use std::task::Context;
+use std::task::Poll;
 
-use futures::{future::BoxFuture, FutureExt};
-use serde::{Deserialize, Serialize};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::Value;
-use tower::{Layer, Service, ServiceExt};
+use tower::BoxError;
+use tower::Layer;
+use tower::Service;
+use tower::ServiceExt;
 
-use crate::{cache::storage::CacheStorage, services::subgraph};
+use crate::cache::storage::CacheStorage;
+use crate::error::FetchError;
+use crate::services::subgraph;
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCacheLayer {
@@ -18,13 +22,6 @@ pub(crate) struct SubgraphCacheLayer {
 }
 
 impl SubgraphCacheLayer {
-    pub(crate) async fn new(name: String) -> Self {
-        SubgraphCacheLayer {
-            storage: CacheStorage::new(1024).await,
-            name,
-        }
-    }
-
     pub(crate) fn new_with_storage(name: String, storage: CacheStorage<String, Value>) -> Self {
         SubgraphCacheLayer { storage, name }
     }
@@ -51,8 +48,10 @@ pub(crate) struct SubgraphCache<S: Clone> {
 
 impl<S> Service<subgraph::Request> for SubgraphCache<S>
 where
-    S: Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
-    S::Error: Into<tower::BoxError> + std::fmt::Debug,
+    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     <S as Service<subgraph::Request>>::Future: std::marker::Send,
 {
     type Response = <S as Service<subgraph::Request>>::Response;
@@ -64,26 +63,12 @@ where
             <S as Service<subgraph::Request>>::Error,
         >,
     >;
-    /*Either<
-        BoxFuture<'static, Result<S::Response, <S as Service<subgraph::Request>>::Error>>,
-        Oneshot<S, subgraph::Request>,
-    >*/
-    //type Future = ResponseFuture<S::Future>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, mut request: subgraph::Request) -> Self::Future {
-        /*let response = self.inner.call(request);
-
-        ResponseFuture::new(
-            response,
-            self.sleep
-                .take()
-                .expect("poll_ready must been called before"),
-        )*/
-
         let service = self.service.clone();
 
         if !request
@@ -108,7 +93,10 @@ async fn cache_call<S>(
     mut request: subgraph::Request,
 ) -> Result<<S as Service<subgraph::Request>>::Response, <S as Service<subgraph::Request>>::Error>
 where
-    S: Service<subgraph::Request, Response = subgraph::Response> + Clone + Send + 'static,
+    S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     S::Error: Into<tower::BoxError> + std::fmt::Debug,
     <S as Service<subgraph::Request>>::Future: std::marker::Send,
 {
@@ -116,23 +104,23 @@ where
     let reps = body
         .variables
         .get_mut("representations")
-        .and_then(|value| value.as_array_mut());
-
-    let reps = reps.unwrap();
+        .and_then(|value| value.as_array_mut())
+        .expect("we already checked that representations exist");
 
     let mut new_reps: Vec<Value> = Vec::new();
     let mut result: Vec<(String, Option<Value>)> = Vec::new();
     for mut representation in reps.drain(..) {
-        let opt_type: Option<Value> = representation
+        let opt_type = representation
             .as_object_mut()
-            .and_then(|o| o.remove("__typename"));
-        //and_then(|v| serde_json::from_value(v).ok());
+            .and_then(|o| o.remove("__typename"))
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "missing __typename in representation".to_string(),
+            })?;
 
-        //FIXME: add the query
         let key = format!(
             "subgraph.{}|{}|{}|{}",
             name,
-            opt_type.as_ref().and_then(|v| v.as_str()).unwrap_or("-"),
+            opt_type.as_str().unwrap_or("-"),
             serde_json::to_string(&representation).unwrap(),
             body.query.as_deref().unwrap_or("-")
         );
@@ -142,7 +130,7 @@ where
             println!("cache miss for {key}");
             representation
                 .as_object_mut()
-                .map(|o| o.insert("__typename", opt_type.unwrap()));
+                .map(|o| o.insert("__typename", opt_type));
             new_reps.push(representation);
         } else {
             println!("cache hit for {key}");
@@ -152,7 +140,7 @@ where
 
     body.variables.insert("representations", new_reps.into());
 
-    let mut response = service.oneshot(request).await.unwrap();
+    let mut response = service.oneshot(request).await?;
 
     let mut data = response.response.body_mut().data.take();
 
@@ -162,7 +150,12 @@ where
         .and_then(|o| o.remove("_entities"))
     {
         let mut new_entities = Vec::new();
-        let mut entities_it = entities.as_array_mut().unwrap().drain(..);
+        let mut entities_it = entities
+            .as_array_mut()
+            .ok_or_else(|| FetchError::MalformedResponse {
+                reason: "expected an array of entities".to_string(),
+            })?
+            .drain(..);
 
         // insert requested entities and cached entities in the same order as
         // they were requested
@@ -170,7 +163,12 @@ where
             match entity {
                 Some(v) => new_entities.push(v),
                 None => {
-                    let value = entities_it.next().unwrap();
+                    let value =
+                        entities_it
+                            .next()
+                            .ok_or_else(|| FetchError::MalformedResponse {
+                                reason: "invalid number of entities".to_string(),
+                            })?;
                     println!(
                         "cache insert for {key}: {}",
                         serde_json::to_string(&value).unwrap()

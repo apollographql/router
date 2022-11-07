@@ -14,7 +14,6 @@ mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 

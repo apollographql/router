@@ -53,6 +53,12 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
+    /// request was malformed: {reason}
+    MalformedRequest {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
     /// response was malformed: {reason}
     MalformedResponse {
         /// The reason the serialization failed.
