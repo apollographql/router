@@ -6,5 +6,17 @@ telemetry:
       scheduled_delay: 100ms
       agent:
         endpoint: default
+  logging:
+    supergraph:
+      include_attributes:
+        - request
+    subgraph:
+      all:
+        include_attributes:
+          - response_body
+      subgraphs:
+        accounts:
+          include_attributes:
+            - response_headers
 override_subgraph_url:
   products: http://localhost:4005
