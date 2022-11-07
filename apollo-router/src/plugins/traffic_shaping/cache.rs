@@ -24,6 +24,10 @@ impl SubgraphCacheLayer {
             name,
         }
     }
+
+    pub(crate) fn new_with_storage(name: String, storage: CacheStorage<String, Value>) -> Self {
+        SubgraphCacheLayer { storage, name }
+    }
 }
 
 impl<S: Clone> Layer<S> for SubgraphCacheLayer {

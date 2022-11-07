@@ -18,11 +18,13 @@ use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use futures::future::BoxFuture;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tower::util::Either;
 use tower::util::Oneshot;
 use tower::BoxError;
@@ -36,6 +38,7 @@ use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
+use crate::cache::storage::CacheStorage;
 use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -145,6 +148,7 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    storage: CacheStorage<String, Value>,
 }
 
 #[async_trait::async_trait]
@@ -179,6 +183,7 @@ impl Plugin for TrafficShaping {
             config: init.config,
             rate_limit_router,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
+            storage: CacheStorage::new(1024).await,
         })
     }
 }
@@ -234,26 +239,14 @@ impl TrafficShaping {
         subgraph::Request,
         Response = subgraph::Response,
         Error = BoxError,
-        Future = tower::util::Either<
-            tower::util::Either<
-                Pin<
-                    Box<
-                        (dyn futures::Future<
-                            Output = std::result::Result<
-                                subgraph::Response,
-                                Box<
-                                    (dyn std::error::Error
-                                         + std::marker::Send
-                                         + std::marker::Sync
-                                         + 'static),
-                                >,
-                            >,
-                        > + std::marker::Send
-                             + 'static),
+        Future = Either<
+            Either<
+                BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                Either<
+                    BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                    timeout::future::ResponseFuture<
+                        Oneshot<Either<rate::service::RateLimit<S>, S>, subgraph::Request>,
                     >,
-                >,
-                timeout::future::ResponseFuture<
-                    Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, subgraph::Request>,
                 >,
             >,
             <S as Service<subgraph::Request>>::Future,
@@ -287,7 +280,7 @@ impl TrafficShaping {
                     .clone()
             });
             Either::A(ServiceBuilder::new()
-            .option_layer(Some(SubgraphCacheLayer::new(name.to_string()).await))
+            .option_layer(Some(SubgraphCacheLayer::new_with_storage(name.to_string(), self.storage.clone())))
             .option_layer(config.deduplicate_query.unwrap_or_default().then(
               QueryDeduplicationLayer::default
             ))
