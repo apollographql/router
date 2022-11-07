@@ -122,15 +122,19 @@ dependencies = [
 
 [[package]]
 name = "apollo-encoder"
-version = "0.3.2"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "344a1afec31ce0273dc2061105b04e5c4ab620fe0748a76244338aa893db42f3"
+checksum = "8b17d38f06e92256e9b0b271b878e20309822a587b2acfa234a60d36d92b6b43"
+dependencies = [
+ "apollo-parser",
+ "thiserror",
+]
 
 [[package]]
 name = "apollo-parser"
-version = "0.2.12"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f901785c93a542be795c2703370ddb5f84d4e38606357fc56fefa4b42ab25151"
+checksum = "7a8f6cc3fa1313e045538ed2ce72ba916d52b501cd81e636a0bd5cdc703a0c73"
 dependencies = [
  "rowan",
 ]
@@ -286,9 +290,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.1.3"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d66fba27e21f40315a0e8abfd2998632b3d1670ae5a16d069c8ff652ea79992d"
+checksum = "005d27ddeb774d8059040d00f5a5fee276458b57a22414256e74269b30b7b3ea"
 dependencies = [
  "apollo-encoder",
  "apollo-parser 0.2.12",
