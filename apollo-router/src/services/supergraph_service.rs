@@ -423,7 +423,7 @@ impl RouterCreator {
         let supergraph_service = match self
             .plugins
             .iter()
-            .find(|i| i.0.as_str() == "apollo.traffic_shaping")
+            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
         {
             Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),

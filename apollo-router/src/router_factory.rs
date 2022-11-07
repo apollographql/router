@@ -17,6 +17,7 @@ use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
@@ -130,7 +131,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         for (name, _) in schema.subgraphs() {
             let subgraph_service = match plugins
                 .iter()
-                .find(|i| i.0.as_str() == "apollo.traffic_shaping")
+                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (&*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
                 Some(shaping) => {

@@ -45,6 +45,8 @@ use crate::Configuration;
 use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+pub const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
+
 trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
@@ -311,7 +313,7 @@ impl TrafficShaping {
 impl TrafficShaping {
     pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
         configuration
-            .plugin_configuration("apollo.traffic_shaping")
+            .plugin_configuration(APOLLO_TRAFFIC_SHAPING)
             .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
             .unwrap_or_default()
     }
@@ -424,7 +426,7 @@ mod test {
             .with_configuration(Arc::new(config));
 
         let builder = builder
-            .with_dyn_plugin("apollo.traffic_shaping".to_string(), plugin)
+            .with_dyn_plugin(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
@@ -435,7 +437,7 @@ mod test {
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a traffic shaping plugin
         crate::plugin::plugins()
-            .get("apollo.traffic_shaping")
+            .get(APOLLO_TRAFFIC_SHAPING)
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
