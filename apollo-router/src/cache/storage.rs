@@ -188,10 +188,6 @@ mod redis_storage {
         V: ValueType,
     {
         fn from_redis_value(v: &redis::Value) -> RedisResult<Self> {
-            tracing::trace!("TRYING TO WORK WITH: {:?}", v);
-            // let this: RedisValue<V> = RedisValue(V::from_str(v));
-            // RedisResult
-            // Ok(RedisValue(v.into()))
             match v {
                 redis::Value::Bulk(bulk_data) => {
                     for entry in bulk_data {
@@ -223,14 +219,6 @@ mod redis_storage {
         pub(crate) async fn new(urls: Vec<String>) -> Self {
             let client = Client::open(urls).expect("opening ClusterClient");
             let connection = client.get_connection().await.expect("got redis connection");
-            /*
-            let _: () = connection
-                .set("test", "test_data")
-                .await
-                .expect("setting data");
-            let rv: String = connection.get("test").await.expect("getting data");
-            tracing::info!("rv: {:?}", rv);
-            */
 
             tracing::trace!("redis connection established");
             Self {
@@ -242,10 +230,9 @@ mod redis_storage {
             &self,
             key: RedisKey<K>,
         ) -> Option<RedisValue<V>> {
-            tracing::trace!("GETTING FROM REDIS: {:?}", key);
+            tracing::trace!("getting from redis: {:?}", key);
             let mut guard = self.inner.lock().await;
             guard.get(key).await.ok()
-            // guard.get(key).await.ok()
         }
 
         pub(crate) async fn insert<K: KeyType, V: ValueType>(
@@ -253,11 +240,11 @@ mod redis_storage {
             key: RedisKey<K>,
             value: RedisValue<V>,
         ) {
-            tracing::trace!("INSERTING INTO REDIS: {:?}, {:?}", key, value);
+            tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
             let mut guard = self.inner.lock().await;
             let r = guard
                 .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
-                .await; // .ok();
+                .await;
             tracing::trace!("insert result {:?}", r);
         }
     }
