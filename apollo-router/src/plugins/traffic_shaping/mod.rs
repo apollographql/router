@@ -88,6 +88,28 @@ impl Merge for Shaping {
     }
 }
 
+// this is a wrapper struct to add subgraph specific options over Shaping
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SubgraphShaping {
+    #[serde(flatten)]
+    shaping: Shaping,
+    /// Enable entity caching
+    entity_caching: Option<bool>,
+}
+
+impl Merge for SubgraphShaping {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => SubgraphShaping {
+                shaping: self.shaping.merge(Some(&fallback.shaping)),
+                entity_caching: self.entity_caching.or(fallback.entity_caching),
+            },
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RouterShaping {
@@ -113,7 +135,7 @@ pub(crate) struct Config {
     all: Option<Shaping>,
     #[serde(default)]
     /// Applied on specific subgraphs
-    subgraphs: HashMap<String, Shaping>,
+    subgraphs: HashMap<String, SubgraphShaping>,
     /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
@@ -265,7 +287,21 @@ impl TrafficShaping {
         // Either we have the subgraph config and we merge it with the all config, or we just have the all config or we have nothing.
         let all_config = self.config.all.as_ref();
         let subgraph_config = self.config.subgraphs.get(name);
-        let final_config = Self::merge_config(all_config, subgraph_config);
+        let final_config =
+            Self::merge_config(all_config, subgraph_config.as_ref().map(|c| &c.shaping));
+
+        let entity_caching = if subgraph_config
+            .as_ref()
+            .and_then(|c| c.entity_caching)
+            .unwrap_or_default()
+        {
+            Some(SubgraphCacheLayer::new_with_storage(
+                name.to_string(),
+                self.storage.clone(),
+            ))
+        } else {
+            None
+        };
 
         if let Some(config) = final_config {
             let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
@@ -279,7 +315,7 @@ impl TrafficShaping {
                     .clone()
             });
             Either::A(ServiceBuilder::new()
-            .option_layer(Some(SubgraphCacheLayer::new_with_storage(name.to_string(), self.storage.clone())))
+            .option_layer(entity_caching)
             .option_layer(config.deduplicate_query.unwrap_or_default().then(
               QueryDeduplicationLayer::default
             ))
@@ -515,9 +551,20 @@ mod test {
             config.all
         );
         assert_eq!(
-            TrafficShaping::merge_config(config.all.as_ref(), config.subgraphs.get("products"))
-                .as_ref(),
-            config.subgraphs.get("products")
+            TrafficShaping::merge_config(
+                config.all.as_ref(),
+                config
+                    .subgraphs
+                    .get("products")
+                    .as_ref()
+                    .map(|c| &c.shaping)
+            )
+            .as_ref(),
+            config
+                .subgraphs
+                .get("products")
+                .as_ref()
+                .map(|c| &c.shaping)
         );
 
         assert_eq!(

@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
 ---
 {
@@ -2130,6 +2130,11 @@ expression: "&schema"
               },
               "deduplicate_query": {
                 "description": "Enable query deduplication",
+                "type": "boolean",
+                "nullable": true
+              },
+              "entity_caching": {
+                "description": "Enable entity caching",
                 "type": "boolean",
                 "nullable": true
               },
