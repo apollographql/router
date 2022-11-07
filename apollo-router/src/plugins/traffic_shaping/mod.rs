@@ -14,15 +14,16 @@ mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
-use std::pin::Pin;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use futures::future::BoxFuture;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::retry::Retry;
 use tower::util::Either;
 use tower::util::Oneshot;
 use tower::BoxError;
@@ -239,24 +240,15 @@ impl TrafficShaping {
         Error = BoxError,
         Future = tower::util::Either<
             tower::util::Either<
-                Pin<
-                    Box<
-                        (dyn futures::Future<
-                            Output = std::result::Result<
-                                subgraph::Response,
-                                Box<
-                                    (dyn std::error::Error
-                                         + std::marker::Send
-                                         + std::marker::Sync
-                                         + 'static),
-                                >,
-                            >,
-                        > + std::marker::Send
-                             + 'static),
-                    >,
-                >,
+                BoxFuture<'static, Result<subgraph::Response, BoxError>>,
                 timeout::future::ResponseFuture<
-                    Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, subgraph::Request>,
+                    Oneshot<
+                        tower::util::Either<
+                            Retry<RetryPolicy, tower::util::Either<rate::service::RateLimit<S>, S>>,
+                            tower::util::Either<rate::service::RateLimit<S>, S>,
+                        >,
+                        subgraph::Request,
+                    >,
                 >,
             >,
             <S as Service<subgraph::Request>>::Future,
@@ -295,12 +287,12 @@ impl TrafficShaping {
                 .option_layer(config.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
-                //.option_layer(Some(retry))
                     .layer(TimeoutLayer::new(
                         config
                         .timeout
                         .unwrap_or(DEFAULT_TIMEOUT),
                     ))
+                    .option_layer(Some(retry))
                     .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {

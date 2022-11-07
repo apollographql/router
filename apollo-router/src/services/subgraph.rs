@@ -74,6 +74,35 @@ impl Request {
     }
 }
 
+impl Clone for Request {
+    fn clone(&self) -> Self {
+        // http::Request is not clonable so we have to rebuild a new one
+        // we don't use the extensions field for now
+        let mut builder = http::Request::builder()
+            .method(self.subgraph_request.method())
+            .version(self.subgraph_request.version())
+            .uri(self.subgraph_request.uri());
+
+        {
+            let headers = builder.headers_mut().unwrap();
+            headers.extend(
+                self.subgraph_request
+                    .headers()
+                    .iter()
+                    .map(|(name, value)| (name.clone(), value.clone())),
+            );
+        }
+        let subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
+
+        Self {
+            supergraph_request: self.supergraph_request.clone(),
+            subgraph_request,
+            operation_kind: self.operation_kind.clone(),
+            context: self.context.clone(),
+        }
+    }
+}
+
 assert_impl_all!(Response: Send);
 #[derive(Debug)]
 #[non_exhaustive]

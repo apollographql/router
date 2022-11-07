@@ -9,7 +9,7 @@ pub(crate) struct RetryPolicy {
 }
 
 impl RetryPolicy {
-    pub fn new(duration: Duration, min_per_sec: u32, retry_percent: f32) -> Self {
+    pub(crate) fn new(duration: Duration, min_per_sec: u32, retry_percent: f32) -> Self {
         Self {
             budget: Arc::new(Budget::new(duration, min_per_sec, retry_percent)),
         }
