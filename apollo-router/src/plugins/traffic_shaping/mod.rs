@@ -45,7 +45,7 @@ use crate::Configuration;
 use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
-pub const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
+pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
 
 trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
