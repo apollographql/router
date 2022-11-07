@@ -93,6 +93,19 @@ When validating variables, we should use default values for object fields if app
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
+###  ([Issue #2036](https://github.com/apollographql/router/issues/2036))
+
+Work around for [opentelemetry-rust#908](https://github.com/open-telemetry/opentelemetry-rust/issues/908)
+The default URL currently incorrectly uses https causing errors when connecting to a default localhost OTel Collector.
+
+The router will detect and work around this by explicitly setting the correct endpoint URLs when not specified in config.
+
+In addition: 
+* basic TLS defaulting will occur when the endpoint scheme uses `https`.
+* a warning will be raised if the endpoint port is 443 but no TLS config is specified.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#2048
+
 ## 🛠 Maintenance
 
 ### Apply tower best practice to inner service cloning ([PR #2030](https://github.com/apollographql/router/pull/2030))
