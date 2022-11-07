@@ -3657,7 +3657,7 @@ fn check_fragment_on_interface() {
                 name
               }
             }
-        }}",
+        }",
         )
         .response(json! {{
             "get": {
@@ -4648,7 +4648,7 @@ fn parse_introspection_query() {
             }
           }
         }
-      }}";
+      }";
     assert!(Query::parse(query, api_schema, &Default::default())
         .unwrap()
         .operations

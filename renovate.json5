@@ -94,27 +94,5 @@
       "groupSlug": "cargo-tracing-packages",
       "dependencyDashboardApproval": true
     },
-    {
-      "matchPaths": [
-        "docs/package.json"
-      ],
-      "extends": [
-        "apollo-docs"
-      ],
-      // "Past" major version branches, preserved as
-      // "version-[0-9]" branches, should be added here!
-      // See Apollo Server or Apollo Client repos for examples.
-      "baseBranches": [
-        "main"
-      ],
-      // The current Apollo Gatsby theme does not support a version of Gatsby
-      // that supports React 17.
-      "packageRules": [
-        {
-          "matchPackageNames": ["react", "react-dom"],
-          "allowedVersions": "16.x",
-        },
-      ],
-    },
   ]
 }

@@ -56,7 +56,10 @@ where
     }
 
     fn call(&mut self, req: ExecutionRequest) -> Self::Future {
-        let this = self.clone();
+        let clone = self.clone();
+
+        let this = std::mem::replace(self, clone);
+
         let fut = async move {
             let context = req.context;
             let ctx = context.clone();

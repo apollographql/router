@@ -60,7 +60,6 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    ready_query_planner_service: Option<CachingQueryPlanner<BridgeQueryPlanner>>,
     schema: Arc<Schema>,
 }
 
@@ -75,7 +74,6 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
-            ready_query_planner_service: None,
             schema,
         }
     }
@@ -90,19 +88,16 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We need to obtain references to two hot services for use in call.
-        // The reason for us to clone here is that the async block needs to own the hot services,
-        // and cloning will produce a cold service. Therefore cloning in `SupergraphService#call` is not
-        // a valid course of action.
-        self.ready_query_planner_service
-            .get_or_insert_with(|| self.query_planner_service.clone())
+        self.query_planner_service
             .poll_ready(cx)
             .map_err(|err| err.into())
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let planning = self.ready_query_planner_service.take().unwrap();
+        let clone = self.query_planner_service.clone();
+
+        let planning = std::mem::replace(&mut self.query_planner_service, clone);
         let execution = self.execution_service_factory.new_service();
 
         let schema = self.schema.clone();
