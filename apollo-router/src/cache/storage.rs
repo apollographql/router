@@ -260,14 +260,5 @@ mod redis_storage {
                 .await; // .ok();
             tracing::trace!("insert result {:?}", r);
         }
-
-        /*#[cfg(test)]
-        async fn len(&self) -> usize {
-            let mut guard = self.inner.lock().await;
-            redis::cmd("DBSIZE")
-                .query_async(&mut *guard)
-                .await
-                .expect("DBSIZE should work")
-        }*/
     }
 }
