@@ -13,6 +13,7 @@ use indexmap::IndexMap;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
+use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -32,6 +33,8 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
+use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
@@ -403,23 +406,35 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(self.query_planner_service.clone())
+            .execution_service_factory(ExecutionCreator {
+                schema: self.schema.clone(),
+                plugins: self.plugins.clone(),
+                subgraph_creator: self.subgraph_creator.clone(),
+            })
+            .schema(self.schema.clone())
+            .build();
+
+        let supergraph_service = match self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
+        {
+            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
+            None => Either::B(supergraph_service),
+        };
+
         ServiceBuilder::new()
             .layer(EnsureQueryPresence::default())
             .service(
-                self.plugins.iter().rev().fold(
-                    BoxService::new(
-                        SupergraphService::builder()
-                            .query_planner_service(self.query_planner_service.clone())
-                            .execution_service_factory(ExecutionCreator {
-                                schema: self.schema.clone(),
-                                plugins: self.plugins.clone(),
-                                subgraph_creator: self.subgraph_creator.clone(),
-                            })
-                            .schema(self.schema.clone())
-                            .build(),
-                    ),
-                    |acc, (_, e)| e.supergraph_service(acc),
-                ),
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
             )
     }
 

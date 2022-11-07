@@ -120,6 +120,15 @@ The file is becoming large and hard to modify.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
 
+### Apply traffic shaping on supergraph and subgraph directly [PR #2034](https://github.com/apollographql/router/issues/2034))
+
+The plugin infrastructure works on `BoxService` instances, and makes no guarantee on plugin ordering.
+The traffic shaping plugin needs a clonable inner service, and should run right before calling
+the underlying service. So this changes the traffic plugin application so it can work directly
+on the underlying service. It is still a plugin though, so it keeps the same configuration.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2034
+
 ## 📚 Documentation
 
 ### Remove references to git submodules from DEVELOPMENT.md ([Issue #2012](https://github.com/apollographql/router/issues/2012))
