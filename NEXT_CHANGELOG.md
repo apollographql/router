@@ -28,13 +28,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### Add support for dhat based heap profiling [PR #1829](https://github.com/apollographql/router/pull/1829))
+### Add support for dhat based heap profiling ([PR #1829](https://github.com/apollographql/router/pull/1829))
 
 [dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1829
 
-### Add `trace_id` in logs to identify all logs related to a specific request [Issue #1981](https://github.com/apollographql/router/issues/1981))
+### Add `trace_id` in logs to identify all logs related to a specific request ([Issue #1981](https://github.com/apollographql/router/issues/1981))
 
 It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
 
@@ -54,7 +54,7 @@ Example of logs in JSON:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
 
-### Reload the configuration when receiving the SIGHUP signal [Issue #35](https://github.com/apollographql/router/issues/35))
+### Reload the configuration when receiving the SIGHUP signal ([Issue #35](https://github.com/apollographql/router/issues/35))
 
 This adds support for reloading configuration when receiving the SIGHUP signal. This only works on unix-like platforms,
 and only with the configuration file.
@@ -63,7 +63,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Fix the deduplication logic in deduplication caching [Issue #1984](https://github.com/apollographql/router/issues/1984))
+### Fix the deduplication logic in deduplication caching ([Issue #1984](https://github.com/apollographql/router/issues/1984))
 
 Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
 
@@ -77,7 +77,7 @@ The Uplink API returns actionable info in its responses:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
 
-### Fix the rhai SDL print function [Issue #2005](https://github.com/apollographql/router/issues/2005))
+### Fix the rhai SDL print function ([Issue #2005](https://github.com/apollographql/router/issues/2005))
 
 A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
 
@@ -93,18 +93,47 @@ When validating variables, we should use default values for object fields if app
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
 
+###  ([Issue #2036](https://github.com/apollographql/router/issues/2036))
+
+Work around for [opentelemetry-rust#908](https://github.com/open-telemetry/opentelemetry-rust/issues/908)
+The default URL currently incorrectly uses https causing errors when connecting to a default localhost OTel Collector.
+
+The router will detect and work around this by explicitly setting the correct endpoint URLs when not specified in config.
+
+In addition: 
+* basic TLS defaulting will occur when the endpoint scheme uses `https`.
+* a warning will be raised if the endpoint port is 443 but no TLS config is specified.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#2048
+
 ## 🛠 Maintenance
 
-### Apply tower best practice to inner service cloning [PR #2030](https://github.com/apollographql/router/pull/2030))
+### Apply tower best practice to inner service cloning ([PR #2030](https://github.com/apollographql/router/pull/2030))
 
 Our service readiness checking can be improved by following tower project recommendations for cloning inner services.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
 
-### Split the configuration file management in multiple modules [Issue #1790](https://github.com/apollographql/router/issues/1790))
+### Split the configuration file management in multiple modules ([Issue #1790](https://github.com/apollographql/router/issues/1790))
 
 The file is becoming large and hard to modify.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
 
+### Apply traffic shaping on supergraph and subgraph directly [PR #2034](https://github.com/apollographql/router/issues/2034))
+
+The plugin infrastructure works on `BoxService` instances, and makes no guarantee on plugin ordering.
+The traffic shaping plugin needs a clonable inner service, and should run right before calling
+the underlying service. So this changes the traffic plugin application so it can work directly
+on the underlying service. It is still a plugin though, so it keeps the same configuration.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2034
+
 ## 📚 Documentation
+
+### Remove references to git submodules from DEVELOPMENT.md ([Issue #2012](https://github.com/apollographql/router/issues/2012))
+
+We don't need instructions about submodules since #1856. Let's remove them.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2045
+
