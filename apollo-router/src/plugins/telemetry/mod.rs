@@ -66,6 +66,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::formatters::JsonFields;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
@@ -97,7 +98,7 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
-pub(crate) mod formatter;
+pub(crate) mod formatters;
 mod metrics;
 mod otlp;
 mod tracing;
@@ -422,9 +423,13 @@ impl Telemetry {
                     .map(|s| s.as_str())
                     .unwrap_or("info");
 
-                let sub_builder = tracing_subscriber::fmt::fmt().with_env_filter(
-                    EnvFilter::try_new(log_level).context("could not parse log configuration")?,
-                );
+                let sub_builder = tracing_subscriber::fmt::fmt()
+                    .with_env_filter(
+                        EnvFilter::try_new(log_level)
+                            .context("could not parse log configuration")?,
+                    )
+                    .with_file(true)
+                    .with_line_number(true);
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -436,7 +441,7 @@ impl Telemetry {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                     let subscriber = sub_builder
-                        .event_format(formatter::TextFormatter::new())
+                        .event_format(formatters::TextFormatter::new())
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
@@ -446,9 +451,13 @@ impl Telemetry {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                     let subscriber = sub_builder
-                        .json()
-                        .with_current_span(false)
-                        .with_span_list(false)
+                        .map_event_format(|e| {
+                            e.json()
+                                .with_current_span(true)
+                                .with_span_list(true)
+                                .flatten_event(true)
+                        })
+                        .map_fmt_fields(|_f| JsonFields::new())
                         .finish()
                         .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
