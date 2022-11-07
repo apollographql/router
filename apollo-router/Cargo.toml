@@ -146,7 +146,7 @@ reqwest = { version = "0.11.12", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.11"
+router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "igni/license_elv2"} # "0.1.11"
 schemars = { version = "0.8.10", features = ["url"] }
 shellexpand = "2.1.2"
 sha2 = "0.10.6"

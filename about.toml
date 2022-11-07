@@ -6,7 +6,6 @@ accepted = [
     "CC0-1.0",
     "ISC",
     "Elastic-2.0",
-    "LicenseRef-ELv2",
     "LicenseRef-ring",
     "MIT",
     "MPL-2.0",
@@ -17,14 +16,6 @@ accepted = [
 private = { ignore = true }
 # Ignore dependencies used in tests only, test-log for example
 ignore-dev-dependencies = true
-
-# apollographql licenses
-[router-bridge.clarify]
-license = "LicenseRef-ELv2"
-[[router-bridge.clarify.files]]
-path = 'LICENSE'
-license = 'LicenseRef-ELv2'
-checksum = 'f527cb71b36ad7d828d0d1198ee0ab60db4170521a405661c0893f31b9962a6c'
 
 [ring.clarify]
 license = "LicenseRef-ring"
