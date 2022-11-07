@@ -5,6 +5,7 @@ use tracing::field;
 use tracing::Level;
 use tracing::Subscriber;
 use tracing_core::Field;
+use tracing_subscriber::registry::LookupSpan;
 
 // Specific attributes for logging
 pub(crate) const SPECIFIC_ATTRIBUTES: [&str; 4] = [
@@ -135,6 +136,17 @@ where
 
     fn exit(&self, span: &tracing_core::span::Id) {
         self.inner.exit(span)
+    }
+}
+
+impl<'a, S> LookupSpan<'a> for FilterSubscriber<S>
+where
+    S: Subscriber + Send + Sync + 'static + for<'span> LookupSpan<'span>,
+{
+    type Data = <S as LookupSpan<'a>>::Data;
+
+    fn span_data(&'a self, id: &tracing::Id) -> Option<Self::Data> {
+        self.inner.span_data(id)
     }
 }
 

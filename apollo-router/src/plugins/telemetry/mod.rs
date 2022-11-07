@@ -360,6 +360,38 @@ impl Telemetry {
         Self::new_common(serde_json::from_value(config)?, Some(subscriber)).await
     }
 
+    #[doc(hidden)]
+    /// This method can be used instead of `Plugin::new` to override the subscriber but still enable the `FilterSubscriber` to filter logs
+    pub async fn new_with_filter_subscriber<S>(
+        config: serde_json::Value,
+        subscriber: S,
+    ) -> Result<Self, BoxError>
+    where
+        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
+    {
+        let config: <Self as Plugin>::Config = serde_json::from_value(config)?;
+        let attributes_to_exclude = config
+            .logging
+            .as_ref()
+            .map(|l| l.get_attributes_to_exclude());
+
+        match config
+            .logging
+            .as_ref()
+            .map(|l| l.format)
+            .unwrap_or_default()
+        {
+            config::LoggingFormat::Pretty => {
+                let subscriber = FilterSubscriber::new(subscriber, attributes_to_exclude);
+                Self::new_common(config, Some(subscriber)).await
+            }
+            config::LoggingFormat::Json => {
+                let subscriber = FilterSubscriber::new(subscriber, attributes_to_exclude);
+                Self::new_common(config, Some(subscriber)).await
+            }
+        }
+    }
+
     /// This method can be used instead of `Plugin::new` to override the subscriber
     async fn new_common<S>(
         mut config: <Self as Plugin>::Config,

@@ -986,6 +986,12 @@ fn redact_dynamic() -> Redaction {
             {
                 return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
             }
+            if value_slice.get(0).and_then(|v| v.as_str()) == Some("response_headers") {
+                return Content::Seq(vec![
+                    value_slice.get(0).unwrap().clone(),
+                    Content::String("[REDACTED]".to_string()),
+                ]);
+            }
         }
         value
     })

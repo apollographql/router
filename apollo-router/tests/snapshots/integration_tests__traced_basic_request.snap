@@ -54,8 +54,12 @@ expression: get_spans()
             "{\"content-type\":[\"\"]}"
           ],
           [
-            "apollo_private.operation_signature",
-            "# -\n{topProducts{name name}}"
+            "message",
+            "Supergraph response headers"
+          ],
+          [
+            "response_headers",
+            "[REDACTED]"
           ]
         ],
         "metadata": {
@@ -244,6 +248,42 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "internal"
+                      ],
+                      [
+                        "message",
+                        "Request to subgraph \"products\""
+                      ],
+                      [
+                        "request",
+                        "Request { method: POST, uri: https://products.demo.starstuff.dev/, version: HTTP/1.1, headers: {\"content-type\": \"application/json\", \"accept\": \"application/json\", \"accept\": \"application/graphql-response+json\"}, body: Body(Full(b\"{\\\"query\\\":\\\"{topProducts{name name2:name}}\\\"}\")) }"
+                      ],
+                      [
+                        "subgraph",
+                        "products"
+                      ],
+                      [
+                        "message",
+                        "Response headers from subgraph \"products\""
+                      ],
+                      [
+                        "response_headers",
+                        "[REDACTED]"
+                      ],
+                      [
+                        "subgraph",
+                        "products"
+                      ],
+                      [
+                        "message",
+                        "Raw response body from subgraph \"products\" received"
+                      ],
+                      [
+                        "response_body",
+                        "{\"data\":{\"topProducts\":[{\"name\":\"Table\",\"name2\":\"Table\"},{\"name\":\"Couch\",\"name2\":\"Couch\"},{\"name\":\"Chair\",\"name2\":\"Chair\"}]}}\n"
+                      ],
+                      [
+                        "subgraph",
+                        "products"
                       ]
                     ],
                     "metadata": {
