@@ -64,8 +64,8 @@ impl TracingTest {
         Self {
             test_config_location: test_config_location.clone(),
             router: Command::new(router_location)
-                .stdout(Stdio::inherit())
-                .stderr(Stdio::inherit())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .args([
                     "--hr",
                     "--config",
@@ -109,19 +109,17 @@ impl TracingTest {
                     &span.context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 );
-
-                println!("propagator --- {:#?}", request.headers());
             });
-            match client.send(dbg!(request)).await {
+            match client.send(request).await {
                 Ok(result) => {
-                    println!(
+                    tracing::debug!(
                         "got {}",
                         String::from_utf8(result.body().to_vec()).unwrap_or_default()
                     );
                     return id;
                 }
                 Err(e) => {
-                    println!("query failed: {}", e);
+                    eprintln!("query failed: {}", e);
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;

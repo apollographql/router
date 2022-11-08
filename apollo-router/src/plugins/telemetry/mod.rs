@@ -197,7 +197,7 @@ impl Plugin for Telemetry {
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_response(move |resp: SupergraphResponse| {
+            .map_response(|resp: SupergraphResponse| {
                 if let Ok(Some(usage_reporting)) =
                     resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
@@ -218,7 +218,7 @@ impl Plugin for Telemetry {
                     Self::populate_context(config.clone(), req);
                     ::tracing::debug!(request = ?req.supergraph_request, "Supergraph request");
                     if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-                        ::tracing::debug!(%operation_name,  "Supergraph request with operation_name");
+                        ::tracing::debug!(%operation_name,  "Supergraph request with operation name");
                     }
                     req.context.clone()
                 },
@@ -461,21 +461,16 @@ impl Telemetry {
                             .map(|l| l.display_line_number)
                             .unwrap_or(default_display_line_number()),
                     );
+                // To filter logs with attributes
+                let filter_layer = FilterLayer::new(attributes_to_exclude);
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                    let subscriber = sub
-                        .with(FilterLayer::new(attributes_to_exclude))
-                        .with(telemetry);
+                    let subscriber = sub.with(filter_layer).with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
                 } else {
-                    let attributes_to_exclude = config
-                        .logging
-                        .as_ref()
-                        .map(|l| l.get_attributes_to_exclude());
-
                     match config
                         .logging
                         .as_ref()
@@ -488,7 +483,7 @@ impl Telemetry {
                             let subscriber = sub_builder
                                 .event_format(formatters::TextFormatter::new())
                                 .finish()
-                                .with(FilterLayer::new(attributes_to_exclude))
+                                .with(filter_layer)
                                 .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
@@ -506,7 +501,7 @@ impl Telemetry {
                                 })
                                 .map_fmt_fields(|_f| JsonFields::new())
                                 .finish()
-                                .with(FilterLayer::new(attributes_to_exclude))
+                                .with(filter_layer)
                                 .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
@@ -571,7 +566,6 @@ impl Telemetry {
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
         if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
-            println!("JAEGER PROPAGATOR !!!!");
             propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
         }
         if propagation.baggage.unwrap_or_default() {
