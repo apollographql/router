@@ -36,7 +36,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Add `trace_id` in logs to identify all logs related to a specific request ([Issue #1981](https://github.com/apollographql/router/issues/1981))
 
-It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
+It automatically adds a `trace_id` on logs to identify which log is related to a specific request.
 
 Example of logs in text:
 
