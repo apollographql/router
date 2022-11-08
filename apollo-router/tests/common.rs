@@ -112,14 +112,14 @@ impl TracingTest {
             });
             match client.send(request).await {
                 Ok(result) => {
-                    tracing::debug!(
+                    println!(
                         "got {}",
                         String::from_utf8(result.body().to_vec()).unwrap_or_default()
                     );
                     return id;
                 }
                 Err(e) => {
-                    tracing::debug!("query failed: {}", e);
+                    println!("query failed: {}", e);
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;

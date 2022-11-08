@@ -54,6 +54,10 @@ expression: get_spans()
             "{\"content-type\":[\"\"]}"
           ],
           [
+            "apollo_private.operation_signature",
+            "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
+          ],
+          [
             "message",
             "Supergraph response headers"
           ],
