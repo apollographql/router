@@ -61,6 +61,15 @@ and only with the configuration file.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
 
+### Subgraph entity caching ([PR #2044](https://github.com/apollographql/router/pull/2044))
+
+First pass implementation of subgraph entity caching. This will cache individual queries returned by
+federated queries (not root operations), separated in the cache by type, key, subgraph query,
+root operation and variables.
+This is only an in memory LRU cache with 1024 entries, and does not support invalidation.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2044
+
 ## 🐛 Fixes
 
 ### Fix the deduplication logic in deduplication caching ([Issue #1984](https://github.com/apollographql/router/issues/1984))
