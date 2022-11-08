@@ -17,6 +17,7 @@ use tracing::Level;
 
 use crate::cache::storage::CacheStorage;
 use crate::error::FetchError;
+use crate::json_ext::Object;
 use crate::services::subgraph;
 
 #[derive(Clone)]
@@ -126,37 +127,53 @@ where
     let (new_representations, mut result) =
         filter_representations(representations, keys, cache_result)?;
 
-    body.variables
-        .insert("representations", new_representations.into());
+    if new_representations.len() > 0 {
+        body.variables
+            .insert("representations", new_representations.into());
 
-    let mut response = service.oneshot(request).await?;
+        let mut response = service.oneshot(request).await?;
 
-    let mut data = response.response.body_mut().data.take();
+        let mut data = response.response.body_mut().data.take();
 
-    if let Some(mut entities) = data
-        .as_mut()
-        .and_then(|v| v.as_object_mut())
-        .and_then(|o| o.remove("_entities"))
-    {
-        let new_entities = insert_entities_in_result(
-            entities
-                .as_array_mut()
-                .ok_or_else(|| FetchError::MalformedResponse {
-                    reason: "expected an array of entities".to_string(),
-                })?,
-            &cache,
-            &mut result,
-        )
-        .await?;
-
-        //FIXME: check that entities_it is now empty
-        data.as_mut()
+        if let Some(mut entities) = data
+            .as_mut()
             .and_then(|v| v.as_object_mut())
-            .map(|o| o.insert("_entities", new_entities.into()));
-    }
+            .and_then(|o| o.remove("_entities"))
+        {
+            let new_entities = insert_entities_in_result(
+                entities
+                    .as_array_mut()
+                    .ok_or_else(|| FetchError::MalformedResponse {
+                        reason: "expected an array of entities".to_string(),
+                    })?,
+                &cache,
+                &mut result,
+            )
+            .await?;
 
-    response.response.body_mut().data = data;
-    Ok(response)
+            //FIXME: check that entities_it is now empty
+            data.as_mut()
+                .and_then(|v| v.as_object_mut())
+                .map(|o| o.insert("_entities", new_entities.into()));
+            response.response.body_mut().data = data;
+            Ok(response)
+        } else {
+            Err(FetchError::MalformedResponse {
+                reason: "expected  entities".to_string(),
+            }
+            .into())
+        }
+    } else {
+        let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
+        let mut data = Object::default();
+        data.insert("entities", entities.into());
+
+        Ok(subgraph::Response::builder()
+            .data(data)
+            .extensions(Object::new())
+            .context(request.context)
+            .build())
+    }
 }
 
 // build a list of keys to get from the cache in one query
