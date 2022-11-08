@@ -14,7 +14,7 @@ use super::future::ResponseFuture;
 use super::Rate;
 use crate::plugins::traffic_shaping::rate::error::RateLimited;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct RateLimit<T> {
     pub(crate) inner: T,
     pub(crate) rate: Rate,
