@@ -18,11 +18,11 @@ use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
+use crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType;
+use crate::plugins::telemetry::apollo_exporter::proto::ReportHeader;
+use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
-use crate::spaceport::ReferencedFieldsForType;
-use crate::spaceport::ReportHeader;
-use crate::spaceport::StatsContext;
-use crate::spaceport::Trace;
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -182,8 +182,11 @@ impl Report {
         aggregated_report
     }
 
-    pub(crate) fn into_report(self, header: ReportHeader) -> crate::spaceport::Report {
-        let mut report = crate::spaceport::Report {
+    pub(crate) fn into_report(
+        self,
+        header: ReportHeader,
+    ) -> crate::plugins::telemetry::apollo_exporter::proto::Report {
+        let mut report = crate::plugins::telemetry::apollo_exporter::proto::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
             operation_count: self.operation_count,
@@ -237,7 +240,7 @@ pub(crate) struct TracesAndStats {
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl From<TracesAndStats> for crate::spaceport::TracesAndStats {
+impl From<TracesAndStats> for crate::plugins::telemetry::apollo_exporter::proto::TracesAndStats {
     fn from(stats: TracesAndStats) -> Self {
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),

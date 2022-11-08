@@ -2,7 +2,6 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::error::Error as Errors;
 use std::fmt;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
@@ -50,7 +49,6 @@ use tracing_subscriber::registry::LookupSpan;
 #[cfg(not(feature = "console"))]
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
-use url::Url;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
@@ -64,6 +62,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::formatters::JsonFields;
@@ -82,8 +81,6 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::spaceport::server::ReportSpaceport;
-use crate::spaceport::StatsContext;
 use crate::subgraph::Request;
 use crate::subgraph::Response;
 use crate::Context;
@@ -93,7 +90,6 @@ use crate::SubgraphRequest;
 use crate::SubgraphResponse;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
-
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
@@ -348,38 +344,12 @@ impl Telemetry {
 
     /// This method can be used instead of `Plugin::new` to override the subscriber
     async fn new_common<S>(
-        mut config: <Self as Plugin>::Config,
+        config: <Self as Plugin>::Config,
         #[cfg_attr(feature = "console", allow(unused_variables))] subscriber: Option<S>,
     ) -> Result<Self, BoxError>
     where
         S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
     {
-        // Apollo config is special because we enable tracing if some env variables are present.
-        let apollo = config
-            .apollo
-            .as_mut()
-            .expect("telemetry apollo config must be present");
-
-        // If we have key and graph ref but no endpoint we start embedded spaceport
-        let spaceport = match apollo {
-            apollo::Config {
-                apollo_key: Some(_),
-                apollo_graph_ref: Some(_),
-                endpoint: None,
-                ..
-            } => {
-                ::tracing::debug!("starting Spaceport");
-                let report_spaceport = ReportSpaceport::new("127.0.0.1:0".parse()?).await?;
-                // Now that the port is known update the config
-                apollo.endpoint = Some(Url::parse(&format!(
-                    "https://{}",
-                    report_spaceport.address()
-                ))?);
-                Some(report_spaceport)
-            }
-            _ => None,
-        };
-
         // Setup metrics
         // The act of setting up metrics will overwrite a global meter. However it is essential that
         // we use the aggregate meter provider that is created below. It enables us to support
@@ -478,28 +448,6 @@ impl Telemetry {
             field_level_instrumentation_ratio,
             config,
         });
-
-        // We're now safe for shutdown.
-        // Start spaceport
-        if let Some(spaceport) = spaceport {
-            tokio::spawn(async move {
-                ::tracing::debug!("serving spaceport");
-                match spaceport.serve().await {
-                    Ok(v) => {
-                        ::tracing::debug!("spaceport terminated normally: {:?}", v);
-                    }
-                    Err(e) => match e.source() {
-                        Some(source) => {
-                            ::tracing::warn!("spaceport did not terminate normally: {}", source);
-                        }
-                        None => {
-                            ::tracing::warn!("spaceport did not terminate normally: {}", e);
-                        }
-                    },
-                }
-                ::tracing::debug!("stopped serving spaceport");
-            });
-        }
 
         let _ = TELEMETRY_REFCOUNT.fetch_add(1, Ordering::Relaxed);
         plugin
@@ -1198,8 +1146,8 @@ fn operation_count(stats_report_key: &str) -> u64 {
 
 fn convert(
     referenced_fields: router_bridge::planner::ReferencedFieldsForType,
-) -> crate::spaceport::ReferencedFieldsForType {
-    crate::spaceport::ReferencedFieldsForType {
+) -> crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType {
+    crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
         is_interface: referenced_fields.is_interface,
     }

@@ -5,10 +5,10 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::spaceport::Trace;
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &config::Trace) -> Result<Builder, BoxError> {
