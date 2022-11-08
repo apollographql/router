@@ -56,14 +56,6 @@ expression: get_spans()
           [
             "apollo_private.operation_signature",
             "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
-          ],
-          [
-            "message",
-            "Supergraph response headers"
-          ],
-          [
-            "response_headers",
-            "[REDACTED]"
           ]
         ],
         "metadata": {
@@ -267,42 +259,6 @@ expression: get_spans()
                           [
                             "otel.kind",
                             "internal"
-                          ],
-                          [
-                            "message",
-                            "Request to subgraph \"products\""
-                          ],
-                          [
-                            "request",
-                            "Request { method: POST, uri: https://products.demo.starstuff.dev/, version: HTTP/1.1, headers: {\"content-type\": \"application/json\", \"accept\": \"application/json\", \"accept\": \"application/graphql-response+json\"}, body: Body(Full(b\"{\\\"query\\\":\\\"{topProducts{__typename upc name}}\\\"}\")) }"
-                          ],
-                          [
-                            "subgraph",
-                            "products"
-                          ],
-                          [
-                            "message",
-                            "Response headers from subgraph \"products\""
-                          ],
-                          [
-                            "response_headers",
-                            "[REDACTED]"
-                          ],
-                          [
-                            "subgraph",
-                            "products"
-                          ],
-                          [
-                            "message",
-                            "Raw response body from subgraph \"products\" received"
-                          ],
-                          [
-                            "response_body",
-                            "{\"data\":{\"topProducts\":[{\"__typename\":\"Product\",\"upc\":\"1\",\"name\":\"Table\"},{\"__typename\":\"Product\",\"upc\":\"2\",\"name\":\"Couch\"},{\"__typename\":\"Product\",\"upc\":\"3\",\"name\":\"Chair\"}]}}\n"
-                          ],
-                          [
-                            "subgraph",
-                            "products"
                           ]
                         ],
                         "metadata": {
@@ -527,42 +483,6 @@ expression: get_spans()
                               [
                                 "otel.kind",
                                 "internal"
-                              ],
-                              [
-                                "message",
-                                "Request to subgraph \"reviews\""
-                              ],
-                              [
-                                "request",
-                                "Request { method: POST, uri: https://reviews.demo.starstuff.dev/, version: HTTP/1.1, headers: {\"content-type\": \"application/json\", \"accept\": \"application/json\", \"accept\": \"application/graphql-response+json\"}, body: Body(Full(b\"{\\\"query\\\":\\\"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}\\\",\\\"variables\\\":{\\\"representations\\\":[{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"1\\\"},{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"2\\\"},{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"3\\\"}]}}\")) }"
-                              ],
-                              [
-                                "subgraph",
-                                "reviews"
-                              ],
-                              [
-                                "message",
-                                "Response headers from subgraph \"reviews\""
-                              ],
-                              [
-                                "response_headers",
-                                "[REDACTED]"
-                              ],
-                              [
-                                "subgraph",
-                                "reviews"
-                              ],
-                              [
-                                "message",
-                                "Raw response body from subgraph \"reviews\" received"
-                              ],
-                              [
-                                "response_body",
-                                "{\"data\":{\"_entities\":[{\"reviews\":[{\"id\":\"1\",\"product\":{\"__typename\":\"Product\",\"upc\":\"1\"},\"author\":{\"__typename\":\"User\",\"id\":\"1\"}},{\"id\":\"4\",\"product\":{\"__typename\":\"Product\",\"upc\":\"1\"},\"author\":{\"__typename\":\"User\",\"id\":\"2\"}}]},{\"reviews\":[{\"id\":\"2\",\"product\":{\"__typename\":\"Product\",\"upc\":\"2\"},\"author\":{\"__typename\":\"User\",\"id\":\"1\"}}]},{\"reviews\":[{\"id\":\"3\",\"product\":{\"__typename\":\"Product\",\"upc\":\"3\"},\"author\":{\"__typename\":\"User\",\"id\":\"2\"}}]}]}}\n"
-                              ],
-                              [
-                                "subgraph",
-                                "reviews"
                               ]
                             ],
                             "metadata": {
@@ -804,42 +724,6 @@ expression: get_spans()
                                   [
                                     "otel.kind",
                                     "internal"
-                                  ],
-                                  [
-                                    "message",
-                                    "Request to subgraph \"products\""
-                                  ],
-                                  [
-                                    "request",
-                                    "Request { method: POST, uri: https://products.demo.starstuff.dev/, version: HTTP/1.1, headers: {\"content-type\": \"application/json\", \"accept\": \"application/json\", \"accept\": \"application/graphql-response+json\"}, body: Body(Full(b\"{\\\"query\\\":\\\"query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}\\\",\\\"variables\\\":{\\\"representations\\\":[{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"1\\\"},{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"1\\\"},{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"2\\\"},{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"3\\\"}]}}\")) }"
-                                  ],
-                                  [
-                                    "subgraph",
-                                    "products"
-                                  ],
-                                  [
-                                    "message",
-                                    "Response headers from subgraph \"products\""
-                                  ],
-                                  [
-                                    "response_headers",
-                                    "[REDACTED]"
-                                  ],
-                                  [
-                                    "subgraph",
-                                    "products"
-                                  ],
-                                  [
-                                    "message",
-                                    "Raw response body from subgraph \"products\" received"
-                                  ],
-                                  [
-                                    "response_body",
-                                    "{\"data\":{\"_entities\":[{\"name\":\"Table\"},{\"name\":\"Table\"},{\"name\":\"Couch\"},{\"name\":\"Chair\"}]}}\n"
-                                  ],
-                                  [
-                                    "subgraph",
-                                    "products"
                                   ]
                                 ],
                                 "metadata": {
@@ -1066,42 +950,6 @@ expression: get_spans()
                                   [
                                     "otel.kind",
                                     "internal"
-                                  ],
-                                  [
-                                    "message",
-                                    "Request to subgraph \"accounts\""
-                                  ],
-                                  [
-                                    "request",
-                                    "Request { method: POST, uri: https://accounts.demo.starstuff.dev/, version: HTTP/1.1, headers: {\"content-type\": \"application/json\", \"accept\": \"application/json\", \"accept\": \"application/graphql-response+json\"}, body: Body(Full(b\"{\\\"query\\\":\\\"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}\\\",\\\"variables\\\":{\\\"representations\\\":[{\\\"__typename\\\":\\\"User\\\",\\\"id\\\":\\\"1\\\"},{\\\"__typename\\\":\\\"User\\\",\\\"id\\\":\\\"2\\\"},{\\\"__typename\\\":\\\"User\\\",\\\"id\\\":\\\"1\\\"},{\\\"__typename\\\":\\\"User\\\",\\\"id\\\":\\\"2\\\"}]}}\")) }"
-                                  ],
-                                  [
-                                    "subgraph",
-                                    "accounts"
-                                  ],
-                                  [
-                                    "message",
-                                    "Response headers from subgraph \"accounts\""
-                                  ],
-                                  [
-                                    "response_headers",
-                                    "[REDACTED]"
-                                  ],
-                                  [
-                                    "subgraph",
-                                    "accounts"
-                                  ],
-                                  [
-                                    "message",
-                                    "Raw response body from subgraph \"accounts\" received"
-                                  ],
-                                  [
-                                    "response_body",
-                                    "{\"data\":{\"_entities\":[{\"name\":\"Ada Lovelace\"},{\"name\":\"Alan Turing\"},{\"name\":\"Ada Lovelace\"},{\"name\":\"Alan Turing\"}]}}\n"
-                                  ],
-                                  [
-                                    "subgraph",
-                                    "accounts"
                                   ]
                                 ],
                                 "metadata": {
