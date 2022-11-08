@@ -105,7 +105,7 @@ where
     <S as Service<subgraph::Request>>::Future: std::marker::Send,
 {
     let body = request.subgraph_request.body_mut();
-    let reps = body
+    let representations = body
         .variables
         .get_mut("representations")
         .and_then(|value| value.as_array_mut())
@@ -116,15 +116,57 @@ where
     digest.update(&[0u8; 1][..]);
     digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
     digest.update(&[0u8; 1][..]);
-    digest.update(&serde_json::to_vec(&reps).unwrap());
+    digest.update(&serde_json::to_vec(&representations).unwrap());
 
     let query_hash = hex::encode(digest.finalize().as_slice());
 
-    let mut new_reps: Vec<Value> = Vec::new();
-    let mut result: Vec<(String, String, Option<Value>)> = Vec::new();
-    let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
+    let keys = extract_cache_keys(representations, &name, &query_hash)?;
+    let cache_result = cache.multi_get(&keys).await;
 
-    for mut representation in reps.drain(..) {
+    let (new_representations, mut result) =
+        filter_representations(representations, keys, cache_result)?;
+
+    body.variables
+        .insert("representations", new_representations.into());
+
+    let mut response = service.oneshot(request).await?;
+
+    let mut data = response.response.body_mut().data.take();
+
+    if let Some(mut entities) = data
+        .as_mut()
+        .and_then(|v| v.as_object_mut())
+        .and_then(|o| o.remove("_entities"))
+    {
+        let new_entities = insert_entities_in_result(
+            entities
+                .as_array_mut()
+                .ok_or_else(|| FetchError::MalformedResponse {
+                    reason: "expected an array of entities".to_string(),
+                })?,
+            &cache,
+            &mut result,
+        )
+        .await?;
+
+        //FIXME: check that entities_it is now empty
+        data.as_mut()
+            .and_then(|v| v.as_object_mut())
+            .map(|o| o.insert("_entities", new_entities.into()));
+    }
+
+    response.response.body_mut().data = data;
+    Ok(response)
+}
+
+// build a list of keys to get from the cache in one query
+fn extract_cache_keys(
+    representations: &mut Vec<Value>,
+    subgraph_name: &str,
+    query_hash: &str,
+) -> Result<Vec<String>, BoxError> {
+    let mut res = Vec::new();
+    for representation in representations {
         let opt_type = representation
             .as_object_mut()
             .and_then(|o| o.remove("__typename"))
@@ -136,24 +178,55 @@ where
 
         let key = format!(
             "subgraph.{}|{}|{}|{}",
-            name,
+            subgraph_name,
             &typename,
             serde_json::to_string(&representation).unwrap(),
             query_hash
         );
 
-        let res = cache.get(&key).await;
-        if res.is_none() {
+        representation
+            .as_object_mut()
+            .map(|o| o.insert("__typename", opt_type));
+        res.push(key);
+    }
+    Ok(res)
+}
+
+// build a new list of representations without the ones we got from the cache
+fn filter_representations(
+    representations: &mut Vec<Value>,
+    keys: Vec<String>,
+    mut cache_result: Vec<Option<Value>>,
+) -> Result<(Vec<Value>, Vec<(String, String, Option<Value>)>), BoxError> {
+    let mut new_representations: Vec<Value> = Vec::new();
+    let mut result: Vec<(String, String, Option<Value>)> = Vec::new();
+    let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
+
+    for ((mut representation, key), cache_entry) in representations
+        .drain(..)
+        .zip(keys)
+        .zip(cache_result.drain(..))
+    {
+        let opt_type = representation
+            .as_object_mut()
+            .and_then(|o| o.remove("__typename"))
+            .ok_or_else(|| FetchError::MalformedRequest {
+                reason: "missing __typename in representation".to_string(),
+            })?;
+
+        let typename = opt_type.as_str().unwrap_or("-").to_string();
+
+        if cache_entry.is_none() {
             cache_hit.entry(typename.clone()).or_default().1 += 1;
 
             representation
                 .as_object_mut()
                 .map(|o| o.insert("__typename", opt_type));
-            new_reps.push(representation);
+            new_representations.push(representation);
         } else {
             cache_hit.entry(typename.clone()).or_default().0 += 1;
         }
-        result.push((key, typename, res));
+        result.push((key, typename, cache_entry));
     }
 
     for (ty, (hit, miss)) in cache_hit {
@@ -165,58 +238,46 @@ where
         );
     }
 
-    body.variables.insert("representations", new_reps.into());
+    Ok((new_representations, result))
+}
 
-    let mut response = service.oneshot(request).await?;
+async fn insert_entities_in_result(
+    entities: &mut Vec<Value>,
+    cache: &CacheStorage<String, Value>,
+    result: &mut Vec<(String, String, Option<Value>)>,
+) -> Result<Vec<Value>, BoxError> {
+    let mut new_entities = Vec::new();
 
-    let mut data = response.response.body_mut().data.take();
+    let mut inserted_types: HashMap<String, usize> = HashMap::new();
+    let mut to_insert: Vec<(String, Value)> = Vec::new();
+    let mut entities_it = entities.drain(..);
 
-    if let Some(mut entities) = data
-        .as_mut()
-        .and_then(|v| v.as_object_mut())
-        .and_then(|o| o.remove("_entities"))
-    {
-        let mut new_entities = Vec::new();
-        let mut entities_it = entities
-            .as_array_mut()
-            .ok_or_else(|| FetchError::MalformedResponse {
-                reason: "expected an array of entities".to_string(),
-            })?
-            .drain(..);
+    // insert requested entities and cached entities in the same order as
+    // they were requested
+    for (key, typename, entity) in result.drain(..) {
+        match entity {
+            Some(v) => new_entities.push(v),
+            None => {
+                let value = entities_it
+                    .next()
+                    .ok_or_else(|| FetchError::MalformedResponse {
+                        reason: "invalid number of entities".to_string(),
+                    })?;
+                *inserted_types.entry(typename).or_default() += 1;
+                to_insert.push((key, value.clone()));
 
-        let mut inserted: HashMap<String, usize> = HashMap::new();
-        // insert requested entities and cached entities in the same order as
-        // they were requested
-        for (key, typename, entity) in result.drain(..) {
-            match entity {
-                Some(v) => new_entities.push(v),
-                None => {
-                    let value =
-                        entities_it
-                            .next()
-                            .ok_or_else(|| FetchError::MalformedResponse {
-                                reason: "invalid number of entities".to_string(),
-                            })?;
-                    *inserted.entry(typename).or_default() += 1;
-                    cache.insert(key, value.clone()).await;
-
-                    new_entities.push(value);
-                }
+                new_entities.push(value);
             }
         }
-
-        for (ty, nb) in inserted {
-            tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);
-        }
-
-        //FIXME: check that entities_it is now empty
-        data.as_mut()
-            .and_then(|v| v.as_object_mut())
-            .map(|o| o.insert("_entities", new_entities.into()));
     }
 
-    response.response.body_mut().data = data;
-    Ok(response)
+    cache.multi_insert(to_insert).await;
+
+    for (ty, nb) in inserted_types {
+        tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);
+    }
+
+    Ok(new_entities)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

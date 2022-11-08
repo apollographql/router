@@ -28,8 +28,22 @@ where
         self.inner.lock().await.get(key).cloned()
     }
 
+    pub(crate) async fn multi_get(&self, keys: &Vec<K>) -> Vec<Option<V>> {
+        let mut inner = self.inner.lock().await;
+
+        keys.iter().map(|key| (*inner).get(key).cloned()).collect()
+    }
+
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.inner.lock().await.put(key, value);
+    }
+
+    pub(crate) async fn multi_insert(&self, inserted: Vec<(K, V)>) {
+        let mut inner = self.inner.lock().await;
+
+        for (key, value) in inserted {
+            (*inner).put(key, value);
+        }
     }
 
     #[cfg(test)]
