@@ -428,12 +428,13 @@ impl Exporter {
             .collect();
         // For now, only trace_id
         let mut response_headers = HashMap::with_capacity(1);
-        response_headers.insert(
-            String::from("apollo_trace_id"),
-            Values {
-                value: vec![span.span_context.trace_id().to_string()],
-            },
-        );
+        // FIXME: uncomment later
+        // response_headers.insert(
+        //     String::from("apollo_trace_id"),
+        //     Values {
+        //         value: vec![span.span_context.trace_id().to_string()],
+        //     },
+        // );
         Http {
             method: method.into(),
             request_headers,
