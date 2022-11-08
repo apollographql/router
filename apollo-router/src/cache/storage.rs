@@ -28,7 +28,7 @@ where
         self.inner.lock().await.get(key).cloned()
     }
 
-    pub(crate) async fn multi_get(&self, keys: &Vec<K>) -> Vec<Option<V>> {
+    pub(crate) async fn multi_get(&self, keys: &[K]) -> Vec<Option<V>> {
         let mut inner = self.inner.lock().await;
 
         keys.iter().map(|key| (*inner).get(key).cloned()).collect()

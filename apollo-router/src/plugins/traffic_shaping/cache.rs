@@ -107,7 +107,7 @@ where
     <S as Service<subgraph::Request>>::Future: std::marker::Send,
 {
     let body = request.subgraph_request.body_mut();
-    let query_hash = hash_request(&body);
+    let query_hash = hash_request(body);
 
     let representations = body
         .variables
@@ -121,7 +121,7 @@ where
     let (new_representations, mut result) =
         filter_representations(representations, keys, cache_result)?;
 
-    if new_representations.len() > 0 {
+    if !new_representations.is_empty() {
         body.variables
             .insert("representations", new_representations.into());
 
@@ -214,14 +214,20 @@ fn extract_cache_keys(
     Ok(res)
 }
 
+struct IntermediateResult {
+    key: String,
+    typename: String,
+    cache_entry: Option<Value>,
+}
+
 // build a new list of representations without the ones we got from the cache
 fn filter_representations(
     representations: &mut Vec<Value>,
     keys: Vec<String>,
     mut cache_result: Vec<Option<Value>>,
-) -> Result<(Vec<Value>, Vec<(String, String, Option<Value>)>), BoxError> {
+) -> Result<(Vec<Value>, Vec<IntermediateResult>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
-    let mut result: Vec<(String, String, Option<Value>)> = Vec::new();
+    let mut result = Vec::new();
     let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
 
     for ((mut representation, key), cache_entry) in representations
@@ -248,7 +254,11 @@ fn filter_representations(
         } else {
             cache_hit.entry(typename.clone()).or_default().0 += 1;
         }
-        result.push((key, typename, cache_entry));
+        result.push(IntermediateResult {
+            key,
+            typename,
+            cache_entry,
+        });
     }
 
     for (ty, (hit, miss)) in cache_hit {
@@ -266,7 +276,7 @@ fn filter_representations(
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
     cache: &CacheStorage<String, Value>,
-    result: &mut Vec<(String, String, Option<Value>)>,
+    result: &mut Vec<IntermediateResult>,
 ) -> Result<Vec<Value>, BoxError> {
     let mut new_entities = Vec::new();
 
@@ -276,8 +286,13 @@ async fn insert_entities_in_result(
 
     // insert requested entities and cached entities in the same order as
     // they were requested
-    for (key, typename, entity) in result.drain(..) {
-        match entity {
+    for IntermediateResult {
+        key,
+        typename,
+        cache_entry,
+    } in result.drain(..)
+    {
+        match cache_entry {
             Some(v) => new_entities.push(v),
             None => {
                 let value = entities_it
