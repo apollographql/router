@@ -10,7 +10,7 @@ use serde_json::json;
 use serde_json::Value;
 
 const GATEWAY_URL: &str = "http://localhost:4100/graphql";
-const ROUTER_URL: &str = "http://localhost:4000/graphql";
+const ROUTER_URL: &str = "http://localhost:4000";
 
 fuzz_target!(|data: &[u8]| {
     let generated_operation = match generate_valid_operation(data, "fuzz/supergraph-fed2.graphql") {

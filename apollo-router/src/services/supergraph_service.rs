@@ -3,14 +3,17 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use axum::headers::HeaderName;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
+use http::HeaderValue;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
+use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -30,11 +33,14 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
+use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::tracer::TraceId;
 use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -54,7 +60,6 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    ready_query_planner_service: Option<CachingQueryPlanner<BridgeQueryPlanner>>,
     schema: Arc<Schema>,
 }
 
@@ -69,7 +74,6 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
-            ready_query_planner_service: None,
             schema,
         }
     }
@@ -84,26 +88,23 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We need to obtain references to two hot services for use in call.
-        // The reason for us to clone here is that the async block needs to own the hot services,
-        // and cloning will produce a cold service. Therefore cloning in `SupergraphService#call` is not
-        // a valid course of action.
-        self.ready_query_planner_service
-            .get_or_insert_with(|| self.query_planner_service.clone())
+        self.query_planner_service
             .poll_ready(cx)
             .map_err(|err| err.into())
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let planning = self.ready_query_planner_service.take().unwrap();
+        let clone = self.query_planner_service.clone();
+
+        let planning = std::mem::replace(&mut self.query_planner_service, clone);
         let execution = self.execution_service_factory.new_service();
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut =
-            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
+        let fut = service_call(planning, execution, schema, req)
+            .or_else(|error: BoxError| async move {
                 let errors = vec![crate::error::Error {
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
@@ -121,6 +122,18 @@ where
                     .context(context_cloned)
                     .build()
                     .expect("building a response like this should not fail"))
+            })
+            .and_then(|mut res| async move {
+                if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
+                    let header_value = HeaderValue::from_str(trace_id.as_str());
+                    if let Ok(header_value) = header_value {
+                        res.response
+                            .headers_mut()
+                            .insert(HeaderName::from_static("apollo_trace_id"), header_value);
+                    }
+                }
+
+                Ok(res)
             });
 
         Box::pin(fut)
@@ -393,23 +406,35 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(self.query_planner_service.clone())
+            .execution_service_factory(ExecutionCreator {
+                schema: self.schema.clone(),
+                plugins: self.plugins.clone(),
+                subgraph_creator: self.subgraph_creator.clone(),
+            })
+            .schema(self.schema.clone())
+            .build();
+
+        let supergraph_service = match self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
+        {
+            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
+            None => Either::B(supergraph_service),
+        };
+
         ServiceBuilder::new()
             .layer(EnsureQueryPresence::default())
             .service(
-                self.plugins.iter().rev().fold(
-                    BoxService::new(
-                        SupergraphService::builder()
-                            .query_planner_service(self.query_planner_service.clone())
-                            .execution_service_factory(ExecutionCreator {
-                                schema: self.schema.clone(),
-                                plugins: self.plugins.clone(),
-                                subgraph_creator: self.subgraph_creator.clone(),
-                            })
-                            .schema(self.schema.clone())
-                            .build(),
-                    ),
-                    |acc, (_, e)| e.supergraph_service(acc),
-                ),
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
             )
     }
 
@@ -432,9 +457,7 @@ mod tests {
     use crate::test_harness::MockedSubgraphs;
     use crate::TestHarness;
 
-    #[tokio::test]
-    async fn nullability_formatting() {
-        let schema = r#"schema
+    const SCHEMA: &str = r#"schema
         @core(feature: "https://specs.apollo.dev/core/v0.1")
         @core(feature: "https://specs.apollo.dev/join/v0.1")
         @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
@@ -473,8 +496,12 @@ mod tests {
    @join__type(graph: USER, key: "id") {
        id: ID
        creatorUser: User
+       name: String
+       suborga: [Organization]
    }"#;
 
+    #[tokio::test]
+    async fn nullability_formatting() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
@@ -486,7 +513,7 @@ mod tests {
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
-            .schema(schema)
+            .schema(SCHEMA)
             .extra_plugin(subgraphs)
             .build()
             .await
@@ -506,5 +533,140 @@ mod tests {
             .unwrap();
 
         insta::assert_json_snapshot!(response);
+    }
+
+    #[tokio::test]
+    async fn errors_on_deferred_responses() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{__typename id}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
+            )
+            .with_json(
+                serde_json::json!{{
+                    "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                    "variables": {
+                        "representations":[{"__typename": "User", "id":"0"}]
+                    }
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "_entities": [{ "suborga": [
+                        { "__typename": "User", "name": "AAA"},
+                        ] }]
+                    },
+                    "errors": [
+                        {
+                            "message": "error user 0",
+                            "path": ["_entities", 0],
+                        }
+                    ]
+                    }}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query("query { currentUser { id  ...@defer { name } } }")
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn errors_on_incremental_responses() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "Organization", "id":"0"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [{ "suborga": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2"},
+                    { "__typename": "Organization", "id": "3"},
+                    ] }]
+                },
+                }}
+        )
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": {
+                    "representations":[
+                        {"__typename": "Organization", "id":"1"},
+                        {"__typename": "Organization", "id":"2"},
+                        {"__typename": "Organization", "id":"3"}
+
+                        ]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2", "name": "A"},
+                    { "__typename": "Organization", "id": "3"},
+                    ]
+                },
+                "errors": [
+                    {
+                        "message": "error orga 1",
+                        "path": ["_entities", 0],
+                    },
+                    {
+                        "message": "error orga 3",
+                        "path": ["_entities", 2],
+                    }
+                ]
+                }}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query(
+                "query { currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
 }

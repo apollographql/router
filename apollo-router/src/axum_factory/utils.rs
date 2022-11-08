@@ -140,8 +140,8 @@ pub(super) async fn check_accept_header(
             format!(
                 r#"'accept' header is mandatory and can't be different than {:?}, {:?} or {:?}"#,
                 APPLICATION_JSON_HEADER_VALUE,
-                MULTIPART_DEFER_CONTENT_TYPE,
-                APPLICATION_JSON_HEADER_VALUE
+                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                MULTIPART_DEFER_CONTENT_TYPE
             ),
         )
             .into_response())
@@ -149,7 +149,7 @@ pub(super) async fn check_accept_header(
 }
 
 /// Returns true if the headers contain header `accept: */*`
-fn accepts_wildcard(headers: &HeaderMap) -> bool {
+pub(crate) fn accepts_wildcard(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
         value
             .to_str()
@@ -158,27 +158,29 @@ fn accepts_wildcard(headers: &HeaderMap) -> bool {
     })
 }
 
-/// Returns true if the headers contain header `accept: application/json` or `accept: application/graphql-response+json`
-fn accepts_json(headers: &HeaderMap) -> bool {
-    headers.get_all(ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
+/// Returns true if the headers contain `accept: application/json` or `accept: application/graphql-response+json`,
+/// or if there is no `accept` header
+pub(crate) fn accepts_json(headers: &HeaderMap) -> bool {
+    !headers.contains_key(ACCEPT)
+        || headers.get_all(ACCEPT).iter().any(|value| {
+            value
+                .to_str()
+                .map(|accept_str| {
+                    let mut list = MediaTypeList::new(accept_str);
 
-                list.any(|mime| {
-                    mime.as_ref()
-                        .map(|mime| {
-                            (mime.ty == APPLICATION && mime.subty == JSON)
-                                || (mime.ty == APPLICATION
-                                    && mime.subty.as_str() == "graphql-response"
-                                    && mime.suffix == Some(JSON))
-                        })
-                        .unwrap_or(false)
+                    list.any(|mime| {
+                        mime.as_ref()
+                            .map(|mime| {
+                                (mime.ty == APPLICATION && mime.subty == JSON)
+                                    || (mime.ty == APPLICATION
+                                        && mime.subty.as_str() == "graphql-response"
+                                        && mime.suffix == Some(JSON))
+                            })
+                            .unwrap_or(false)
+                    })
                 })
-            })
-            .unwrap_or(false)
-    })
+                .unwrap_or(false)
+        })
 }
 
 /// Returns true if the headers contain accept header to enable defer
@@ -248,7 +250,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.flavor" = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
-                "apollo_private.duration_ns" = tracing::field::Empty
+                "apollo_private.duration_ns" = tracing::field::Empty,
+                "trace_id" = tracing::field::Empty
             )
         } else {
             // No remote span, we can go ahead and create the span without context.
@@ -260,7 +263,8 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.flavor" = ?request.version(),
                 "otel.kind" = %SpanKind::Server,
                 "otel.status_code" = tracing::field::Empty,
-                "apollo_private.duration_ns" = tracing::field::Empty
+                "apollo_private.duration_ns" = tracing::field::Empty,
+                "trace_id" = tracing::field::Empty
             )
         }
     }

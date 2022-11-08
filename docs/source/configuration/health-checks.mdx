@@ -35,6 +35,7 @@ $ curl -v "http://127.0.0.1:8088/health"
 < 
 * Connection #0 to host 127.0.0.1 left intact
 {"status":"UP"}
+```
 
 ## Using with Kubernetes
 In Kubernetes, you can configure health checks by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:

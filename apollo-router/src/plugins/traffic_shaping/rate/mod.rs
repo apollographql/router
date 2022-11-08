@@ -1,11 +1,11 @@
 //! Limit the rate at which requests are processed.
 
 mod error;
-mod future;
+pub(crate) mod future;
 mod layer;
 #[allow(clippy::module_inception)]
 mod rate;
-mod service;
+pub(crate) mod service;
 
 pub(crate) use self::error::RateLimited;
 pub(crate) use self::layer::RateLimitLayer;

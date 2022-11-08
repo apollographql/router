@@ -4,6 +4,7 @@ query SupergraphSdl($apiKey: String!, $graph_ref: String!, $ifAfterId: ID) {
         ... on RouterConfigResult {
             id
             supergraphSdl: supergraphSDL
+            minDelaySeconds
         }
         ... on FetchError {
             code
