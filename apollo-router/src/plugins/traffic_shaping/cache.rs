@@ -7,6 +7,8 @@ use futures::FutureExt;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -109,6 +111,15 @@ where
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
 
+    let mut digest = Sha256::new();
+    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.update(&serde_json::to_vec(&reps).unwrap());
+
+    let query_hash = hex::encode(digest.finalize().as_slice());
+
     let mut new_reps: Vec<Value> = Vec::new();
     let mut result: Vec<(String, String, Option<Value>)> = Vec::new();
     let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
@@ -128,7 +139,7 @@ where
             name,
             &typename,
             serde_json::to_string(&representation).unwrap(),
-            body.query.as_deref().unwrap_or("-")
+            query_hash
         );
 
         let res = cache.get(&key).await;
