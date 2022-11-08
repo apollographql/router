@@ -25,7 +25,6 @@ use http::HeaderMap;
 use http::HeaderValue;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
-use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
@@ -368,10 +367,10 @@ impl Telemetry {
                 None,
             );
 
-            global::set_tracer_provider(tracer_provider);
-            global::set_error_handler(handle_error)
+            opentelemetry::global::set_tracer_provider(tracer_provider);
+            opentelemetry::global::set_error_handler(handle_error)
                 .expect("otel error handler lock poisoned, fatal");
-            global::set_text_map_propagator(Self::create_propagator(&config));
+            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&config));
 
             #[cfg(feature = "console")]
             {
@@ -440,10 +439,13 @@ impl Telemetry {
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
 
+        // Set the meter provider
+        opentelemetry::global::set_meter_provider(builder.meter_provider());
+
         let plugin = Ok(Telemetry {
             custom_endpoints: builder.custom_endpoints(),
             _metrics_exporters: builder.exporters(),
-            metrics: BasicMetrics::new(&*builder.meter_provider()),
+            metrics: BasicMetrics::default(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
             config,
