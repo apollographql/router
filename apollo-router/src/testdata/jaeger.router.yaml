@@ -1,5 +1,7 @@
 telemetry:
   tracing:
+    propagation:
+      jaeger: true
     trace_config:
       service_name: router
     jaeger:
