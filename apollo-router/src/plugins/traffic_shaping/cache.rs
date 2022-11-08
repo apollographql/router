@@ -17,6 +17,7 @@ use tracing::Level;
 
 use crate::cache::storage::CacheStorage;
 use crate::error::FetchError;
+use crate::graphql;
 use crate::json_ext::Object;
 use crate::services::subgraph;
 
@@ -106,20 +107,13 @@ where
     <S as Service<subgraph::Request>>::Future: std::marker::Send,
 {
     let body = request.subgraph_request.body_mut();
+    let query_hash = hash_request(&body);
+
     let representations = body
         .variables
         .get_mut("representations")
         .and_then(|value| value.as_array_mut())
         .expect("we already checked that representations exist");
-
-    let mut digest = Sha256::new();
-    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
-    digest.update(&[0u8; 1][..]);
-    digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
-    digest.update(&[0u8; 1][..]);
-    digest.update(&serde_json::to_vec(&representations).unwrap());
-
-    let query_hash = hex::encode(digest.finalize().as_slice());
 
     let keys = extract_cache_keys(representations, &name, &query_hash)?;
     let cache_result = cache.multi_get(&keys).await;
@@ -174,6 +168,17 @@ where
             .context(request.context)
             .build())
     }
+}
+
+fn hash_request(body: &graphql::Request) -> String {
+    let mut digest = Sha256::new();
+    digest.update(body.query.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.update(body.operation_name.as_deref().unwrap_or("-").as_bytes());
+    digest.update(&[0u8; 1][..]);
+    digest.update(&serde_json::to_vec(&body.variables).unwrap());
+
+    hex::encode(digest.finalize().as_slice())
 }
 
 // build a list of keys to get from the cache in one query
