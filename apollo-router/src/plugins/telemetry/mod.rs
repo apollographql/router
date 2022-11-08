@@ -79,6 +79,7 @@ use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
@@ -202,7 +203,7 @@ impl Plugin for Telemetry {
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        "apolog_configllo_private.operation_signature",
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
@@ -1803,6 +1804,4 @@ mod tests {
         assert!(prom_metrics.contains(r#"apollo_router_http_requests_total{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400"} 1"#));
         assert!(prom_metrics.contains(r#"apollo_router_http_requests_error_total{another_test="my_default_value",error="400 Bad Request",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="400"} 1"#))
     }
-
-    // TODO: add test for logging
 }
