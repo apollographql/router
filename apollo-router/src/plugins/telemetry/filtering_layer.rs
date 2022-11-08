@@ -5,7 +5,7 @@ use tracing::field;
 use tracing::Level;
 use tracing::Subscriber;
 use tracing_core::Field;
-use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Layer;
 
 // Specific attributes for logging
 pub(crate) const SPECIFIC_ATTRIBUTES: [&str; 4] = [
@@ -24,32 +24,30 @@ pub(crate) struct AttributesToExclude {
     pub(crate) subgraphs: HashMap<String, HashSet<String>>,
 }
 
-pub(crate) struct FilterSubscriber<S>
-where
-    S: Subscriber + Send + Sync + 'static,
-{
-    inner: S,
+pub(crate) struct FilterLayer {
     attributes_to_exclude: Option<AttributesToExclude>,
 }
 
-impl<S> FilterSubscriber<S>
-where
-    S: Subscriber + Send + Sync + 'static,
-{
-    pub(crate) fn new(inner: S, attributes_to_exclude: Option<AttributesToExclude>) -> Self {
+impl FilterLayer {
+    pub(crate) fn new(attributes_to_exclude: Option<AttributesToExclude>) -> Self {
         Self {
-            inner,
             attributes_to_exclude,
         }
     }
 }
 
-impl<S> Subscriber for FilterSubscriber<S>
+impl<S> Layer<S> for FilterLayer
 where
     S: Subscriber + Send + Sync + 'static,
 {
-    // Called only one time for a specific callsite
-    fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+    fn enabled(
+        &self,
+        metadata: &tracing::Metadata<'_>,
+        ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
+        // The logic is splitted between `enabled` and `event_enabled` because we can't evaluate the value of an attribute in this method
+        // This method is evaluated only once for a specific callsite, which means if I return false here I won't re-enter in this method everytime for this event
+        // Which is better for performance. So for supergraph level we can use this method, for subgraph level we have to know the value of subgraph attribute
         if metadata.level() == &Level::DEBUG && metadata.is_event() {
             match &self.attributes_to_exclude {
                 Some(attributes_to_exclude) => {
@@ -58,7 +56,7 @@ where
                     for field_name in metadata.fields().iter().map(|f| f.name()) {
                         if field_name == SUBGRAPH_ATTRIBUTE_NAME {
                             subgraph = true;
-                            // Cannot do anything for subgraph at this level. It will be in `event` method.
+                            // Cannot do anything for subgraph at this level. It will be in `event_enabled` method.
                             break;
                         }
                         if attributes_to_exclude.supergraph.contains(field_name) {
@@ -82,23 +80,14 @@ where
             }
         }
 
-        self.inner.enabled(metadata)
+        ctx.enabled(metadata)
     }
 
-    fn new_span(&self, span: &tracing_core::span::Attributes<'_>) -> tracing_core::span::Id {
-        self.inner.new_span(span)
-    }
-
-    fn record(&self, span: &tracing_core::span::Id, values: &tracing_core::span::Record<'_>) {
-        // Filter for subgraph here
-        self.inner.record(span, values)
-    }
-
-    fn record_follows_from(&self, span: &tracing_core::span::Id, follows: &tracing_core::span::Id) {
-        self.inner.record_follows_from(span, follows)
-    }
-
-    fn event(&self, event: &tracing::Event<'_>) {
+    fn event_enabled(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
         if event.metadata().level() == &Level::DEBUG {
             let mut fields_visitor = FieldsVisitor::default();
             event.record(&mut fields_visitor);
@@ -112,7 +101,7 @@ where
                         .map(|a| a.iter().map(|a| a.as_str()).collect::<HashSet<&str>>())
                     {
                         if !attrs_to_exclude.is_disjoint(&field_names) {
-                            return;
+                            return false;
                         }
                     } else if !attributes_to_exclude
                         .all_subgraphs
@@ -121,32 +110,13 @@ where
                         .collect::<HashSet<&str>>()
                         .is_disjoint(&field_names)
                     {
-                        return;
+                        return false;
                     }
                 }
             }
         }
 
-        self.inner.event(event)
-    }
-
-    fn enter(&self, span: &tracing_core::span::Id) {
-        self.inner.enter(span)
-    }
-
-    fn exit(&self, span: &tracing_core::span::Id) {
-        self.inner.exit(span)
-    }
-}
-
-impl<'a, S> LookupSpan<'a> for FilterSubscriber<S>
-where
-    S: Subscriber + Send + Sync + 'static + for<'span> LookupSpan<'span>,
-{
-    type Data = <S as LookupSpan<'a>>::Data;
-
-    fn span_data(&'a self, id: &tracing::Id) -> Option<Self::Data> {
-        self.inner.span_data(id)
+        true
     }
 }
 

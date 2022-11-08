@@ -68,7 +68,7 @@ use crate::plugins::telemetry::config::default_display_filename;
 use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::filtering_layer::FilterSubscriber;
+use crate::plugins::telemetry::filtering_layer::FilterLayer;
 use crate::plugins::telemetry::formatters::JsonFields;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -361,38 +361,6 @@ impl Telemetry {
         Self::new_common(serde_json::from_value(config)?, Some(subscriber)).await
     }
 
-    #[doc(hidden)]
-    /// This method can be used instead of `Plugin::new` to override the subscriber but still enable the `FilterSubscriber` to filter logs
-    pub async fn new_with_filter_subscriber<S>(
-        config: serde_json::Value,
-        subscriber: S,
-    ) -> Result<Self, BoxError>
-    where
-        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
-    {
-        let config: <Self as Plugin>::Config = serde_json::from_value(config)?;
-        let attributes_to_exclude = config
-            .logging
-            .as_ref()
-            .map(|l| l.get_attributes_to_exclude());
-
-        match config
-            .logging
-            .as_ref()
-            .map(|l| l.format)
-            .unwrap_or_default()
-        {
-            config::LoggingFormat::Pretty => {
-                let subscriber = FilterSubscriber::new(subscriber, attributes_to_exclude);
-                Self::new_common(config, Some(subscriber)).await
-            }
-            config::LoggingFormat::Json => {
-                let subscriber = FilterSubscriber::new(subscriber, attributes_to_exclude);
-                Self::new_common(config, Some(subscriber)).await
-            }
-        }
-    }
-
     /// This method can be used instead of `Plugin::new` to override the subscriber
     async fn new_common<S>(
         mut config: <Self as Plugin>::Config,
@@ -464,6 +432,11 @@ impl Telemetry {
 
             #[cfg(not(feature = "console"))]
             {
+                let attributes_to_exclude = config
+                    .logging
+                    .as_ref()
+                    .map(|l| l.get_attributes_to_exclude());
+
                 let log_level = GLOBAL_ENV_FILTER
                     .get()
                     .map(|s| s.as_str())
@@ -491,7 +464,9 @@ impl Telemetry {
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                    let subscriber = sub.with(telemetry);
+                    let subscriber = sub
+                        .with(FilterLayer::new(attributes_to_exclude))
+                        .with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -510,13 +485,11 @@ impl Telemetry {
                         config::LoggingFormat::Pretty => {
                             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                            let subscriber = FilterSubscriber::new(
-                                sub_builder
-                                    .event_format(formatters::TextFormatter::new())
-                                    .finish()
-                                    .with(telemetry),
-                                attributes_to_exclude,
-                            );
+                            let subscriber = sub_builder
+                                .event_format(formatters::TextFormatter::new())
+                                .finish()
+                                .with(FilterLayer::new(attributes_to_exclude))
+                                .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
                             }
@@ -524,19 +497,17 @@ impl Telemetry {
                         config::LoggingFormat::Json => {
                             let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                            let subscriber = FilterSubscriber::new(
-                                sub_builder
-                                    .map_event_format(|e| {
-                                        e.json()
-                                            .with_current_span(true)
-                                            .with_span_list(true)
-                                            .flatten_event(true)
-                                    })
-                                    .map_fmt_fields(|_f| JsonFields::new())
-                                    .finish()
-                                    .with(telemetry),
-                                attributes_to_exclude,
-                            );
+                            let subscriber = sub_builder
+                                .map_event_format(|e| {
+                                    e.json()
+                                        .with_current_span(true)
+                                        .with_span_list(true)
+                                        .flatten_event(true)
+                                })
+                                .map_fmt_fields(|_f| JsonFields::new())
+                                .finish()
+                                .with(FilterLayer::new(attributes_to_exclude))
+                                .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
                             }
@@ -600,6 +571,7 @@ impl Telemetry {
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
         if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
+            println!("JAEGER PROPAGATOR !!!!");
             propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
         }
         if propagation.baggage.unwrap_or_default() {

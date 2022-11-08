@@ -64,8 +64,8 @@ impl TracingTest {
         Self {
             test_config_location: test_config_location.clone(),
             router: Command::new(router_location)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
                 .args([
                     "--hr",
                     "--config",
@@ -108,9 +108,11 @@ impl TracingTest {
                 propagator.inject_context(
                     &span.context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
+
+                println!("propagator --- {:#?}", request.headers());
             });
-            match client.send(request).await {
+            match client.send(dbg!(request)).await {
                 Ok(result) => {
                     println!(
                         "got {}",

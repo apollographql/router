@@ -145,7 +145,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 propagator.inject_context(
                     &Span::current().context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
             });
 
             let schema_uri = request.uri();
