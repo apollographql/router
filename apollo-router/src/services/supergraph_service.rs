@@ -3,16 +3,15 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::headers::HeaderName;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use http::HeaderValue;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
+use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -32,12 +31,13 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
+use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::tracer::TraceId;
 use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -100,8 +100,8 @@ where
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = service_call(planning, execution, schema, req)
-            .or_else(|error: BoxError| async move {
+        let fut =
+            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
                 let errors = vec![crate::error::Error {
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
@@ -119,19 +119,20 @@ where
                     .context(context_cloned)
                     .build()
                     .expect("building a response like this should not fail"))
-            })
-            .and_then(|mut res| async move {
-                if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-                    let header_value = HeaderValue::from_str(trace_id.as_str());
-                    if let Ok(header_value) = header_value {
-                        res.response
-                            .headers_mut()
-                            .insert(HeaderName::from_static("apollo_trace_id"), header_value);
-                    }
-                }
-
-                Ok(res)
             });
+        // FIXME: Enable it later
+        // .and_then(|mut res| async move {
+        //     if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
+        //         let header_value = HeaderValue::from_str(trace_id.as_str());
+        //         if let Ok(header_value) = header_value {
+        //             res.response
+        //                 .headers_mut()
+        //                 .insert(HeaderName::from_static("apollo_trace_id"), header_value);
+        //         }
+        //     }
+
+        //     Ok(res)
+        // });
 
         Box::pin(fut)
     }
@@ -409,23 +410,35 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(self.query_planner_service.clone())
+            .execution_service_factory(ExecutionCreator {
+                schema: self.schema.clone(),
+                plugins: self.plugins.clone(),
+                subgraph_creator: self.subgraph_creator.clone(),
+            })
+            .schema(self.schema.clone())
+            .build();
+
+        let supergraph_service = match self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
+        {
+            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
+            None => Either::B(supergraph_service),
+        };
+
         ServiceBuilder::new()
             .layer(EnsureQueryPresence::default())
             .service(
-                self.plugins.iter().rev().fold(
-                    BoxService::new(
-                        SupergraphService::builder()
-                            .query_planner_service(self.query_planner_service.clone())
-                            .execution_service_factory(ExecutionCreator {
-                                schema: self.schema.clone(),
-                                plugins: self.plugins.clone(),
-                                subgraph_creator: self.subgraph_creator.clone(),
-                            })
-                            .schema(self.schema.clone())
-                            .build(),
-                    ),
-                    |acc, (_, e)| e.supergraph_service(acc),
-                ),
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
             )
     }
 

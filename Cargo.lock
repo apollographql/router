@@ -141,7 +141,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "access-json",
  "ansi_term",
@@ -253,7 +253,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -269,7 +269,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -283,9 +283,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.1.5"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "005d27ddeb774d8059040d00f5a5fee276458b57a22414256e74269b30b7b3ea"
+checksum = "796458df9954e3f7ad451dd231d3d369296d349371878a31b9641470989bb112"
 dependencies = [
  "apollo-encoder",
  "apollo-parser",
@@ -3862,9 +3862,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c4eb3267174b8c6c2f654116623910a0fef09c4753f8dd83db29c48a0df988b"
+checksum = "e076559ef8e241f2ae3479e36f97bd5741c0330689e217ad51ce2c76808b868a"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -5979,7 +5979,7 @@ dependencies = [
 
 [[package]]
 name = "xtask"
-version = "1.2.1"
+version = "1.3.0"
 dependencies = [
  "ansi_term",
  "anyhow",
