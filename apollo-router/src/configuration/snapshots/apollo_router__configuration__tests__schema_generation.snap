@@ -802,11 +802,11 @@ expression: "&schema"
                 "all": {
                   "type": "object",
                   "required": [
-                    "include_attributes"
+                    "contains_attributes"
                   ],
                   "properties": {
-                    "include_attributes": {
-                      "description": "Attributes to include in logs",
+                    "contains_attributes": {
+                      "description": "Include logs which contain these logs",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -822,11 +822,11 @@ expression: "&schema"
                   "additionalProperties": {
                     "type": "object",
                     "required": [
-                      "include_attributes"
+                      "contains_attributes"
                     ],
                     "properties": {
-                      "include_attributes": {
-                        "description": "Attributes to include in logs",
+                      "contains_attributes": {
+                        "description": "Include logs which contain these logs",
                         "type": "array",
                         "items": {
                           "type": "string"
@@ -846,11 +846,11 @@ expression: "&schema"
               "description": "Log configuration at supergraph level",
               "type": "object",
               "required": [
-                "include_attributes"
+                "contains_attributes"
               ],
               "properties": {
-                "include_attributes": {
-                  "description": "Attributes to include in logs",
+                "contains_attributes": {
+                  "description": "Include logs which contain these logs",
                   "type": "array",
                   "items": {
                     "type": "string"

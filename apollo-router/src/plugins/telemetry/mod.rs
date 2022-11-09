@@ -207,18 +207,18 @@ impl Plugin for Telemetry {
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
-                ::tracing::debug!(response_headers = ?resp.response.headers(), "Supergraph response headers");
+                ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
                 resp.map_stream(move |gql_response| {
-                    ::tracing::debug!(response_body = ?gql_response, "Supergraph GraphQL response");
+                    ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
                     gql_response
                 })
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
-                    ::tracing::debug!(request = ?req.supergraph_request, "Supergraph request");
+                    ::tracing::info!(http.request = ?req.supergraph_request, "Supergraph request");
                     if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-                        ::tracing::debug!(%operation_name,  "Supergraph request with operation name");
+                        ::tracing::info!(graphql.operation.name = %operation_name,  "Supergraph request with operation name");
                     }
                     req.context.clone()
                 },
@@ -395,6 +395,9 @@ impl Telemetry {
             _ => None,
         };
 
+        if let Some(logging_conf) = &config.logging {
+            logging_conf.validate()?;
+        }
         // Setup metrics
         // The act of setting up metrics will overwrite a global meter. However it is essential that
         // we use the aggregate meter provider that is created below. It enables us to support

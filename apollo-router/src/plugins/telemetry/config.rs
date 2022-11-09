@@ -11,9 +11,10 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::filtering_layer::AttributesToExclude;
-use super::filtering_layer::SPECIFIC_ATTRIBUTES;
+use super::filtering_layer::DEFAULT_ATTRIBUTES;
 use super::metrics::MetricsAttributesConf;
 use super::*;
+use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::metrics;
 
 #[derive(thiserror::Error, Debug)]
@@ -114,6 +115,42 @@ pub(crate) const fn default_display_line_number() -> bool {
 }
 
 impl Logging {
+    pub(crate) fn validate(&self) -> Result<(), ConfigurationError> {
+        const ERROR_MESSAGE: &str = "invalid attributes name for logging";
+        let hash_set_default_attributes: HashSet<String> = DEFAULT_ATTRIBUTES
+            .into_iter()
+            .map(|a| a.to_string())
+            .collect();
+        if let Some(supergraph_conf) = &self.supergraph {
+            if !supergraph_conf
+                .contains_attributes
+                .is_subset(&hash_set_default_attributes)
+            {
+                return Err(ConfigurationError::InvalidConfiguration { message: ERROR_MESSAGE, error: format!("one of your attributes set for the supergraph is wrong (accepted attributes: {DEFAULT_ATTRIBUTES:?}") });
+            }
+        }
+        if let Some(all_subgraph_conf) = self.subgraph.as_ref().and_then(|s| s.all.as_ref()) {
+            if !all_subgraph_conf
+                .contains_attributes
+                .is_subset(&hash_set_default_attributes)
+            {
+                return Err(ConfigurationError::InvalidConfiguration { message: ERROR_MESSAGE, error: format!("one of your attributes set in 'subgraph.all' is wrong (accepted attributes: {DEFAULT_ATTRIBUTES:?}") });
+            }
+        }
+        if let Some(subgraphs_conf) = self.subgraph.as_ref().and_then(|s| s.subgraphs.as_ref()) {
+            for (subgraph_name, subgraph_conf) in subgraphs_conf {
+                if !subgraph_conf
+                    .contains_attributes
+                    .is_subset(&hash_set_default_attributes)
+                {
+                    return Err(ConfigurationError::InvalidConfiguration { message: ERROR_MESSAGE, error: format!("one of your attributes set for subgraph {subgraph_name:?} is wrong (accepted attributes: {DEFAULT_ATTRIBUTES:?}") });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub(crate) fn get_attributes_to_exclude(&self) -> AttributesToExclude {
         let (all_subgraphs_attrs_to_include, attrs_to_include_by_subg) = self
             .subgraph
@@ -123,11 +160,12 @@ impl Logging {
         let global_attrs_to_include = self
             .supergraph
             .clone()
-            .map(|s| s.include_attributes)
+            .map(|s| s.contains_attributes)
             .unwrap_or_default();
 
+        // Compute the difference between attributes to inlcude and default attributes to have attributes to exclude for logs
         let usual_attributes: HashSet<String> =
-            HashSet::from_iter(SPECIFIC_ATTRIBUTES.into_iter().map(|a| a.to_string()));
+            HashSet::from_iter(DEFAULT_ATTRIBUTES.into_iter().map(|a| a.to_string()));
         let global_attrs_to_exclude = global_attrs_to_include
             .symmetric_difference(&usual_attributes)
             .cloned()
@@ -169,13 +207,13 @@ impl SubgraphLogging {
         let mut by_subgraph = HashMap::new();
 
         if let Some(all) = self.all {
-            globals.extend(all.include_attributes);
+            globals.extend(all.contains_attributes);
         }
         if let Some(subgraphs) = self.subgraphs {
             by_subgraph.extend(subgraphs.into_iter().map(|(k, v)| {
                 (
                     k,
-                    v.include_attributes
+                    v.contains_attributes
                         .into_iter()
                         .chain(globals.clone())
                         .collect::<HashSet<String>>(),
@@ -209,8 +247,8 @@ impl Default for LoggingFormat {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct LoggingIncludeAttrs {
-    /// Attributes to include in logs
-    pub(crate) include_attributes: HashSet<String>,
+    /// Include logs which contain these logs
+    pub(crate) contains_attributes: HashSet<String>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
@@ -466,14 +504,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_get_attributes_to_exclude() {
+    fn test_logging_conf_validation() {
         let mut subgraphs = HashMap::new();
         subgraphs.insert(
             "test_subgraph".to_string(),
             LoggingIncludeAttrs {
-                include_attributes: vec!["request".to_string(), "operation_name".to_string()]
-                    .into_iter()
-                    .collect(),
+                contains_attributes: vec![
+                    "http.request".to_string(),
+                    "graphql.operation.name".to_string(),
+                ]
+                .into_iter()
+                .collect(),
             },
         );
         let logging_conf = Logging {
@@ -481,15 +522,86 @@ mod tests {
             display_filename: false,
             display_line_number: false,
             supergraph: Some(LoggingIncludeAttrs {
-                include_attributes: vec!["response_body".to_string(), "operation_name".to_string()]
-                    .into_iter()
-                    .collect(),
+                contains_attributes: vec![
+                    "http.response.body".to_string(),
+                    "graphql.operation.name".to_string(),
+                ]
+                .into_iter()
+                .collect(),
             }),
             subgraph: Some(SubgraphLogging {
                 all: Some(LoggingIncludeAttrs {
-                    include_attributes: vec![
-                        "response_headers".to_string(),
-                        "operation_name".to_string(),
+                    contains_attributes: vec![
+                        "http.response.headers".to_string(),
+                        "graphql.operation.name".to_string(),
+                    ]
+                    .into_iter()
+                    .collect(),
+                }),
+                subgraphs: subgraphs.into(),
+            }),
+        };
+
+        logging_conf.validate().unwrap();
+
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert(
+            "test_subgraph".to_string(),
+            LoggingIncludeAttrs {
+                contains_attributes: vec![
+                    "request".to_string(),
+                    "graphql.operation.name".to_string(),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            supergraph: None,
+            subgraph: Some(SubgraphLogging {
+                all: None,
+                subgraphs: subgraphs.into(),
+            }),
+        };
+        let validate_res = logging_conf.validate();
+        assert!(validate_res.is_err());
+        assert_eq!(validate_res.unwrap_err().to_string(), "invalid attributes name for logging: one of your attributes set for subgraph \"test_subgraph\" is wrong (accepted attributes: [\"http.request\", \"http.response.headers\", \"http.response.body\", \"graphql.operation.name\"]");
+    }
+
+    #[test]
+    fn test_get_attributes_to_exclude() {
+        let mut subgraphs = HashMap::new();
+        subgraphs.insert(
+            "test_subgraph".to_string(),
+            LoggingIncludeAttrs {
+                contains_attributes: vec![
+                    "http.request".to_string(),
+                    "graphql.operation.name".to_string(),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        );
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            supergraph: Some(LoggingIncludeAttrs {
+                contains_attributes: vec![
+                    "http.response.body".to_string(),
+                    "graphql.operation.name".to_string(),
+                ]
+                .into_iter()
+                .collect(),
+            }),
+            subgraph: Some(SubgraphLogging {
+                all: Some(LoggingIncludeAttrs {
+                    contains_attributes: vec![
+                        "http.response.headers".to_string(),
+                        "graphql.operation.name".to_string(),
                     ]
                     .into_iter()
                     .collect(),
@@ -499,15 +611,18 @@ mod tests {
         };
 
         let expected = AttributesToExclude {
-            supergraph: vec!["request".to_string(), "response_headers".to_string()]
-                .into_iter()
-                .collect(),
-            all_subgraphs: vec!["response_body".to_string(), "request".to_string()]
+            supergraph: vec![
+                "http.request".to_string(),
+                "http.response.headers".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+            all_subgraphs: vec!["http.response.body".to_string(), "http.request".to_string()]
                 .into_iter()
                 .collect(),
             subgraphs: [(
                 "test_subgraph".to_string(),
-                vec!["response_body".to_string()].into_iter().collect(),
+                vec!["http.response.body".to_string()].into_iter().collect(),
             )]
             .into(),
         };
@@ -518,7 +633,7 @@ mod tests {
         subgraphs.insert(
             "test_subgraph".to_string(),
             LoggingIncludeAttrs {
-                include_attributes: vec!["request".to_string()].into_iter().collect(),
+                contains_attributes: vec!["http.request".to_string()].into_iter().collect(),
             },
         );
         let logging_conf = Logging {
@@ -526,7 +641,7 @@ mod tests {
             display_filename: false,
             display_line_number: false,
             supergraph: Some(LoggingIncludeAttrs {
-                include_attributes: vec!["response_body".to_string()].into_iter().collect(),
+                contains_attributes: vec!["http.response.body".to_string()].into_iter().collect(),
             }),
             subgraph: Some(SubgraphLogging {
                 all: None,
@@ -536,26 +651,26 @@ mod tests {
 
         let expected = AttributesToExclude {
             supergraph: vec![
-                "request".to_string(),
-                "response_headers".to_string(),
-                "operation_name".to_string(),
+                "http.request".to_string(),
+                "http.response.headers".to_string(),
+                "graphql.operation.name".to_string(),
             ]
             .into_iter()
             .collect(),
             all_subgraphs: vec![
-                "response_body".to_string(),
-                "response_headers".to_string(),
-                "request".to_string(),
-                "operation_name".to_string(),
+                "http.response.body".to_string(),
+                "http.response.headers".to_string(),
+                "http.request".to_string(),
+                "graphql.operation.name".to_string(),
             ]
             .into_iter()
             .collect(),
             subgraphs: [(
                 "test_subgraph".to_string(),
                 vec![
-                    "response_body".to_string(),
-                    "response_headers".to_string(),
-                    "operation_name".to_string(),
+                    "http.response.body".to_string(),
+                    "http.response.headers".to_string(),
+                    "graphql.operation.name".to_string(),
                 ]
                 .into_iter()
                 .collect(),

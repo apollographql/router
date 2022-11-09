@@ -68,6 +68,10 @@ JSON-formatted logging provides compatibility with common searchable logging too
 
 ## Basic configuration
 
+By default some of our logs containing sensible data (like request body, response body, headers) are not displayed even if we are in the right log level.
+For example if you need to display raw responses from one of your subgraph it won't be displayed by default. To enable them you have to configure it thanks to the `contains_attributes` setting.
+Here is an example on how you can configure it:
+
 ```yaml title="router.yaml"
 telemetry:
   logging:
@@ -75,15 +79,15 @@ telemetry:
     display_filename: true # Display filename where the log is coming from. Default: true
     display_line_number: false # Display line number in the file where the log is coming from. Default: true
     supergraph:
-      include_attributes: # Available attributes are request|response_body|response_headers|operation_name
+      contains_attributes: # Available attributes are request|response_body|response_headers|operation_name
         - request # Display the request at the supergraph level
     subgraph:
-      all:
-        include_attributes: # Available attributes are request|response_body|response_headers|operation_name
+      all: # Display logs that contains these attributes
+        contains_attributes: # Available attributes are request|response_body|response_headers|operation_name
           - response_body # Display the response_body for all the subgraph calls
       subgraphs:
-        accounts:
-          include_attributes: # Available attributes are request|response_body|response_headers|operation_name
+        accounts: # Display logs that contains these attributes
+          contains_attributes: # Available attributes are request|response_body|response_headers|operation_name
             - response_headers # Display the response_headers for the subgraph "accounts"
 ```
 

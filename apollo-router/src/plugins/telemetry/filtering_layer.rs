@@ -2,20 +2,19 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use tracing::field;
-use tracing::Level;
 use tracing::Subscriber;
 use tracing_core::Field;
 use tracing_subscriber::Layer;
 
-// Specific attributes for logging
-pub(crate) const SPECIFIC_ATTRIBUTES: [&str; 4] = [
-    "request",
-    "response_headers",
-    "response_body",
-    "operation_name",
+// Default attributes for logging
+pub(crate) const DEFAULT_ATTRIBUTES: [&str; 4] = [
+    "http.request",
+    "http.response.headers",
+    "http.response.body",
+    "graphql.operation.name",
 ];
 
-const SUBGRAPH_ATTRIBUTE_NAME: &str = "subgraph";
+const SUBGRAPH_ATTRIBUTE_NAME: &str = "apollo.subgraph.name";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct AttributesToExclude {
@@ -48,7 +47,7 @@ where
         // The logic is splitted between `enabled` and `event_enabled` because we can't evaluate the value of an attribute in this method
         // This method is evaluated only once for a specific callsite, which means if I return false here I won't re-enter in this method everytime for this event
         // Which is better for performance. So for supergraph level we can use this method, for subgraph level we have to know the value of subgraph attribute
-        if metadata.level() == &Level::DEBUG && metadata.is_event() {
+        if metadata.is_event() {
             match &self.attributes_to_exclude {
                 Some(attributes_to_exclude) => {
                     let mut subgraph = false;
@@ -72,7 +71,7 @@ where
                         .fields()
                         .iter()
                         .map(|f| f.name())
-                        .any(|n| SPECIFIC_ATTRIBUTES.contains(&n))
+                        .any(|n| DEFAULT_ATTRIBUTES.contains(&n))
                     {
                         return false;
                     }
@@ -88,7 +87,12 @@ where
         event: &tracing::Event<'_>,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
-        if event.metadata().level() == &Level::DEBUG {
+        if event
+            .metadata()
+            .fields()
+            .field(SUBGRAPH_ATTRIBUTE_NAME)
+            .is_some()
+        {
             let mut fields_visitor = FieldsVisitor::default();
             event.record(&mut fields_visitor);
             let field_names: HashSet<&str> = fields_visitor.fields.keys().copied().collect();
@@ -128,13 +132,13 @@ pub(crate) struct FieldsVisitor {
 impl field::Visit for FieldsVisitor {
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
-        if SPECIFIC_ATTRIBUTES.contains(&field.name()) || field.name() == SUBGRAPH_ATTRIBUTE_NAME {
+        if DEFAULT_ATTRIBUTES.contains(&field.name()) || field.name() == SUBGRAPH_ATTRIBUTE_NAME {
             self.fields.insert(field.name(), value.to_string());
         }
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        if SPECIFIC_ATTRIBUTES.contains(&field.name()) || field.name() == SUBGRAPH_ATTRIBUTE_NAME {
+        if DEFAULT_ATTRIBUTES.contains(&field.name()) || field.name() == SUBGRAPH_ATTRIBUTE_NAME {
             self.fields.insert(field.name(), format!("{:?}", value));
         }
     }

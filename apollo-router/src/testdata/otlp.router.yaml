@@ -4,15 +4,3 @@ telemetry:
       service_name: router
     otlp:
       endpoint: default
-  logging:
-    supergraph:
-      include_attributes:
-        - request
-    subgraph:
-      all:
-        include_attributes:
-          - response_body
-      subgraphs:
-        accounts:
-          include_attributes:
-            - response_headers

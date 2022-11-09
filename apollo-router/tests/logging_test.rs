@@ -36,7 +36,7 @@ impl Subscriber for TestLogSubscriber {
 
     fn event(&self, event: &tracing::Event<'_>) {
         if event.metadata().target().starts_with("apollo_router")
-            && event.metadata().level() == &Level::DEBUG
+            && event.metadata().level() == &Level::INFO
         {
             self.event_metadata.lock().unwrap().push(event.metadata());
         }
@@ -112,13 +112,13 @@ struct LoggingCount {
 }
 
 impl LoggingCount {
-    const RESPONSE_BODY: &'static str = "response_body";
-    const RESPONSE_HEADERS: &'static str = "response_headers";
-    const REQUEST: &'static str = "request";
+    const RESPONSE_BODY: &'static str = "http.response.body";
+    const RESPONSE_HEADERS: &'static str = "http.response.headers";
+    const REQUEST: &'static str = "http.request";
 
     fn count(&mut self, fields: &field::FieldSet) {
         let fields_name: Vec<&str> = fields.iter().map(|f| f.name()).collect();
-        if fields_name.contains(&"subgraph") {
+        if fields_name.contains(&"apollo.subgraph.name") {
             if fields_name.contains(&Self::RESPONSE_BODY) {
                 self.subgraph_response_body_count += 1;
             }
@@ -147,16 +147,16 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
     let logging_config = serde_json::json!({
         "subgraph": {
             "all": {
-                "include_attributes": ["response_body"]
+                "contains_attributes": ["http.response.body"]
             },
             "subgraphs": {
                 "accounts": {
-                    "include_attributes": ["response_headers"]
+                    "contains_attributes": ["http.response.headers"]
                 }
             }
         },
         "supergraph": {
-            "include_attributes": ["request"]
+            "contains_attributes": ["http.request"]
         }
     });
     let request = supergraph::Request::fake_builder()

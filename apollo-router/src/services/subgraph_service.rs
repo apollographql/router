@@ -117,7 +117,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             let (parts, body) = subgraph_request.into_parts();
 
             if let Some(operation_name) = &body.operation_name {
-                tracing::debug!(%operation_name, subgraph = %service_name, "Request to subgraph {service_name:?} with operation_name");
+                tracing::info!(graphql.operation.name = %operation_name, apollo.subgraph.name = %service_name, "Request to subgraph {service_name:?} with operation_name");
             }
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
@@ -160,7 +160,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     0
                 }
             });
-            tracing::debug!(request = ?request, subgraph = %service_name, "Request to subgraph {service_name:?}");
+            tracing::info!(http.request = ?request, apollo.subgraph.name = %service_name, "Request to subgraph {service_name:?}");
 
             let path = schema_uri.path().to_string();
             let response = client
@@ -184,8 +184,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 })?;
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();
-            tracing::debug!(
-                response_headers = ?parts.headers, subgraph = %service_name, "Response headers from subgraph {service_name:?}"
+            tracing::info!(
+                http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
             );
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
@@ -213,8 +213,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     }
                 })?;
 
-            tracing::debug!(
-                response_body = %String::from_utf8_lossy(&body), subgraph = %service_name, "Raw response body from subgraph {service_name:?} received"
+            tracing::info!(
+                http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
             );
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")

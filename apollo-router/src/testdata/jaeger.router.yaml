@@ -10,16 +10,16 @@ telemetry:
         endpoint: default
   logging:
     supergraph:
-      include_attributes:
-        - request
+      contains_attributes:
+        - http.request
     subgraph:
       all:
-        include_attributes:
-          - response_body
+        contains_attributes:
+          - http.response.body
       subgraphs:
         accounts:
-          include_attributes:
-            - response_headers
+          contains_attributes:
+            - http.response.headers
 override_subgraph_url:
   products: http://localhost:4005
 include_subgraph_errors:
