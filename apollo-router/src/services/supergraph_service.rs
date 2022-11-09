@@ -11,6 +11,7 @@ use indexmap::IndexMap;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
+use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -30,6 +31,8 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
+use crate::plugins::traffic_shaping::TrafficShaping;
+use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
@@ -54,7 +57,6 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    ready_query_planner_service: Option<CachingQueryPlanner<BridgeQueryPlanner>>,
     schema: Arc<Schema>,
 }
 
@@ -69,7 +71,6 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
-            ready_query_planner_service: None,
             schema,
         }
     }
@@ -84,19 +85,16 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // We need to obtain references to two hot services for use in call.
-        // The reason for us to clone here is that the async block needs to own the hot services,
-        // and cloning will produce a cold service. Therefore cloning in `SupergraphService#call` is not
-        // a valid course of action.
-        self.ready_query_planner_service
-            .get_or_insert_with(|| self.query_planner_service.clone())
+        self.query_planner_service
             .poll_ready(cx)
             .map_err(|err| err.into())
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let planning = self.ready_query_planner_service.take().unwrap();
+        let clone = self.query_planner_service.clone();
+
+        let planning = std::mem::replace(&mut self.query_planner_service, clone);
         let execution = self.execution_service_factory.new_service();
 
         let schema = self.schema.clone();
@@ -122,6 +120,19 @@ where
                     .build()
                     .expect("building a response like this should not fail"))
             });
+        // FIXME: Enable it later
+        // .and_then(|mut res| async move {
+        //     if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
+        //         let header_value = HeaderValue::from_str(trace_id.as_str());
+        //         if let Ok(header_value) = header_value {
+        //             res.response
+        //                 .headers_mut()
+        //                 .insert(HeaderName::from_static("apollo_trace_id"), header_value);
+        //         }
+        //     }
+
+        //     Ok(res)
+        // });
 
         Box::pin(fut)
     }
@@ -321,6 +332,7 @@ impl PluggableSupergraphServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
+        let redis_urls = configuration.supergraph.cache();
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
@@ -333,8 +345,13 @@ impl PluggableSupergraphServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await;
+        let query_planner_service = CachingQueryPlanner::new(
+            bridge_query_planner,
+            plan_cache_limit,
+            self.schema.schema_id.clone(),
+            redis_urls,
+        )
+        .await;
 
         let plugins = Arc::new(self.plugins);
 
@@ -393,23 +410,35 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
     > + Send {
+        let supergraph_service = SupergraphService::builder()
+            .query_planner_service(self.query_planner_service.clone())
+            .execution_service_factory(ExecutionCreator {
+                schema: self.schema.clone(),
+                plugins: self.plugins.clone(),
+                subgraph_creator: self.subgraph_creator.clone(),
+            })
+            .schema(self.schema.clone())
+            .build();
+
+        let supergraph_service = match self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
+        {
+            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
+            None => Either::B(supergraph_service),
+        };
+
         ServiceBuilder::new()
             .layer(EnsureQueryPresence::default())
             .service(
-                self.plugins.iter().rev().fold(
-                    BoxService::new(
-                        SupergraphService::builder()
-                            .query_planner_service(self.query_planner_service.clone())
-                            .execution_service_factory(ExecutionCreator {
-                                schema: self.schema.clone(),
-                                plugins: self.plugins.clone(),
-                                subgraph_creator: self.subgraph_creator.clone(),
-                            })
-                            .schema(self.schema.clone())
-                            .build(),
-                    ),
-                    |acc, (_, e)| e.supergraph_service(acc),
-                ),
+                self.plugins
+                    .iter()
+                    .rev()
+                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
+                        e.supergraph_service(acc)
+                    }),
             )
     }
 

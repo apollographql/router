@@ -130,7 +130,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             ..
         } = request;
 
-        let mut client = self.client.clone();
+        let clone = self.client.clone();
+
+        let mut client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {

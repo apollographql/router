@@ -229,10 +229,7 @@ impl SchemaSource {
                         future::ready(match res {
                             Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
                             Err(e) => {
-                                tracing::error!(
-                                    "error downloading the schema from Uplink: {:?}",
-                                    e
-                                );
+                                tracing::error!("{}", e);
                                 None
                             }
                         })
@@ -321,10 +318,49 @@ impl ConfigurationSource {
                         .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
-                        Ok(configuration) => stream::once(future::ready(UpdateConfiguration(
-                            Box::new(configuration),
-                        )))
-                        .boxed(),
+                        Ok(configuration) => {
+                            #[cfg(any(test, not(unix)))]
+                            {
+                                stream::once(future::ready(UpdateConfiguration(Box::new(
+                                    configuration,
+                                ))))
+                                .boxed()
+                            }
+
+                            #[cfg(all(not(test), unix))]
+                            {
+                                let mut sighup_stream = tokio::signal::unix::signal(
+                                    tokio::signal::unix::SignalKind::hangup(),
+                                )
+                                .expect("Failed to install SIGHUP signal handler");
+
+                                let (mut tx, rx) = futures::channel::mpsc::channel(1);
+                                tokio::task::spawn(async move {
+                                    while let Some(()) = sighup_stream.recv().await {
+                                        tx.send(()).await.unwrap();
+                                    }
+                                });
+                                futures::stream::select(
+                                    stream::once(future::ready(UpdateConfiguration(Box::new(
+                                        configuration,
+                                    ))))
+                                    .boxed(),
+                                    rx.filter_map(
+                                        move |()| match ConfigurationSource::read_config(&path) {
+                                            Ok(configuration) => future::ready(Some(
+                                                UpdateConfiguration(Box::new(configuration)),
+                                            )),
+                                            Err(err) => {
+                                                tracing::error!("{}", err);
+                                                future::ready(None)
+                                            }
+                                        },
+                                    )
+                                    .boxed(),
+                                )
+                                .boxed()
+                            }
+                        }
                         Err(err) => {
                             tracing::error!("{}", err);
                             stream::empty().boxed()
