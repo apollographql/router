@@ -127,18 +127,18 @@ pub(super) async fn check_accept_header(
 ) -> Result<Response, Response> {
     let ask_for_html = req.method() == Method::GET && prefers_html(req.headers());
 
-    if req.headers().get(ACCEPT).is_some()
-        && (accepts_wildcard(req.headers())
-            || ask_for_html
-            || accepts_multipart(req.headers())
-            || accepts_json(req.headers()))
+    if req.headers().get(ACCEPT).is_none()
+        || accepts_wildcard(req.headers())
+        || ask_for_html
+        || accepts_multipart(req.headers())
+        || accepts_json(req.headers())
     {
         Ok(next.run(req).await)
     } else {
         Err((
             StatusCode::NOT_ACCEPTABLE,
             format!(
-                r#"'accept' header is mandatory and can't be different than {:?}, {:?} or {:?}"#,
+                r#"'accept' header can't be different than \"*/*\", {:?}, {:?} or {:?}"#,
                 APPLICATION_JSON_HEADER_VALUE,
                 GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                 MULTIPART_DEFER_CONTENT_TYPE

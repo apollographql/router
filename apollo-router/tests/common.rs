@@ -7,6 +7,7 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
+use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
 use http::Request;
@@ -97,6 +98,7 @@ impl TracingTest {
         for _i in 0..100 {
             let mut request = Request::builder()
                 .method(Method::POST)
+                .header(ACCEPT, "")
                 .header(CONTENT_TYPE, "application/json")
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
