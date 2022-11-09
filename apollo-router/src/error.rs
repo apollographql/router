@@ -8,7 +8,6 @@ use miette::NamedSource;
 use miette::Report;
 use miette::SourceSpan;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::PlanErrors;
 use router_bridge::planner::PlannerError;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -148,7 +147,7 @@ impl From<QueryPlannerError> for FetchError {
 }
 
 /// Error types for CacheResolver
-#[derive(Error, Debug, Display, Clone)]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum CacheResolverError {
     /// value retrieval failed: {0}
     RetrievalError(Arc<QueryPlannerError>),
@@ -179,7 +178,7 @@ pub(crate) enum ServiceBuildError {
 }
 
 /// Error types for QueryPlanner
-#[derive(Error, Debug, Display, Clone)]
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerError {
     /// couldn't instantiate query planner; invalid schema: {0}
     SchemaValidationErrors(PlannerErrors),
@@ -188,7 +187,7 @@ pub(crate) enum QueryPlannerError {
     PlanningErrors(PlanErrors),
 
     /// query planning panicked: {0}
-    JoinError(Arc<JoinError>),
+    JoinError(String),
 
     /// Cache resolution failed: {0}
     CacheResolverError(Arc<CacheResolverError>),
@@ -229,7 +228,7 @@ impl IntoGraphQLErrors for QueryPlannerError {
     }
 }
 
-#[derive(Clone, Debug, Error)]
+#[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
 
@@ -260,6 +259,12 @@ impl From<Vec<PlannerError>> for QueryPlannerError {
     }
 }
 
+impl From<router_bridge::planner::PlanErrors> for QueryPlannerError {
+    fn from(errors: router_bridge::planner::PlanErrors) -> Self {
+        QueryPlannerError::PlanningErrors(errors.into())
+    }
+}
+
 impl From<PlanErrors> for QueryPlannerError {
     fn from(errors: PlanErrors) -> Self {
         QueryPlannerError::PlanningErrors(errors)
@@ -268,7 +273,7 @@ impl From<PlanErrors> for QueryPlannerError {
 
 impl From<JoinError> for QueryPlannerError {
     fn from(err: JoinError) -> Self {
-        QueryPlannerError::JoinError(Arc::new(err))
+        QueryPlannerError::JoinError(err.to_string())
     }
 }
 
@@ -287,6 +292,46 @@ impl From<SpecError> for QueryPlannerError {
 impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
         FetchError::from(err).to_response()
+    }
+}
+
+/// The payload if the plan_worker invocation failed
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct PlanErrors {
+    /// The errors the plan_worker invocation failed with
+    pub(crate) errors: Arc<Vec<router_bridge::planner::PlanError>>,
+    /// Usage reporting related data such as the
+    /// operation signature and referenced fields
+    pub(crate) usage_reporting: UsageReporting,
+}
+
+impl From<router_bridge::planner::PlanErrors> for PlanErrors {
+    fn from(
+        router_bridge::planner::PlanErrors {
+            errors,
+            usage_reporting,
+        }: router_bridge::planner::PlanErrors,
+    ) -> Self {
+        PlanErrors {
+            errors,
+            usage_reporting,
+        }
+    }
+}
+
+impl std::fmt::Display for PlanErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!(
+            "query validation errors: {}",
+            self.errors
+                .iter()
+                .map(|e| e
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "UNKNWON ERROR".to_string()))
+                .collect::<Vec<String>>()
+                .join(", ")
+        ))
     }
 }
 
