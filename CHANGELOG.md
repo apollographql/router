@@ -18,7 +18,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 A `trace_id` is now added to each log line to help correlate log entries to specific requests.  The value for this property will be automatically inherited from any enabled distributed tracing headers, such as those listed in our [Tracing propagation header](https://www.apollographql.com/docs/router/configuration/tracing/#propagation) documentation (e.g., Jaeger, Zipkin, Datadog, etc.).
 
-In the event that a `trace_id` was not inherited from a propagated header, the Router will originate a `trace_id` and also propagate that value to subgraphs to enable tracing in subgraphs.
+In the event that a `trace_id` was not inherited from a propagated header, the Router will originate a `trace_id` and propagate that ID to subgraphs if header propagation (see link above) is enabled.
 
 Here is an example of the `trace_id` appearing in plain-text log output:
 
