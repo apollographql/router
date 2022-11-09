@@ -27,6 +27,14 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+### **Experimental** 🥼 External cache storage in Redis ([PR #2024](https://github.com/apollographql/router/pull/2024))
+
+implement caching in external storage for query plans, introspection and APQ. This is done as a multi level cache, first in
+memory with LRU then with a redis cluster backend. Since it is still experimental, it is opt-in through a Cargo feature.
+
+By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
+
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
