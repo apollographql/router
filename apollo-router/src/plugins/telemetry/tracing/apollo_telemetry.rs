@@ -6,11 +6,12 @@ use async_trait::async_trait;
 use derivative::Derivative;
 use futures::future::BoxFuture;
 use futures::FutureExt;
+use futures::TryFutureExt;
 use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::trace::SpanId;
+use opentelemetry::trace::{SpanId, TraceError};
 use opentelemetry::Key;
 use opentelemetry::Value;
 use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
@@ -18,6 +19,7 @@ use thiserror::Error;
 use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::FetchNode;
@@ -29,7 +31,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
-use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
@@ -92,7 +93,7 @@ pub(crate) struct Exporter {
     endpoint: Url,
     schema_id: String,
     #[derivative(Debug = "ignore")]
-    apollo_sender: Sender,
+    apollo_exporter: ApolloExporter,
     field_execution_weight: f64,
 }
 
@@ -121,14 +122,17 @@ impl Exporter {
         field_execution_sampler: Option<SamplerOption>,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
-        let apollo_exporter =
-            ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             trace_config,
-            endpoint,
-            schema_id,
-            apollo_sender: apollo_exporter.provider(),
+            endpoint: endpoint.clone(),
+            schema_id: schema_id.clone(),
+            apollo_exporter: ApolloExporter::new(
+                &endpoint,
+                &apollo_key,
+                &apollo_graph_ref,
+                &schema_id,
+            )?,
             field_execution_weight: match field_execution_sampler {
                 Some(SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
                 Some(SamplerOption::Always(Sampler::AlwaysOff)) => 0.0,
@@ -518,9 +522,15 @@ impl SpanExporter for Exporter {
                     .push(span);
             }
         }
-        self.apollo_sender
-            .send(SingleReport::Traces(TracesReport { traces }));
-
-        async { ExportResult::Ok(()) }.boxed()
+        let mut report = telemetry::apollo::Report::default();
+        report += SingleReport::Traces(TracesReport { traces });
+        let exporter = self.apollo_exporter.clone();
+        let fut = async move {
+            exporter
+                .submit_report(report)
+                .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                .await
+        };
+        fut.boxed()
     }
 }

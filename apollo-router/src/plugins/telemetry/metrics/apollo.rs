@@ -36,9 +36,7 @@ impl MetricsConfigurator for Config {
                 tracing::debug!("creating metrics exporter");
                 let exporter = ApolloExporter::new(endpoint, key, reference, schema_id)?;
 
-                builder
-                    .with_apollo_metrics_collector(exporter.provider())
-                    .with_exporter(exporter)
+                builder.with_apollo_metrics_collector(exporter.start())
             }
             _ => {
                 ENABLED.swap(false, Ordering::Relaxed);

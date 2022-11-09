@@ -10,7 +10,6 @@ use reqwest::Client;
 use std::io::Write;
 use std::time::Duration;
 use sys_info::hostname;
-use tonic::Status;
 use tower::BoxError;
 use url::Url;
 
@@ -21,9 +20,25 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
-static DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL: &str =
-    "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
+
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum ApolloExportError {
+    #[error("Apollo exporter server error: {0}")]
+    ServerError(String),
+
+    #[error("Apollo exporter client error: {0}")]
+    ClientError(String),
+
+    #[error("Apollo exporter unavailable error: {0}")]
+    Unavailable(String),
+}
+
+impl ExportError for ApolloExportError {
+    fn exporter_name(&self) -> &'static str {
+        "ApolloExporter"
+    }
+}
 
 #[derive(Clone)]
 pub(crate) enum Sender {
@@ -53,8 +68,15 @@ impl Default for Sender {
     }
 }
 
+/// The Apollo exporter is responsible for attaching report header information for individual requests
+/// Retrying when sending fails.
+/// Sending periodically (in the case of metrics).
+#[derive(Clone)]
 pub(crate) struct ApolloExporter {
-    tx: mpsc::Sender<SingleReport>,
+    endpoint: Url,
+    apollo_key: String,
+    header: crate::plugins::telemetry::apollo_exporter::proto::ReportHeader,
+    client: Client,
 }
 
 impl ApolloExporter {
@@ -64,14 +86,6 @@ impl ApolloExporter {
         apollo_graph_ref: &str,
         schema_id: &str,
     ) -> Result<ApolloExporter, BoxError> {
-        let apollo_key = apollo_key.to_string();
-        // Desired behavior:
-        // * Metrics are batched with a timeout.
-        // * If we cannot connect to spaceport metrics are discarded and a warning raised.
-        // * When the stream of metrics finishes we terminate the task.
-        // * If the exporter is dropped the remaining records are flushed.
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
-
         let header = crate::plugins::telemetry::apollo_exporter::proto::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
             hostname: hostname()?,
@@ -86,12 +100,20 @@ impl ApolloExporter {
             ..Default::default()
         };
 
-        let spaceport_endpoint = endpoint.clone();
-        tracing::debug!(%spaceport_endpoint, "creating apollo exporter");
+        tracing::debug!("creating apollo exporter {}", endpoint);
 
+        Ok(ApolloExporter {
+            endpoint: endpoint.clone(),
+            apollo_key: apollo_key.to_string(),
+            client: reqwest::Client::default(),
+            header,
+        })
+    }
+
+    pub(crate) fn start(self) -> Sender {
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
         // This is the task that actually sends metrics
         tokio::spawn(async move {
-            let client = reqwest::Client::new();
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
             let mut report = Report::default();
 
@@ -103,64 +125,49 @@ impl ApolloExporter {
                         if let Some(r) = single_report {
                             report += r;
                         } else {
-                            tracing::debug!(%spaceport_endpoint, "terminating apollo exporter");
+                            tracing::debug!("terminating apollo exporter");
                             break;
                         }
                        },
                     _ = timeout.tick() => {
-                        if let Err(e) = Self::submit_report(&client, &apollo_key, std::mem::take(&mut report).into_report(header.clone())).await {
-                            tracing::error!("Failed to submit Apollo report: {}", e)
+                        if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
+                            tracing::error!("failed to submit Apollo report: {}", e)
                         }
                     }
                 };
             }
 
-            if let Err(e) = Self::submit_report(
-                &client,
-                &apollo_key,
-                std::mem::take(&mut report).into_report(header),
-            )
-            .await
-            {
-                tracing::error!("Failed to submit Apollo report: {}", e)
+            if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
+                tracing::error!("failed to submit Apollo report: {}", e)
             }
         });
-        Ok(ApolloExporter { tx })
+        Sender::Spaceport(tx)
     }
 
-    pub(crate) fn provider(&self) -> Sender {
-        Sender::Spaceport(self.tx.clone())
-    }
-
-    pub(crate) async fn submit_report(
-        client: &Client,
-        key: &str,
-        report: crate::plugins::telemetry::apollo_exporter::proto::Report,
-    ) -> Result<(), Status> {
+    pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
+        let report = report.into_report(self.header.clone());
         prost::Message::encode(&report, &mut content)
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         // Write our content to our encoder
         encoder
             .write_all(&content)
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Finish encoding and retrieve content
         let compressed_content = encoder
             .finish()
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         let mut backoff = Duration::from_millis(0);
-        let ingress = match std::env::var("APOLLO_USAGE_REPORTING_INGRESS_URL") {
-            Ok(v) => v,
-            Err(_e) => DEFAULT_APOLLO_USAGE_REPORTING_INGRESS_URL.to_string(),
-        };
-        let req = client
-            .post(ingress)
+
+        let req = self
+            .client
+            .post(self.endpoint.clone())
             .body(compressed_content)
-            .header("X-Api-Key", key)
+            .header("X-Api-Key", self.apollo_key.clone())
             .header("Content-Encoding", "gzip")
             .header(CONTENT_TYPE, "application/protobuf")
             .header("Accept", "application/json")
@@ -173,26 +180,26 @@ impl ApolloExporter {
                 ),
             )
             .build()
-            .map_err(|e| Status::unavailable(e.to_string()))?;
+            .map_err(|e| ApolloExportError::Unavailable(e.to_string()))?;
 
         let mut msg = "default error message".to_string();
         for i in 0..5 {
             // We know these requests can be cloned
             let task_req = req.try_clone().expect("requests must be clone-able");
-            match client.execute(task_req).await {
+            match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();
                     let data = v
                         .text()
                         .await
-                        .map_err(|e| Status::internal(e.to_string()))?;
+                        .map_err(|e| ApolloExportError::ServerError(e.to_string()))?;
                     // Handle various kinds of status:
                     //  - if client error, terminate immediately
                     //  - if server error, it may be transient so treat as retry-able
                     //  - if ok, return ok
                     if status.is_client_error() {
                         tracing::error!("client error reported at ingress: {}", data);
-                        return Err(Status::invalid_argument(data));
+                        return Err(ApolloExportError::ClientError(data));
                     } else if status.is_server_error() {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
                         msg = data;
@@ -212,7 +219,7 @@ impl ApolloExporter {
             backoff += BACKOFF_INCREMENT;
             tokio::time::sleep(backoff).await;
         }
-        Err(Status::unavailable(msg))
+        Err(ApolloExportError::Unavailable(msg))
     }
 }
 
@@ -244,9 +251,11 @@ pub(crate) mod proto {
     tonic::include_proto!("report");
 }
 
+use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use serde::ser::SerializeStruct;
 use std::error::Error;
+use std::fmt::Debug;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;
 
