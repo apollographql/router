@@ -492,7 +492,7 @@ mod tests {
    @join__owner(graph: ORGA)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id") {
-       id: ID
+       id: ID!
        creatorUser: User
        name: String
        suborga: [Organization]
@@ -504,6 +504,41 @@ mod tests {
         ("user", MockSubgraph::builder().with_json(
                 serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
                 serde_json::json!{{"data": {"currentUser": { "activeOrganization": null }}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
+            // Request building here
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        insta::assert_json_snapshot!(response);
+    }
+
+    #[tokio::test]
+    async fn nullability_bubbling() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {} }}}}
             ).build()),
         ("orga", MockSubgraph::default())
     ].into_iter().collect());

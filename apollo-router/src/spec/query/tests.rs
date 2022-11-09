@@ -26,6 +26,7 @@ struct FormatTest {
     response: Option<serde_json_bytes::Value>,
     expected: Option<serde_json_bytes::Value>,
     expected_errors: Option<serde_json_bytes::Value>,
+    expected_extensions: Option<serde_json_bytes::Value>,
     federation_version: FederationVersion,
     is_deferred: bool,
 }
@@ -76,8 +77,8 @@ impl FormatTest {
         self
     }
 
-    fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
-        self.expected_errors = Some(v);
+    fn expected_extensions(mut self, v: serde_json_bytes::Value) -> Self {
+        self.expected_extensions = Some(v);
         self
     }
 
@@ -128,6 +129,10 @@ impl FormatTest {
 
         if let Some(e) = self.expected_errors {
             assert_eq_and_ordered!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+        }
+
+        if let Some(e) = self.expected_extensions {
+            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.extensions).unwrap(), e);
         }
     }
 }
@@ -1491,12 +1496,14 @@ fn filter_list_errors() {
                 "l2": null,
             },
         }})
-        .expected_errors(json! {[
-            {
-                "message": "Cannot return null for non-nullable array element of type String at index 1",
-                "path": ["list", "l2", 1]
-            }
-        ]},)
+        .expected_extensions(json! {{
+            "formatting": [
+                {
+                    "message": "Cannot return null for non-nullable array element of type String at index 1",
+                    "path": ["list", "l2", 1]
+                }
+            ]
+        }},)
         .test();
 
     FormatTest::builder()
@@ -1692,12 +1699,14 @@ fn filter_nested_object_errors() {
                 "reviews1": [ null ],
             },
         }})
-        .expected_errors(json! {[
-            {
-                "message": "Cannot return null for non-nullable field Review.text2",
-                "path": ["me", "reviews1", 0]
-            }
-        ]})
+        .expected_extensions(json! {{
+            "formatting": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews1", 0]
+                }
+            ]
+        }})
         .test();
 
     // text2 was null, reviews1 element should be nullified
