@@ -995,25 +995,13 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
         .and_then(|value| parse_value(&value))
 }
 
-fn parse_value(value: &ast::Value) -> Option<Value> {
+pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
-        ast::Value::StringValue(s) => Some(s.to_string().into()),
-        ast::Value::FloatValue(f) => f.to_string().parse::<f64>().ok().map(Into::into),
-        ast::Value::IntValue(i) => {
-            let s = i.to_string();
-            s.parse::<i64>()
-                .ok()
-                .map(Into::into)
-                .or_else(|| s.parse::<u64>().ok().map(Into::into))
-        }
-        ast::Value::BooleanValue(b) => {
-            match (b.true_token().is_some(), b.false_token().is_some()) {
-                (true, false) => Some(Value::Bool(true)),
-                (false, true) => Some(Value::Bool(false)),
-                _ => None,
-            }
-        }
+        ast::Value::StringValue(s) => Some(String::from(s).into()),
+        ast::Value::FloatValue(f) => Some(f64::from(f).into()),
+        ast::Value::IntValue(i) => Some(i32::from(i).into()),
+        ast::Value::BooleanValue(b) => Some(bool::from(b).into()),
         ast::Value::NullValue(_) => Some(Value::Null),
         ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
         ast::Value::ListValue(l) => l
