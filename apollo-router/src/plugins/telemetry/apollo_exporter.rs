@@ -10,9 +10,12 @@ use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
+use serde_json::Value;
 use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use sys_info::hostname;
 use tokio::task::JoinError;
@@ -84,6 +87,7 @@ pub(crate) struct ApolloExporter {
     apollo_key: String,
     header: crate::plugins::telemetry::apollo_exporter::proto::ReportHeader,
     client: Client,
+    strip_traces: Arc<Mutex<bool>>,
 }
 
 impl ApolloExporter {
@@ -114,6 +118,7 @@ impl ApolloExporter {
             apollo_key: apollo_key.to_string(),
             client: reqwest::Client::default(),
             header,
+            strip_traces: Default::default(),
         })
     }
 
@@ -152,10 +157,13 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
+        if report.operation_count == 0 {
+            return Ok(());
+        }
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let report = report.into_report(self.header.clone());
+        let mut report = report.into_report(self.header.clone());
         prost::Message::encode(&report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
@@ -190,6 +198,24 @@ impl ApolloExporter {
             .map_err(|e| ApolloExportError::Unavailable(e.to_string()))?;
 
         let mut msg = "default error message".to_string();
+        let mut has_traces = false;
+
+        for (_, traces_and_stats) in report.traces_per_query.iter_mut() {
+            if !traces_and_stats.trace.is_empty()
+                || !traces_and_stats
+                    .internal_traces_contributing_to_stats
+                    .is_empty()
+            {
+                has_traces = true;
+                if *self.strip_traces.lock().expect("lock poisoned") {
+                    traces_and_stats.trace.clear();
+                    traces_and_stats
+                        .internal_traces_contributing_to_stats
+                        .clear();
+                }
+            }
+        }
+
         for i in 0..5 {
             // We know these requests can be cloned
             let task_req = req.try_clone().expect("requests must be clone-able");
@@ -211,7 +237,17 @@ impl ApolloExporter {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
                         msg = data;
                     } else {
+                        let data = "{\"tracesIgnored\": true}\n";
                         tracing::debug!("ingress response text: {:?}", data);
+                        if has_traces && !*self.strip_traces.lock().expect("lock poisoned") {
+                            // If we had traces then maybe disable sending traces from this exporter based on the response.
+                            if let Ok(response) = serde_json::Value::from_str(data) {
+                                if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
+                                    tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
+                                    *self.strip_traces.lock().expect("lock poisoned") = true;
+                                }
+                            }
+                        }
                         return Ok(());
                     }
                 }
