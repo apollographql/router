@@ -43,4 +43,15 @@ By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) i
 
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+### Use debian:bullseye-slim as our base docker image ([PR #2085](https://github.com/apollographql/router/pull/2085))
+
+A while ago, when we added compression support to the router, we discovered that distroless doesn't ship with a copy of `libz.so.1`. We addressed that problem by copying in a version of the library from a distroless image (java) which does ship it. That was ugly. Now, as we try to consider how to add support for both aarch64 and amd64 docker images, that ugliness would expand substantially.
+
+Rather than persist with this complexity, we've concluded that it would be better to just use a base image which ships with `libz.so.1`, hence the change to `debian:bullseye-slim`
+
+We'll also stop creating the `-debug` image, since the contents of that image were the same as the main image with the addition of a busybox shell for debugging. Our new base image has a shell, so it's already debuggable.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2085
+
 ## 📚 Documentation
