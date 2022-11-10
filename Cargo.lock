@@ -111,7 +111,7 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8469cb8f7f42ad9b062e70f1148320e6cb7d727d2e87ca46635633ca6b2e6e4d"
 dependencies = [
- "apollo-parser 0.3.1",
+ "apollo-parser",
  "miette 4.7.1",
  "ordered-float 2.10.0",
  "rowan",
@@ -140,22 +140,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "apollo-parser"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8f6cc3fa1313e045538ed2ce72ba916d52b501cd81e636a0bd5cdc703a0c73"
-dependencies = [
- "rowan",
-]
-
-[[package]]
 name = "apollo-router"
 version = "1.3.0"
 dependencies = [
  "access-json",
  "ansi_term",
  "anyhow",
- "apollo-parser 0.2.12",
+ "apollo-parser",
  "askama",
  "async-compression",
  "async-trait",
@@ -295,7 +286,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "796458df9954e3f7ad451dd231d3d369296d349371878a31b9641470989bb112"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.2.12",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
 ]
@@ -1687,19 +1678,6 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
-]
-
-[[package]]
-name = "forbid_anonymous_oeprations_rhai"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "apollo-router",
- "futures",
- "http",
- "serde_json",
- "tokio",
- "tower",
 ]
 
 [[package]]
@@ -4060,7 +4038,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.2.12",
+ "apollo-parser",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -4735,7 +4713,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.3.1",
+ "apollo-parser",
  "apollo-router",
  "async-trait",
  "futures",
