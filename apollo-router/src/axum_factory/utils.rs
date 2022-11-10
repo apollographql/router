@@ -127,8 +127,7 @@ pub(super) async fn check_accept_header(
 ) -> Result<Response, Response> {
     let ask_for_html = req.method() == Method::GET && prefers_html(req.headers());
 
-    if req.headers().get(ACCEPT).is_none()
-        || accepts_wildcard(req.headers())
+    if accepts_wildcard(req.headers())
         || ask_for_html
         || accepts_multipart(req.headers())
         || accepts_json(req.headers())
