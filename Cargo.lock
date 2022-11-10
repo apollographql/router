@@ -107,16 +107,17 @@ checksum = "216261ddc8289130e551ddcd5ce8a064710c0d064a4d2895c67151c92b5443f6"
 
 [[package]]
 name = "apollo-compiler"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "619d54da02587ebced191b1000e3d8b31060cf7c77c5800c53d33d88faaeff30"
+checksum = "8469cb8f7f42ad9b062e70f1148320e6cb7d727d2e87ca46635633ca6b2e6e4d"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.3.1",
  "miette 4.7.1",
  "ordered-float 2.10.0",
+ "rowan",
  "salsa",
  "thiserror",
- "uuid 0.8.2",
+ "uuid 1.2.1",
 ]
 
 [[package]]
@@ -135,13 +136,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a8f6cc3fa1313e045538ed2ce72ba916d52b501cd81e636a0bd5cdc703a0c73"
+dependencies = [
+ "rowan",
+]
+
+[[package]]
 name = "apollo-router"
 version = "1.2.1"
 dependencies = [
  "access-json",
  "ansi_term",
  "anyhow",
- "apollo-parser",
+ "apollo-parser 0.2.12",
  "askama",
  "async-compression",
  "async-trait",
@@ -280,7 +290,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d66fba27e21f40315a0e8abfd2998632b3d1670ae5a16d069c8ff652ea79992d"
 dependencies = [
  "apollo-encoder",
- "apollo-parser",
+ "apollo-parser 0.2.12",
  "arbitrary",
  "once_cell",
 ]
@@ -933,6 +943,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "terminal_size",
+ "unicode-width",
  "winapi 0.3.9",
 ]
 
@@ -1836,8 +1847,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9be70c98951c83b8d2f8f60d7065fa6d5146873094452a1008da8c2f1e4205ad"
 dependencies = [
  "cfg-if",
+ "js-sys",
  "libc",
  "wasi 0.10.2+wasi-snapshot-preview1",
+ "wasm-bindgen",
 ]
 
 [[package]]
@@ -2268,7 +2281,7 @@ version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7baab56125e25686df467fe470785512329883aab42696d661247aca2a2896e4"
 dependencies = [
- "console 0.12.0",
+ "console 0.15.2",
  "lazy_static",
  "number_prefix",
  "regex",
@@ -4016,7 +4029,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.2.12",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -4686,12 +4699,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bdef32e8150c2a081110b42772ffe7d7c9032b606bc226c8260fd97e0976601"
 
 [[package]]
-name = "supergraph-sdl"
+name = "supergraph_sdl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-compiler",
- "apollo-parser",
+ "apollo-parser 0.3.1",
  "apollo-router",
  "async-trait",
  "futures",
@@ -5557,10 +5570,6 @@ name = "uuid"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bc5cf98d8186244414c848017f0e2676b3fcb46807f6668a97dfe67359a3c4b7"
-dependencies = [
- "getrandom",
- "serde",
-]
 
 [[package]]
 name = "uuid"
@@ -5570,6 +5579,7 @@ checksum = "feb41e78f93363bb2df8b0e86a2ca30eed7806ea16ea0c790d757cf93f79be83"
 dependencies = [
  "getrandom",
  "serde",
+ "wasm-bindgen",
 ]
 
 [[package]]
