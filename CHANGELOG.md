@@ -4,6 +4,123 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.3.0] - 2022-11-09
+
+## 🚀 Features
+
+### Add support for DHAT-based heap profiling ([PR #1829](https://github.com/apollographql/router/pull/1829))
+
+The [dhat-rs](https://github.com/nnethercote/dhat-rs) crate provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html)-style heap profiling. We have added two compile-time features, `dhat-heap` and `dhat-ad-hoc`, which leverage this ability.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1829
+
+### Add `trace_id` in logs to correlate entries from the same request ([Issue #1981](https://github.com/apollographql/router/issues/1981))
+
+A `trace_id` is now added to each log line to help correlate log entries to specific requests.  The value for this property will be automatically inherited from any enabled distributed tracing headers, such as those listed in our [Tracing propagation header](https://www.apollographql.com/docs/router/configuration/tracing/#propagation) documentation (e.g., Jaeger, Zipkin, Datadog, etc.).
+
+In the event that a `trace_id` was not inherited from a propagated header, the Router will originate a `trace_id` and propagate that ID to subgraphs if header propagation (see link above) is enabled.
+
+Here is an example of the `trace_id` appearing in plain-text log output:
+
+```
+2022-10-21T15:17:45.562553Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::services::subgraph_service: fetch_error="hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))"
+2022-10-21T15:17:45.565768Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::query_planner::execution: Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)
+```
+
+And an example of the `trace_id` appearing in JSON-formatted log output in a similar scenario:
+
+```json
+{"timestamp":"2022-10-26T15:39:01.078260Z","level":"ERROR","fetch_error":"hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))","target":"apollo_router::services::subgraph_service","filename":"apollo-router/src/services/subgraph_service.rs","line_number":182,"span":{"name":"subgraph"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"},{"name":"fetch"},{"name":"subgraph"}]}
+{"timestamp":"2022-10-26T15:39:01.080259Z","level":"ERROR","message":"Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)","target":"apollo_router::query_planner::execution","filename":"apollo-router/src/query_planner/execution.rs","line_number":188,"span":{"name":"parallel"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"}]}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
+
+### Reload configuration when receiving the SIGHUP signal ([Issue #35](https://github.com/apollographql/router/issues/35))
+
+The Router will now reload its configuration when receiving the SIGHUP signal.  This signal is only supported on *nix platforms,
+and only when a configuration file was passed to the Router initially at startup.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
+
+## 🐛 Fixes
+
+### Fix the deduplication logic in deduplication caching ([Issue #1984](https://github.com/apollographql/router/issues/1984))
+
+Under load, we found it was possible to break the router de-duplication logic and leave orphaned entries in the waiter map.  This fixes the de-duplication logic to prevent this from occurring.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
+
+### Follow back-off instructions from Studio Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
+
+When operating in a [Managed Federation configuration](https://www.apollographql.com/docs/federation/managed-federation/overview/) and fetching the supergraph from Apollo Uplink, the Router will now react differently depending on the response from Apollo Uplink, rather than retrying incessantly:
+
+- Not attempt to retry when met with unrecoverable conditions (e.g., a Graph that does not exist).
+- Back-off on retries when the infrastructure asks for a longer retry interval.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
+
+### Fix the rhai SDL `print` function ([Issue #2005](https://github.com/apollographql/router/issues/2005))
+
+Fixes the `print` function exposed to rhai which was broken due to a recent change that was made in the way we pass SDL (schema definition language) to plugins.
+
+By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
+
+### Export `router_factory::Endpoint` ([PR #2007](https://github.com/apollographql/router/pull/2007))
+
+We now export the `router_factory::Endpoint` struct that was inadvertently unexposed.  Without access to this struct, it was not possible to implement the `web_endpoints` trait in plugins.
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2007
+
+### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
+
+When validating variables, the Router now uses graph-specified default values for object fields, if applicable.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
+
+### Address regression when sending gRPC to `localhost` ([Issue #2036](https://github.com/apollographql/router/issues/2036))
+
+We again support sending unencrypted gRPC tracing and metrics data to `localhost`.  This follows-up on a regression which occurred in the previous release which addressed a limitation which prevented sending gRPC to TLS-secured endpoints.
+
+Applying a proper fix was complicated by an upstream issue ([opentelemetry-rust#908](https://github.com/open-telemetry/opentelemetry-rust/issues/908)) which incorrectly assumes `https` in the absence of a more-specific protocol/schema, contrary to the OpenTelmetry specification which indicates otherwise.
+
+The Router will now detect and work-around this upstream issue by explicitly setting the full, correct endpoint URLs when not specified in config.
+
+In addition:
+
+- Basic TLS-encyrption will be enabled when the endpoint scheme is explicitly `https`.
+- A _warning_ will be emitted if the endpoint port is 443 but *no* TLS config is specified since _most_ traffic on port 443 is expected to be encrypted.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#2048
+
+## 🛠 Maintenance
+
+### Apply Tower best-practice to "inner" Service cloning ([PR #2030](https://github.com/apollographql/router/pull/2030))
+
+We found our `Service` readiness checks could be improved by following the Tower project's [recommendations](https://docs.rs/tower/latest/tower/trait.Service.html#be-careful-when-cloning-inner-services) for cloning inner Services.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
+
+### Split the configuration file implementation into modules ([Issue #1790](https://github.com/apollographql/router/issues/1790))
+
+The internals of the implementation for the configuration have been modularized to facilitate on-going development.  There should be no impact to end-users who are only using YAML to configure their Router.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
+
+### Apply traffic-shaping directly to `supergraph` and `subgraph` ([PR #2034](https://github.com/apollographql/router/issues/2034))
+
+The plugin infrastructure works on `BoxService` instances and makes no guarantee on plugin ordering.  The traffic shaping plugin needs a clonable inner service, and should run right before calling the underlying service.  We'e changed the traffic plugin application so it can work directly on the underlying service.  The configuration remains the same since this is still implemented as a plugin.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2034
+
+## 📚 Documentation
+
+### Remove references to Git submodules from `DEVELOPMENT.md` ([Issue #2012](https://github.com/apollographql/router/issues/2012))
+
+We've removed the instructions from our development documentation which guide users to familiarize themselves with and clone Git submodules when working on the Router source itself.   This follows-up on the removal of the modules themselves in [PR #1856](https://github.com/apollographql/router/pull/1856).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2045
+
 # [1.2.1] - 2022-10-25
 
 ## 🐛 Fixes
