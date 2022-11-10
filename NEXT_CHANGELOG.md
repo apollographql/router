@@ -28,6 +28,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
+
+Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2053
+
 ### **Experimental** 🥼 External cache storage in Redis ([PR #2024](https://github.com/apollographql/router/pull/2024))
 
 implement caching in external storage for query plans, introspection and APQ. This is done as a multi level cache, first in
