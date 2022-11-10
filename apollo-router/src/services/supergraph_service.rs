@@ -332,6 +332,7 @@ impl PluggableSupergraphServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
+        let redis_urls = configuration.supergraph.cache();
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
@@ -344,8 +345,13 @@ impl PluggableSupergraphServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await;
+        let query_planner_service = CachingQueryPlanner::new(
+            bridge_query_planner,
+            plan_cache_limit,
+            self.schema.schema_id.clone(),
+            redis_urls,
+        )
+        .await;
 
         let plugins = Arc::new(self.plugins);
 
