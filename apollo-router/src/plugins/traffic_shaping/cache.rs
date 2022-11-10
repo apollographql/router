@@ -15,7 +15,9 @@ use tower::Service;
 use tower::ServiceExt;
 use tracing::Level;
 
-use crate::cache::storage::CacheStorage;
+use crate::cache::storage::redis_storage::RedisCacheStorage;
+use crate::cache::storage::redis_storage::RedisKey;
+use crate::cache::storage::redis_storage::RedisValue;
 use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -23,12 +25,12 @@ use crate::services::subgraph;
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCacheLayer {
-    storage: CacheStorage<String, Value>,
+    storage: RedisCacheStorage,
     name: String,
 }
 
 impl SubgraphCacheLayer {
-    pub(crate) fn new_with_storage(name: String, storage: CacheStorage<String, Value>) -> Self {
+    pub(crate) fn new_with_storage(name: String, storage: RedisCacheStorage) -> Self {
         SubgraphCacheLayer { storage, name }
     }
 }
@@ -47,7 +49,7 @@ impl<S: Clone> Layer<S> for SubgraphCacheLayer {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCache<S: Clone> {
-    storage: CacheStorage<String, Value>,
+    storage: RedisCacheStorage,
     name: String,
     service: S,
 }
@@ -95,7 +97,7 @@ where
 async fn cache_call<S>(
     service: S,
     name: String,
-    cache: CacheStorage<String, Value>,
+    cache: RedisCacheStorage,
     mut request: subgraph::Request,
 ) -> Result<<S as Service<subgraph::Request>>::Response, <S as Service<subgraph::Request>>::Error>
 where
@@ -116,7 +118,11 @@ where
         .expect("we already checked that representations exist");
 
     let keys = extract_cache_keys(representations, &name, &query_hash)?;
-    let cache_result = cache.multi_get(&keys).await;
+    let cache_result = cache
+        .mget(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
+        .await
+        .map(|res| res.into_iter().map(|r| r.map(|v| v.0)).collect())
+        .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
 
     let (new_representations, mut result) =
         filter_representations(representations, keys, cache_result)?;
@@ -160,7 +166,7 @@ where
     } else {
         let entities = insert_entities_in_result(&mut Vec::new(), &cache, &mut result).await?;
         let mut data = Object::default();
-        data.insert("entities", entities.into());
+        data.insert("_entities", entities.into());
 
         Ok(subgraph::Response::builder()
             .data(data)
@@ -275,13 +281,13 @@ fn filter_representations(
 
 async fn insert_entities_in_result(
     entities: &mut Vec<Value>,
-    cache: &CacheStorage<String, Value>,
+    cache: &RedisCacheStorage,
     result: &mut Vec<IntermediateResult>,
 ) -> Result<Vec<Value>, BoxError> {
     let mut new_entities = Vec::new();
 
     let mut inserted_types: HashMap<String, usize> = HashMap::new();
-    let mut to_insert: Vec<(String, Value)> = Vec::new();
+    let mut to_insert: Vec<_> = Vec::new();
     let mut entities_it = entities.drain(..);
 
     // insert requested entities and cached entities in the same order as
@@ -301,14 +307,16 @@ async fn insert_entities_in_result(
                         reason: "invalid number of entities".to_string(),
                     })?;
                 *inserted_types.entry(typename).or_default() += 1;
-                to_insert.push((key, value.clone()));
+                to_insert.push((RedisKey(key), RedisValue(value.clone())));
 
                 new_entities.push(value);
             }
         }
     }
 
-    cache.multi_insert(to_insert).await;
+    if !to_insert.is_empty() {
+        cache.insert_multiple(&to_insert).await;
+    }
 
     for (ty, nb) in inserted_types {
         tracing::event!(Level::INFO, entity_type = ty.as_str(), cache_insert = nb,);

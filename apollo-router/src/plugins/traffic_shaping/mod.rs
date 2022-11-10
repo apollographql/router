@@ -37,6 +37,7 @@ use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
+use crate::cache::storage::redis_storage::RedisCacheStorage;
 use crate::cache::storage::CacheStorage;
 use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
@@ -138,6 +139,9 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
+    #[cfg(feature = "experimental_cache")]
+    /// URLs of Redis cache used for query planning
+    pub(crate) cache_redis_urls: Option<Vec<String>>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -169,7 +173,7 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
-    storage: CacheStorage<String, Value>,
+    storage: RedisCacheStorage,
 }
 
 #[async_trait::async_trait]
@@ -200,11 +204,13 @@ impl Plugin for TrafficShaping {
             })
             .transpose()?;
 
+        let storage =
+            RedisCacheStorage::new(init.config.cache_redis_urls.as_ref().unwrap().clone()).await;
         Ok(Self {
             config: init.config,
             rate_limit_router,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
-            storage: CacheStorage::new(1024).await,
+            storage,
         })
     }
 }

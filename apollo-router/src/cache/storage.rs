@@ -89,27 +89,14 @@ where
         }
     }
 
-    pub(crate) async fn multi_get(&self, keys: &[K]) -> Vec<Option<V>> {
-        let mut inner = self.inner.lock().await;
-
-        keys.iter().map(|key| (*inner).get(key).cloned()).collect()
-    }
-
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.inner.lock().await.put(key.clone(), value.clone());
-
         #[cfg(feature = "experimental_cache")]
         if let Some(redis) = self.redis.as_ref() {
-            redis.insert(RedisKey(key), RedisValue(value)).await;
+            redis
+                .insert(RedisKey(key.clone()), RedisValue(value.clone()))
+                .await;
         }
-    }
-
-    pub(crate) async fn multi_insert(&self, inserted: Vec<(K, V)>) {
-        let mut inner = self.inner.lock().await;
-
-        for (key, value) in inserted {
-            (*inner).put(key, value);
-        }
+        self.inner.lock().await.put(key, value);
     }
 
     #[cfg(test)]
@@ -119,7 +106,7 @@ where
 }
 
 #[cfg(feature = "experimental_cache")]
-mod redis_storage {
+pub(crate) mod redis_storage {
     use std::fmt;
     use std::sync::Arc;
 
@@ -203,16 +190,10 @@ mod redis_storage {
     {
         fn from_redis_value(v: &redis::Value) -> RedisResult<Self> {
             match v {
-                redis::Value::Bulk(bulk_data) => {
-                    for entry in bulk_data {
-                        tracing::trace!("entry: {:?}", entry);
-                        // entry.parse::<V>().unwrap()
-                    }
-                    Err(redis::RedisError::from((
-                        redis::ErrorKind::TypeError,
-                        "the data is the wrong type",
-                    )))
-                }
+                redis::Value::Bulk(_bulk_data) => Err(redis::RedisError::from((
+                    redis::ErrorKind::TypeError,
+                    "the data is the wrong type",
+                ))),
                 redis::Value::Data(v) => serde_json::from_slice(v).map(RedisValue).map_err(|e| {
                     redis::RedisError::from((
                         redis::ErrorKind::TypeError,
@@ -249,6 +230,23 @@ mod redis_storage {
             guard.get(key).await.ok()
         }
 
+        pub(crate) async fn mget<K: KeyType, V: ValueType>(
+            &self,
+            keys: Vec<RedisKey<K>>,
+        ) -> Option<Vec<Option<RedisValue<V>>>> {
+            tracing::info!("getting from redis: {:?}", keys);
+            let mut guard = self.inner.lock().await;
+
+            guard
+                .get::<Vec<RedisKey<K>>, Vec<Option<RedisValue<V>>>>(keys)
+                .await
+                .map_err(|e| {
+                    tracing::error!("mget error: {}", e);
+                    e
+                })
+                .ok()
+        }
+
         pub(crate) async fn insert<K: KeyType, V: ValueType>(
             &self,
             key: RedisKey<K>,
@@ -260,6 +258,18 @@ mod redis_storage {
                 .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
                 .await;
             tracing::trace!("insert result {:?}", r);
+        }
+
+        pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+            &self,
+            data: &[(RedisKey<K>, RedisValue<V>)],
+        ) {
+            tracing::info!("inserting into redis: {:#?}", data);
+            let mut guard = self.inner.lock().await;
+            let r = guard
+                .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
+                .await;
+            tracing::info!("insert result {:?}", r);
         }
     }
 }
