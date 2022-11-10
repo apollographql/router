@@ -1,5 +1,7 @@
+use apollo_parser::ast;
 use apollo_parser::ast::Value;
-use apollo_parser::ast::{self};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 
 use crate::json_ext::Object;
@@ -8,7 +10,7 @@ use crate::FieldType;
 use crate::Schema;
 use crate::SpecError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {
     Field {
         name: ByteString,
@@ -351,7 +353,7 @@ pub(crate) fn parse_skip(directive: &ast::Directive) -> Option<Skip> {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Skip {
     Yes,
     No,
@@ -410,7 +412,7 @@ pub(crate) fn parse_include(directive: &ast::Directive) -> Option<Include> {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Include {
     Yes,
     No,
