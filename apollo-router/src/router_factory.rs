@@ -202,9 +202,9 @@ async fn create_plugins(
                     configuration
                 );
                 if name == "apollo.telemetry" {
+                    inject_apollo_configuration(&mut configuration);
                     inject_schema_id(schema, &mut configuration);
                 }
-                // expand any env variables in the config before processing.
                 match factory
                     .create_instance(&configuration, schema.as_string().clone())
                     .await
@@ -290,25 +290,24 @@ async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
-        Err(BoxError::from(
-            errors
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<String>>()
-                .join("\n"),
-        ))
+        Err(BoxError::from(format!(
+            "there were {} configuration errors",
+            errors.len()
+        )))
     } else {
         Ok(plugin_instances)
     }
 }
 
-fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
+fn inject_apollo_configuration(configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
         if let Some(telemetry) = configuration.as_object_mut() {
             telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
         }
     }
+}
 
+fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
         configuration.get_mut("apollo"),

@@ -1,6 +1,7 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
 use std::collections::HashMap;
+use std::env::VarError;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
@@ -8,6 +9,7 @@ use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
+
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
@@ -24,13 +26,16 @@ use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 
+const ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
-    #[schemars(with = "Option<String>")]
+    #[schemars(with = "Option<String>", default)]
+    #[serde(default = "endpoint_default")]
     pub(crate) endpoint: Option<Url>,
 
     /// The Apollo Studio API key.
@@ -81,12 +86,56 @@ pub(crate) struct Config {
     pub(crate) schema_id: String,
 }
 
+#[cfg(test)]
+fn apollo_key() -> Option<String> {
+    // During tests we don't want env variables to affect defaults
+    None
+}
+
+#[cfg(not(test))]
 fn apollo_key() -> Option<String> {
     std::env::var("APOLLO_KEY").ok()
 }
 
+#[cfg(test)]
+fn apollo_graph_reference() -> Option<String> {
+    // During tests we don't want env variables to affect defaults
+    None
+}
+
+#[cfg(not(test))]
 fn apollo_graph_reference() -> Option<String> {
     std::env::var("APOLLO_GRAPH_REF").ok()
+}
+
+#[cfg(test)]
+fn endpoint_default() -> Option<Url> {
+    Url::parse(&v)
+        .map(Some)
+        .expect("APOLLO_USAGE_REPORTING_INGRESS_URL is not valid")
+}
+
+#[cfg(not(test))]
+fn endpoint_default() -> Option<Url> {
+    match std::env::var("APOLLO_USAGE_REPORTING_INGRESS_URL") {
+        Ok(v) => match Url::parse(&v) {
+            Ok(url) => Some(url),
+            Err(e) => {
+                tracing::error!("APOLLO_USAGE_REPORTING_INGRESS_URL is not valid: {}", e);
+                None
+            }
+        },
+        Err(VarError::NotPresent) => {
+            Some(Url::parse(ENDPOINT_DEFAULT).expect("default endpoint URL must be parseable"))
+        }
+        Err(e) => {
+            tracing::error!(
+                "APOLLO_USAGE_REPORTING_INGRESS_URL could not be read: {}",
+                e
+            );
+            None
+        }
+    }
 }
 
 const fn client_name_header_default_str() -> &'static str {
@@ -112,7 +161,9 @@ pub(crate) const fn default_buffer_size() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            endpoint: None,
+            endpoint: Some(
+                Url::parse(ENDPOINT_DEFAULT).expect("default endpoint URL must be parseable"),
+            ),
             apollo_key: None,
             apollo_graph_ref: None,
             client_name_header: client_name_header_default(),

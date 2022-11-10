@@ -6,10 +6,17 @@ use flate2::Compression;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
 use http::header::CONTENT_TYPE;
+use opentelemetry::ExportError;
+pub(crate) use prost::*;
 use reqwest::Client;
+use serde::ser::SerializeStruct;
+use std::error::Error;
+use std::fmt::Debug;
 use std::io::Write;
 use std::time::Duration;
 use sys_info::hostname;
+use tokio::task::JoinError;
+use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
 use url::Url;
 
@@ -248,16 +255,9 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
 
 #[allow(unreachable_pub)]
 pub(crate) mod proto {
+    #![allow(clippy::derive_partial_eq_without_eq)]
     tonic::include_proto!("report");
 }
-
-use opentelemetry::ExportError;
-pub(crate) use prost::*;
-use serde::ser::SerializeStruct;
-use std::error::Error;
-use std::fmt::Debug;
-use tokio::task::JoinError;
-use tonic::codegen::http::uri::InvalidUri;
 
 /// Reporting Error type
 #[derive(Debug)]

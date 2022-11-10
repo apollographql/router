@@ -172,6 +172,19 @@ impl Plugin for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if init
+            .config
+            .apollo
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
+            .endpoint
+            .is_none()
+        {
+            return Err(BoxError::from(
+                "APOLLO_USAGE_REPORTING_INGRESS_URL was set, but was not a valid URL",
+            ));
+        }
         Self::new_common::<Registry>(init.config, None).await
     }
 
