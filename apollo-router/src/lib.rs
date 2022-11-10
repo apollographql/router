@@ -66,7 +66,7 @@ mod response;
 mod router;
 mod router_factory;
 pub mod services;
-mod spec;
+pub(crate) mod spec;
 mod state_machine;
 mod test_harness;
 pub mod tracer;

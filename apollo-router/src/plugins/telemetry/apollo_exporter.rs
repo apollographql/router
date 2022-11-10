@@ -237,11 +237,10 @@ impl ApolloExporter {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
                         msg = data;
                     } else {
-                        let data = "{\"tracesIgnored\": true}\n";
                         tracing::debug!("ingress response text: {:?}", data);
                         if has_traces && !*self.strip_traces.lock().expect("lock poisoned") {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
-                            if let Ok(response) = serde_json::Value::from_str(data) {
+                            if let Ok(response) = serde_json::Value::from_str(&data) {
                                 if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
                                     tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
                                     *self.strip_traces.lock().expect("lock poisoned") = true;
