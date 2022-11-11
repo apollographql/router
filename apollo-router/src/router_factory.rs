@@ -332,7 +332,6 @@ mod test {
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
-    use crate::router_factory::inject_apollo_configuration;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::YamlSupergraphServiceFactory;
