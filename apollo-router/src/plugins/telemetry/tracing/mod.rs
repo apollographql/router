@@ -1,4 +1,9 @@
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::time::Duration;
+
 use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::trace::BatchConfig;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::sdk::trace::Span;
@@ -140,5 +145,73 @@ where
 {
     fn filtered(self) -> ApolloFilterSpanProcessor<Self> {
         ApolloFilterSpanProcessor { delegate: self }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
+pub(crate) struct BatchProcessorConfig {
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// The delay interval in milliseconds between two consecutive processing
+    /// of batches. The default value is 5 seconds.
+    scheduled_delay: Option<Duration>,
+
+    /// The maximum queue size to buffer spans for delayed processing. If the
+    /// queue gets full it drops the spans. The default value of is 2048.
+    #[schemars(default)]
+    #[serde(default)]
+    max_queue_size: Option<usize>,
+
+    /// The maximum number of spans to process in a single batch. If there are
+    /// more than one batch worth of spans then it processes multiple batches
+    /// of spans one batch after the other without any delay. The default value
+    /// is 512.
+    #[schemars(default)]
+    #[serde(default)]
+    max_export_batch_size: Option<usize>,
+
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// The maximum duration to export a batch of data.
+    max_export_timeout: Option<Duration>,
+
+    /// Maximum number of concurrent exports
+    ///
+    /// Limits the number of spawned tasks for exports and thus memory consumed
+    /// by an exporter. A value of 1 will cause exports to be performed
+    /// synchronously on the BatchSpanProcessor task.
+    #[schemars(default)]
+    #[serde(default)]
+    max_concurrent_exports: Option<usize>,
+}
+
+impl From<BatchProcessorConfig> for BatchConfig {
+    fn from(config: BatchProcessorConfig) -> Self {
+        let mut default = BatchConfig::default();
+        if let Some(scheduled_delay) = config.scheduled_delay {
+            default = default.with_scheduled_delay(scheduled_delay);
+        }
+        if let Some(max_queue_size) = config.max_queue_size {
+            default = default.with_max_queue_size(max_queue_size);
+        }
+        if let Some(max_export_batch_size) = config.max_export_batch_size {
+            default = default.with_max_export_batch_size(max_export_batch_size);
+        }
+        if let Some(max_export_timeout) = config.max_export_timeout {
+            default = default.with_max_export_timeout(max_export_timeout);
+        }
+        if let Some(max_concurrent_exports) = config.max_concurrent_exports {
+            default = default.with_max_concurrent_exports(max_concurrent_exports);
+        }
+        default
+    }
+}
+
+impl Display for BatchProcessorConfig {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let batch_config: BatchConfig = self.clone().into();
+        let debug_str = format!("{:?}", batch_config);
+        // Yes horrible, but there is no other way to get at the actual configured values.
+        f.write_str(&debug_str["BatchConfig { ".len()..debug_str.len() - 1])
     }
 }

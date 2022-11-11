@@ -1,7 +1,4 @@
 //! Configuration for jaeger tracing.
-use std::time::Duration;
-
-use opentelemetry::sdk::trace::BatchConfig;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use schemars::gen::SchemaGenerator;
@@ -17,6 +14,7 @@ use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
@@ -27,9 +25,9 @@ pub(crate) struct Config {
     #[schemars(schema_with = "endpoint_schema")]
     pub(crate) endpoint: Endpoint,
 
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "String", default)]
-    pub(crate) scheduled_delay: Option<Duration>,
+    #[serde(default)]
+    #[schemars(default)]
+    pub(crate) batch_processor: Option<BatchProcessorConfig>,
 }
 
 // This is needed because of the use of flatten.
@@ -46,11 +44,10 @@ fn endpoint_schema(gen: &mut SchemaGenerator) -> Schema {
         .iter_mut()
         .for_each(|s| {
             if let Schema::Object(o) = s {
-                o.object
-                    .as_mut()
-                    .unwrap()
-                    .properties
-                    .insert("scheduled_delay".to_string(), String::json_schema(gen));
+                o.object.as_mut().unwrap().properties.insert(
+                    "batch_processor".to_string(),
+                    BatchProcessorConfig::json_schema(gen),
+                );
             }
         });
 
@@ -78,7 +75,10 @@ fn default_agent_endpoint() -> &'static str {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::debug!("configuring Jaeger tracing");
+        tracing::info!(
+            "configuring Jaeger tracing: {}",
+            self.batch_processor.as_ref().cloned().unwrap_or_default()
+        );
         let exporter = match &self.endpoint {
             Endpoint::Agent { endpoint } => {
                 let socket = match endpoint {
@@ -94,11 +94,6 @@ impl TracingConfigurator for Config {
                     .with_trace_config(trace_config.into())
                     .with(&trace_config.service_name, |b, n| b.with_service_name(n))
                     .with(&socket, |b, s| b.with_endpoint(s))
-                    .with(&self.scheduled_delay, |b, p| {
-                        b.with_batch_processor_config(
-                            BatchConfig::default().with_scheduled_delay(*p),
-                        )
-                    })
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?
             }
             Endpoint::Collector {
@@ -122,7 +117,13 @@ impl TracingConfigurator for Config {
 
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with(&self.scheduled_delay, |b, d| b.with_scheduled_delay(*d))
+                .with_batch_config(
+                    self.batch_processor
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_default()
+                        .into(),
+                )
                 .build()
                 .filtered(),
         ))

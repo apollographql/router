@@ -25,6 +25,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::ReportHeader;
 use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
@@ -84,6 +85,8 @@ pub(crate) struct Config {
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
     pub(crate) schema_id: String,
+
+    pub(crate) batch_processor: Option<BatchProcessorConfig>,
 }
 
 #[cfg(test)]
@@ -173,6 +176,7 @@ impl Default for Config {
             field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
+            batch_processor: Some(BatchProcessorConfig::default()),
         }
     }
 }
