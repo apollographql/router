@@ -43,18 +43,17 @@ By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) i
 
 ## 🐛 Fixes
 
-### Fix float input default value coercion on big integers ([Issue #2087](https://github.com/apollographql/router/issues/2087))
+### Fix `Float` input-type coercion for default values with values larger than 32-bits ([Issue #2087](https://github.com/apollographql/router/issues/2087))
 
-The router will now correctly accept integers that dont fit in 32 bits as Float default values:
+A regression has been fixed which caused the Router to reject integers larger than 32-bits used as the default values on `Float` fields in input types.
 
-A supergraph schema that contains:
+In other words, the following will once again work as expected:
+
 ```graphql
-    input MyInputType {
-        a_float_input: Float = 9876543210
-    }
+input MyInputType {
+    a_float_input: Float = 9876543210
+}
 ```
-
-is now correctly accepted by the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2090
 
