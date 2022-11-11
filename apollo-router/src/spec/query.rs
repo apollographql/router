@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_parser::ast;
+use apollo_parser::ast::AstNode;
 use derivative::Derivative;
 use graphql::Error;
 use serde::de::Visitor;
@@ -1072,7 +1073,13 @@ pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => Some(String::from(s).into()),
         ast::Value::FloatValue(f) => Some(f64::from(f).into()),
-        ast::Value::IntValue(i) => Some(i32::from(i).into()),
+        ast::Value::IntValue(i) => {
+            let s = i.source_string();
+            s.parse::<i64>()
+                .ok()
+                .map(Into::into)
+                .or_else(|| s.parse::<u64>().ok().map(Into::into))
+        }
         ast::Value::BooleanValue(b) => Some(bool::from(b).into()),
         ast::Value::NullValue(_) => Some(Value::Null),
         ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
