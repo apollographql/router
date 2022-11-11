@@ -2861,11 +2861,14 @@ fn merge_selections() {
 fn it_parses_default_floats() {
     let schema = with_supergraph_boilerplate(
         r#"
+        type Query {
+            name: String
+        }
+
         input WithAllKindsOfFloats {
             a_regular_float: Float = 1.2
-            a_string_like_float: Float = "1.2"
             an_integer_float: Float = 1234
-            a_float_that_doesnt_fit_an_int: Float = 1668043729570
+            a_float_that_doesnt_fit_an_int: Float = 9876543210
         }
         "#,
     );

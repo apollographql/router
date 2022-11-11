@@ -42,5 +42,21 @@ memory with LRU then with a redis cluster backend. Since it is still experimenta
 By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
 
 ## 🐛 Fixes
+
+### Fix float input value coercion on big integers ([Issue #2087](https://github.com/apollographql/router/issues/2087))
+
+The router will now correctly accept integers that dont fit in 32 bits as Float default values:
+
+A supergraph schema that contains:
+```graphql
+    input MyInputType {
+        a_float_input: Float = 9876543210
+    }
+```
+
+Is not correctly accepted by the router.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2090
+
 ## 🛠 Maintenance
 ## 📚 Documentation
