@@ -55,11 +55,12 @@ dependencies = [
 
 [[package]]
 name = "ahash"
-version = "0.8.1"
+version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "464b3811b747f8f7ebc8849c9c728c39f6ac98a055edad93baf9eb330e3f8f9d"
+checksum = "bf6ccdb167abbf410dcb915cabd428929d7f6a04980b54a11f26a39f1c7f7107"
 dependencies = [
  "cfg-if",
+ "const-random",
  "getrandom",
  "once_cell",
  "serde",
@@ -955,6 +956,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "722e23542a15cea1f65d4a1419c4cfd7a26706c70871a13a04238ca3f40f1661"
 
 [[package]]
+name = "const-random"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "368a7a772ead6ce7e1de82bfb04c485f3db8ec744f72925af5735e29a22cc18e"
+dependencies = [
+ "const-random-macro",
+ "proc-macro-hack",
+]
+
+[[package]]
+name = "const-random-macro"
+version = "0.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d7d6ab3c3a2282db210df5f02c4dab6e0a7057af0fb7ebd4070f30fe05c0ddb"
+dependencies = [
+ "getrandom",
+ "once_cell",
+ "proc-macro-hack",
+ "tiny-keccak",
+]
+
+[[package]]
 name = "context-data"
 version = "0.1.0"
 dependencies = [
@@ -1121,6 +1144,12 @@ checksum = "edbafec5fa1f196ca66527c1b12c2ec4745ca14b50f1ad8f9f6f720b55d11fac"
 dependencies = [
  "cfg-if",
 ]
+
+[[package]]
+name = "crunchy"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
 name = "crypto-bigint"
@@ -2363,7 +2392,7 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ca9e2b45609132ae2214d50482c03aeee78826cd6fd53a8940915b81acedf16"
 dependencies = [
- "ahash 0.8.1",
+ "ahash 0.8.2",
  "anyhow",
  "base64 0.13.1",
  "bytecount",
@@ -3497,6 +3526,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-hack"
+version = "0.5.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3846,11 +3881,11 @@ dependencies = [
 
 [[package]]
 name = "rhai"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6eec3a3db30f591ece18c66b3db4c9fa26f3bce20bc821c50550968361f84333"
+checksum = "0f61559c2ea5fef5af856ae95443111dc14e7c9ce73d29c257a840249c0ed298"
 dependencies = [
- "ahash 0.8.1",
+ "ahash 0.8.2",
  "bitflags",
  "instant",
  "num-traits",
@@ -4926,6 +4961,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d967f99f534ca7e495c575c62638eebc2898a8c84c119b89e250477bc4ba16b2"
 dependencies = [
  "time-core",
+]
+
+[[package]]
+name = "tiny-keccak"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c9d3793400a45f954c52e73d068316d76b6f4e36977e3fcebb13a2721e80237"
+dependencies = [
+ "crunchy",
 ]
 
 [[package]]
