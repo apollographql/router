@@ -43,7 +43,7 @@ By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) i
 
 ## 🐛 Fixes
 
-### Fix float input value coercion on big integers ([Issue #2087](https://github.com/apollographql/router/issues/2087))
+### Fix float input default value coercion on big integers ([Issue #2087](https://github.com/apollographql/router/issues/2087))
 
 The router will now correctly accept integers that dont fit in 32 bits as Float default values:
 
@@ -54,7 +54,7 @@ A supergraph schema that contains:
     }
 ```
 
-Is not correctly accepted by the router.
+is not correctly accepted by the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2090
 
