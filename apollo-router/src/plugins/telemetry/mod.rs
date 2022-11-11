@@ -48,6 +48,7 @@ use tracing_subscriber::registry::LookupSpan;
 #[cfg(not(feature = "console"))]
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
+use url::Url;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
@@ -61,6 +62,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::apollo::ENDPOINT_INVALID;
 use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
@@ -112,10 +114,10 @@ static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 #[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
     config: config::Conf,
+    metrics: BasicMetrics,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
     // shutdown exporter.
-    metrics: BasicMetrics,
     _metrics_exporters: Vec<MetricsExporterHandle>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
@@ -179,7 +181,7 @@ impl Plugin for Telemetry {
             .cloned()
             .unwrap_or_default()
             .endpoint
-            .is_none()
+            == Some(Url::parse(ENDPOINT_INVALID).expect("Invalid endpoint must parse"))
         {
             return Err(BoxError::from(
                 "APOLLO_USAGE_REPORTING_INGRESS_URL was set, but was not a valid URL",

@@ -646,6 +646,46 @@ expression: "&schema"
         "apollo": {
           "type": "object",
           "properties": {
+            "batch_processor": {
+              "type": "object",
+              "properties": {
+                "max_concurrent_exports": {
+                  "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                  "default": null,
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "nullable": true
+                },
+                "max_export_batch_size": {
+                  "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                  "default": null,
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "nullable": true
+                },
+                "max_export_timeout": {
+                  "description": "The maximum duration to export a batch of data.",
+                  "default": null,
+                  "type": "string"
+                },
+                "max_queue_size": {
+                  "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                  "default": null,
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "nullable": true
+                },
+                "scheduled_delay": {
+                  "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                  "default": null,
+                  "type": "string"
+                }
+              },
+              "nullable": true
+            },
             "buffer_size": {
               "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
               "default": 10000,
@@ -667,6 +707,7 @@ expression: "&schema"
             },
             "endpoint": {
               "description": "The Apollo Studio endpoint for exporting traces and metrics.",
+              "default": null,
               "type": "string",
               "nullable": true
             },
@@ -1580,6 +1621,46 @@ expression: "&schema"
                 "endpoint"
               ],
               "properties": {
+                "batch_processor": {
+                  "type": "object",
+                  "properties": {
+                    "max_concurrent_exports": {
+                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_batch_size": {
+                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_timeout": {
+                      "description": "The maximum duration to export a batch of data.",
+                      "default": null,
+                      "type": "string"
+                    },
+                    "max_queue_size": {
+                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "scheduled_delay": {
+                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                      "default": null,
+                      "type": "string"
+                    }
+                  },
+                  "nullable": true
+                },
                 "endpoint": {
                   "type": "string"
                 },
@@ -1683,6 +1764,46 @@ expression: "&schema"
             "datadog": {
               "type": "object",
               "properties": {
+                "batch_processor": {
+                  "type": "object",
+                  "properties": {
+                    "max_concurrent_exports": {
+                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_batch_size": {
+                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_timeout": {
+                      "description": "The maximum duration to export a batch of data.",
+                      "default": null,
+                      "type": "string"
+                    },
+                    "max_queue_size": {
+                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "scheduled_delay": {
+                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                      "default": null,
+                      "type": "string"
+                    }
+                  },
+                  "nullable": true
+                },
                 "endpoint": {
                   "default": "default",
                   "type": "string"
@@ -1710,8 +1831,44 @@ expression: "&schema"
                       },
                       "additionalProperties": false
                     },
-                    "scheduled_delay": {
-                      "type": "string"
+                    "batch_processor": {
+                      "type": "object",
+                      "properties": {
+                        "max_concurrent_exports": {
+                          "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                          "default": null,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_export_batch_size": {
+                          "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                          "default": null,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_export_timeout": {
+                          "description": "The maximum duration to export a batch of data.",
+                          "default": null,
+                          "type": "string"
+                        },
+                        "max_queue_size": {
+                          "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                          "default": null,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "scheduled_delay": {
+                          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                          "default": null,
+                          "type": "string"
+                        }
+                      }
                     }
                   },
                   "additionalProperties": false
@@ -1722,6 +1879,45 @@ expression: "&schema"
                     "collector"
                   ],
                   "properties": {
+                    "batch_processor": {
+                      "type": "object",
+                      "properties": {
+                        "max_concurrent_exports": {
+                          "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                          "default": null,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_export_batch_size": {
+                          "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                          "default": null,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "max_export_timeout": {
+                          "description": "The maximum duration to export a batch of data.",
+                          "default": null,
+                          "type": "string"
+                        },
+                        "max_queue_size": {
+                          "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                          "default": null,
+                          "type": "integer",
+                          "format": "uint",
+                          "minimum": 0.0,
+                          "nullable": true
+                        },
+                        "scheduled_delay": {
+                          "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                          "default": null,
+                          "type": "string"
+                        }
+                      }
+                    },
                     "collector": {
                       "type": "object",
                       "required": [
@@ -1741,18 +1937,52 @@ expression: "&schema"
                         }
                       },
                       "additionalProperties": false
-                    },
-                    "scheduled_delay": {
-                      "type": "string"
                     }
                   },
                   "additionalProperties": false
                 }
               ],
               "properties": {
-                "scheduled_delay": {
+                "batch_processor": {
                   "default": null,
-                  "type": "string"
+                  "type": "object",
+                  "properties": {
+                    "max_concurrent_exports": {
+                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_batch_size": {
+                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_timeout": {
+                      "description": "The maximum duration to export a batch of data.",
+                      "default": null,
+                      "type": "string"
+                    },
+                    "max_queue_size": {
+                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "scheduled_delay": {
+                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                      "default": null,
+                      "type": "string"
+                    }
+                  },
+                  "nullable": true
                 }
               },
               "nullable": true
@@ -1763,6 +1993,46 @@ expression: "&schema"
                 "endpoint"
               ],
               "properties": {
+                "batch_processor": {
+                  "type": "object",
+                  "properties": {
+                    "max_concurrent_exports": {
+                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_batch_size": {
+                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_timeout": {
+                      "description": "The maximum duration to export a batch of data.",
+                      "default": null,
+                      "type": "string"
+                    },
+                    "max_queue_size": {
+                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "scheduled_delay": {
+                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                      "default": null,
+                      "type": "string"
+                    }
+                  },
+                  "nullable": true
+                },
                 "endpoint": {
                   "type": "string"
                 },
@@ -1982,6 +2252,46 @@ expression: "&schema"
             "zipkin": {
               "type": "object",
               "properties": {
+                "batch_processor": {
+                  "type": "object",
+                  "properties": {
+                    "max_concurrent_exports": {
+                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_batch_size": {
+                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "max_export_timeout": {
+                      "description": "The maximum duration to export a batch of data.",
+                      "default": null,
+                      "type": "string"
+                    },
+                    "max_queue_size": {
+                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
+                      "default": null,
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0,
+                      "nullable": true
+                    },
+                    "scheduled_delay": {
+                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
+                      "default": null,
+                      "type": "string"
+                    }
+                  },
+                  "nullable": true
+                },
                 "endpoint": {
                   "default": "default",
                   "type": "string"

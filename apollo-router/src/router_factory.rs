@@ -202,7 +202,6 @@ async fn create_plugins(
                     configuration
                 );
                 if name == "apollo.telemetry" {
-                    inject_apollo_configuration(&mut configuration);
                     inject_schema_id(schema, &mut configuration);
                 }
                 match factory
@@ -299,15 +298,12 @@ async fn create_plugins(
     }
 }
 
-fn inject_apollo_configuration(configuration: &mut Value) {
+fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if configuration.get("apollo").is_none() {
         if let Some(telemetry) = configuration.as_object_mut() {
             telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
         }
     }
-}
-
-fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
         configuration.get_mut("apollo"),
@@ -336,6 +332,7 @@ mod test {
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
+    use crate::router_factory::inject_apollo_configuration;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::SupergraphServiceConfigurator;
     use crate::router_factory::YamlSupergraphServiceFactory;
@@ -465,6 +462,7 @@ mod test {
         let schema = include_str!("testdata/starstuff@current.graphql");
         let schema = Schema::parse(schema, &Default::default()).unwrap();
         let mut config = json!({});
+        inject_apollo_configuration(&mut config);
         inject_schema_id(&schema, &mut config);
         let config =
             serde_json::from_value::<crate::plugins::telemetry::config::Conf>(config).unwrap();

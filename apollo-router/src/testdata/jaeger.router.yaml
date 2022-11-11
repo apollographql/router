@@ -3,7 +3,8 @@ telemetry:
     trace_config:
       service_name: router
     jaeger:
-      scheduled_delay: 100ms
+      batch_processor:
+        scheduled_delay: 100ms
       agent:
         endpoint: default
 override_subgraph_url:

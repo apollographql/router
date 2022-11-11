@@ -27,7 +27,10 @@ use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-const ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+pub(crate) const ENDPOINT_DEFAULT: &str =
+    "https://usage-reporting.api.apollographql.com/api/ingress/traces";
+// Magic invalid URL. There's no good way of checking the validity of defaults obtained from env variables.
+pub(crate) const ENDPOINT_INVALID: &str = "https://invalid";
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -125,7 +128,7 @@ fn endpoint_default() -> Option<Url> {
             Ok(url) => Some(url),
             Err(e) => {
                 tracing::error!("APOLLO_USAGE_REPORTING_INGRESS_URL is not valid: {}", e);
-                None
+                Some(Url::parse(ENDPOINT_INVALID).expect("invalid endpoint URL must be parseable"))
             }
         },
         Err(VarError::NotPresent) => {

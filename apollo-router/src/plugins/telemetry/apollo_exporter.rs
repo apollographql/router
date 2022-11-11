@@ -55,14 +55,14 @@ impl ExportError for ApolloExportError {
 #[derive(Clone)]
 pub(crate) enum Sender {
     Noop,
-    Spaceport(mpsc::Sender<SingleReport>),
+    Apollo(mpsc::Sender<SingleReport>),
 }
 
 impl Sender {
     pub(crate) fn send(&self, metrics: SingleReport) {
         match &self {
             Sender::Noop => {}
-            Sender::Spaceport(channel) => {
+            Sender::Apollo(channel) => {
                 if let Err(err) = channel.to_owned().try_send(metrics) {
                     tracing::warn!(
                         "could not send metrics to spaceport, metric will be dropped: {}",
@@ -155,7 +155,7 @@ impl ApolloExporter {
                 tracing::error!("failed to submit Apollo report: {}", e)
             }
         });
-        Sender::Spaceport(tx)
+        Sender::Apollo(tx)
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
