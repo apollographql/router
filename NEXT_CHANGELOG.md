@@ -54,7 +54,7 @@ A supergraph schema that contains:
     }
 ```
 
-is not correctly accepted by the router.
+is now correctly accepted by the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2090
 
