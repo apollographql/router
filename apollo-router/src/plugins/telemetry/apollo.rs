@@ -1,6 +1,7 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
 use std::collections::HashMap;
+#[cfg(not(test))]
 use std::env::VarError;
 use std::ops::AddAssign;
 use std::time::SystemTime;
@@ -9,7 +10,6 @@ use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
-
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
@@ -110,7 +110,7 @@ fn apollo_graph_reference() -> Option<String> {
 
 #[cfg(test)]
 fn endpoint_default() -> Option<Url> {
-    Url::parse(&v)
+    Url::parse(ENDPOINT_DEFAULT)
         .map(Some)
         .expect("APOLLO_USAGE_REPORTING_INGRESS_URL is not valid")
 }

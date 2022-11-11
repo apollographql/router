@@ -1,5 +1,13 @@
 //! Configuration for apollo telemetry exporter.
 // This entire file is license key functionality
+use std::error::Error;
+use std::fmt::Debug;
+use std::io::Write;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
+
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -11,12 +19,6 @@ pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
 use serde_json::Value;
-use std::error::Error;
-use std::fmt::Debug;
-use std::io::Write;
-use std::str::FromStr;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
 use sys_info::hostname;
 use tokio::task::JoinError;
 use tonic::codegen::http::uri::InvalidUri;

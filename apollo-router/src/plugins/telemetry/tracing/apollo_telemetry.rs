@@ -11,10 +11,12 @@ use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::trace::{SpanId, TraceError};
+use opentelemetry::trace::SpanId;
+use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
 use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
+use prost::Message;
 use thiserror::Error;
 use url::Url;
 
@@ -42,7 +44,6 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
-use prost::Message;
 
 const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
