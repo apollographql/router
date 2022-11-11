@@ -58,5 +58,11 @@ is now correctly accepted by the router.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2090
 
+### Assume `Accept: application/json` when no `Accept` header is present [Issue #1990](https://github.com/apollographql/router/issues/1990))
+
+the `Accept` header means `*/*` when it is absent.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2078
+
 ## 🛠 Maintenance
 ## 📚 Documentation
