@@ -596,19 +596,24 @@ impl Telemetry {
                 apollo_private.http.request_headers = field::Empty
             );
 
-            span.record(
-                "apollo_private.graphql.variables",
-                &Self::filter_variables_values(
-                    &request.supergraph_request.body().variables,
-                    &config.send_variable_values,
-                )
-                .as_str(),
-            );
-            span.record(
-                "apollo_private.http.request_headers",
-                &Self::filter_headers(request.supergraph_request.headers(), &config.send_headers)
+            if is_span_sampled(&request.context) {
+                span.record(
+                    "apollo_private.graphql.variables",
+                    &Self::filter_variables_values(
+                        &request.supergraph_request.body().variables,
+                        &config.send_variable_values,
+                    )
                     .as_str(),
-            );
+                );
+                span.record(
+                    "apollo_private.http.request_headers",
+                    &Self::filter_headers(
+                        request.supergraph_request.headers(),
+                        &config.send_headers,
+                    )
+                    .as_str(),
+                );
+            }
 
             span
         }
