@@ -1,5 +1,6 @@
 //! Customization via Rhai.
 
+use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -485,27 +486,27 @@ macro_rules! gen_map_request {
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
-                        msg: String,
+                        error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
                     {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
+                            .status_code(error_details.status)
                             .context(context)
                             .build()?;
                         Ok(ControlFlow::Break(res))
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result: Result<Dynamic, String> = if $callback.is_curried() {
+                    let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
                         $callback
                             .call(
                                 &$rhai_service.engine,
                                 &$rhai_service.ast,
                                 (shared_request.clone(),),
                             )
-                            .map_err(|err| err.to_string())
                     } else {
                         let mut guard = $rhai_service.scope.lock().unwrap();
                         $rhai_service
@@ -516,15 +517,16 @@ macro_rules! gen_map_request {
                                 $callback.fn_name(),
                                 (shared_request.clone(),),
                             )
-                            .map_err(|err| err.to_string())
                     };
                     if let Err(error) = result {
-                        tracing::error!("map_request callback failed: {error}");
+                        let error_details = process_error(error);
+                        tracing::error!("map_request callback failed: {error_details}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
                         return failure_message(
                             request_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
+                            error_details,
+                            // format!("rhai execution error: '{}'", error),
                         );
                     }
                     let mut guard = shared_request.lock().unwrap();
@@ -556,15 +558,14 @@ macro_rules! gen_map_deferred_request {
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
-                        msg: String,
-                        status: StatusCode,
+                        error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$response, $request>, BoxError> {
                         let res = $response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
-                            .status_code(status)
+                            .status_code(error_details.status)
                             .context(context)
                             .build()?;
                         Ok(ControlFlow::Break(res))
@@ -574,12 +575,12 @@ macro_rules! gen_map_deferred_request {
 
                     if let Err(error) = result {
                         tracing::error!("map_request callback failed: {error}");
+                        let error_details = process_error(error);
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
                         return failure_message(
                             request_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            error_details
                         );
                     }
                     let mut guard = shared_request.lock().unwrap();
@@ -602,46 +603,43 @@ macro_rules! gen_map_response {
                     // the significantly different treatment of errors in different
                     // response types makes this extremely painful. This needs to be
                     // re-visited at some point post GA.
-                    fn failure_message(context: Context, msg: String) -> $base::Response {
+                    fn failure_message(
+                        context: Context,
+                        error_details: ErrorDetails,
+                    ) -> $base::Response {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
+                            .status_code(error_details.status)
                             .context(context)
                             .build()
                             .expect("can't fail to build our error message");
                         res
                     }
                     let shared_response = Shared::new(Mutex::new(Some(response)));
-                    let result: Result<Dynamic, String> = if $callback.is_curried() {
-                        $callback
-                            .call(
-                                &$rhai_service.engine,
-                                &$rhai_service.ast,
-                                (shared_response.clone(),),
-                            )
-                            .map_err(|err| err.to_string())
+                    let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
+                        $callback.call(
+                            &$rhai_service.engine,
+                            &$rhai_service.ast,
+                            (shared_response.clone(),),
+                        )
                     } else {
                         let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service
-                            .engine
-                            .call_fn(
-                                &mut guard,
-                                &$rhai_service.ast,
-                                $callback.fn_name(),
-                                (shared_response.clone(),),
-                            )
-                            .map_err(|err| err.to_string())
+                        $rhai_service.engine.call_fn(
+                            &mut guard,
+                            &$rhai_service.ast,
+                            $callback.fn_name(),
+                            (shared_response.clone(),),
+                        )
                     };
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
+                        let error_details = process_error(error);
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
-                        return failure_message(
-                            response_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                        );
+                        return failure_message(response_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_response.lock().unwrap();
                     let response_opt = guard.take();
@@ -665,15 +663,14 @@ macro_rules! gen_map_deferred_response {
                     // re-visited at some point post GA.
                     fn failure_message(
                         context: Context,
-                        msg: String,
-                        status: StatusCode,
+                        error_details: ErrorDetails,
                     ) -> $response {
                         let res = $response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
-                            .status_code(status)
+                            .status_code(error_details.status)
                             .context(context)
                             .build()
                             .expect("can't fail to build our error message");
@@ -687,10 +684,14 @@ macro_rules! gen_map_deferred_response {
                     let (first, rest) = stream.into_future().await;
 
                     if first.is_none() {
+                        let error_details = ErrorDetails {
+                            status: StatusCode::INTERNAL_SERVER_ERROR,
+                            message: "rhai execution error: empty response".to_string(),
+                            position: None
+                        };
                         return Ok(failure_message(
                             context,
-                            "rhai execution error: empty response".to_string(),
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            error_details
                         ));
                     }
 
@@ -708,12 +709,12 @@ macro_rules! gen_map_deferred_response {
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
+                        let error_details = process_error(error);
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
                         return Ok(failure_message(
                             response_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            error_details
                         ));
                     }
 
@@ -956,23 +957,87 @@ impl ServiceStep {
     }
 }
 
+struct ErrorDetails {
+    status: StatusCode,
+    message: String,
+    position: Option<Position>,
+}
+
+impl fmt::Display for ErrorDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.position {
+            Some(pos) => {
+                write!(f, "{}: {}({})", self.status, self.message, pos)
+            }
+            None => {
+                write!(f, "{}: {}", self.status, self.message)
+            }
+        }
+    }
+}
+
+fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
+    let mut error_details = ErrorDetails {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("rhai execution error: '{}'", error),
+        position: None,
+    };
+
+    if let EvalAltResult::ErrorRuntime(obj, pos) = *error {
+        error_details.position = Some(pos);
+        // If we have a dynamic map, try to process it
+        if obj.is_map() {
+            let map = obj.cast::<Map>();
+
+            let mut ed_status: Option<StatusCode> = None;
+            let mut ed_message: Option<String> = None;
+
+            let status_opt = map.get("status");
+            let message_opt = map.get("message");
+
+            // Now we have optional Dynamics
+            // Try to process each independently
+            if let Some(status_dyn) = status_opt {
+                if let Ok(value) = status_dyn.as_int() {
+                    if let Ok(status) = StatusCode::try_from(value as u16) {
+                        ed_status = Some(status);
+                    }
+                }
+            }
+
+            if let Some(message_dyn) = message_opt {
+                let cloned = message_dyn.clone();
+                if let Ok(value) = cloned.into_string() {
+                    ed_message = Some(value);
+                }
+            }
+
+            if let Some(status) = ed_status {
+                error_details.status = status;
+            }
+            if let Some(message) = ed_message {
+                error_details.message = message;
+            }
+        }
+    }
+    error_details
+}
+
 fn execute(
     rhai_service: &RhaiService,
     callback: &FnPtr,
     args: impl FuncArgs,
-) -> Result<Dynamic, String> {
+) -> Result<Dynamic, Box<EvalAltResult>> {
     if callback.is_curried() {
-        callback
-            .call(&rhai_service.engine, &rhai_service.ast, args)
-            .map_err(|err| err.to_string())
+        callback.call(&rhai_service.engine, &rhai_service.ast, args)
     } else {
         let mut guard = rhai_service.scope.lock().unwrap();
         rhai_service
             .engine
             .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
-            .map_err(|err| err.to_string())
     }
 }
+
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
     scope: Arc<Mutex<Scope<'static>>>,
@@ -996,6 +1061,8 @@ impl Rhai {
             ast: self.ast.clone(),
         };
         let mut guard = scope.lock().unwrap();
+        // TODO: LOOKS LIKE WE'VE NEVER BEEN HANDLING THROWN ERRORS HERE. WHEN FINISHED UPDATING
+        // OTHER CODE, MAKE SURE TO DO THIS HERE AS WELL
         match subgraph {
             Some(name) => {
                 self.engine
