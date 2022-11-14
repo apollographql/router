@@ -455,12 +455,60 @@ pub(crate) struct Supergraph {
 
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
+
+    #[cfg(feature = "experimental_cache")]
+    /// URLs of Redis cache used for query planning
+    pub(crate) cache_redis_urls: Option<Vec<String>>,
 }
 
 fn default_defer_support() -> bool {
     true
 }
 
+#[cfg(feature = "experimental_cache")]
+#[buildstructor::buildstructor]
+impl Supergraph {
+    #[builder]
+    pub(crate) fn new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+        cache_redis_urls: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(default_graphql_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            cache_redis_urls,
+        }
+    }
+}
+
+#[cfg(feature = "experimental_cache")]
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Supergraph {
+    #[builder]
+    pub(crate) fn fake_new(
+        listen: Option<ListenAddr>,
+        path: Option<String>,
+        introspection: Option<bool>,
+        preview_defer_support: Option<bool>,
+        cache_redis_urls: Option<Vec<String>>,
+    ) -> Self {
+        Self {
+            listen: listen.unwrap_or_else(test_listen),
+            path: path.unwrap_or_else(default_graphql_path),
+            introspection: introspection.unwrap_or_else(default_graphql_introspection),
+            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            cache_redis_urls,
+        }
+    }
+}
+
+#[cfg(not(feature = "experimental_cache"))]
 #[buildstructor::buildstructor]
 impl Supergraph {
     #[builder]
@@ -479,6 +527,7 @@ impl Supergraph {
     }
 }
 
+#[cfg(not(feature = "experimental_cache"))]
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl Supergraph {
@@ -495,6 +544,18 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
         }
+    }
+}
+
+impl Supergraph {
+    #[cfg(feature = "experimental_cache")]
+    pub(crate) fn cache(&self) -> Option<Vec<String>> {
+        self.cache_redis_urls.clone()
+    }
+
+    #[cfg(not(feature = "experimental_cache"))]
+    pub(crate) fn cache(&self) -> Option<Vec<String>> {
+        None
     }
 }
 

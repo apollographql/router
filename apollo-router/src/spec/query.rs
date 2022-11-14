@@ -1,13 +1,18 @@
 //! Query processing.
 //!
 //! Parsing, formatting and manipulation of queries.
+#![allow(clippy::mutable_key_type)]
 
 use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_parser::ast;
+use apollo_parser::ast::AstNode;
 use derivative::Derivative;
 use graphql::Error;
+use serde::de::Visitor;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
@@ -24,7 +29,7 @@ use crate::*;
 pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative, Default)]
+#[derive(Debug, Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq)]
 pub(crate) struct Query {
     string: String,
@@ -33,7 +38,56 @@ pub(crate) struct Query {
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
-    pub(crate) subselections: HashMap<(Path, String), Query>,
+    pub(crate) subselections: HashMap<SubSelection, Query>,
+}
+
+#[derive(Debug, Derivative, Default)]
+#[derivative(PartialEq, Hash, Eq)]
+pub(crate) struct SubSelection {
+    pub(crate) path: Path,
+    pub(crate) subselection: String,
+}
+
+impl Serialize for SubSelection {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let s = format!("{}|{}", self.path, self.subselection);
+        serializer.serialize_str(&s)
+    }
+}
+
+impl<'de> Deserialize<'de> for SubSelection {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SubSelectionVisitor)
+    }
+}
+
+struct SubSelectionVisitor;
+impl<'de> Visitor<'de> for SubSelectionVisitor {
+    type Value = SubSelection;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("a string containing the path and the subselection separated by |")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if let Some((path, subselection)) = s.split_once('|') {
+            Ok(SubSelection {
+                path: Path::from(path),
+                subselection: subselection.to_string(),
+            })
+        } else {
+            Err(E::custom("invalid subselection"))
+        }
+    }
 }
 
 impl Query {
@@ -56,10 +110,10 @@ impl Query {
             if is_deferred {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
-                    match self.subselections.get(&(
-                        response.path.clone().unwrap_or_default(),
-                        subselection.clone(),
-                    )) {
+                    match self.subselections.get(&SubSelection {
+                        path: response.path.clone().unwrap_or_default(),
+                        subselection: subselection.clone(),
+                    }) {
                         Some(subselection_query) => {
                             let mut output = Object::default();
                             let operation = &subselection_query.operations[0];
@@ -101,7 +155,9 @@ impl Query {
                     operation
                         .variables
                         .iter()
-                        .filter_map(|(k, (_, opt))| opt.as_ref().map(|v| (k, v)))
+                        .filter_map(|(k, Variable { default_value, .. })| {
+                            default_value.as_ref().map(|v| (k, v))
+                        })
                         .chain(variables.iter())
                         .map(|(k, v)| (k.clone(), v.clone()))
                         .collect()
@@ -776,19 +832,27 @@ impl Query {
 
         let errors = operation_variable_types
             .iter()
-            .filter_map(|(name, (ty, default_value))| {
-                let value = request
-                    .variables
-                    .get(*name)
-                    .or(default_value.as_ref())
-                    .unwrap_or(&Value::Null);
-                ty.validate_input_value(value, schema).err().map(|_| {
-                    FetchError::ValidationInvalidTypeVariable {
-                        name: name.to_string(),
-                    }
-                    .to_graphql_error(None)
-                })
-            })
+            .filter_map(
+                |(
+                    name,
+                    Variable {
+                        field_type: ty,
+                        default_value,
+                    },
+                )| {
+                    let value = request
+                        .variables
+                        .get(*name)
+                        .or(default_value.as_ref())
+                        .unwrap_or(&Value::Null);
+                    ty.validate_input_value(value, schema).err().map(|_| {
+                        FetchError::ValidationInvalidTypeVariable {
+                            name: name.to_string(),
+                        }
+                        .to_graphql_error(None)
+                    })
+                },
+            )
             .collect::<Vec<_>>();
 
         if errors.is_empty() {
@@ -825,7 +889,7 @@ impl Query {
         self.operation(operation_name).and_then(|op| {
             op.variables
                 .get(variable_name)
-                .and_then(|(_, value)| value.as_ref())
+                .and_then(|Variable { default_value, .. }| default_value.as_ref())
         })
     }
 
@@ -854,12 +918,18 @@ struct FormatParameters<'a> {
     schema: &'a Schema,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct Operation {
     name: Option<String>,
     kind: OperationKind,
     selection_set: Vec<Selection>,
-    variables: HashMap<ByteString, (FieldType, Option<Value>)>,
+    variables: HashMap<ByteString, Variable>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub(crate) struct Variable {
+    field_type: FieldType,
+    default_value: Option<Value>,
 }
 
 impl Operation {
@@ -926,7 +996,10 @@ impl Operation {
 
                 Ok((
                     ByteString::from(name),
-                    (ty, parse_default_value(&definition)),
+                    Variable {
+                        field_type: ty,
+                        default_value: parse_default_value(&definition),
+                    },
                 ))
             })
             .collect::<Result<_, _>>()?;
@@ -1000,7 +1073,13 @@ pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => Some(String::from(s).into()),
         ast::Value::FloatValue(f) => Some(f64::from(f).into()),
-        ast::Value::IntValue(i) => Some(i32::from(i).into()),
+        ast::Value::IntValue(i) => {
+            let s = i.source_string();
+            s.parse::<i64>()
+                .ok()
+                .map(Into::into)
+                .or_else(|| s.parse::<u64>().ok().map(Into::into))
+        }
         ast::Value::BooleanValue(b) => Some(bool::from(b).into()),
         ast::Value::NullValue(_) => Some(Value::Null),
         ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
