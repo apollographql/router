@@ -218,7 +218,6 @@ impl Plugin for Telemetry {
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
-                    ::tracing::info!(counter.coucou = 1);
                     let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
