@@ -50,7 +50,7 @@ This will have a 500 HTTP status code with the specified message.
 
 It is not currently possible to return a 200 "error". If you try, it will be implicitly converted into a 500 error.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2097
 
 ### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
 
