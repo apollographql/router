@@ -65,3 +65,9 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 ## 📚 Documentation
+
+### Fix example `helm show values` command ([PR #2088](https://github.com/apollographql/router/pull/2088))
+
+The `helm show vaues` command needs to use the correct Helm chart reference `oci://ghcr.io/apollographql/helm-charts/router`.
+
+By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2088
