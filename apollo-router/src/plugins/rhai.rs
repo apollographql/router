@@ -1829,6 +1829,9 @@ mod tests {
             (response,),
         );
         result.expect("test failed");
+    }
+
+    #[test]
     fn it_can_urlencode_string() {
         let engine = Rhai::new_rhai_engine(None);
         let encoded: String = engine
