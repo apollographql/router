@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::Extension;
 use axum::extract::Host;
 use axum::extract::OriginalUri;
@@ -386,7 +387,7 @@ where
             .post({
                 move |host: Host,
                       uri: OriginalUri,
-                      request: Json<graphql::Request>,
+                      request: Result<Json<graphql::Request>, JsonRejection>,
                       Extension(service): Extension<RF>,
                       header_map: HeaderMap| {
                     {

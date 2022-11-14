@@ -218,6 +218,7 @@ impl Plugin for Telemetry {
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
+                    ::tracing::info!(counter.coucou = 1);
                     let config = config_map_res.clone();
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
@@ -400,6 +401,8 @@ impl Telemetry {
 
             #[cfg(not(feature = "console"))]
             {
+                let otel_metrics = builder.layers();
+                println!("otel_metrics : {}", otel_metrics.len());
                 let log_level = GLOBAL_ENV_FILTER
                     .get()
                     .map(|s| s.as_str())
@@ -415,7 +418,7 @@ impl Telemetry {
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                    let subscriber = sub.with(telemetry);
+                    let subscriber = sub.with(telemetry).with(otel_metrics);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -425,7 +428,8 @@ impl Telemetry {
                     let subscriber = sub_builder
                         .event_format(formatters::TextFormatter::new())
                         .finish()
-                        .with(telemetry);
+                        .with(telemetry)
+                        .with(otel_metrics);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -441,7 +445,8 @@ impl Telemetry {
                         })
                         .map_fmt_fields(|_f| JsonFields::new())
                         .finish()
-                        .with(telemetry);
+                        .with(telemetry)
+                        .with(otel_metrics);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }

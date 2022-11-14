@@ -82,8 +82,9 @@ impl MetricsConfigurator for Config {
                     .map(|(k, v)| KeyValue::new(k, v)),
             ))
             .build();
-            let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
+            let exporter = opentelemetry_prometheus::exporter(controller.clone()).try_init()?;
 
+            builder = builder.with_controller(controller);
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),
                 Endpoint::new(

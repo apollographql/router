@@ -270,6 +270,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -2,6 +2,7 @@
 use std::str::FromStr;
 
 use axum::body::StreamBody;
+use axum::extract::rejection::JsonRejection;
 use axum::extract::Host;
 use axum::extract::OriginalUri;
 use axum::http::header::HeaderMap;
@@ -89,11 +90,26 @@ pub(super) async fn handle_get(
 pub(super) async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
-    Json(request): Json<graphql::Request>,
+    request_json: Result<Json<graphql::Request>, JsonRejection>,
     apq: APQLayer,
     service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
+    let request = match request_json {
+        Ok(Json(req)) => req,
+        Err(json_err) => {
+            let json_err = json_err.into_response();
+            ::tracing::error!(
+                counter.apollo_router_http_requests_error_total = 1,
+                status = %json_err.status().as_u16(),
+                error = "Failed to parse the request body as JSON",
+                "Failed to parse the request body as JSON"
+            );
+
+            return json_err;
+        }
+    };
+
     let mut http_request = Request::post(
         Uri::from_str(&format!("http://{}{}", host, uri))
             .expect("the URL is already valid because it comes from axum; qed"),
@@ -124,15 +140,22 @@ where
 
             return match stream.next().await {
                 None => {
-                    tracing::error!("router service is not available to process request",);
+                    tracing::error!(
+                        counter.apollo_router_http_requests_error_total = 1,
+                        status = %StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+                        "router service is not available to process request"
+                    );
                     (
                         StatusCode::SERVICE_UNAVAILABLE,
                         "router service is not available to process request",
                     )
                         .into_response()
                 }
-                Some(body) => http_ext::Response::from(http::Response::from_parts(parts, body))
-                    .into_response(),
+                Some(body) => {
+                    tracing::info!(counter.apollo_router_http_requests_total = 1);
+                    http_ext::Response::from(http::Response::from_parts(parts, body))
+                        .into_response()
+                }
             };
         }
     };

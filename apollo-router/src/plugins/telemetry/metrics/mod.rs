@@ -7,10 +7,12 @@ use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
+use layer::MetricsLayer;
 use multimap::MultiMap;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::sdk::metrics::controllers::BasicController;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -32,6 +34,7 @@ use crate::ListenAddr;
 
 mod aggregation;
 pub(crate) mod apollo;
+pub(crate) mod layer;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 
@@ -454,6 +457,7 @@ pub(crate) struct MetricsBuilder {
     meter_providers: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics: Sender,
+    controllers: Vec<BasicController>,
 }
 
 impl MetricsBuilder {
@@ -470,9 +474,21 @@ impl MetricsBuilder {
     pub(crate) fn apollo_metrics_provider(&mut self) -> Sender {
         self.apollo_metrics.clone()
     }
+
+    pub(crate) fn layers(&mut self) -> Vec<MetricsLayer> {
+        std::mem::take(&mut self.controllers)
+            .into_iter()
+            .map(MetricsLayer::new)
+            .collect()
+    }
 }
 
 impl MetricsBuilder {
+    fn with_controller(mut self, controller: BasicController) -> Self {
+        self.controllers.push(controller);
+        self
+    }
+
     fn with_exporter<T: Send + Sync + 'static>(mut self, handle: T) -> Self {
         self.exporters.push(Box::new(handle));
         self
