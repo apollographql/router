@@ -1744,7 +1744,7 @@ mod tests {
             assert_eq!(processed_error.message, "I have raised a 403");
         } else {
             // Test failed
-            assert!(false);
+            panic!("error processed incorrectly");
         }
     }
 
@@ -1756,7 +1756,7 @@ mod tests {
             assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
         } else {
             // Test failed
-            assert!(false);
+            panic!("error processed incorrectly");
         }
     }
 
@@ -1768,7 +1768,7 @@ mod tests {
             assert_eq!(processed_error.message, "I have raised a 200");
         } else {
             // Test failed
-            assert!(false);
+            panic!("error processed incorrectly");
         }
     }
 
@@ -1782,7 +1782,7 @@ mod tests {
             assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
         } else {
             // Test failed
-            assert!(false);
+            panic!("error processed incorrectly");
         }
     }
 }
