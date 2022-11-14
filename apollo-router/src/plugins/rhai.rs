@@ -983,40 +983,51 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
         position: None,
     };
 
-    if let EvalAltResult::ErrorRuntime(obj, pos) = *error {
-        error_details.position = Some(pos);
-        // If we have a dynamic map, try to process it
-        if obj.is_map() {
-            let map = obj.cast::<Map>();
+    // We only want to process errors raised in functions
+    if let EvalAltResult::ErrorInFunctionCall(..) = &*error {
+        let inner_error = error.unwrap_inner();
+        // We only want to process runtime errors raised in functions
+        if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
+            error_details.position = Some(*pos);
+            // If we have a dynamic map, try to process it
+            if obj.is_map() {
+                // Clone is annoying, but we only have a reference, so...
+                let map = obj.clone().cast::<Map>();
 
-            let mut ed_status: Option<StatusCode> = None;
-            let mut ed_message: Option<String> = None;
+                let mut ed_status: Option<StatusCode> = None;
+                let mut ed_message: Option<String> = None;
 
-            let status_opt = map.get("status");
-            let message_opt = map.get("message");
+                let status_opt = map.get("status");
+                let message_opt = map.get("message");
 
-            // Now we have optional Dynamics
-            // Try to process each independently
-            if let Some(status_dyn) = status_opt {
-                if let Ok(value) = status_dyn.as_int() {
-                    if let Ok(status) = StatusCode::try_from(value as u16) {
-                        ed_status = Some(status);
+                // Now we have optional Dynamics
+                // Try to process each independently
+                if let Some(status_dyn) = status_opt {
+                    if let Ok(value) = status_dyn.as_int() {
+                        if let Ok(status) = StatusCode::try_from(value as u16) {
+                            ed_status = Some(status);
+                        }
                     }
                 }
-            }
 
-            if let Some(message_dyn) = message_opt {
-                let cloned = message_dyn.clone();
-                if let Ok(value) = cloned.into_string() {
-                    ed_message = Some(value);
+                if let Some(message_dyn) = message_opt {
+                    let cloned = message_dyn.clone();
+                    if let Ok(value) = cloned.into_string() {
+                        ed_message = Some(value);
+                    }
                 }
-            }
 
-            if let Some(status) = ed_status {
-                error_details.status = status;
-            }
-            if let Some(message) = ed_message {
-                error_details.message = message;
+                if let Some(status) = ed_status {
+                    // Decide in future if returning a 200 here is ok.
+                    // If it is, we can simply remove this check
+                    if status != StatusCode::OK {
+                        error_details.status = status;
+                    }
+                }
+
+                if let Some(message) = ed_message {
+                    error_details.message = message;
+                }
             }
         }
     }
@@ -1691,5 +1702,87 @@ mod tests {
             .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
             .expect("can decode string");
         assert_eq!(decoded, "This has an ümlaut in it.");
+    }
+
+    async fn base_process_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult>> {
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .get("apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Downcast our generic plugin. We know it must be Rhai
+        let it: &dyn std::any::Any = dyn_plugin.as_any();
+        let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+        // Get a scope to use for our test
+        let scope = rhai_instance.scope.clone();
+
+        let mut guard = scope.lock().unwrap();
+
+        // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
+        // happy
+        let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
+
+        // Call our rhai test function. If it doesn't return an error, the test failed.
+        rhai_instance
+            .engine
+            .call_fn(&mut guard, &rhai_instance.ast, fn_name, (response,))
+    }
+
+    #[tokio::test]
+    async fn it_can_process_om_subgraph_forbidden() {
+        if let Err(error) = base_process_function("process_subgraph_response_om_forbidden").await {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
+            assert_eq!(processed_error.message, "I have raised a 403");
+        } else {
+            // Test failed
+            assert!(false);
+        }
+    }
+
+    #[tokio::test]
+    async fn it_can_process_string_subgraph_forbidden() {
+        if let Err(error) = base_process_function("process_subgraph_response_string").await {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
+        } else {
+            // Test failed
+            assert!(false);
+        }
+    }
+
+    #[tokio::test]
+    async fn it_cannot_process_ok_subgraph_forbidden() {
+        if let Err(error) = base_process_function("process_subgraph_response_om_ok").await {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(processed_error.message, "I have raised a 200");
+        } else {
+            // Test failed
+            assert!(false);
+        }
+    }
+
+    #[tokio::test]
+    async fn it_cannot_process_om_subgraph_missing_message() {
+        if let Err(error) =
+            base_process_function("process_subgraph_response_om_missing_message").await
+        {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
+        } else {
+            // Test failed
+            assert!(false);
+        }
     }
 }
