@@ -735,6 +735,8 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
+                    skip,
+                    include,
                     ..
                 } => {
                     // top level objects will not provide a __typename field
@@ -742,6 +744,14 @@ impl Query {
                         != parameters.schema.root_operation_name(operation.kind)
                     {
                         return Err(InvalidValue);
+                    }
+
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                        continue;
                     }
 
                     self.apply_selection_set(
@@ -756,10 +766,33 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
-                    skip: _,
-                    include: _,
+                    skip,
+                    include,
                 } => {
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                        continue;
+                    }
+
                     if let Some(fragment) = self.fragments.get(name) {
+                        if fragment
+                            .skip
+                            .should_skip(parameters.variables)
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        if !fragment
+                            .include
+                            .should_include(parameters.variables)
+                            .unwrap_or(true)
+                        {
+                            continue;
+                        }
+
                         let operation_type_name =
                             parameters.schema.root_operation_name(operation.kind);
                         let is_apply = {
