@@ -125,11 +125,11 @@ Rather than persist with this complexity, we've concluded that it would be bette
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2085
 
-### Update `apollo-parser` to `v0.3.2` ([PR #TODO](https://github.com/apollographql/router/pull/TODO))
+### Update `apollo-parser` to `v0.3.2` ([PR #2103](https://github.com/apollographql/router/pull/2103))
 
 This updates our dependency on our `apollo-parser` package which brings a few improvements, including more defensive parsing of some operations.  See its CHANGELOG in [the `apollo-rs` repository](https://github.com/apollographql/apollo-rs/blob/main/crates/apollo-parser/CHANGELOG.md#032---2022-11-15) for more details.
 
-By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/TODO
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2103
 
 ## 📚 Documentation
 
