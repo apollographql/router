@@ -147,6 +147,7 @@ dependencies = [
  "access-json",
  "ansi_term",
  "anyhow",
+ "apollo-encoder",
  "apollo-parser",
  "askama",
  "async-compression",
