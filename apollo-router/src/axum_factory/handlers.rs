@@ -100,7 +100,7 @@ pub(super) async fn handle_post(
         Err(json_err) => {
             let json_err = json_err.into_response();
             ::tracing::error!(
-                counter.apollo_router_http_requests_error_total = 1,
+                counter.apollo_router_http_requests_total = 1,
                 status = %json_err.status().as_u16(),
                 error = "failed to parse the request body as JSON",
                 "failed to parse the request body as JSON"
@@ -141,7 +141,7 @@ where
             return match stream.next().await {
                 None => {
                     tracing::error!(
-                        counter.apollo_router_http_requests_error_total = 1,
+                        counter.apollo_router_http_requests_total = 1,
                         status = %StatusCode::SERVICE_UNAVAILABLE.as_u16(),
                         "router service is not available to process request"
                     );
