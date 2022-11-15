@@ -1704,10 +1704,10 @@ mod tests {
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body)
             .to_string()
-            .split("\n")
+            .split('\n')
             .filter(|l| l.contains("_count"))
             .sorted()
-            .join('\n');
+            .join("\n");
         assert_snapshot!(prom_metrics);
     }
 }
