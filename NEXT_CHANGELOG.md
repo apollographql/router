@@ -28,6 +28,30 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support for returning different HTTP status codes to rhai engine ([Issue #2023](https://github.com/apollographql/router/issues/2023))
+
+This feature now makes it possible to return different HTTP status codes when raising an exception in Rhai. You do this by providing an objectmap with two keys: status and message.
+
+```
+    throw #{
+        status: 403,
+        message: "I have raised a 403"
+    };
+```
+
+This would short-circuit request/response processing and set an HTTP status code of 403 in the client response and also set the error message.
+
+It is still possible to return errors as per the current method:
+
+```
+    throw "I have raised an error";
+```
+This will have a 500 HTTP status code with the specified message.
+
+It is not currently possible to return a 200 "error". If you try, it will be implicitly converted into a 500 error.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2097
+
 ### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
 
 Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
