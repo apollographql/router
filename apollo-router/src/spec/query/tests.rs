@@ -4111,6 +4111,120 @@ fn include() {
             },
         }})
         .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ...test @include(if: $shouldInclude)
+        }
+
+        fragment test on Query {
+            get {
+                id
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "shouldInclude": false
+        }})
+        .expected(json! {{
+            "get": {
+               "name": "a",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ...test @include(if: $shouldInclude)
+        }
+
+        fragment test on Query {
+            get {
+                id
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .expected(json! {{
+            "get": null,
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ... @include(if: $shouldInclude) {
+                get {
+                    id
+                }
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "shouldInclude": false
+        }})
+        .expected(json! {{
+            "get": {
+               "name": "a",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ... @include(if: $shouldInclude) {
+                get {
+                    id
+                }
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .expected(json! {{
+            "get": null,
+        }})
+        .test();
 }
 
 #[test]
