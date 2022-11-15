@@ -28,6 +28,30 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add support for returning different HTTP status codes to rhai engine ([Issue #2023](https://github.com/apollographql/router/issues/2023))
+
+This feature now makes it possible to return different HTTP status codes when raising an exception in Rhai. You do this by providing an objectmap with two keys: status and message.
+
+```
+    throw #{
+        status: 403,
+        message: "I have raised a 403"
+    };
+```
+
+This would short-circuit request/response processing and set an HTTP status code of 403 in the client response and also set the error message.
+
+It is still possible to return errors as per the current method:
+
+```
+    throw "I have raised an error";
+```
+This will have a 500 HTTP status code with the specified message.
+
+It is not currently possible to return a 200 "error". If you try, it will be implicitly converted into a 500 error.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2097
+
 ### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
 
 Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
@@ -54,6 +78,16 @@ request.query_plan
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2081
 
 ## 🐛 Fixes
+
+### Move the nullifying error messages to extension ([Issue #2071](https://github.com/apollographql/router/issues/2071))
+
+The Router was generating error messages when triggering nullability rules (when a non nullable field is null,
+it will nullify the parent object). Adding those messages in the list of errors was potentially redundant
+(subgraph can already add an error message indicating why a field is null) and could be treated as a failure by
+clients, while nullifying fields is a part of normal operation. We still add the messages in extensions so
+clients can easily debug why parts of the response were removed
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2077
 
 ### Fix `Float` input-type coercion for default values with values larger than 32-bits ([Issue #2087](https://github.com/apollographql/router/issues/2087))
 

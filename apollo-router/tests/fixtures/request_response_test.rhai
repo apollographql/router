@@ -112,3 +112,27 @@ fn process_execution_response(response) {
 fn process_subgraph_response(response) {
     process_common_response(response);
 }
+
+fn process_subgraph_response_om_forbidden(response) {
+    throw #{
+        status: 403,
+        message: "I have raised a 403"
+    };
+}
+
+fn process_subgraph_response_string(response) {
+    throw "I have raised an error";
+}
+
+fn process_subgraph_response_om_ok(response) {
+    throw #{
+        status: 200,
+        message: "I have raised a 200"
+    };
+}
+
+fn process_subgraph_response_om_missing_message(response) {
+    throw #{
+        status: 400,
+    };
+}

@@ -135,7 +135,11 @@ impl Query {
                                 },
                             );
 
-                            response.errors.extend(parameters.errors.into_iter());
+                            if !parameters.errors.is_empty() {
+                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                                    response.extensions.insert("value-completion", value);
+                                }
+                            }
 
                             return;
                         }
@@ -181,7 +185,11 @@ impl Query {
                         Err(InvalidValue) => Value::Null,
                     },
                 );
-                response.errors.extend(parameters.errors.into_iter());
+                if !parameters.errors.is_empty() {
+                    if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                        response.extensions.insert("value-completion", value);
+                    }
+                }
 
                 return;
             } else {
