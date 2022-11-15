@@ -404,7 +404,6 @@ impl Telemetry {
             #[cfg(not(feature = "console"))]
             {
                 let otel_metrics = builder.layers();
-                println!("otel_metrics : {}", otel_metrics.len());
                 let log_level = GLOBAL_ENV_FILTER
                     .get()
                     .map(|s| s.as_str())
