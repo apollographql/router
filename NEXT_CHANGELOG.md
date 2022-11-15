@@ -79,6 +79,16 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 
+### Move the nullifying error messages to extension ([Issue #2071](https://github.com/apollographql/router/issues/2071))
+
+The Router was generating error messages when triggering nullability rules (when a non nullable field is null,
+it will nullify the parent object). Adding those messages in the list of errors was potentially redundant
+(subgraph can already add an error message indicating why a field is null) and could be treated as a failure by
+clients, while nullifying fields is a part of normal operation. We still add the messages in extensions so
+clients can easily debug why parts of the response were removed
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2077
+
 ### Fix `Float` input-type coercion for default values with values larger than 32-bits ([Issue #2087](https://github.com/apollographql/router/issues/2087))
 
 A regression has been fixed which caused the Router to reject integers larger than 32-bits used as the default values on `Float` fields in input types.
