@@ -8,68 +8,60 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Add support for returning different HTTP status codes to rhai engine ([Issue #2023](https://github.com/apollographql/router/issues/2023))
+### Add support for returning different HTTP status codes in Rhai ([Issue #2023](https://github.com/apollographql/router/issues/2023))
 
-This feature now makes it possible to return different HTTP status codes when raising an exception in Rhai. You do this by providing an objectmap with two keys: status and message.
+It is now possible to return different HTTP status codes when raising an exception in Rhai. You do this by providing an object map with two keys: `status` and `message`, rather than merely a string as was the case previously.
 
+```rust
+throw #{
+    status: 403,
+    message: "I have raised a 403"
+};
 ```
-    throw #{
-        status: 403,
-        message: "I have raised a 403"
-    };
+
+This example will short-circuit request/response processing and return with an HTTP status code of 403 to the client and also set the error message accordingly.
+
+It is still possible to return errors using the current pattern, which will continue to return HTTP status code 500 as previously:
+
+```rust
+throw "I have raised an error";
 ```
 
-This would short-circuit request/response processing and set an HTTP status code of 403 in the client response and also set the error message.
-
-It is still possible to return errors as per the current method:
-
-```
-    throw "I have raised an error";
-```
-This will have a 500 HTTP status code with the specified message.
-
-It is not currently possible to return a 200 "error". If you try, it will be implicitly converted into a 500 error.
+> It is not currently possible to return a 200 status code using this pattern. If you try, it will be implicitly converted into a 500 error.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2097
 
-### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
+### Add support for `urlencode()` / `decode()` in Rhai ([Issue #2052](https://github.com/apollographql/router/issues/2052))
 
-Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
+Two new functions, `urlencode()` and `urldecode()` may now be used to URL-encode or URL-decode strings, respectively.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2053
 
 ### **Experimental** 🥼 External cache storage in Redis ([PR #2024](https://github.com/apollographql/router/pull/2024))
 
-implement caching in external storage for query plans, introspection and APQ. This is done as a multi level cache, first in
-memory with LRU then with a redis cluster backend. Since it is still experimental, it is opt-in through a Cargo feature.
+We are experimenting with introducing external storage for caches in the Router, which will provide a foundation for caching things like automated persisted queries (APQ) amongst other future-looking ideas.  Our initial implementation supports a multi-level cache hierarchy, first attempting an in-memory LRU-cache, proceeded by a Redis Cluster backend.
+
+As this is still experimental, it is only available as an opt-in through a Cargo feature-flag.
 
 By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
 
-### Add Query Plan access to ExecutionRequest ([PR #2081](https://github.com/apollographql/router/pull/2081))
+### Expose `query_plan` to `ExecutionRequest` ([PR #2081](https://github.com/apollographql/router/pull/2081))
 
-You can now access the query plan from an execution request:
-
-```
-request.query_plan
-```
-
-`request.context` also now supports the rhai `in` keyword.
+You can now read the query-plan from an execution request by accessing `request.query_plan`.  Additionally, `request.context` also now supports the Rhai `in` keyword.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2081
 
 ## 🐛 Fixes
 
-### Move the nullifying error messages to extension ([Issue #2071](https://github.com/apollographql/router/issues/2071))
+### Move error messages about nullifying into `extensions` ([Issue #2071](https://github.com/apollographql/router/issues/2071))
 
-The Router was generating error messages when triggering nullability rules (when a non nullable field is null,
-it will nullify the parent object). Adding those messages in the list of errors was potentially redundant
-(subgraph can already add an error message indicating why a field is null) and could be treated as a failure by
-clients, while nullifying fields is a part of normal operation. We still add the messages in extensions so
-clients can easily debug why parts of the response were removed
+The Router was previously creating and returning error messages in `errors` when nullability rules had been triggered (e.g., when a _non-nullable_ field was `null`, it nullifies the parent object).  These are now emitted into a `value-completion` portion of the `extensions` response.
+
+Adding those messages in the list of `errors` was potentially redundant and resulted in failures by clients (such as the Apollo Client error policy, by default) which would otherwise have expected nullified fields as part of normal operation execution.  Additionally, the subgraph could already add such an error message indicating why a field was null which would cause the error to be doubled.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2077
 
-### Fix `Float` input-type coercion for default values with values larger than 32-bits ([Issue #2087](https://github.com/apollographql/router/issues/2087))
+### Fix `Float` input-type coercion for default values with values larger than 32-bit ([Issue #2087](https://github.com/apollographql/router/issues/2087))
 
 A regression has been fixed which caused the Router to reject integers larger than 32-bits used as the default values on `Float` fields in input types.
 
@@ -85,13 +77,13 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### Assume `Accept: application/json` when no `Accept` header is present [Issue #1990](https://github.com/apollographql/router/issues/1990))
 
-the `Accept` header means `*/*` when it is absent.
+The `Accept` header means `*/*` when it is absent, and despite efforts to fix this previously, we still were not always doing the correct thing.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2078
 
-### Missing `@skip` and `@include` implementation for root operations ([Issue #2072](https://github.com/apollographql/router/issues/2072))
+### `@skip` and `@include` implementation for root-level fragment use ([Issue #2072](https://github.com/apollographql/router/issues/2072))
 
-`@skip` and `@include` were not implemented for inline fragments and fragment spreads on top level operations.
+The `@skip` and `@include` directives are now implemented for both inline fragments and fragment spreads at the top-level of operations.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2096
 
