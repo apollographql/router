@@ -136,10 +136,9 @@ impl Query {
                             );
 
                             if !parameters.errors.is_empty() {
-                                response.extensions.insert(
-                                    "nullability",
-                                    serde_json_bytes::to_value(&parameters.errors).unwrap(),
-                                );
+                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                                    response.extensions.insert("value-completion", value);
+                                }
                             }
 
                             return;
@@ -187,10 +186,9 @@ impl Query {
                     },
                 );
                 if !parameters.errors.is_empty() {
-                    response.extensions.insert(
-                        "nullability",
-                        serde_json_bytes::to_value(&parameters.errors).unwrap(),
-                    );
+                    if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                        response.extensions.insert("value-completion", value);
+                    }
                 }
 
                 return;
