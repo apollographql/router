@@ -102,20 +102,27 @@ pub(super) async fn decompress_request_body(
                 "deflate" => decode_body!(ZlibDecoder, "cannot decompress (deflate) request body"),
                 "identity" => Ok(next.run(Request::from_parts(parts, body)).await),
                 unknown => {
-                    tracing::error!("unknown content-encoding header value {:?}", unknown);
-                    Err((
-                        StatusCode::BAD_REQUEST,
-                        format!("unknown content-encoding header value: {unknown:?}"),
-                    )
-                        .into_response())
+                    let message = format!("unknown content-encoding header value {:?}", unknown);
+                    tracing::error!(message);
+                    ::tracing::error!(
+                       monotonic_counter.apollo_router_http_requests_total = 1u64,
+                       status = %400u16,
+                       error = %message,
+                    );
+
+                    Err((StatusCode::BAD_REQUEST, message).into_response())
                 }
             },
 
-            Err(err) => Err((
-                StatusCode::BAD_REQUEST,
-                format!("cannot read content-encoding header: {err}"),
-            )
-                .into_response()),
+            Err(err) => {
+                let message = format!("cannot read content-encoding header: {err}");
+                ::tracing::error!(
+                   monotonic_counter.apollo_router_http_requests_total = 1u64,
+                   status = %400u16,
+                   error = %message,
+                );
+                Err((StatusCode::BAD_REQUEST, message).into_response())
+            }
         },
         None => Ok(next.run(Request::from_parts(parts, body)).await),
     }
@@ -134,6 +141,12 @@ pub(super) async fn check_accept_header(
     {
         Ok(next.run(req).await)
     } else {
+        ::tracing::error!(
+            monotonic_counter.apollo_router_http_requests_total = 1u64,
+            status = %406u16,
+            error = "accept header is wrong",
+        );
+
         Err((
             StatusCode::NOT_ACCEPTABLE,
             format!(
