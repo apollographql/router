@@ -19,12 +19,12 @@ use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 
+use super::METRIC_PREFIX_COUNTER;
+use super::METRIC_PREFIX_HISTOGRAM;
+use super::METRIC_PREFIX_MONOTONIC_COUNTER;
+
 const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
 const INSTRUMENTATION_LIBRARY_NAME: &str = "tracing/tracing-opentelemetry";
-
-const METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
-const METRIC_PREFIX_COUNTER: &str = "counter.";
-const METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
 const I64_MAX: u64 = i64::MAX as u64;
 
 #[derive(Default)]
@@ -77,6 +77,7 @@ impl Instruments {
             // that metric did not already exist, so we have to acquire a write lock to
             // create it.
             let mut lock = map.write().unwrap();
+
             // handle the case where the entry was created while we were waiting to
             // acquire the write lock
             let metric = lock.entry(name).or_insert_with(insert);

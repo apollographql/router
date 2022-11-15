@@ -49,6 +49,8 @@ use crate::Schema;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 
+pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
+
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
@@ -257,7 +259,7 @@ async fn plan_query(
                 .context(context)
                 .build(),
         )
-        .instrument(tracing::info_span!("query_planning",
+        .instrument(tracing::info_span!(QUERY_PLANNING_SPAN_NAME,
             graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
             graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
             "otel.kind" = ?SpanKind::Internal

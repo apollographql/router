@@ -29,6 +29,7 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
@@ -66,6 +67,8 @@ use crate::plugins::telemetry::apollo::ENDPOINT_INVALID;
 use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::formatters::filter_metric_events;
+use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::formatters::JsonFields;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -100,6 +103,7 @@ mod otlp;
 mod tracing;
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
+pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -142,6 +146,11 @@ fn setup_tracing<T: TracingConfigurator>(
 ) -> Result<Builder, BoxError> {
     if let Some(config) = configurator {
         builder = config.apply(builder, tracing_config)?;
+        let exporter = metrics::span_metrics_exporter::Exporter {};
+        // For metrics
+        builder = builder.with_span_processor(
+            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio).build(),
+        );
     }
     Ok(builder)
 }
@@ -264,7 +273,7 @@ impl Plugin for Telemetry {
                     .operation_name
                     .clone()
                     .unwrap_or_default();
-                info_span!("execution",
+                info_span!(EXECUTION_SPAN_NAME,
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = ?SpanKind::Internal,
@@ -425,7 +434,10 @@ impl Telemetry {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
                     let subscriber = sub_builder
-                        .event_format(formatters::TextFormatter::new())
+                        .event_format(FilteringFormatter::new(
+                            formatters::TextFormatter::new(),
+                            filter_metric_events,
+                        ))
                         .finish()
                         .with(telemetry)
                         .with(otel_metrics);
@@ -437,10 +449,13 @@ impl Telemetry {
 
                     let subscriber = sub_builder
                         .map_event_format(|e| {
-                            e.json()
-                                .with_current_span(true)
-                                .with_span_list(true)
-                                .flatten_event(true)
+                            FilteringFormatter::new(
+                                e.json()
+                                    .with_current_span(true)
+                                    .with_span_list(true)
+                                    .flatten_event(true),
+                                filter_metric_events,
+                            )
                         })
                         .map_fmt_fields(|_f| JsonFields::new())
                         .finish()
