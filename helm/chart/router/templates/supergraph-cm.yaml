@@ -9,5 +9,5 @@ metadata:
     {{- include "router.labels" . | nindent 4 }}
 data:
   supergraph.graphql: |-
-{{ .Files.Get .Values.supergraphFile | indent 4 }}
+{{ .Values.supergraphFile | indent 4 }}
 {{- end }}
