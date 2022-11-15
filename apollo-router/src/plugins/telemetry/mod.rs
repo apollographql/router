@@ -1190,6 +1190,9 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
         opentelemetry::global::Error::Trace(err) => {
             ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
         }
+        opentelemetry::global::Error::Metric(err_msg) => {
+            ::tracing::error!("OpenTelemetry metric error occurred: {}", err_msg)
+        }
         opentelemetry::global::Error::Other(err_msg) => {
             ::tracing::error!("OpenTelemetry error occurred: {}", err_msg)
         }
