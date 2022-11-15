@@ -756,11 +756,6 @@ impl Telemetry {
 
                 if !parts.status.is_success() {
                     metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
-                    metrics.http_requests_error_total.add(
-                        &opentelemetry::Context::current(),
-                        1,
-                        &metric_attrs,
-                    );
                 }
                 let response = http::Response::from_parts(
                     parts,
@@ -1002,7 +997,7 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_error_total.add(
+                metrics.http_requests_total.add(
                     &opentelemetry::Context::current(),
                     1,
                     &metric_attrs,
@@ -1047,7 +1042,7 @@ impl Telemetry {
                     );
                 }
 
-                metrics.http_requests_error_total.add(
+                metrics.http_requests_total.add(
                     &opentelemetry::Context::current(),
                     1,
                     &metric_attrs,

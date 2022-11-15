@@ -68,10 +68,11 @@ impl SpanExporter for Exporter {
                 ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name, subgraph = %subgraph_name);
                 ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name, subgraph = %subgraph_name);
                 ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name, subgraph = %subgraph_name);
+            } else {
+                ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name);
+                ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name);
+                ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name);
             }
-            ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name);
-            ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name);
-            ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name);
         }
 
         async { Ok(()) }.boxed()

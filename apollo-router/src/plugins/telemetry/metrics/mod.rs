@@ -529,7 +529,6 @@ pub(crate) trait MetricsConfigurator {
 #[derive(Clone)]
 pub(crate) struct BasicMetrics {
     pub(crate) http_requests_total: Counter<u64>,
-    pub(crate) http_requests_error_total: Counter<u64>,
     pub(crate) http_requests_duration: Histogram<f64>,
 }
 
@@ -540,10 +539,6 @@ impl Default for BasicMetrics {
             http_requests_total: meter
                 .u64_counter("apollo_router_http_requests_total")
                 .with_description("Total number of HTTP requests made.")
-                .init(),
-            http_requests_error_total: meter
-                .u64_counter("apollo_router_http_requests_error_total")
-                .with_description("Total number of HTTP requests in error made.")
                 .init(),
             http_requests_duration: meter
                 .f64_histogram("apollo_router_http_request_duration_seconds")
