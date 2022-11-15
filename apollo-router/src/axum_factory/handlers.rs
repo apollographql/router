@@ -100,7 +100,7 @@ pub(super) async fn handle_post(
         Err(json_err) => {
             let json_err = json_err.into_response();
             ::tracing::error!(
-                counter.apollo_router_http_requests_total = 1,
+                monotonic_counter.apollo_router_http_requests_total = 1u64,
                 status = %json_err.status().as_u16(),
                 error = "failed to parse the request body as JSON",
                 "failed to parse the request body as JSON"
