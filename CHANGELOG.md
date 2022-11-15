@@ -55,7 +55,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Move error messages about nullifying into `extensions` ([Issue #2071](https://github.com/apollographql/router/issues/2071))
 
-The Router was previously creating and returning error messages in `errors` when nullability rules had been triggered (e.g., when a _non-nullable_ field was `null`, it nullifies the parent object).  These are now emitted into a `value-completion` portion of the `extensions` response.
+The Router was previously creating and returning error messages in `errors` when nullability rules had been triggered (e.g., when a _non-nullable_ field was `null`, it nullifies the parent object).  These are now emitted into a `valueCompletion` portion of the `extensions` response.
 
 Adding those messages in the list of `errors` was potentially redundant and resulted in failures by clients (such as the Apollo Client error policy, by default) which would otherwise have expected nullified fields as part of normal operation execution.  Additionally, the subgraph could already add such an error message indicating why a field was null which would cause the error to be doubled.
 
