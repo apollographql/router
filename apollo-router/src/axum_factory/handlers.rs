@@ -141,7 +141,7 @@ where
             return match stream.next().await {
                 None => {
                     tracing::error!(
-                        counter.apollo_router_http_requests_total = 1,
+                        monotonic_counter.apollo_router_http_requests_total = 1u64,
                         status = %StatusCode::SERVICE_UNAVAILABLE.as_u16(),
                         "router service is not available to process request"
                     );
@@ -152,7 +152,7 @@ where
                         .into_response()
                 }
                 Some(body) => {
-                    tracing::info!(counter.apollo_router_http_requests_total = 1);
+                    tracing::info!(monotonic_counter.apollo_router_http_requests_total = 1u64);
                     http_ext::Response::from(http::Response::from_parts(parts, body))
                         .into_response()
                 }
