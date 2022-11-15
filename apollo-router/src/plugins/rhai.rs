@@ -1072,8 +1072,11 @@ impl Rhai {
             ast: self.ast.clone(),
         };
         let mut guard = scope.lock().unwrap();
-        // TODO: LOOKS LIKE WE'VE NEVER BEEN HANDLING THROWN ERRORS HERE. WHEN FINISHED UPDATING
-        // OTHER CODE, MAKE SURE TO DO THIS HERE AS WELL
+        // Note: We don't use `process_error()` here, because this code executes in the context of
+        // the pipeline processing. We can't return an HTTP error, we can only return a boxed
+        // service which represents the next stage of the pipeline.
+        // We could have an error pipeline which always returns results, but that's a big
+        // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
                 self.engine
