@@ -69,6 +69,30 @@ fn supergraph_service(service) {
 }
 ```
 
+If you wish to have more control over the HTTP status code returned to the client, then you can throw an error which is an objectmap with keys: status and message.
+
+The key must be a number and the message must be something which can be converted to a string.
+
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Something goes wrong during response processing...
+        throw #{
+            status: 400,
+            message: "An error occurred processing the response..."
+        };
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+
+Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+
 ## Timing execution
 
 Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
@@ -116,6 +140,27 @@ fn supergraph_service(service) {
     {
         // log any errors
         log_error(`span id error: ${err}`);
+    }
+}
+```
+
+## url encode/decode strings
+
+Your Rhai customization can use the functions `urlencode()` and `urldecode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = urlencode(original);
+    // encoded will be "alice%20and%20bob"
+    try {
+        let and_back = urldecode(encoded);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`urldecode error: ${err}`);
     }
 }
 ```

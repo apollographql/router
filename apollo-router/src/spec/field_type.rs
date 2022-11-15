@@ -1,4 +1,6 @@
 use apollo_parser::ast;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
@@ -8,7 +10,7 @@ use crate::*;
 pub(crate) struct InvalidValue;
 
 // Primitives are taken from scalars: https://spec.graphql.org/draft/#sec-Scalars
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum FieldType {
     /// Only used for introspection queries when types are prefixed by __
     Introspection(String),
