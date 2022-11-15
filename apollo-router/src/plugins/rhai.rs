@@ -1067,6 +1067,18 @@ impl Rhai {
                     Err(_e) => false,
                 }
             })
+            // Register urlencode/decode functions
+            .register_fn("urlencode", |x: &mut ImmutableString| -> String {
+                urlencoding::encode(x).into_owned()
+            })
+            .register_fn(
+                "urldecode",
+                |x: &mut ImmutableString| -> Result<String, Box<EvalAltResult>> {
+                    Ok(urlencoding::decode(x)
+                        .map_err(|e| e.to_string())?
+                        .into_owned())
+                },
+            )
             .register_fn(
                 "headers_are_available",
                 |_: &mut SharedMut<supergraph::Response>| -> bool { true },
@@ -1668,5 +1680,23 @@ mod tests {
             .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
             .expect("can get sdl");
         assert_eq!(sdl.as_str(), "");
+    }
+
+    #[test]
+    fn it_can_urlencode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let encoded: String = engine
+            .eval(r#"urlencode("This has an ümlaut in it.")"#)
+            .expect("can encode string");
+        assert_eq!(encoded, "This%20has%20an%20%C3%BCmlaut%20in%20it.");
+    }
+
+    #[test]
+    fn it_can_urldecode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let decoded: String = engine
+            .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
+            .expect("can decode string");
+        assert_eq!(decoded, "This has an ümlaut in it.");
     }
 }
