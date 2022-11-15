@@ -1707,7 +1707,7 @@ mod tests {
             .split("\n")
             .filter(|l| l.contains("_count"))
             .sorted()
-            .join("\n");
+            .join('\n');
         assert_snapshot!(prom_metrics);
     }
 }
