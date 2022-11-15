@@ -65,7 +65,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Missing `@skip` and `@include` implementation for root operations ([Issue #2072](https://github.com/apollographql/router/issues/2072))
 
-`@skip` and `@include` were not implemented for inline fratgments and fragment spreads on top level operations.
+`@skip` and `@include` were not implemented for inline fragments and fragment spreads on top level operations.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2096
 
