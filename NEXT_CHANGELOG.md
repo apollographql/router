@@ -41,6 +41,18 @@ memory with LRU then with a redis cluster backend. Since it is still experimenta
 
 By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
 
+### Add Query Plan access to ExecutionRequest ([PR #2081](https://github.com/apollographql/router/pull/2081))
+
+You can now access the query plan from an execution request:
+
+```
+request.query_plan
+```
+
+`request.context` also now supports the rhai `in` keyword.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2081
+
 ## 🐛 Fixes
 
 ### Fix `Float` input-type coercion for default values with values larger than 32-bits ([Issue #2087](https://github.com/apollographql/router/issues/2087))
