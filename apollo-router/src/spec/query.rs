@@ -226,6 +226,17 @@ impl Query {
         let document = tree.document();
         let fragments = Fragments::from_ast(&document, schema)?;
 
+        let ast_fragments = document
+            .definitions()
+            .filter_map(|def| match def {
+                ast::Definition::FragmentDefinition(f) => f
+                    .fragment_name()
+                    .and_then(|f| f.name())
+                    .map(|n| (n.text().to_string(), f)),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+
         let operations: Vec<Operation> = document
             .definitions()
             .filter_map(|definition| {
@@ -235,7 +246,7 @@ impl Query {
                     None
                 }
             })
-            .map(|operation| Operation::from_ast(operation, schema))
+            .map(|operation| Operation::from_ast(operation, &ast_fragments, schema))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
@@ -938,8 +949,12 @@ impl Operation {
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
-        extract_subqueries(&operation, schema);
+    fn from_ast(
+        operation: ast::OperationDefinition,
+        fragments: &HashMap<String, ast::FragmentDefinition>,
+        schema: &Schema,
+    ) -> Result<Self, SpecError> {
+        extract_subqueries(&operation, fragments, schema);
         let name = operation.name().map(|x| x.text().to_string());
 
         let kind = operation
@@ -1045,15 +1060,24 @@ impl Operation {
     }
 }
 
-fn extract_subqueries(operation: &ast::OperationDefinition, schema: &Schema) {
+fn extract_subqueries(
+    operation: &ast::OperationDefinition,
+    fragments: &HashMap<String, ast::FragmentDefinition>,
+    schema: &Schema,
+) {
     let mut v = Vec::new();
 
     //let op: apollo_encoder::OperationDefinition = operation.clone().try_into().unwrap();
-    extract_operation(&operation, schema, &mut v);
+    extract_operation(&operation, fragments, schema, &mut v);
     println!("subqueries: {:#?}", v);
 }
 
-fn extract_operation(operation: &ast::OperationDefinition, schema: &Schema, v: &mut Vec<String>) {
+fn extract_operation(
+    operation: &ast::OperationDefinition,
+    fragments: &HashMap<String, ast::FragmentDefinition>,
+    schema: &Schema,
+    v: &mut Vec<String>,
+) {
     let name: Option<String> = operation.name().map(|n| n.text().to_string().into());
     let op_type: apollo_encoder::OperationType = operation
         .operation_type()
@@ -1061,11 +1085,22 @@ fn extract_operation(operation: &ast::OperationDefinition, schema: &Schema, v: &
         .unwrap_or(apollo_encoder::OperationType::Query);
 
     if let Some(selection_set) = operation.selection_set() {
-        for selection_set in extract_selection_set(&selection_set, schema) {
+        for selection_set in extract_selection_set(&selection_set, fragments, schema) {
             let mut document = apollo_encoder::Document::new();
 
             let mut operation = apollo_encoder::OperationDefinition::new(
-                apollo_encoder::OperationType::Query,
+                //apollo_encoder::OperationType is not Clone yet
+                match &op_type {
+                    apollo_encoder::OperationType::Query => apollo_encoder::OperationType::Query,
+                    apollo_encoder::OperationType::Mutation => {
+                        apollo_encoder::OperationType::Mutation
+                    }
+                    apollo_encoder::OperationType::Subscription => {
+                        apollo_encoder::OperationType::Subscription
+                    }
+                },
+                //op_type.clone(),
+                //apollo_encoder::OperationType::Query,
                 selection_set,
             );
             operation.name(name.clone());
@@ -1080,6 +1115,7 @@ fn extract_operation(operation: &ast::OperationDefinition, schema: &Schema, v: &
 
 fn extract_selection_set(
     selection_set: &ast::SelectionSet,
+    fragments: &HashMap<String, ast::FragmentDefinition>,
     schema: &Schema,
 ) -> impl Iterator<Item = apollo_encoder::SelectionSet> {
     let mut primary_selection_set = Vec::new();
@@ -1087,9 +1123,11 @@ fn extract_selection_set(
 
     for selection in selection_set.selections() {
         match selection {
-            ast::Selection::Field(f) => {
-                primary_selection_set.push(extract_selection(&ast::Selection::Field(f), schema))
-            }
+            ast::Selection::Field(f) => primary_selection_set.push(extract_selection(
+                &ast::Selection::Field(f),
+                fragments,
+                schema,
+            )),
             ast::Selection::FragmentSpread(f) => {
                 if f.directives()
                     .map(|d| {
@@ -1103,11 +1141,13 @@ fn extract_selection_set(
                 {
                     deferred_selection_set.push(extract_selection(
                         &ast::Selection::FragmentSpread(f),
+                        fragments,
                         schema,
                     ));
                 } else {
                     primary_selection_set.push(extract_selection(
                         &ast::Selection::FragmentSpread(f),
+                        fragments,
                         schema,
                     ));
                 }
@@ -1125,11 +1165,13 @@ fn extract_selection_set(
                 {
                     deferred_selection_set.push(extract_selection(
                         &ast::Selection::InlineFragment(f),
+                        fragments,
                         schema,
                     ));
                 } else {
                     primary_selection_set.push(extract_selection(
                         &ast::Selection::InlineFragment(f),
+                        fragments,
                         schema,
                     ));
                 }
@@ -1161,8 +1203,7 @@ fn extract_selection_set(
 
 fn extract_selection(
     selection: &ast::Selection,
-    //operation_type: ast::OperationType,
-    //operation_name: Option<&str>,
+    fragments: &HashMap<String, ast::FragmentDefinition>,
     schema: &Schema,
 ) -> impl Iterator<Item = apollo_encoder::Selection> {
     match selection {
@@ -1191,14 +1232,15 @@ fn extract_selection(
             match field.selection_set().as_ref() {
                 None => Box::new(std::iter::once(apollo_encoder::Selection::Field(f)))
                     as Box<dyn Iterator<Item = apollo_encoder::Selection>>,
-                Some(selection_set) => Box::new(extract_selection_set(selection_set, schema).map(
-                    move |selection_set| {
-                        let mut new_field = f.clone();
-                        new_field.selection_set(Some(selection_set));
-                        apollo_encoder::Selection::Field(new_field)
-                    },
-                ))
-                    as Box<dyn Iterator<Item = apollo_encoder::Selection>>,
+                Some(selection_set) => {
+                    Box::new(extract_selection_set(selection_set, fragments, schema).map(
+                        move |selection_set| {
+                            let mut new_field = f.clone();
+                            new_field.selection_set(Some(selection_set));
+                            apollo_encoder::Selection::Field(new_field)
+                        },
+                    )) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
+                }
             }
         }
         ast::Selection::FragmentSpread(fragment) => {
@@ -1208,7 +1250,39 @@ fn extract_selection(
                 .map(|n| n.text().to_string())
                 .unwrap();
 
-            let mut f = apollo_encoder::FragmentSpread::new(name);
+            let named = fragments.get(&name).unwrap();
+
+            let type_condition = named.type_condition().and_then(|ty| ty.try_into().ok());
+
+            let mut directives: Vec<apollo_encoder::Directive> = fragment
+                .directives()
+                .into_iter()
+                .map(|dir| dir.directives())
+                .flatten()
+                .filter_map(|directive| directive.try_into().ok())
+                .collect::<Vec<_>>();
+
+            directives.extend(
+                named
+                    .directives()
+                    .into_iter()
+                    .map(|dir| dir.directives())
+                    .flatten()
+                    .filter_map(|directive| directive.try_into().ok()),
+            );
+
+            Box::new(
+                extract_selection_set(named.selection_set().as_ref().unwrap(), fragments, schema)
+                    .map(move |selection_set| {
+                        let mut f = apollo_encoder::InlineFragment::new(selection_set);
+                        f.type_condition(type_condition.clone());
+                        for directive in directives.iter() {
+                            f.directive(directive.clone());
+                        }
+                        apollo_encoder::Selection::InlineFragment(f)
+                    }),
+            ) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
+            /*let mut f = apollo_encoder::FragmentSpread::new(name);
             for directive in fragment
                 .directives()
                 .into_iter()
@@ -1221,15 +1295,7 @@ fn extract_selection(
 
             Box::new(std::iter::once(apollo_encoder::Selection::FragmentSpread(
                 f,
-            ))) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-
-            /*extract_selection_set(fragment.selection_set().as_ref().unwrap(), schema).map(
-                move |selection_set| {
-                    let mut new_fragment = f.clone();
-                    new_fragment.selection_set(Some(selection_set));
-                    apollo_encoder::Selection::FragmentSpread(new_fragment)
-                },
-            )*/
+            ))) as Box<dyn Iterator<Item = apollo_encoder::Selection>>*/
         }
         ast::Selection::InlineFragment(fragment) => {
             let type_condition = fragment.type_condition().and_then(|ty| ty.try_into().ok());
@@ -1243,16 +1309,19 @@ fn extract_selection(
                 .collect::<Vec<apollo_encoder::Directive>>();
 
             Box::new(
-                extract_selection_set(fragment.selection_set().as_ref().unwrap(), schema).map(
-                    move |selection_set| {
-                        let mut f = apollo_encoder::InlineFragment::new(selection_set);
-                        f.type_condition(type_condition.clone());
-                        for directive in directives.iter() {
-                            f.directive(directive.clone());
-                        }
-                        apollo_encoder::Selection::InlineFragment(f)
-                    },
-                ),
+                extract_selection_set(
+                    fragment.selection_set().as_ref().unwrap(),
+                    fragments,
+                    schema,
+                )
+                .map(move |selection_set| {
+                    let mut f = apollo_encoder::InlineFragment::new(selection_set);
+                    f.type_condition(type_condition.clone());
+                    for directive in directives.iter() {
+                        f.directive(directive.clone());
+                    }
+                    apollo_encoder::Selection::InlineFragment(f)
+                }),
             ) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
         }
     }
