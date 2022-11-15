@@ -526,7 +526,6 @@ macro_rules! gen_map_request {
                         return failure_message(
                             request_opt.unwrap().context,
                             error_details,
-                            // format!("rhai execution error: '{}'", error),
                         );
                     }
                     let mut guard = shared_request.lock().unwrap();
