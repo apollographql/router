@@ -2858,6 +2858,25 @@ fn merge_selections() {
 }
 
 #[test]
+fn it_parses_default_floats() {
+    let schema = with_supergraph_boilerplate(
+        r#"
+        type Query {
+            name: String
+        }
+
+        input WithAllKindsOfFloats {
+            a_regular_float: Float = 1.2
+            an_integer_float: Float = 1234
+            a_float_that_doesnt_fit_an_int: Float = 9876543210
+        }
+        "#,
+    );
+
+    Schema::parse(&schema, &Default::default()).unwrap();
+}
+
+#[test]
 fn it_statically_includes() {
     let schema = with_supergraph_boilerplate(
         "type Query {
@@ -4081,6 +4100,120 @@ fn include() {
                 "id": "a",
                 "name": "Chair",
             },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ...test @include(if: $shouldInclude)
+        }
+
+        fragment test on Query {
+            get {
+                id
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "shouldInclude": false
+        }})
+        .expected(json! {{
+            "get": {
+               "name": "a",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ...test @include(if: $shouldInclude)
+        }
+
+        fragment test on Query {
+            get {
+                id
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .expected(json! {{
+            "get": null,
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ... @include(if: $shouldInclude) {
+                get {
+                    id
+                }
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "shouldInclude": false
+        }})
+        .expected(json! {{
+            "get": {
+               "name": "a",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ... @include(if: $shouldInclude) {
+                get {
+                    id
+                }
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .expected(json! {{
+            "get": null,
         }})
         .test();
 }

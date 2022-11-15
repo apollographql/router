@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_parser::ast;
+use apollo_parser::ast::AstNode;
 use derivative::Derivative;
 use graphql::Error;
 use serde::de::Visitor;
@@ -734,6 +735,8 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
+                    skip,
+                    include,
                     ..
                 } => {
                     // top level objects will not provide a __typename field
@@ -741,6 +744,14 @@ impl Query {
                         != parameters.schema.root_operation_name(operation.kind)
                     {
                         return Err(InvalidValue);
+                    }
+
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                        continue;
                     }
 
                     self.apply_selection_set(
@@ -755,10 +766,33 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
-                    skip: _,
-                    include: _,
+                    skip,
+                    include,
                 } => {
+                    if skip.should_skip(parameters.variables).unwrap_or(false) {
+                        continue;
+                    }
+
+                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                        continue;
+                    }
+
                     if let Some(fragment) = self.fragments.get(name) {
+                        if fragment
+                            .skip
+                            .should_skip(parameters.variables)
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        if !fragment
+                            .include
+                            .should_include(parameters.variables)
+                            .unwrap_or(true)
+                        {
+                            continue;
+                        }
+
                         let operation_type_name =
                             parameters.schema.root_operation_name(operation.kind);
                         let is_apply = {
@@ -1072,7 +1106,13 @@ pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => Some(String::from(s).into()),
         ast::Value::FloatValue(f) => Some(f64::from(f).into()),
-        ast::Value::IntValue(i) => Some(i32::from(i).into()),
+        ast::Value::IntValue(i) => {
+            let s = i.source_string();
+            s.parse::<i64>()
+                .ok()
+                .map(Into::into)
+                .or_else(|| s.parse::<u64>().ok().map(Into::into))
+        }
         ast::Value::BooleanValue(b) => Some(bool::from(b).into()),
         ast::Value::NullValue(_) => Some(Value::Null),
         ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
