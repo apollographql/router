@@ -340,16 +340,18 @@ impl PlanNode {
 fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str) -> String {
     let mut query = String::new();
     let mut len = 0;
+    let kind_str = match kind {
+        OperationKind::Query => "query",
+        OperationKind::Mutation => "mutation",
+        OperationKind::Subscription => "subscription",
+    };
+    write!(&mut query, "{}", kind_str)
+        .expect("writing to a String should not fail because it can reallocate");
     for path_elt in path.iter() {
         match path_elt {
             json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => {}
             json_ext::PathElement::Key(key) => {
-                let kind_str = match kind {
-                    OperationKind::Query => "query",
-                    OperationKind::Mutation => "mutation",
-                    OperationKind::Subscription => "subscription",
-                };
-                write!(&mut query, "{} {{ {key}", kind_str)
+                write!(&mut query, "{{ {key}")
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
