@@ -45,7 +45,7 @@ As this is still experimental, it is only available as an opt-in through a Cargo
 
 By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
 
-### Expose `query_plan` to `ExecutionRequest` ([PR #2081](https://github.com/apollographql/router/pull/2081))
+### Expose `query_plan` to `ExecutionRequest` in Rhai ([PR #2081](https://github.com/apollographql/router/pull/2081))
 
 You can now read the query-plan from an execution request by accessing `request.query_plan`.  Additionally, `request.context` also now supports the Rhai `in` keyword.
 
