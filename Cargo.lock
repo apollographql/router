@@ -225,7 +225,6 @@ dependencies = [
  "sys-info",
  "tempfile",
  "test-log",
- "test-span",
  "thiserror",
  "tokio",
  "tokio-stream",
@@ -1255,16 +1254,6 @@ checksum = "cdffe87e1d521a10f9696f833fe502293ea446d7f256c06128293a4119bdf4cb"
 dependencies = [
  "quote",
  "syn",
-]
-
-[[package]]
-name = "daggy"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91a9304e55e9d601a39ae4deaba85406d5c0980e106f65afcf0460e9af1e7602"
-dependencies = [
- "petgraph",
- "serde",
 ]
 
 [[package]]
@@ -2606,9 +2595,6 @@ name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "lock_api"
@@ -3441,8 +3427,6 @@ checksum = "4a13a2fa9d0b63e5f22328828741e523766fff0ee9e779316902290dff3f824f"
 dependencies = [
  "fixedbitset",
  "indexmap",
- "serde",
- "serde_derive",
 ]
 
 [[package]]
@@ -4875,38 +4859,6 @@ name = "test-log"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38f0c854faeb68a048f0f2dc410c5ddae3bf83854ef0e4977d58306a5edef50e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "test-span"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "88c12e1076fc168ae4b9870a29cabf575d318f5399f025c2248a8deae057ed12"
-dependencies = [
- "daggy",
- "derivative",
- "indexmap",
- "linked-hash-map",
- "once_cell",
- "serde",
- "serde_json",
- "test-span-macro",
- "tokio",
- "tracing",
- "tracing-core",
- "tracing-futures",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "test-span-macro"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f972445f2c781bb6d47ee4a715db3a0e404a79d977f751fd4eb2b0d44c6eb9d"
 dependencies = [
  "proc-macro2",
  "quote",
