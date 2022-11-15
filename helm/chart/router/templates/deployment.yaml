@@ -50,6 +50,10 @@ spec:
             - /app/configuration.yaml
             {{- end }}
           {{- end }}
+          {{- if .Values.supergraphFile }}
+            - --supergraph
+            - /supergraph.graphql
+          {{- end }}
           {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret .Values.managedFederation.graphRef .Values.extraEnvVars }}
           env:
             {{- if or .Values.managedFederation.apiKey .Values.managedFederation.existingSecret }}
@@ -109,6 +113,12 @@ spec:
               mountPath: /app/
               readOnly: true
             {{- end }}
+            {{- if .Values.supergraphFile }}
+            - name: router-supergraph
+              mountPath: /supergraph.graphql
+              subPath: supergraph.graphql
+              readOnly: true
+            {{- end }}
             {{- if .Values.extraVolumeMounts }}
               {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
@@ -119,6 +129,11 @@ spec:
         - name: router-configuration
           configMap:
             name: {{ include "router.fullname" . }}
+        {{- end }}
+        {{- if .Values.supergraphFile }}
+        - name: router-supergraph
+          configMap:
+            name: {{ include "router.fullname" . }}-supergraph
         {{- end }}
         {{- if .Values.extraVolumes }}
           {{- include "common.tplvalues.render" ( dict "value" .Values.extraVolumes "context" $) | nindent 8 }}

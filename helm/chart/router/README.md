@@ -80,6 +80,7 @@ helm show values apollographql/router
 | serviceAccount.name | string | `""` |  |
 | serviceMonitor.enabled | bool | `false` |  |
 | serviceentry.enabled | bool | `false` |  |
+| supergraphFile | string | `""` | name of the supergraph file to mount as a configmap |
 | tolerations | list | `[]` |  |
 | virtualservice.enabled | bool | `false` |  |
 

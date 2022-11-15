@@ -4,6 +4,10 @@
 
 replicaCount: 1
 
+# If set, supergraphFile will load the file specified and create a configmap with its content. The file will then
+# be mounted and the --supergraph argument will be set to load this file. 
+supergraphFile: ""
+
 # -- See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure
 router:
   configuration:
