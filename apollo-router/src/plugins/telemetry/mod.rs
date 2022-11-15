@@ -1705,7 +1705,7 @@ mod tests {
         let prom_metrics = String::from_utf8_lossy(&body)
             .to_string()
             .split('\n')
-            .filter(|l| l.contains("_count"))
+            .filter(|l| l.contains("_count") && !l.contains("apollo_router_span_count"))
             .sorted()
             .join("\n");
         assert_snapshot!(prom_metrics);
