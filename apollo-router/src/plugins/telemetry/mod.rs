@@ -29,7 +29,6 @@ use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
@@ -146,11 +145,6 @@ fn setup_tracing<T: TracingConfigurator>(
 ) -> Result<Builder, BoxError> {
     if let Some(config) = configurator {
         builder = config.apply(builder, tracing_config)?;
-        let exporter = metrics::span_metrics_exporter::Exporter {};
-        // For metrics
-        builder = builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio).build(),
-        );
     }
     Ok(builder)
 }
@@ -534,6 +528,8 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
         builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        // For metrics
+        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)

@@ -21,7 +21,7 @@ const SPAN_NAMES: &[&str] = &[
     EXECUTION_SPAN_NAME,
 ];
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct Exporter {}
 #[async_trait]
 impl SpanExporter for Exporter {
@@ -31,8 +31,6 @@ impl SpanExporter for Exporter {
             .into_iter()
             .filter(|s| SPAN_NAMES.contains(&s.name.as_ref()))
         {
-            dbg!(&span);
-            println!("span name {}", span.name);
             let busy = span
                 .attributes
                 .get(&Key::from_static_str("busy_ns"))
