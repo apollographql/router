@@ -9,9 +9,9 @@ expression: response
     }
   },
   "extensions": {
-    "formatting": [
+    "nullability": [
       {
-        "message": "Cannot return null for non-nullable field Organization.id",
+        "message": "Cannot return null for non-nullable field Organization.nonNullId",
         "path": [
           "currentUser",
           "activeOrganization"

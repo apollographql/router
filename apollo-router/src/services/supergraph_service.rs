@@ -498,9 +498,10 @@ mod tests {
    @join__owner(graph: ORGA)
    @join__type(graph: ORGA, key: "id")
    @join__type(graph: USER, key: "id") {
-       id: ID!
+       id: ID
        creatorUser: User
        name: String
+       nonNullId: ID!
        suborga: [Organization]
    }"#;
 
@@ -559,8 +560,9 @@ mod tests {
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
-            // Request building here
+            .query(
+                "query { currentUser { activeOrganization { nonNullId creatorUser { name } } } }",
+            )
             .build()
             .unwrap();
         let response = service

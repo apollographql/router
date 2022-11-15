@@ -137,7 +137,7 @@ impl Query {
 
                             if !parameters.errors.is_empty() {
                                 response.extensions.insert(
-                                    "formatting",
+                                    "nullability",
                                     serde_json_bytes::to_value(&parameters.errors).unwrap(),
                                 );
                             }
@@ -188,7 +188,7 @@ impl Query {
                 );
                 if !parameters.errors.is_empty() {
                     response.extensions.insert(
-                        "formatting",
+                        "nullability",
                         serde_json_bytes::to_value(&parameters.errors).unwrap(),
                     );
                 }
