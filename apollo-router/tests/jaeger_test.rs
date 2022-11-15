@@ -234,7 +234,6 @@ async fn subgraph() {
         let tracer = tracer_provider.tracer("products");
 
         //extract the trace id from headers and create a child span from it
-        println!("headers: {:?}", request.headers());
         assert!(
             request.headers().get("uber-trace-id").is_some(),
             "the uber-trace-id is absent, trace propagation is broken"

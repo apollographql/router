@@ -1,0 +1,22 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: response
+---
+{
+  "data": {
+    "currentUser": {
+      "activeOrganization": null
+    }
+  },
+  "extensions": {
+    "value-completion": [
+      {
+        "message": "Cannot return null for non-nullable field Organization.nonNullId",
+        "path": [
+          "currentUser",
+          "activeOrganization"
+        ]
+      }
+    ]
+  }
+}

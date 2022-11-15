@@ -253,7 +253,7 @@ where
                                 (
                                     StatusCode::NOT_ACCEPTABLE,
                                     format!(
-                                        r#"'accept' header is mandatory and can't be different than {:?}, {:?} or {:?}"#,
+                                        r#"'accept' header can't be different than \"*/*\", {:?}, {:?} or {:?}"#,
                                         APPLICATION_JSON_HEADER_VALUE,
                                         GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                                         MULTIPART_DEFER_CONTENT_TYPE
