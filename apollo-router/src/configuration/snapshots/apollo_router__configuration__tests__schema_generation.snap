@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: "&schema"
 ---
 {
@@ -679,10 +679,21 @@ expression: "&schema"
                   "format": "double"
                 },
                 {
-                  "type": "string",
-                  "enum": [
-                    "always_on",
-                    "always_off"
+                  "oneOf": [
+                    {
+                      "description": "Always sample",
+                      "type": "string",
+                      "enum": [
+                        "always_on"
+                      ]
+                    },
+                    {
+                      "description": "Never sample",
+                      "type": "string",
+                      "enum": [
+                        "always_off"
+                      ]
+                    }
                   ]
                 }
               ],
@@ -1958,10 +1969,21 @@ expression: "&schema"
                       "format": "double"
                     },
                     {
-                      "type": "string",
-                      "enum": [
-                        "always_on",
-                        "always_off"
+                      "oneOf": [
+                        {
+                          "description": "Always sample",
+                          "type": "string",
+                          "enum": [
+                            "always_on"
+                          ]
+                        },
+                        {
+                          "description": "Never sample",
+                          "type": "string",
+                          "enum": [
+                            "always_off"
+                          ]
+                        }
                       ]
                     }
                   ],
@@ -2028,11 +2050,28 @@ expression: "&schema"
           "properties": {
             "compression": {
               "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
-              "type": "string",
-              "enum": [
-                "gzip",
-                "deflate",
-                "br"
+              "oneOf": [
+                {
+                  "description": "gzip",
+                  "type": "string",
+                  "enum": [
+                    "gzip"
+                  ]
+                },
+                {
+                  "description": "deflate",
+                  "type": "string",
+                  "enum": [
+                    "deflate"
+                  ]
+                },
+                {
+                  "description": "brotli",
+                  "type": "string",
+                  "enum": [
+                    "br"
+                  ]
+                }
               ],
               "nullable": true
             },
@@ -2120,11 +2159,28 @@ expression: "&schema"
             "properties": {
               "compression": {
                 "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
-                "type": "string",
-                "enum": [
-                  "gzip",
-                  "deflate",
-                  "br"
+                "oneOf": [
+                  {
+                    "description": "gzip",
+                    "type": "string",
+                    "enum": [
+                      "gzip"
+                    ]
+                  },
+                  {
+                    "description": "deflate",
+                    "type": "string",
+                    "enum": [
+                      "deflate"
+                    ]
+                  },
+                  {
+                    "description": "brotli",
+                    "type": "string",
+                    "enum": [
+                      "br"
+                    ]
+                  }
                 ],
                 "nullable": true
               },

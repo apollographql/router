@@ -19,15 +19,24 @@ pub(crate) struct Introspection {
 }
 
 impl Introspection {
-    pub(crate) async fn with_capacity(configuration: &Configuration, capacity: usize) -> Self {
+    pub(crate) async fn with_capacity(
+        configuration: &Configuration,
+        capacity: usize,
+        redis_urls: Option<Vec<String>>,
+    ) -> Self {
         Self {
-            cache: CacheStorage::new(capacity).await,
+            cache: CacheStorage::new(capacity, redis_urls).await,
             defer_support: configuration.supergraph.preview_defer_support,
         }
     }
 
     pub(crate) async fn new(configuration: &Configuration) -> Self {
-        Self::with_capacity(configuration, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
+        Self::with_capacity(
+            configuration,
+            DEFAULT_INTROSPECTION_CACHE_CAPACITY,
+            configuration.supergraph.cache(),
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -35,7 +44,8 @@ impl Introspection {
         configuration: &Configuration,
         cache: HashMap<String, Response>,
     ) -> Self {
-        let this = Self::with_capacity(configuration, cache.len()).await;
+        let this =
+            Self::with_capacity(configuration, cache.len(), configuration.supergraph.cache()).await;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;
