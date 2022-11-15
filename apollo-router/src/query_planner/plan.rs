@@ -194,7 +194,18 @@ impl PlanNode {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
-        self.collect_subselections(schema, &Path::default(), &mut subselections)?;
+        let operation_kind = if self.contains_mutations() {
+            OperationKind::Mutation
+        } else {
+            OperationKind::Query
+        };
+
+        self.collect_subselections(
+            schema,
+            &Path::default(),
+            &operation_kind,
+            &mut subselections,
+        )?;
 
         Ok(subselections)
     }
@@ -203,6 +214,7 @@ impl PlanNode {
         &self,
         schema: &Schema,
         initial_path: &Path,
+        kind: &OperationKind,
         subselections: &mut HashMap<SubSelection, Query>,
     ) -> Result<(), QueryPlannerError> {
         // re-create full query with the right path
@@ -210,7 +222,7 @@ impl PlanNode {
         match self {
             Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 nodes.iter().try_fold(subselections, |subs, current| {
-                    current.collect_subselections(schema, initial_path, subs)?;
+                    current.collect_subselections(schema, initial_path, kind, subs)?;
 
                     Ok::<_, QueryPlannerError>(subs)
                 })?;
@@ -218,12 +230,12 @@ impl PlanNode {
             }
             Self::Flatten(node) => {
                 node.node
-                    .collect_subselections(schema, initial_path, subselections)
+                    .collect_subselections(schema, initial_path, kind, subselections)
             }
             Self::Defer { primary, deferred } => {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
-                    let query = reconstruct_full_query(&primary_path, primary_subselection);
+                    let query = reconstruct_full_query(&primary_path, kind, primary_subselection);
                     // ----------------------- Parse ---------------------------------
                     let sub_selection = Query::parse(&query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
@@ -239,7 +251,7 @@ impl PlanNode {
 
                 deferred.iter().try_fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
-                        let query = reconstruct_full_query(&current.path, subselection);
+                        let query = reconstruct_full_query(&current.path, kind, subselection);
                         // ----------------------- Parse ---------------------------------
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
@@ -256,6 +268,7 @@ impl PlanNode {
                         current_node.collect_subselections(
                             schema,
                             &initial_path.join(&current.path),
+                            kind,
                             subs,
                         )?;
                     }
@@ -271,10 +284,10 @@ impl PlanNode {
                 ..
             } => {
                 if let Some(node) = if_clause {
-                    node.collect_subselections(schema, initial_path, subselections)?;
+                    node.collect_subselections(schema, initial_path, kind, subselections)?;
                 }
                 if let Some(node) = else_clause {
-                    node.collect_subselections(schema, initial_path, subselections)?;
+                    node.collect_subselections(schema, initial_path, kind, subselections)?;
                 }
                 Ok(())
             }
@@ -324,14 +337,19 @@ impl PlanNode {
     }
 }
 
-fn reconstruct_full_query(path: &Path, subselection: &str) -> String {
+fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str) -> String {
     let mut query = String::new();
     let mut len = 0;
     for path_elt in path.iter() {
         match path_elt {
             json_ext::PathElement::Flatten | json_ext::PathElement::Index(_) => {}
             json_ext::PathElement::Key(key) => {
-                write!(&mut query, "{{ {key}")
+                let kind_str = match kind {
+                    OperationKind::Query => "query",
+                    OperationKind::Mutation => "mutation",
+                    OperationKind::Subscription => "subscription",
+                };
+                write!(&mut query, "{} {{ {key}", kind_str)
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
