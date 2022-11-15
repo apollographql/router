@@ -774,77 +774,29 @@ mod tests {
     @join__type(graph: USERS)
   {
     id: ID!
-    user: PaymentUser!
     paymentStatus: PaymentStatus
   }
   
   type Mutation
     @join__type(graph: USERS)
   {
-    makePayment(userId: ID!, paymentInformation: PaymentInformationInput!): MakePaymentResult!
+    makePayment(userId: ID!): MakePaymentResult!
   }
   
-  type PaymentFailed implements PaymentStatus
-    @join__implements(graph: USERS, interface: "PaymentStatus")
-    @join__type(graph: USERS)
-  {
-    id: ID!
-    reason: String!
-  }
   
-  input PaymentInformationInput
-    @join__type(graph: USERS)
-  {
-    fakeInfo: String!
-  }
-  
-  interface PaymentStatus
+ type PaymentStatus
     @join__type(graph: USERS)
   {
     id: ID!
   }
-  
-  type PaymentSuccess implements PaymentStatus
-    @join__implements(graph: USERS, interface: "PaymentStatus")
-    @join__type(graph: USERS)
-  {
-    id: ID!
-    billedAmount: Float!
-  }
-  
-  type PaymentUser
-    @join__type(graph: USERS)
-  {
-    id: ID!
-    name: String!
-    email: String
-    username: String!
-    friends(first: Int = 10, after: Int = 0): [PaymentUser!]
-    phoneNumber: String
-    title: String
-    avatarUrl: String
-  }
-  
   
   type Query
     @join__type(graph: PRODUCTS)
     @join__type(graph: USERS)
   {
-    user(id: ID!): PaymentUser! @join__field(graph: USERS)
+    name: String
   }
-  
-  interface SkuItf
-    @join__type(graph: PRODUCTS)
-  {
-    sku: String
-  }
-  
-  type User
-    @join__type(graph: PRODUCTS, key: "email")
-  {
-    email: ID!
-    totalProductsCreated: Int
-  }"#;
+  "#;
 
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
@@ -858,19 +810,12 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .header("Accept", "multipart/mixed; deferSpec=20220824")
             .query(
-                r#"mutation ($userId: ID!, $paymentInformation: PaymentInformationInput!) {
-                    makePayment(userId: $userId, paymentInformation: $paymentInformation) {
+                r#"mutation ($userId: ID!) {
+                    makePayment(userId: $userId) {
                       id
                       ... @defer {
                         paymentStatus {
-                          __typename
                           id
-                          ... on PaymentSuccess {
-                            billedAmount
-                          }
-                          ... on PaymentFailed {
-                            reason
-                          }
                         }
                       }
                     }
@@ -880,8 +825,6 @@ mod tests {
             .unwrap();
 
         let mut stream = service.oneshot(request).await.unwrap();
-
-        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
