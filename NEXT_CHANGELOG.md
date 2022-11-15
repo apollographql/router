@@ -50,8 +50,6 @@ A while ago, when we added compression support to the router, we discovered that
 
 Rather than persist with this complexity, we've concluded that it would be better to just use a base image which ships with `libz.so.1`, hence the change to `debian:bullseye-slim`
 
-We'll also stop creating the `-debug` image, since the contents of that image were the same as the main image with the addition of a busybox shell for debugging. Our new base image has a shell, so it's already debuggable.
-
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2085
 
 ## 📚 Documentation
