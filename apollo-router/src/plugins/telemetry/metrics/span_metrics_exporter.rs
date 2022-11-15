@@ -8,6 +8,7 @@ use opentelemetry::Key;
 use opentelemetry::Value;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::tracing::apollo_telemetry::SUBGRAPH_ATTRIBUTE_NAME;
 use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
@@ -21,7 +22,6 @@ const SPAN_NAMES: &[&str] = &[
     EXECUTION_SPAN_NAME,
 ];
 
-const SUBGRAPH_ATTRIBUTE_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 const BUSY_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("busy_ns");
 const IDLE_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("idle_ns");
 
@@ -55,10 +55,10 @@ impl SpanExporter for Exporter {
                 .end_time
                 .duration_since(span.start_time)
                 .unwrap_or_default()
-                .as_millis() as f64;
+                .as_secs_f64() as f64;
 
-            let idle_ms: f64 = idle as f64 / 1000000_f64;
-            let busy_ms: f64 = busy as f64 / 1000000_f64;
+            let idle_ms: f64 = idle as f64 / 1_000_000_000_f64;
+            let busy_ms: f64 = busy as f64 / 1_000_000_000_f64;
             if span.name == SUBGRAPH_SPAN_NAME {
                 let subgraph_name = span
                     .attributes
@@ -66,12 +66,12 @@ impl SpanExporter for Exporter {
                     .map(|name| name.as_str())
                     .unwrap_or_default();
                 ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name, subgraph = %subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle_ms", span = %span.name, subgraph = %subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy_ms", span = %span.name, subgraph = %subgraph_name);
+                ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name, subgraph = %subgraph_name);
+                ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name, subgraph = %subgraph_name);
             }
             ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name);
-            ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle_ms", span = %span.name);
-            ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy_ms", span = %span.name);
+            ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name);
+            ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name);
         }
 
         async { Ok(()) }.boxed()
