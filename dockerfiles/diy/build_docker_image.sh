@@ -122,8 +122,10 @@ fi
 echo "Building in: ${BUILD_DIR}"
 
 # Copy in our dockerfiles, we'll need them later
-cp dockerfiles/* "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
-cp ../router.yaml "${BUILD_DIR}" || terminate "Couldn't copy ../router.yaml to ${BUILD_DIR}"
+mkdir "${BUILD_DIR}/dockerfiles"
+cp dockerfiles/Dockerfile.repo "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
+cp ../Dockerfile.router "${BUILD_DIR}" || terminate "Couldn't copy dockerfiles to ${BUILD_DIR}"
+cp ../router.yaml "${BUILD_DIR}/dockerfiles" || terminate "Couldn't copy ../router.yaml to ${BUILD_DIR}"
 
 # Change to our build directory
 cd "${BUILD_DIR}" || terminate "Couldn't cd to ${BUILD_DIR}";
@@ -149,7 +151,7 @@ else
     echo "Building image: ${ROUTER_VERSION}" from released version""
     docker build -q -t "router:${ROUTER_VERSION}" \
         --build-arg ROUTER_RELEASE="${ROUTER_VERSION}" \
-        --no-cache -f Dockerfile.release . \
+        --no-cache -f Dockerfile.router . \
         || terminate "Couldn't build router image"
 fi
 

@@ -70,6 +70,15 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2096
 
 ## 🛠 Maintenance
+
+### Use `debian:bullseye-slim` as our base Docker image ([PR #2085](https://github.com/apollographql/router/pull/2085))
+
+A while ago, when we added compression support to the router, we discovered that the Distroless base-images we were using didn't ship with a copy of `libz.so.1`. We addressed that problem by copying in a version of the library from the Distroless image (Java) which does ship it. While that worked, we found challenges in adding support for both `aarch64` and `amd64` Docker images that would make it less than ideal to continue using those Distroless images.
+
+Rather than persist with this complexity, we've concluded that it would be better to just use a base image which ships with `libz.so.1`, hence the change to `debian:bullseye-slim`.  Those images are still quite minimal and the resulting images are similar in size.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2085
+
 ## 📚 Documentation
 
 ### Fix example `helm show values` command ([PR #2088](https://github.com/apollographql/router/pull/2088))
