@@ -21,7 +21,7 @@ mod tests {
     // Test must be multi-threaded or the executor will hang
     // when "call-service" is invoked.
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_subgraph_processes_operation_name() {
+    async fn test_supergraph_processes_external_call() {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
 
@@ -71,7 +71,7 @@ mod tests {
         let response = service_response.next_response().await.unwrap();
         // If there is no server, then we'll get this error
         if response.errors.len() == 1 {
-            assert_eq!(response.errors[0].message, "rhai execution error: 'Runtime error: error sending request for url (http://127.0.0.1:8081/): error trying to connect: tcp connect error: Connection refused (os error 61) (line 28, position 12) in call to function process_request'");
+            assert_eq!(response.errors[0].message, "rhai execution error: 'Runtime error: error sending request for url (http://127.0.0.1:8081/): error trying to connect: tcp connect error: Connection refused (os error 61) (line 37, position 13) in call to function process_response'");
             // Rhai should return a 500...
             assert_eq!(
                 StatusCode::INTERNAL_SERVER_ERROR,
