@@ -115,9 +115,9 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2096
 
-### Improve errors when subgraph returns non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
+### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
 
-The error response will now contain the status code and status name.
+The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
 
 By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
 
