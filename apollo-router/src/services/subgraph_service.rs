@@ -186,10 +186,17 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
                         && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                     {
-                        return Err(BoxError::from(FetchError::SubrequestHttpError {
-                            service: service_name.clone(),
-                            reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
-                        }));
+                        if !parts.status.is_success() {
+                            return Err(BoxError::from(FetchError::SubrequestHttpError {
+                                service: service_name.clone(),
+                                reason: format!("{}: {}", parts.status.as_str(), parts.status.canonical_reason().unwrap_or("Unknown")),
+                            }));
+                        } else {
+                            return Err(BoxError::from(FetchError::SubrequestHttpError {
+                                service: service_name.clone(),
+                                reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
+                            }));
+                        }
                     }
                 }
             }
@@ -381,6 +388,23 @@ mod tests {
         }
     }
 
+    // starts a local server emulating a subgraph returning status code 401
+    async fn emulate_subgraph_unauthorized(socket_addr: SocketAddr) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, "text/html")
+                .status(StatusCode::UNAUTHORIZED)
+                .body(r#""#.into())
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        if let Err(e) = server.await {
+            eprintln!("server error: {}", e);
+        }
+    }
+
     // starts a local server emulating a subgraph returning bad response format
     async fn emulate_subgraph_bad_response_format(socket_addr: SocketAddr) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
@@ -548,5 +572,38 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &resp_from_subgraph);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_unauthorized() {
+        let socket_addr = SocketAddr::from_str("127.0.0.1:2828").unwrap();
+        tokio::task::spawn(emulate_subgraph_unauthorized(socket_addr));
+        let subgraph_service = SubgraphService::new("test");
+
+        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let err = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "HTTP fetch failed from 'test': 401: Unauthorized"
+        );
     }
 }
