@@ -189,14 +189,18 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         return if !parts.status.is_success() {
                             Err(BoxError::from(FetchError::SubrequestHttpError {
                                 service: service_name.clone(),
-                                reason: format!("{}: {}", parts.status.as_str(), parts.status.canonical_reason().unwrap_or("Unknown")),
+                                reason: format!(
+                                    "{}: {}",
+                                    parts.status.as_str(),
+                                    parts.status.canonical_reason().unwrap_or("Unknown")
+                                ),
                             }))
                         } else {
                             Err(BoxError::from(FetchError::SubrequestHttpError {
                                 service: service_name.clone(),
                                 reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
                             }))
-                        }
+                        };
                     }
                 }
             }
