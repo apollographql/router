@@ -8,7 +8,6 @@ use std::collections::HashSet;
 
 use apollo_parser::ast;
 use apollo_parser::ast::AstNode;
-use apollo_parser::ast::DirectiveLocation;
 use derivative::Derivative;
 use graphql::Error;
 use serde::de::Visitor;
@@ -1099,8 +1098,6 @@ fn extract_operation(
                         apollo_encoder::OperationType::Subscription
                     }
                 },
-                //op_type.clone(),
-                //apollo_encoder::OperationType::Query,
                 selection_set,
             );
             operation.name(name.clone());
@@ -1208,7 +1205,7 @@ fn extract_selection(
 ) -> impl Iterator<Item = apollo_encoder::Selection> {
     match selection {
         ast::Selection::Field(field) => {
-            let mut name = field.name().map(|n| n.text().to_string()).unwrap();
+            let name = field.name().map(|n| n.text().to_string()).unwrap();
             let mut f = apollo_encoder::Field::new(name);
             for argument in field
                 .arguments()
@@ -1244,7 +1241,7 @@ fn extract_selection(
             }
         }
         ast::Selection::FragmentSpread(fragment) => {
-            let mut name = fragment
+            let name = fragment
                 .fragment_name()
                 .and_then(|f| f.name())
                 .map(|n| n.text().to_string())
@@ -1282,20 +1279,6 @@ fn extract_selection(
                         apollo_encoder::Selection::InlineFragment(f)
                     }),
             ) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-            /*let mut f = apollo_encoder::FragmentSpread::new(name);
-            for directive in fragment
-                .directives()
-                .into_iter()
-                .map(|dir| dir.directives())
-                .flatten()
-                .filter_map(|directive| directive.try_into().ok())
-            {
-                f.directive(directive);
-            }
-
-            Box::new(std::iter::once(apollo_encoder::Selection::FragmentSpread(
-                f,
-            ))) as Box<dyn Iterator<Item = apollo_encoder::Selection>>*/
         }
         ast::Selection::InlineFragment(fragment) => {
             let type_condition = fragment.type_condition().and_then(|ty| ty.try_into().ok());
