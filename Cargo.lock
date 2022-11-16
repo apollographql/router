@@ -224,6 +224,7 @@ dependencies = [
  "sha2",
  "shellexpand",
  "static_assertions",
+ "strum_macros",
  "sys-info",
  "tempfile",
  "test-log",
@@ -2100,23 +2101,6 @@ dependencies = [
  "bytes",
  "http",
  "pin-project-lite",
-]
-
-[[package]]
-name = "http-plugin"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "apollo-router",
- "async-trait",
- "futures",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tracing",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 //! Customization via Rhai.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
@@ -38,13 +39,17 @@ use rhai::Scope;
 use rhai::Shared;
 use rhai::AST;
 use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
+use serde::Serialize;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
+use crate::external::Externalizable;
+use crate::external::PipelineStep;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
@@ -55,7 +60,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::tracer::TraceId;
-use crate::utility::Output;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
@@ -63,6 +67,9 @@ use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 
 static SDL: Lazy<RwLock<Arc<String>>> = Lazy::new(|| RwLock::new(Arc::new("".to_string())));
+
+static TOKIO_RUNTIME: Lazy<tokio::runtime::Runtime> =
+    Lazy::new(|| tokio::runtime::Runtime::new().expect("creating tokio runtime"));
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -404,6 +411,9 @@ impl Plugin for Rhai {
         // defined in scripts into scope.
         engine.run_ast_with_scope(&mut scope, &ast)?;
 
+        // Update the global SDL which we'll use as part of our external call interface
+        let mut guard = SDL.write().expect("acquiring SDL write lock");
+        *guard = sdl;
         Ok(Self {
             ast,
             engine,
@@ -1440,19 +1450,48 @@ impl Rhai {
                  url: &str|
                  -> Result<(), Box<EvalAltResult>> {
                     obj.with_mut(|request| {
-                        let my_request = request.supergraph_request.body().clone();
-                        let my_context = request.context.clone();
-                        let my_sdl = SDL
+                        let body = request.supergraph_request.body().clone();
+                        let context = request.context.clone();
+                        let sdl = SDL
                             .read()
-                            .expect("must be initialised during module load")
+                            .expect("acquiring SDL read lock")
                             .to_string();
+
+                        let headers = request.supergraph_request.headers();
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, my_request, my_context, my_sdl)?;
+                        let output = call_external(my_url, PipelineStep::SupergraphRequest, body, headers, context, sdl)?;
                         // Update the supplied request
+                        *request.supergraph_request.headers_mut() = internalize_header_map(output.headers)?;
                         *request.supergraph_request.body_mut() = output.body;
                         request.context = output.context;
+                        Ok(())
+                    })
+                },
+            )
+            .register_fn(
+                "call_external",
+                |obj: &mut SharedMut<RhaiSupergraphResponse>,
+                 url: &str|
+                 -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|response| {
+                        let body = response.response.body().clone();
+                        let context = response.context.clone();
+                        let sdl = SDL
+                            .read()
+                            .expect("acquiring SDL read lock")
+                            .to_string();
+
+                        let headers = response.response.headers();
+
+                        let my_url = url.to_string();
+
+                        let output = call_external(my_url, PipelineStep::SupergraphResponse, body, headers, context, sdl)?;
+                        // Update the supplied response
+                        *response.response.headers_mut() = internalize_header_map(output.headers)?;
+                        *response.response.body_mut() = output.body;
+                        response.context = output.context;
                         Ok(())
                     })
                 },
@@ -1463,19 +1502,98 @@ impl Rhai {
                  url: &str|
                  -> Result<(), Box<EvalAltResult>> {
                     obj.with_mut(|request| {
-                        let my_request = request.supergraph_request.body().clone();
-                        let my_context = request.context.clone();
-                        let my_sdl = SDL
+                        let body = request.supergraph_request.body().clone();
+                        let context = request.context.clone();
+                        let sdl = SDL
                             .read()
-                            .expect("must be initialised during module load")
+                            .expect("acquiring SDL read lock")
                             .to_string();
+
+                        let headers = request.supergraph_request.headers();
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, my_request, my_context, my_sdl)?;
+                        let output = call_external(my_url, PipelineStep::ExecutionRequest, body, headers, context, sdl)?;
                         // Update the supplied request
+                        *request.supergraph_request.headers_mut() = internalize_header_map(output.headers)?;
                         *request.supergraph_request.body_mut() = output.body;
                         request.context = output.context;
+                        Ok(())
+                    })
+                },
+            )
+            .register_fn(
+                "call_external",
+                |obj: &mut SharedMut<RhaiExecutionResponse>,
+                 url: &str|
+                 -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|response| {
+                        let body = response.response.body().clone();
+                        let context = response.context.clone();
+                        let sdl = SDL
+                            .read()
+                            .expect("acquiring SDL read lock")
+                            .to_string();
+
+                        let headers = response.response.headers();
+
+                        let my_url = url.to_string();
+
+                        let output = call_external(my_url, PipelineStep::ExecutionResponse, body, headers, context, sdl)?;
+                        // Update the supplied response
+                        *response.response.headers_mut() = internalize_header_map(output.headers)?;
+                        *response.response.body_mut() = output.body;
+                        response.context = output.context;
+                        Ok(())
+                    })
+                },
+            )
+            .register_fn(
+                "call_external",
+                |obj: &mut SharedMut<subgraph::Request>,
+                 url: &str|
+                 -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|request| {
+                        let body = request.supergraph_request.body().clone();
+                        let context = request.context.clone();
+                        let sdl = SDL
+                            .read()
+                            .expect("acquiring SDL read lock")
+                            .to_string();
+
+                        let headers = request.supergraph_request.headers();
+
+                        let my_url = url.to_string();
+
+                        let output = call_external(my_url, PipelineStep::SubgraphRequest, body, headers, context, sdl)?;
+                        // Cannot Update the supplied body for subgraph because it is shared
+                        request.context = output.context;
+                        Ok(())
+                    })
+                },
+            )
+            .register_fn(
+                "call_external",
+                |obj: &mut SharedMut<subgraph::Response>,
+                 url: &str|
+                 -> Result<(), Box<EvalAltResult>> {
+                    obj.with_mut(|response| {
+                        let body = response.response.body().clone();
+                        let context = response.context.clone();
+                        let sdl = SDL
+                            .read()
+                            .expect("acquiring SDL read lock")
+                            .to_string();
+
+                        let headers = response.response.headers();
+
+                        let my_url = url.to_string();
+
+                        let output = call_external(my_url, PipelineStep::SubgraphResponse, body, headers, context, sdl)?;
+                        // Update the supplied response
+                        *response.response.headers_mut() = internalize_header_map(output.headers)?;
+                        *response.response.body_mut() = output.body;
+                        response.context = output.context;
                         Ok(())
                     })
                 },
@@ -1531,27 +1649,68 @@ impl Rhai {
     }
 }
 
-// This function is a sync "wrapper" into the async call_with_request fn.
-// Rhai interfaces must be sync, so we must bridge from sync into async.
-// The safest way to do this is to spawn a thread, using the current runtime
-// and then drive the work from our new thread.
-fn call_external(
+/// Convert a HeaderMap into a HashMap
+fn externalize_header_map(
+    input: &HeaderMap<HeaderValue>,
+) -> Result<HashMap<String, Vec<String>>, Box<EvalAltResult>> {
+    let mut output = HashMap::new();
+    for (k, v) in input {
+        let k = k.as_str().to_owned();
+        let v = String::from_utf8(v.as_bytes().to_vec()).map_err(|e| e.to_string())?;
+        output.entry(k).or_insert_with(Vec::new).push(v)
+    }
+    Ok(output)
+}
+
+/// Convert a HashMap into a HeaderMap
+fn internalize_header_map(
+    input: HashMap<String, Vec<String>>,
+) -> Result<HeaderMap<HeaderValue>, Box<EvalAltResult>> {
+    let mut output = HeaderMap::new();
+    for (k, values) in input {
+        for v in values {
+            let key = HeaderName::from_str(k.as_ref()).map_err(|e| e.to_string())?;
+            let value = HeaderValue::from_str(v.as_ref()).map_err(|e| e.to_string())?;
+            output.append(key, value);
+        }
+    }
+    Ok(output)
+}
+
+/// Rhai is sync, but most of our wrapping code is async. We need a way to bridge in and out of the
+/// async world. That's what this function is. We spawn a thread and use that to drive the external
+/// request on the shared Tokio runtime.
+fn call_external<T>(
     url: String,
-    request: Request,
+    stage: PipelineStep,
+    payload: T,
+    headers: &HeaderMap<HeaderValue>,
     context: Context,
     sdl: String,
-) -> Result<Output, Box<EvalAltResult>> {
+) -> Result<Externalizable<T>, Box<EvalAltResult>>
+where
+    T: fmt::Debug + DeserializeOwned + Serialize + Send + Sync + 'static,
+{
+    let converted_headers = externalize_header_map(headers)?;
     let handler = async move {
-        crate::services::utility::call_with_request(&url, request, context, sdl)
-            .await
-            .map_err(|e: BoxError| e.to_string())
+        let target = Externalizable::new(stage, payload, converted_headers, context, sdl);
+        target.call(&url).await.map_err(|e: BoxError| e.to_string())
     };
+    // TODO: Investigate why we can no longer enter the existing runtime and use `block_on()` to
+    // drive the request. This used to work, but something has changed that now requires us to
+    // have a separate runtime. Not a big deal, but annoying all the same...
     // This would fail if we didn't have a tokio runtime here.
-    let rt = tokio::runtime::Handle::current();
+    // let rt_hdl = tokio::runtime::Handle::current();
+    let rt_hdl = TOKIO_RUNTIME.handle();
+    let _guard = rt_hdl.enter();
+
     // Spawn a thread to drive our async work
-    let hdl = thread::spawn(move || -> Result<Output, String> { rt.block_on(handler) });
+    let thread_hdl =
+        thread::spawn(move || -> Result<Externalizable<T>, String> { rt_hdl.block_on(handler) });
     // Join our thread and extract our result
-    let output = hdl.join().map_err(|e| format!("join failed: {:?}", e))??;
+    let output = thread_hdl
+        .join()
+        .map_err(|e| format!("join failed: {:?}", e))??;
     Ok(output)
 }
 

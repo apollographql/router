@@ -12,7 +12,6 @@ members = [
     "examples/forbid-anonymous-operations/rust",
     "examples/forbid-anonymous-operations/rhai",
     "examples/hello-world/rust",
-    "examples/http-plugin",
     "examples/status-code-propagation/rust",
     "examples/op-name-to-header/rhai",
     "examples/rhai-external",

@@ -21,6 +21,7 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 
 pub mod execution;
 mod execution_service;
+pub(crate) mod external;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;
@@ -29,7 +30,6 @@ pub(crate) mod subgraph_service;
 pub mod supergraph;
 mod supergraph_service;
 pub mod transport;
-pub mod utility;
 
 impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {

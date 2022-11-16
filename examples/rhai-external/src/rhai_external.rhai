@@ -19,7 +19,9 @@
 // responses.
 fn supergraph_service(service) {
     const request_callback = Fn("process_request");
+    const response_callback = Fn("process_response");
     service.map_request(request_callback);
+    service.map_response(response_callback);
 }
 
 // Generate a log for each request at this stage
@@ -27,4 +29,11 @@ fn process_request(request) {
     print(`before request: ${request}`);
     request.call_external("http://127.0.0.1:8081");
     print(`after request: ${request}`);
+}
+
+// Generate a log for each response at this stage
+fn process_response(response) {
+    print(`before response: ${response}`);
+    response.call_external("http://127.0.0.1:8081");
+    print(`after response: ${response}`);
 }
