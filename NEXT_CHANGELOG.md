@@ -115,6 +115,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2096
 
+### Improve errors when subgraph returns non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
+
+The error response will no contain the status code and status name.
+
+By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
+
 ## 🛠 Maintenance
 
 ### Use `debian:bullseye-slim` as our base Docker image ([PR #2085](https://github.com/apollographql/router/pull/2085))
