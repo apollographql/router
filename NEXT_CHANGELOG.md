@@ -117,7 +117,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Improve errors when subgraph returns non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
 
-The error response will no contain the status code and status name.
+The error response will now contain the status code and status name.
 
 By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
 
