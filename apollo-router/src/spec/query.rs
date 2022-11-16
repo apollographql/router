@@ -137,7 +137,7 @@ impl Query {
 
                             if !parameters.errors.is_empty() {
                                 if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                                    response.extensions.insert("value-completion", value);
+                                    response.extensions.insert("valueCompletion", value);
                                 }
                             }
 
@@ -187,7 +187,7 @@ impl Query {
                 );
                 if !parameters.errors.is_empty() {
                     if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                        response.extensions.insert("value-completion", value);
+                        response.extensions.insert("valueCompletion", value);
                     }
                 }
 

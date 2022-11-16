@@ -1497,7 +1497,7 @@ fn filter_list_errors() {
             },
         }})
         .expected_extensions(json! {{
-            "value-completion": [
+            "valueCompletion": [
                 {
                     "message": "Cannot return null for non-nullable array element of type String at index 1",
                     "path": ["list", "l2", 1]
@@ -1700,7 +1700,7 @@ fn filter_nested_object_errors() {
             },
         }})
         .expected_extensions(json! {{
-            "value-completion": [
+            "valueCompletion": [
                 {
                     "message": "Cannot return null for non-nullable field Review.text2",
                     "path": ["me", "reviews1", 0]
