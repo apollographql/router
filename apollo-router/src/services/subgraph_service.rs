@@ -186,16 +186,16 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
                         && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                     {
-                        if !parts.status.is_success() {
-                            return Err(BoxError::from(FetchError::SubrequestHttpError {
+                        return if !parts.status.is_success() {
+                            Err(BoxError::from(FetchError::SubrequestHttpError {
                                 service: service_name.clone(),
                                 reason: format!("{}: {}", parts.status.as_str(), parts.status.canonical_reason().unwrap_or("Unknown")),
-                            }));
+                            }))
                         } else {
-                            return Err(BoxError::from(FetchError::SubrequestHttpError {
+                            Err(BoxError::from(FetchError::SubrequestHttpError {
                                 service: service_name.clone(),
                                 reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
-                            }));
+                            }))
                         }
                     }
                 }
