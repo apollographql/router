@@ -194,6 +194,10 @@ impl PlanNode {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
+        println!(
+            "query plan:\n{}",
+            serde_json::to_string_pretty(&self).unwrap()
+        );
         self.collect_subselections(schema, &Path::default(), &mut subselections)?;
 
         Ok(subselections)
@@ -224,6 +228,7 @@ impl PlanNode {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, primary_subselection);
+                    println!("[{}] PARSING reconstructed query {}", line!(), query);
                     // ----------------------- Parse ---------------------------------
                     let sub_selection = Query::parse(&query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
@@ -238,8 +243,11 @@ impl PlanNode {
                 }
 
                 deferred.iter().try_fold(subselections, |subs, current| {
+                    //println!("deferred node: {:?}", current);
+
                     if let Some(subselection) = &current.subselection {
                         let query = reconstruct_full_query(&current.path, subselection);
+                        println!("[{}] PARSING reconstructed query {}", line!(), query);
                         // ----------------------- Parse ---------------------------------
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
