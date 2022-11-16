@@ -1221,6 +1221,11 @@ fn extract_selection(
                 .into_iter()
                 .map(|dir| dir.directives())
                 .flatten()
+                .filter(|dir| {
+                    dir.name()
+                        .map(|n| n.text().as_str() != "defer")
+                        .unwrap_or(true)
+                })
                 .filter_map(|directive| directive.try_into().ok())
             {
                 f.directive(directive);
@@ -1256,6 +1261,11 @@ fn extract_selection(
                 .into_iter()
                 .map(|dir| dir.directives())
                 .flatten()
+                .filter(|dir| {
+                    dir.name()
+                        .map(|n| n.text().as_str() != "defer")
+                        .unwrap_or(true)
+                })
                 .filter_map(|directive| directive.try_into().ok())
                 .collect::<Vec<_>>();
 
@@ -1265,6 +1275,11 @@ fn extract_selection(
                     .into_iter()
                     .map(|dir| dir.directives())
                     .flatten()
+                    .filter(|dir| {
+                        dir.name()
+                            .map(|n| n.text().as_str() != "defer")
+                            .unwrap_or(true)
+                    })
                     .filter_map(|directive| directive.try_into().ok()),
             );
 
@@ -1288,6 +1303,11 @@ fn extract_selection(
                 .into_iter()
                 .map(|dir| dir.directives())
                 .flatten()
+                .filter(|dir| {
+                    dir.name()
+                        .map(|n| n.text().as_str() != "defer")
+                        .unwrap_or(true)
+                })
                 .filter_map(|directive| directive.try_into().ok())
                 .collect::<Vec<apollo_encoder::Directive>>();
 
