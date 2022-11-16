@@ -1461,7 +1461,7 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, PipelineStep::SupergraphRequest, body, headers, context, sdl)?;
+                        let output = call_external(my_url, PipelineStep::SupergraphRequest, headers, body, context, sdl)?;
                         // Update the supplied request
                         *request.supergraph_request.headers_mut() = internalize_header_map(output.headers)?;
                         *request.supergraph_request.body_mut() = output.body;
@@ -1487,7 +1487,7 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, PipelineStep::SupergraphResponse, body, headers, context, sdl)?;
+                        let output = call_external(my_url, PipelineStep::SupergraphResponse, headers, body, context, sdl)?;
                         // Update the supplied response
                         *response.response.headers_mut() = internalize_header_map(output.headers)?;
                         *response.response.body_mut() = output.body;
@@ -1513,7 +1513,7 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, PipelineStep::ExecutionRequest, body, headers, context, sdl)?;
+                        let output = call_external(my_url, PipelineStep::ExecutionRequest, headers, body, context, sdl)?;
                         // Update the supplied request
                         *request.supergraph_request.headers_mut() = internalize_header_map(output.headers)?;
                         *request.supergraph_request.body_mut() = output.body;
@@ -1539,7 +1539,7 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, PipelineStep::ExecutionResponse, body, headers, context, sdl)?;
+                        let output = call_external(my_url, PipelineStep::ExecutionResponse, headers, body, context, sdl)?;
                         // Update the supplied response
                         *response.response.headers_mut() = internalize_header_map(output.headers)?;
                         *response.response.body_mut() = output.body;
@@ -1565,7 +1565,7 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, PipelineStep::SubgraphRequest, body, headers, context, sdl)?;
+                        let output = call_external(my_url, PipelineStep::SubgraphRequest, headers, body, context, sdl)?;
                         // Cannot Update the supplied body for subgraph because it is shared
                         request.context = output.context;
                         Ok(())
@@ -1589,7 +1589,7 @@ impl Rhai {
 
                         let my_url = url.to_string();
 
-                        let output = call_external(my_url, PipelineStep::SubgraphResponse, body, headers, context, sdl)?;
+                        let output = call_external(my_url, PipelineStep::SubgraphResponse, headers, body, context, sdl)?;
                         // Update the supplied response
                         *response.response.headers_mut() = internalize_header_map(output.headers)?;
                         *response.response.body_mut() = output.body;
@@ -1683,8 +1683,8 @@ fn internalize_header_map(
 fn call_external<T>(
     url: String,
     stage: PipelineStep,
-    payload: T,
     headers: &HeaderMap<HeaderValue>,
+    payload: T,
     context: Context,
     sdl: String,
 ) -> Result<Externalizable<T>, Box<EvalAltResult>>
@@ -1693,7 +1693,7 @@ where
 {
     let converted_headers = externalize_header_map(headers)?;
     let handler = async move {
-        let target = Externalizable::new(stage, payload, converted_headers, context, sdl);
+        let target = Externalizable::new(stage, converted_headers, payload, context, sdl);
         target.call(&url).await.map_err(|e: BoxError| e.to_string())
     };
     // TODO: Investigate why we can no longer enter the existing runtime and use `block_on()` to

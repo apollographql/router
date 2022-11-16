@@ -33,8 +33,8 @@ pub(crate) enum PipelineStep {
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
-    pub(crate) body: T,
     pub(crate) headers: HashMap<String, Vec<String>>,
+    pub(crate) body: T,
     pub(crate) context: Context,
     pub(crate) sdl: String,
 }
@@ -45,16 +45,16 @@ where
 {
     pub(crate) fn new(
         stage: PipelineStep,
-        body: T,
         headers: HashMap<String, Vec<String>>,
+        body: T,
         context: Context,
         sdl: String,
     ) -> Self {
         Self {
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
-            body,
             headers,
+            body,
             context,
             sdl,
         }
