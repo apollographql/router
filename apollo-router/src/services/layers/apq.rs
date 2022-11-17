@@ -34,7 +34,7 @@ struct PersistedQuery {
 /// [`Layer`] for APQ implementation.
 #[derive(Clone)]
 pub(crate) struct APQLayer {
-    cache: DeduplicatingCache<Vec<u8>, String>,
+    cache: DeduplicatingCache<String, String>,
 }
 
 impl APQLayer {
@@ -44,7 +44,7 @@ impl APQLayer {
         }
     }
 
-    pub(crate) fn with_cache(cache: DeduplicatingCache<Vec<u8>, String>) -> Self {
+    pub(crate) fn with_cache(cache: DeduplicatingCache<String, String>) -> Self {
         Self { cache }
     }
 
@@ -52,29 +52,35 @@ impl APQLayer {
         &self,
         mut request: SupergraphRequest,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
-        let maybe_query_hash: Option<Vec<u8>> = request
+        let maybe_query_hash: Option<(String, Vec<u8>)> = request
             .supergraph_request
             .body()
             .extensions
             .get("persistedQuery")
             .and_then(|value| serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok())
-            .and_then(|persisted_query| hex::decode(persisted_query.sha256hash.as_bytes()).ok());
+            .and_then(|persisted_query| {
+                hex::decode(persisted_query.sha256hash.as_bytes())
+                    .ok()
+                    .map(|decoded| (persisted_query.sha256hash, decoded))
+            });
 
         let body_query = request.supergraph_request.body().query.clone();
 
         match (maybe_query_hash, body_query) {
-            (Some(query_hash), Some(query)) => {
-                if query_matches_hash(query.as_str(), query_hash.as_slice()) {
+            (Some((query_hash, query_hash_bytes)), Some(query)) => {
+                if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                     tracing::trace!("apq: cache insert");
                     let _ = request.context.insert("persisted_query_hit", false);
-                    self.cache.insert(query_hash, query).await;
+                    self.cache.insert(format!("apq|{query_hash}"), query).await;
                 } else {
                     tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
                 }
                 Ok(request)
             }
-            (Some(apq_hash), _) => {
-                if let Ok(cached_query) = self.cache.get(&apq_hash).await.get().await {
+            (Some((apq_hash, _)), _) => {
+                if let Ok(cached_query) =
+                    self.cache.get(&format!("apq|{apq_hash}")).await.get().await
+                {
                     let _ = request.context.insert("persisted_query_hit", true);
                     tracing::trace!("apq: cache hit");
                     request.supergraph_request.body_mut().query = Some(cached_query);
@@ -133,7 +139,7 @@ where
             move |mut req| {
                 let cache = cache.clone();
                 Box::pin(async move {
-                    let maybe_query_hash: Option<Vec<u8>> = req
+                    let maybe_query_hash: Option<(String, Vec<u8>)> = req
                         .supergraph_request
                         .body()
                         .extensions
@@ -142,17 +148,19 @@ where
                             serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok()
                         })
                         .and_then(|persisted_query| {
-                            hex::decode(persisted_query.sha256hash.as_bytes()).ok()
+                            hex::decode(persisted_query.sha256hash.as_bytes())
+                                .ok()
+                                .map(|decoded| (persisted_query.sha256hash, decoded))
                         });
 
                     let body_query = req.supergraph_request.body().query.clone();
 
                     match (maybe_query_hash, body_query) {
-                        (Some(query_hash), Some(query)) => {
-                            if query_matches_hash(query.as_str(), query_hash.as_slice()) {
+                        (Some((query_hash, query_hash_bytes)), Some(query)) => {
+                            if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                                 tracing::trace!("apq: cache insert");
                                 let _ = req.context.insert("persisted_query_hit", false);
-                                cache.insert(query_hash, query).await;
+                                cache.insert(format!("apq|{query_hash}"), query).await;
                             } else {
                                 tracing::warn!(
                                     "apq: graphql request doesn't match provided sha256Hash"
@@ -160,8 +168,10 @@ where
                             }
                             Ok(ControlFlow::Continue(req))
                         }
-                        (Some(apq_hash), _) => {
-                            if let Ok(cached_query) = cache.get(&apq_hash).await.get().await {
+                        (Some((apq_hash, _)), _) => {
+                            if let Ok(cached_query) =
+                                cache.get(&format!("apq|{apq_hash}")).await.get().await
+                            {
                                 let _ = req.context.insert("persisted_query_hit", true);
                                 tracing::trace!("apq: cache hit");
                                 req.supergraph_request.body_mut().query = Some(cached_query);

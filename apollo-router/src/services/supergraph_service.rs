@@ -3,11 +3,9 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::headers::HeaderName;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use http::HeaderValue;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
@@ -40,7 +38,6 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::tracer::TraceId;
 use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -103,8 +100,8 @@ where
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = service_call(planning, execution, schema, req)
-            .or_else(|error: BoxError| async move {
+        let fut =
+            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
                 let errors = vec![crate::error::Error {
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
@@ -122,19 +119,20 @@ where
                     .context(context_cloned)
                     .build()
                     .expect("building a response like this should not fail"))
-            })
-            .and_then(|mut res| async move {
-                if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-                    let header_value = HeaderValue::from_str(trace_id.as_str());
-                    if let Ok(header_value) = header_value {
-                        res.response
-                            .headers_mut()
-                            .insert(HeaderName::from_static("apollo_trace_id"), header_value);
-                    }
-                }
-
-                Ok(res)
             });
+        // FIXME: Enable it later
+        // .and_then(|mut res| async move {
+        //     if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
+        //         let header_value = HeaderValue::from_str(trace_id.as_str());
+        //         if let Ok(header_value) = header_value {
+        //             res.response
+        //                 .headers_mut()
+        //                 .insert(HeaderName::from_static("apollo_trace_id"), header_value);
+        //         }
+        //     }
+
+        //     Ok(res)
+        // });
 
         Box::pin(fut)
     }
@@ -334,6 +332,7 @@ impl PluggableSupergraphServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
+        let redis_urls = configuration.supergraph.cache();
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
@@ -346,8 +345,13 @@ impl PluggableSupergraphServiceBuilder {
             BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service =
-            CachingQueryPlanner::new(bridge_query_planner, plan_cache_limit).await;
+        let query_planner_service = CachingQueryPlanner::new(
+            bridge_query_planner,
+            plan_cache_limit,
+            self.schema.schema_id.clone(),
+            redis_urls,
+        )
+        .await;
 
         let plugins = Arc::new(self.plugins);
 
@@ -497,6 +501,7 @@ mod tests {
        id: ID
        creatorUser: User
        name: String
+       nonNullId: ID!
        suborga: [Organization]
    }"#;
 
@@ -522,6 +527,42 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
             // Request building here
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        insta::assert_json_snapshot!(response);
+    }
+
+    #[tokio::test]
+    async fn nullability_bubbling() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {} }}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "query { currentUser { activeOrganization { nonNullId creatorUser { name } } } }",
+            )
             .build()
             .unwrap();
         let response = service

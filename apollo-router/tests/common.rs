@@ -7,6 +7,7 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
+use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
 use http::Request;
@@ -110,6 +111,7 @@ impl TracingTest {
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 )
             });
+            request.headers_mut().remove(ACCEPT);
             match client.send(request).await {
                 Ok(result) => {
                     tracing::debug!(
