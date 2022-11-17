@@ -387,9 +387,7 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
-        }
+        server.await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning status code 401
@@ -404,9 +402,7 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
-        }
+        server.await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -421,9 +417,7 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
-        }
+        server.await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning compressed response
@@ -470,9 +464,7 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
-        }
+        server.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
