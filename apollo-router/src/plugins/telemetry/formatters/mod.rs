@@ -18,7 +18,18 @@ use super::metrics::METRIC_PREFIX_MONOTONIC_COUNTER;
 
 pub(crate) const TRACE_ID_FIELD_NAME: &str = "trace_id";
 
-// TODO create better trait extension to use this
+/// `FilteringFormatter` is useful if you want to not filter the entire event but only want to not display it
+/// ```ignore
+/// use tracing_core::Event;
+/// use tracing_subscriber::fmt::format::{Format};
+/// tracing_subscriber::fmt::fmt()
+/// .event_format(FilteringFormatter::new(
+///     Format::default().pretty(),
+///     // Do not display the event if an attribute name starts with "counter"
+///     |event: &Event| !event.metadata().fields().iter().any(|f| f.name().starts_with("counter")),
+/// ))
+/// .finish();
+/// ```
 pub(crate) struct FilteringFormatter<T, F> {
     inner: T,
     filter_fn: F,
