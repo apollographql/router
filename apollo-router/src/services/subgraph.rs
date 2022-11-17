@@ -97,7 +97,7 @@ impl Clone for Request {
         Self {
             supergraph_request: self.supergraph_request.clone(),
             subgraph_request,
-            operation_kind: self.operation_kind.clone(),
+            operation_kind: self.operation_kind,
             context: self.context.clone(),
         }
     }

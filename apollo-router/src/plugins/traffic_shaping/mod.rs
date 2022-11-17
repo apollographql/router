@@ -67,7 +67,8 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    //  retri
+    //  *experimental feature*: Enables request retry
+    experimental_retry: Option<RetryConfig>,
 }
 
 impl Merge for Shaping {
@@ -83,6 +84,42 @@ impl Merge for Shaping {
                     .as_ref()
                     .or(fallback.global_rate_limit.as_ref())
                     .cloned(),
+                experimental_retry: self
+                    .experimental_retry
+                    .as_ref()
+                    .or(fallback.experimental_retry.as_ref())
+                    .cloned(),
+            },
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RetryConfig {
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    /// how long a single deposit should be considered. Must be between 1 and 60 seconds,
+    /// default value is 10 seconds
+    ttl: Option<Duration>,
+    /// minimum rate of retries allowed to accomodate clients that have just started
+    /// issuing requests, or clients that do not issue many requests per window. The
+    /// default value is 10
+    min_per_sec: Option<u32>,
+    /// percentage of calls to deposit that can be retried. This is in addition to any
+    /// retries allowed for via min_per_sec. Must be between 0 and 1000, default value
+    /// is 0.2
+    retry_percent: Option<f32>,
+}
+
+impl Merge for RetryConfig {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => RetryConfig {
+                ttl: self.ttl.or(fallback.ttl),
+                min_per_sec: self.min_per_sec.or(fallback.min_per_sec),
+                retry_percent: self.retry_percent.or(fallback.retry_percent),
             },
         }
     }
@@ -147,7 +184,6 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
-    retry_policy: Option<RetryPolicy>,
 }
 
 #[async_trait::async_trait]
@@ -182,7 +218,6 @@ impl Plugin for TrafficShaping {
             config: init.config,
             rate_limit_router,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
-            retry_policy: Some(RetryPolicy::default()),
         })
     }
 }
@@ -281,7 +316,12 @@ impl TrafficShaping {
                     })
                     .clone()
             });
-            let retry = tower::retry::RetryLayer::new(self.retry_policy.clone().unwrap());
+
+            let retry = config.experimental_retry.as_ref().map(|config| {
+                let retry_policy =
+                    RetryPolicy::new(config.ttl, config.min_per_sec, config.retry_percent);
+                tower::retry::RetryLayer::new(retry_policy)
+            });
 
             Either::A(ServiceBuilder::new()
                 .option_layer(config.deduplicate_query.unwrap_or_default().then(
@@ -292,7 +332,7 @@ impl TrafficShaping {
                         .timeout
                         .unwrap_or(DEFAULT_TIMEOUT),
                     ))
-                    .option_layer(Some(retry))
+                    .option_layer(retry)
                     .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
