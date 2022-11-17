@@ -9,7 +9,7 @@ expression: response
     }
   },
   "extensions": {
-    "value-completion": [
+    "valueCompletion": [
       {
         "message": "Cannot return null for non-nullable field Organization.nonNullId",
         "path": [
