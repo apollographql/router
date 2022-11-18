@@ -7,6 +7,7 @@ use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
 
 use crate::json_ext::Object;
+use crate::services::layers::live::QueryCursor;
 
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
@@ -65,6 +66,9 @@ pub struct Request {
     /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
     #[serde(skip_serializing_if = "Object::is_empty", default)]
     pub extensions: Object,
+
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub cursor: Option<QueryCursor>,
 }
 
 // NOTE: this deserialize helper is used to transform `null` to Default::default()
@@ -94,12 +98,14 @@ impl Request {
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         variables: JsonMap<ByteString, Value>,
         extensions: JsonMap<ByteString, Value>,
+        cursor: Option<QueryCursor>,
     ) -> Self {
         Self {
             query,
             operation_name,
             variables,
             extensions,
+            cursor,
         }
     }
 
@@ -119,12 +125,14 @@ impl Request {
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
         variables: JsonMap<ByteString, Value>,
         extensions: JsonMap<ByteString, Value>,
+        cursor: Option<QueryCursor>,
     ) -> Self {
         Self {
             query,
             operation_name,
             variables,
             extensions,
+            cursor,
         }
     }
 
