@@ -59,5 +59,13 @@ helm upgrade --install --create-namespace --namespace router-test --set-file sup
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
 
 ## 🐛 Fixes
+
+### handle mutations containing @defer ([Issue #2099](https://github.com/apollographql/router/issues/2099))
+
+The Router generates partial query shapes corresponding to the primary and deferred responses,
+to validate the data sent back to the client. Those query shapes were invalid for mutations.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
+
 ## 🛠 Maintenance
 ## 📚 Documentation
