@@ -7,6 +7,7 @@
 //! * Rate limiting
 //!
 
+#[cfg(feature = "experimental_cache")]
 mod cache;
 mod deduplication;
 mod rate;
@@ -23,7 +24,6 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::util::Either;
 use tower::util::Oneshot;
 use tower::BoxError;
@@ -31,14 +31,11 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
-use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
-use crate::cache::storage::redis_storage::RedisCacheStorage;
-use crate::cache::storage::CacheStorage;
 use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -48,6 +45,9 @@ use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
 use crate::Configuration;
 use crate::SubgraphRequest;
+
+#[cfg(feature = "experimental_cache")]
+use {self::cache::SubgraphCacheLayer, crate::cache::storage::redis_storage::RedisCacheStorage};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -173,6 +173,7 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    #[cfg(feature = "experimental_cache")]
     storage: RedisCacheStorage,
 }
 
@@ -204,13 +205,23 @@ impl Plugin for TrafficShaping {
             })
             .transpose()?;
 
-        let storage =
-            RedisCacheStorage::new(init.config.cache_redis_urls.as_ref().unwrap().clone()).await;
+        #[cfg(feature = "experimental_cache")]
+        {
+            let storage =
+                RedisCacheStorage::new(init.config.cache_redis_urls.as_ref().unwrap().clone())
+                    .await;
+            Ok(Self {
+                config: init.config,
+                rate_limit_router,
+                rate_limit_subgraphs: Mutex::new(HashMap::new()),
+                storage,
+            })
+        }
+        #[cfg(not(feature = "experimental_cache"))]
         Ok(Self {
             config: init.config,
             rate_limit_router,
             rate_limit_subgraphs: Mutex::new(HashMap::new()),
-            storage,
         })
     }
 }
@@ -296,6 +307,7 @@ impl TrafficShaping {
         let final_config =
             Self::merge_config(all_config, subgraph_config.as_ref().map(|c| &c.shaping));
 
+        #[cfg(feature = "experimental_cache")]
         let entity_caching = if subgraph_config
             .as_ref()
             .and_then(|c| c.entity_caching)
@@ -308,6 +320,8 @@ impl TrafficShaping {
         } else {
             None
         };
+        #[cfg(not(feature = "experimental_cache"))]
+        let entity_caching: Option<dummy::DummySubgraphCacheLayer> = None;
 
         if let Some(config) = final_config {
             let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
@@ -343,6 +357,60 @@ impl TrafficShaping {
                 }))
         } else {
             Either::B(service)
+        }
+    }
+}
+
+#[cfg(not(feature = "experimental_cache"))]
+mod dummy {
+    use std::{
+        marker::PhantomData,
+        task::{Context, Poll},
+    };
+
+    use futures::future::BoxFuture;
+    use tower::{BoxError, Layer, Service};
+
+    use crate::services::subgraph;
+
+    #[derive(Clone)]
+    pub(crate) struct DummySubgraphCacheLayer;
+    impl<S: Clone> Layer<S> for DummySubgraphCacheLayer {
+        type Service = DummySubgraphCache<S>;
+
+        fn layer(&self, _: S) -> Self::Service {
+            DummySubgraphCache { p: PhantomData }
+        }
+    }
+
+    #[derive(Clone)]
+    pub(crate) struct DummySubgraphCache<S> {
+        p: PhantomData<S>,
+    }
+    impl<S> Service<subgraph::Request> for DummySubgraphCache<S>
+    where
+        S: Service<subgraph::Request, Response = subgraph::Response, Error = BoxError>
+            + Clone
+            + Send
+            + 'static,
+        <S as Service<subgraph::Request>>::Future: std::marker::Send,
+    {
+        type Response = <S as Service<subgraph::Request>>::Response;
+        type Error = <S as Service<subgraph::Request>>::Error;
+        type Future = BoxFuture<
+            'static,
+            Result<
+                <S as Service<subgraph::Request>>::Response,
+                <S as Service<subgraph::Request>>::Error,
+            >,
+        >;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            unimplemented!()
+        }
+
+        fn call(&mut self, _: subgraph::Request) -> Self::Future {
+            unimplemented!()
         }
     }
 }
