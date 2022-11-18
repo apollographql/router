@@ -82,7 +82,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.23", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.1", features = ["http1", "http2"] }
-indexmap = { version = "1.9.1", features = ["serde-1"] }
+indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
 jsonschema = { version = "0.16.1", default-features = false }
 lazy_static = "1.4.0"
@@ -156,7 +156,7 @@ shellexpand = "2.1.2"
 sha2 = "0.10.6"
 serde = { version = "1.0.147", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
-serde_json = { version = "1.0.87", features = ["preserve_order"] }
+serde_json = { version = "1.0.88", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
