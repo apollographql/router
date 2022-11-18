@@ -58,7 +58,7 @@ where
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             #[cfg(feature = "experimental_cache")]
             redis: if let Some(urls) = _redis_urls {
-                Some(RedisCacheStorage::new(urls).await)
+                Some(RedisCacheStorage::new(urls, None).await)
             } else {
                 None
             },
@@ -109,6 +109,7 @@ where
 pub(crate) mod redis_storage {
     use std::fmt;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use redis::AsyncCommands;
     use redis::FromRedisValue;
@@ -135,6 +136,7 @@ pub(crate) mod redis_storage {
     #[derive(Clone)]
     pub(crate) struct RedisCacheStorage {
         inner: Arc<Mutex<Connection>>,
+        ttl: Option<Duration>,
     }
 
     fn get_type_of<T>(_: &T) -> &'static str {
@@ -211,14 +213,19 @@ pub(crate) mod redis_storage {
     }
 
     impl RedisCacheStorage {
-        pub(crate) async fn new(urls: Vec<String>) -> Self {
+        pub(crate) async fn new(urls: Vec<String>, ttl: Option<Duration>) -> Self {
             let client = Client::open(urls).expect("opening ClusterClient");
             let connection = client.get_connection().await.expect("got redis connection");
 
             tracing::trace!("redis connection established");
             Self {
                 inner: Arc::new(Mutex::new(connection)),
+                ttl,
             }
+        }
+
+        pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
+            self.ttl = ttl;
         }
 
         pub(crate) async fn get<K: KeyType, V: ValueType>(
@@ -265,11 +272,30 @@ pub(crate) mod redis_storage {
             data: &[(RedisKey<K>, RedisValue<V>)],
         ) {
             tracing::info!("inserting into redis: {:#?}", data);
-            let mut guard = self.inner.lock().await;
-            let r = guard
-                .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
-                .await;
-            tracing::info!("insert result {:?}", r);
+
+            if let Some(ttl) = self.ttl.as_ref() {
+                let expiration: usize = ttl.as_secs().try_into().unwrap();
+                let mut pipeline = redis::pipe();
+                pipeline.atomic();
+
+                for (key, value) in data {
+                    pipeline.set_ex(key, value, expiration);
+                }
+
+                let mut guard = self.inner.lock().await;
+
+                let r = pipeline
+                    .query_async::<Connection, redis::Value>(&mut *guard)
+                    .await;
+                tracing::info!("insert result {:?}", r);
+            } else {
+                let mut guard = self.inner.lock().await;
+
+                let r = guard
+                    .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
+                    .await;
+                tracing::info!("insert result {:?}", r);
+            }
         }
     }
 }

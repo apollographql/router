@@ -95,8 +95,9 @@ impl Merge for Shaping {
 struct SubgraphShaping {
     #[serde(flatten)]
     shaping: Shaping,
+    #[cfg(feature = "experimental_cache")]
     /// Enable entity caching
-    entity_caching: Option<bool>,
+    entity_caching: Option<SubgraphEntityCaching>,
 }
 
 impl Merge for SubgraphShaping {
@@ -105,8 +106,33 @@ impl Merge for SubgraphShaping {
             None => self.clone(),
             Some(fallback) => SubgraphShaping {
                 shaping: self.shaping.merge(Some(&fallback.shaping)),
-                entity_caching: self.entity_caching.or(fallback.entity_caching),
+                #[cfg(feature = "experimental_cache")]
+                entity_caching: self
+                    .entity_caching
+                    .as_ref()
+                    .or(fallback.entity_caching.as_ref())
+                    .cloned(),
             },
+        }
+    }
+}
+
+#[cfg(feature = "experimental_cache")]
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SubgraphEntityCaching {
+    /// expiration for all keys
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    pub(crate) ttl: Duration,
+}
+
+#[cfg(feature = "experimental_cache")]
+impl Merge for SubgraphEntityCaching {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => fallback.clone(),
         }
     }
 }
@@ -174,7 +200,7 @@ pub(crate) struct TrafficShaping {
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
     #[cfg(feature = "experimental_cache")]
-    storage: RedisCacheStorage,
+    storage: Option<RedisCacheStorage>,
 }
 
 #[async_trait::async_trait]
@@ -207,9 +233,11 @@ impl Plugin for TrafficShaping {
 
         #[cfg(feature = "experimental_cache")]
         {
-            let storage =
-                RedisCacheStorage::new(init.config.cache_redis_urls.as_ref().unwrap().clone())
-                    .await;
+            let storage = if let Some(urls) = init.config.cache_redis_urls.as_ref() {
+                Some(RedisCacheStorage::new(urls.clone(), None).await)
+            } else {
+                None
+            };
             Ok(Self {
                 config: init.config,
                 rate_limit_router,
@@ -308,14 +336,16 @@ impl TrafficShaping {
             Self::merge_config(all_config, subgraph_config.as_ref().map(|c| &c.shaping));
 
         #[cfg(feature = "experimental_cache")]
-        let entity_caching = if subgraph_config
-            .as_ref()
-            .and_then(|c| c.entity_caching)
-            .unwrap_or_default()
-        {
+        let entity_caching = if let (Some(storage), Some(caching_config)) = (
+            self.storage.clone(),
+            subgraph_config
+                .as_ref()
+                .and_then(|c| c.entity_caching.as_ref()),
+        ) {
             Some(SubgraphCacheLayer::new_with_storage(
                 name.to_string(),
-                self.storage.clone(),
+                storage,
+                caching_config.ttl,
             ))
         } else {
             None

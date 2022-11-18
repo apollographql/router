@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::task::Context;
 use std::task::Poll;
+use std::time::Duration;
 
 use futures::future::BoxFuture;
 use futures::FutureExt;
@@ -30,7 +31,12 @@ pub(crate) struct SubgraphCacheLayer {
 }
 
 impl SubgraphCacheLayer {
-    pub(crate) fn new_with_storage(name: String, storage: RedisCacheStorage) -> Self {
+    pub(crate) fn new_with_storage(
+        name: String,
+        mut storage: RedisCacheStorage,
+        ttl: Duration,
+    ) -> Self {
+        storage.set_ttl(Some(ttl));
         SubgraphCacheLayer { storage, name }
     }
 }

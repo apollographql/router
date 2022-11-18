@@ -605,10 +605,19 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true
+        "preview_defer_support": true,
+        "cache_redis_urls": null
       },
       "type": "object",
       "properties": {
+        "cache_redis_urls": {
+          "description": "URLs of Redis cache used for query planning",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true
+        },
         "introspection": {
           "description": "Enable introspection Default: false",
           "default": false,
@@ -2111,6 +2120,14 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         },
+        "cache_redis_urls": {
+          "description": "URLs of Redis cache used for query planning",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true
+        },
         "deduplicate_variables": {
           "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
           "type": "boolean",
@@ -2191,7 +2208,17 @@ expression: "&schema"
               },
               "entity_caching": {
                 "description": "Enable entity caching",
-                "type": "boolean",
+                "type": "object",
+                "required": [
+                  "ttl"
+                ],
+                "properties": {
+                  "ttl": {
+                    "description": "expiration for all keys",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "global_rate_limit": {
