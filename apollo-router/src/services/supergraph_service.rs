@@ -501,6 +501,7 @@ mod tests {
        id: ID
        creatorUser: User
        name: String
+       nonNullId: ID!
        suborga: [Organization]
    }"#;
 
@@ -526,6 +527,42 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
             // Request building here
+            .build()
+            .unwrap();
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        insta::assert_json_snapshot!(response);
+    }
+
+    #[tokio::test]
+    async fn nullability_bubbling() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {} }}}}
+            ).build()),
+        ("orga", MockSubgraph::default())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                "query { currentUser { activeOrganization { nonNullId creatorUser { name } } } }",
+            )
             .build()
             .unwrap();
         let response = service
