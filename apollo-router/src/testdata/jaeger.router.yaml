@@ -1,5 +1,8 @@
 telemetry:
   tracing:
+    experimental_expose_trace_id:
+      enabled: true
+      header_name: apollo-custom-trace-id
     trace_config:
       service_name: router
     jaeger:

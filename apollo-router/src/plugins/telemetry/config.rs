@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use axum::headers::HeaderName;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
@@ -11,6 +12,7 @@ use serde::Deserialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
+use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 
 #[derive(thiserror::Error, Debug)]
@@ -78,12 +80,26 @@ pub(crate) struct MetricsCommon {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Tracing {
+    /// A way to expose trace id in response headers
+    #[serde(default, rename = "experimental_expose_trace_id")]
+    pub(crate) expose_trace_id: ExposeTraceId,
     pub(crate) propagation: Option<Propagation>,
     pub(crate) trace_config: Option<Trace>,
     pub(crate) otlp: Option<otlp::Config>,
     pub(crate) jaeger: Option<tracing::jaeger::Config>,
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
     pub(crate) datadog: Option<tracing::datadog::Config>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) struct ExposeTraceId {
+    /// Expose the trace_id in response headers
+    pub(crate) enabled: bool,
+    /// Choose the header name to expose trace_id (default: apollo-trace-id)
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_option_header_name")]
+    pub(crate) header_name: Option<HeaderName>,
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]

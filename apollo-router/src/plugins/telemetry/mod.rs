@@ -109,6 +109,8 @@ const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
+pub(crate) const EXPOSE_TRACE_ID_HEADER_NAME: &str =
+    "apollo_telemetry::expose_trace_id::header_name";
 pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
@@ -213,6 +215,22 @@ impl Plugin for Telemetry {
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
+                    // To expose trace_id or not
+                    let expose_trace_id_header = config
+                        .tracing
+                        .as_ref()
+                        .and_then(|t| {
+                            t.expose_trace_id
+                                .enabled
+                                .then(|| t.expose_trace_id.header_name.clone())
+                        })
+                        .flatten();
+                    if let Some(expose_trace_id_header) = expose_trace_id_header {
+                        let _ = ctx.insert(
+                            EXPOSE_TRACE_ID_HEADER_NAME,
+                            expose_trace_id_header.to_string(),
+                        );
+                    }
                     async move {
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         result = Self::update_otel_metrics(
@@ -360,6 +378,9 @@ impl Telemetry {
             .apollo
             .as_mut()
             .expect("telemetry apollo config must be present");
+        if let Some(tracing_conf) = &config.tracing {
+            apollo.expose_trace_id = tracing_conf.expose_trace_id.clone();
+        }
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
         let spaceport = match apollo {
