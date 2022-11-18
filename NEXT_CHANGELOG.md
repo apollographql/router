@@ -60,4 +60,13 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🐛 Fixes
 ## 🛠 Maintenance
+
+
+### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
+
+Remove duplicated code.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
+
+
 ## 📚 Documentation
