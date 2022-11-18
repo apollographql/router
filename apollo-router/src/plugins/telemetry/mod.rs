@@ -27,13 +27,20 @@ use http::HeaderValue;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
+use opentelemetry::propagation::text_map_propagator::FieldIter;
+use opentelemetry::propagation::Extractor;
+use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use rand::Rng;
@@ -113,6 +120,7 @@ pub(crate) const EXPOSE_TRACE_ID_HEADER_NAME: &str =
     "apollo_telemetry::expose_trace_id::header_name";
 pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
+const GLOBAL_TRACER_NAME: &str = "apollo-router";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
 static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
@@ -416,7 +424,7 @@ impl Telemetry {
             let tracer_provider = Self::create_tracer_provider(&config)?;
 
             let tracer = tracer_provider.versioned_tracer(
-                "apollo-router",
+                GLOBAL_TRACER_NAME,
                 Some(env!("CARGO_PKG_VERSION")),
                 None,
             );
@@ -555,6 +563,11 @@ impl Telemetry {
         }
         if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
+        }
+        if let Some(custom_header) = &propagation.custom_header {
+            propagators.push(Box::new(CustomTraceIdPropagator::new(
+                custom_header.to_string(),
+            )));
         }
 
         TextMapCompositePropagator::new(propagators)
@@ -1263,6 +1276,76 @@ impl ApolloFtv1Handler {
             }
         }
         resp
+    }
+}
+
+/// CustomTraceIdPropagator to set custom trace_id for our tracing system
+/// coming from headers
+#[derive(Debug)]
+struct CustomTraceIdPropagator {
+    header_name: String,
+    fields: [String; 1],
+}
+
+impl CustomTraceIdPropagator {
+    fn new(header_name: String) -> Self {
+        Self {
+            fields: [header_name.clone()],
+            header_name,
+        }
+    }
+
+    fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
+        let trace_id = extractor.get(&self.header_name)?;
+
+        opentelemetry::global::tracer_provider().versioned_tracer(
+            GLOBAL_TRACER_NAME,
+            Some(env!("CARGO_PKG_VERSION")),
+            None,
+        );
+        // extract trace id
+        let trace_id = match opentelemetry::trace::TraceId::from_hex(trace_id) {
+            Ok(trace_id) => trace_id,
+            Err(err) => {
+                ::tracing::error!("cannot generate custom trace_id: {err}");
+                return None;
+            }
+        };
+
+        SpanContext::new(
+            trace_id,
+            SpanId::INVALID,
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+        )
+        .into()
+    }
+}
+
+impl TextMapPropagator for CustomTraceIdPropagator {
+    fn inject_context(&self, cx: &opentelemetry::Context, injector: &mut dyn Injector) {
+        let span = cx.span();
+        let span_context = span.span_context();
+        if span_context.is_valid() {
+            let header_value = format!("{}", span_context.trace_id());
+            injector.set(&self.header_name, header_value);
+        }
+    }
+
+    fn extract_with_context(
+        &self,
+        cx: &opentelemetry::Context,
+        extractor: &dyn Extractor,
+    ) -> opentelemetry::Context {
+        cx.with_remote_span_context(
+            self.extract_span_context(extractor)
+                .unwrap_or_else(SpanContext::empty_context),
+        )
+    }
+
+    fn fields(&self) -> FieldIter<'_> {
+        FieldIter::new(self.fields.as_ref())
     }
 }
 

@@ -105,6 +105,10 @@ pub(crate) struct ExposeTraceId {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Propagation {
+    /// Select a custom header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_option_header_name")]
+    pub(crate) custom_header: Option<HeaderName>,
     pub(crate) baggage: Option<bool>,
     pub(crate) trace_context: Option<bool>,
     pub(crate) jaeger: Option<bool>,

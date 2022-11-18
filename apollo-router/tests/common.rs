@@ -7,18 +7,12 @@ use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
-use axum::response::Response;
-use bytes::Bytes;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::Method;
-use http::Request;
-use http::Uri;
 use jsonpath_lib::Selector;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
-use opentelemetry_http::HttpClient;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
