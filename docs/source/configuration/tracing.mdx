@@ -7,16 +7,16 @@ import { Link } from "gatsby";
 
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
-* [Jaeger](https://www.jaegertracing.io/)
-* [Zipkin](https://zipkin.io/)
-* [Datadog](https://www.datadoghq.com/)
-* [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC
+- [Jaeger](https://www.jaegertracing.io/)
+- [Zipkin](https://zipkin.io/)
+- [Datadog](https://www.datadoghq.com/)
+- [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC
 
 The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
-* Sub-request response times
-* Query shape (sub-request dependencies)
-* Apollo Router post-processing
+- Sub-request response times
+- Query shape (sub-request dependencies)
+- Apollo Router post-processing
 
 Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
 
@@ -81,8 +81,25 @@ telemetry:
       # https://zipkin.io/ (compliant with opentracing)
       zipkin: false
 
+      # If you have your own way to generate a trace id and you want to pass it via a custom header
+      custom_header: "x-request-id"
 ```
+
 Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).
+
+### Trace ID
+
+If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    experimental_expose_trace_id:
+      enabled: true # default: false
+      header_name: "my-trace-id" # default: "apollo-trace-id"
+```
+
+Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
 
 ## Using Datadog
 
@@ -109,7 +126,6 @@ telemetry:
       agent:
         # Either 'default' or a URL
         endpoint: docker_jaeger:14268
-
 ```
 
 ### Collector config

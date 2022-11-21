@@ -1,14 +1,11 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::headers::HeaderName;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
-use http::HeaderValue;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
@@ -34,7 +31,6 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
-use crate::plugins::telemetry::EXPOSE_TRACE_ID_HEADER_NAME;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -42,7 +38,6 @@ use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
 use crate::router_factory::SupergraphServiceFactory;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
-use crate::tracer::TraceId;
 use crate::Configuration;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -105,8 +100,8 @@ where
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = service_call(planning, execution, schema, req)
-            .or_else(|error: BoxError| async move {
+        let fut =
+            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
                 let errors = vec![crate::error::Error {
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
@@ -124,24 +119,6 @@ where
                     .context(context_cloned)
                     .build()
                     .expect("building a response like this should not fail"))
-            })
-            .and_then(|mut res| async move {
-                if let Some(header_name_str) = res
-                    .context
-                    .get::<_, String>(EXPOSE_TRACE_ID_HEADER_NAME)
-                    .ok()
-                    .flatten()
-                {
-                    if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-                        let header_name = HeaderName::from_str(&header_name_str);
-                        let header_value = HeaderValue::from_str(trace_id.as_str());
-                        if let (Ok(header_name), Ok(header_value)) = (header_name, header_value) {
-                            res.response.headers_mut().insert(header_name, header_value);
-                        }
-                    }
-                }
-
-                Ok(res)
             });
 
         Box::pin(fut)

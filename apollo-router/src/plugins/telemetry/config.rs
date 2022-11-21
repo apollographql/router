@@ -80,6 +80,8 @@ pub(crate) struct MetricsCommon {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Tracing {
+    // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
+    // When deleting, put a #[serde(alias = "experimental_expose_trace_id")] if we don't want to break things
     /// A way to expose trace id in response headers
     #[serde(default, rename = "experimental_expose_trace_id")]
     pub(crate) expose_trace_id: ExposeTraceId,

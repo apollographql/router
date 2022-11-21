@@ -16,6 +16,7 @@ use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
+use axum::headers::HeaderName;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
@@ -94,6 +95,7 @@ use crate::spaceport::server::ReportSpaceport;
 use crate::spaceport::StatsContext;
 use crate::subgraph::Request;
 use crate::subgraph::Response;
+use crate::tracer::TraceId;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ListenAddr;
@@ -116,11 +118,10 @@ const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-pub(crate) const EXPOSE_TRACE_ID_HEADER_NAME: &str =
-    "apollo_telemetry::expose_trace_id::header_name";
 pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
+const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
 static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
@@ -195,13 +196,15 @@ impl Plugin for Telemetry {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
+        let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_response(|resp: SupergraphResponse| {
+            .map_response(move |mut resp: SupergraphResponse| {
+                let config = config_map_res_first.clone();
                 if let Ok(Some(usage_reporting)) =
                     resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
@@ -210,6 +213,20 @@ impl Plugin for Telemetry {
                         "apollo_private.operation_signature",
                         &usage_reporting.stats_report_key.as_str(),
                     );
+                }
+                // To expose trace_id or not
+                let expose_trace_id_header = config.tracing.as_ref().and_then(|t| {
+                    t.expose_trace_id.enabled.then(|| {
+                        t.expose_trace_id.header_name.clone().unwrap_or_else(|| {
+                            HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER)
+                        })
+                    })
+                });
+                if let (Some(header_name), Some(trace_id)) = (
+                    expose_trace_id_header,
+                    TraceId::maybe_new().and_then(|t| HeaderValue::from_str(&t.to_string()).ok()),
+                ) {
+                    resp.response.headers_mut().append(header_name, trace_id);
                 }
                 resp
             })
@@ -223,22 +240,7 @@ impl Plugin for Telemetry {
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
-                    // To expose trace_id or not
-                    let expose_trace_id_header = config
-                        .tracing
-                        .as_ref()
-                        .and_then(|t| {
-                            t.expose_trace_id
-                                .enabled
-                                .then(|| t.expose_trace_id.header_name.clone())
-                        })
-                        .flatten();
-                    if let Some(expose_trace_id_header) = expose_trace_id_header {
-                        let _ = ctx.insert(
-                            EXPOSE_TRACE_ID_HEADER_NAME,
-                            expose_trace_id_header.to_string(),
-                        );
-                    }
+
                     async move {
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         result = Self::update_otel_metrics(
