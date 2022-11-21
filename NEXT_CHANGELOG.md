@@ -27,6 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Provide multi-arch (amd64/arm64) docker images for the router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
+
+From the next release, our docker images will be multi-arch.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
+
 ### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
 
 Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
