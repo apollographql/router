@@ -10,10 +10,10 @@ use std::time::Duration;
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
-use clap::AppSettings;
-use clap::ArgAction;
 use clap::CommandFactory;
 use clap::Parser;
+use clap::{AppSettings, Subcommand};
+use clap::{ArgAction, Args};
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use tracing::dispatcher::with_default;
@@ -24,6 +24,7 @@ use url::ParseError;
 use url::Url;
 
 use crate::configuration::generate_config_schema;
+use crate::configuration::upgrade_configuration;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ConfigurationSource;
@@ -97,6 +98,43 @@ extern "C" fn drop_ad_hoc_profiler() {
     }
 }
 
+/// Subcommands
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Runs the router (default).
+    Run,
+
+    /// Configuration subcommands.
+    Config(ConfigSubcommandArgs),
+
+    /// Print the configuration json schema (deprecated).
+    Schema,
+}
+
+#[derive(Args, Debug)]
+struct ConfigSubcommandArgs {
+    /// Subcommands
+    #[clap(subcommand)]
+    command: ConfigSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigSubcommand {
+    /// Print the json configuration schema.
+    Schema,
+
+    /// Print upgraded configuration.
+    Upgrade {
+        #[clap(
+            short,
+            long = "config",
+            parse(from_os_str),
+            env = "APOLLO_ROUTER_CONFIG_PATH"
+        )]
+        config: PathBuf,
+    },
+}
+
 /// Options for the router
 #[derive(Parser, Debug)]
 #[clap(
@@ -150,9 +188,9 @@ pub(crate) struct Opt {
     )]
     supergraph_path: Option<PathBuf>,
 
-    /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue))]
-    schema: bool,
+    /// Subcommands
+    #[clap(subcommand)]
+    command: Option<Commands>,
 
     /// Your Apollo key.
     #[clap(skip = std::env::var("APOLLO_KEY").ok())]
@@ -294,12 +332,6 @@ impl Executable {
 
         copy_args_to_env();
 
-        if opt.schema {
-            let schema = generate_config_schema();
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-            return Ok(());
-        }
-
         let builder = tracing_subscriber::fmt::fmt().with_env_filter(
             EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
         );
@@ -315,15 +347,40 @@ impl Executable {
         };
 
         GLOBAL_ENV_FILTER.set(opt.log_level.clone()).expect(
-            "failed setting the global env filter. THe start() function should only be called once",
+            "failed setting the global env filter. The start() function should only be called once",
         );
 
-        // The dispatcher we created is passed explicitely here to make sure we display the logs
-        // in the initialization phase and in the state machine code, before a global subscriber
-        // is set using the configuration file
-        Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
-            .with_subscriber(dispatcher)
-            .await
+        match opt.command.as_ref().unwrap_or(&Commands::Run) {
+            Commands::Schema => {
+                eprintln!("`router schema` is deprecated. Use `router config schema`");
+                let schema = generate_config_schema();
+                println!("{}", serde_json::to_string_pretty(&schema)?);
+                return Ok(());
+            }
+            Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Schema,
+            }) => {
+                let schema = generate_config_schema();
+                println!("{}", serde_json::to_string_pretty(&schema)?);
+                return Ok(());
+            }
+            Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Upgrade { config },
+            }) => {
+                let config = serde_yaml::from_str(&std::fs::read_to_string(config)?)?;
+                let upgraded_config = upgrade_configuration(config, true)?;
+                println!("{}", serde_yaml::to_string(&upgraded_config)?);
+                return Ok(());
+            }
+            Commands::Run => {
+                // The dispatcher we created is passed explicitly here to make sure we display the logs
+                // in the initialization phase and in the state machine code, before a global subscriber
+                // is set using the configuration file
+                Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
+                    .with_subscriber(dispatcher)
+                    .await
+            }
+        }
     }
 
     async fn inner_start(

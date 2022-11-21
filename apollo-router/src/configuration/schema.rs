@@ -18,6 +18,7 @@ use super::yaml;
 use super::Configuration;
 use super::ConfigurationError;
 use super::APOLLO_PLUGIN_PREFIX;
+pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 /// Generate a JSON schema for the configuration.
 pub(crate) fn generate_config_schema() -> RootSchema {
@@ -37,6 +38,15 @@ pub(crate) fn generate_config_schema() -> RootSchema {
     schema
 }
 
+#[derive(Eq, PartialEq)]
+pub(crate) enum Mode {
+    Upgrade,
+
+    // This is used only in testing to ensure that we don't allow old config in our tests.
+    #[cfg(test)]
+    NoUpgrade,
+}
+
 /// Validate config yaml against the generated json schema.
 /// This is a tricky problem, and the solution here is by no means complete.
 /// In the case that validation cannot be performed then it will let serde validate as normal. The
@@ -54,6 +64,7 @@ pub(crate) fn generate_config_schema() -> RootSchema {
 pub(crate) fn validate_yaml_configuration(
     raw_yaml: &str,
     expansion: Expansion,
+    migration: Mode,
 ) -> Result<Configuration, ConfigurationError> {
     let defaulted_yaml = if raw_yaml.trim().is_empty() {
         "plugins:".to_string()
@@ -61,14 +72,16 @@ pub(crate) fn validate_yaml_configuration(
         raw_yaml.to_string()
     };
 
-    let yaml = &serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
+    let mut yaml = serde_yaml::from_str(&defaulted_yaml).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse yaml",
             error: e.to_string(),
         }
     })?;
-
-    let expanded_yaml = expand_env_variables(yaml, expansion)?;
+    if migration == Mode::Upgrade {
+        yaml = upgrade_configuration(yaml, true)?;
+    }
+    let expanded_yaml = expand_env_variables(&yaml, expansion)?;
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse schema",

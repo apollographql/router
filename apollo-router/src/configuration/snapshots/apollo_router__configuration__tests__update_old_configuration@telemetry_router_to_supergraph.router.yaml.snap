@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  metrics:
+    common:
+      attributes:
+        supergraph:
+          request:
+            header:
+              - named: fd
+
