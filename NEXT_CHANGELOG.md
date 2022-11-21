@@ -61,3 +61,10 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+
+### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
+
+We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
+
