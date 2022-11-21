@@ -35,7 +35,7 @@ where
 }
 
 #[cfg(feature = "experimental_cache")]
-use redis_storage::*;
+pub(crate) use redis_storage::*;
 
 // placeholder storage module
 //

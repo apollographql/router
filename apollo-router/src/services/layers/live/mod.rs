@@ -9,6 +9,7 @@ use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 
+#[cfg(feature = "experimental_cache")]
 pub(crate) mod layer;
 
 #[derive(Clone, Derivative)]

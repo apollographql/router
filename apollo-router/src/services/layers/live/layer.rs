@@ -1,78 +1,98 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
-use std::ops::ControlFlow;
-
-use crate::layers::async_checkpoint::AsyncCheckpointService;
-use crate::layers::DEFAULT_BUFFER_SIZE;
+use crate::cache::storage::RedisCacheStorage;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 use futures::future::BoxFuture;
-use tower::buffer::Buffer;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
-/// [`Layer`] for APQ implementation.
+/// [`Layer`] for live queries implementation
 #[derive(Clone)]
-pub(crate) struct LiveLayer {}
+pub(crate) struct LiveLayer {
+    cache: RedisCacheStorage,
+}
 
 impl LiveLayer {
-    pub(crate) async fn new() -> Self {
-        Self {}
+    pub(crate) async fn new(cache: RedisCacheStorage) -> Self {
+        Self { cache }
     }
 
-    pub(crate) async fn request(
+    /*pub(crate) async fn request(
         &self,
         request: SupergraphRequest,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         handle_request(request).await
-    }
+    }*/
 }
 
 impl<S> Layer<S> for LiveLayer
 where
-    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send + 'static,
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
     <S as Service<SupergraphRequest>>::Future: Send + 'static,
 {
-    type Service = AsyncCheckpointService<
-        Buffer<S, SupergraphRequest>,
-        BoxFuture<
-            'static,
-            Result<
-                ControlFlow<<S as Service<SupergraphRequest>>::Response, SupergraphRequest>,
-                BoxError,
-            >,
-        >,
-        SupergraphRequest,
-    >;
+    type Service = LiveService<S>;
 
     fn layer(&self, service: S) -> Self::Service {
-        AsyncCheckpointService::new(
-            move |request| {
-                Box::pin(async move {
-                    match handle_request(request).await {
-                        Ok(request) => Ok(ControlFlow::Continue(request)),
-                        Err(response) => Ok(ControlFlow::Break(response)),
-                    }
-                })
-                    as BoxFuture<
-                        'static,
-                        Result<
-                            ControlFlow<
-                                <S as Service<SupergraphRequest>>::Response,
-                                SupergraphRequest,
-                            >,
-                            BoxError,
-                        >,
-                    >
-            },
-            Buffer::new(service, DEFAULT_BUFFER_SIZE),
-        )
+        let cache = self.cache.clone();
+        LiveService {
+            cache,
+            inner: service,
+        }
     }
 }
 
-pub(crate) async fn handle_request(
-    _request: SupergraphRequest,
-) -> Result<SupergraphRequest, SupergraphResponse> {
-    unimplemented!()
+struct LiveService<S> {
+    inner: S,
+    cache: RedisCacheStorage,
 }
+
+impl<S> Service<SupergraphRequest> for LiveService<S>
+where
+    S: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + 'static,
+
+    <S as Service<SupergraphRequest>>::Future: std::marker::Send + 'static,
+{
+    type Response = SupergraphResponse;
+
+    type Error = <S as Service<SupergraphRequest>>::Error;
+
+    type Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, mut req: SupergraphRequest) -> Self::Future {
+        match req.supergraph_request.body_mut().cursor.take() {
+            None => Box::pin(self.inner.call(req))
+                as BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
+            Some(cursor) => {
+                todo!()
+            }
+        }
+    }
+}
+/*pub(crate) async fn handle_request(
+    cache: &RedisCacheStorage,
+    mut request: SupergraphRequest,
+) -> Result<SupergraphRequest, SupergraphResponse> {
+    let cursor = match request.cursor.take() {
+        None => return Ok(request),
+        Some(cursor) => cursor,
+    };
+
+    match cursor
+    todo!()
+}
+*/
