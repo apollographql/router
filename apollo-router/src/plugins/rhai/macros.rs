@@ -222,9 +222,7 @@ macro_rules! gen_map_async_request {
                         // *request.supergraph_request.body_mut() = output.body;
                         request.context = output.context;
                         let shared_request = Shared::new(Mutex::new(Some(request)));
-                        tracing::info!("about to callback to rhai");
                         let result = execute(&rs_rs.clone(), &cb_cb.clone(), (shared_request.clone(),));
-                        tracing::info!("just after callback to rhai");
 
                         if let Err(error) = result {
                             tracing::error!("map_request callback failed: {error}");
@@ -308,9 +306,7 @@ macro_rules! gen_map_deferred_async_request {
                         *request.supergraph_request.body_mut() = output.body;
                         request.context = output.context;
                         let shared_request = Shared::new(Mutex::new(Some(request)));
-                        tracing::info!("about to callback to rhai");
                         let result = execute(&rs_rs.clone(), &cb_cb.clone(), (shared_request.clone(),));
-                        tracing::info!("just after callback to rhai");
 
                         if let Err(error) = result {
                             tracing::error!("map_request callback failed: {error}");

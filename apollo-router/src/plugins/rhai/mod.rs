@@ -427,7 +427,6 @@ impl Plugin for Rhai {
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        tracing::info!("JUST STARTING SUPERGRAPH SERVICE");
         const FUNCTION_NAME_SERVICE: &str = "supergraph_service";
         if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
             return service;

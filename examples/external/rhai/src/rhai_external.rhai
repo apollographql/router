@@ -26,8 +26,7 @@
 fn supergraph_service(service) {
     const request_callback = Fn("process_request");
     const response_callback = Fn("process_response");
-    service.map_request(request_callback, "http://127.0.0.1:8081/delay/5");
-    service.map_request(request_callback);
+    service.map_request(request_callback, "http://127.0.0.1:3000");
     service.map_response(response_callback);
 }
 
