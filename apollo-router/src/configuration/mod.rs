@@ -221,6 +221,14 @@ impl Configuration {
                     .entry("experimental_expose_trace_id")
                     .and_modify(|e| *e = json!({"enabled": true, "header_name": null}))
                     .or_insert_with(|| json!({"enabled": true, "header_name": null}));
+            })
+            .or_insert_with(|| {
+                json!({
+                    "experimental_expose_trace_id": {
+                        "enabled": true,
+                        "header_name": null
+                    }
+                })
             });
         self.supergraph.introspection = true;
         self.sandbox.enabled = true;

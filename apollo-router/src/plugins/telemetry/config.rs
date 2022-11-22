@@ -99,7 +99,7 @@ pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
     pub(crate) enabled: bool,
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
-    #[schemars(with = "String")]
+    #[schemars(with = "Option<String>")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) header_name: Option<HeaderName>,
 }
@@ -108,7 +108,7 @@ pub(crate) struct ExposeTraceId {
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Propagation {
     /// Select a custom header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
-    #[schemars(with = "String")]
+    #[schemars(with = "Option<String>")]
     #[serde(deserialize_with = "deserialize_option_header_name")]
     pub(crate) custom_header: Option<HeaderName>,
     pub(crate) baggage: Option<bool>,

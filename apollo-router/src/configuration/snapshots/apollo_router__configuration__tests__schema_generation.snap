@@ -1702,6 +1702,25 @@ expression: "&schema"
               "additionalProperties": false,
               "nullable": true
             },
+            "experimental_expose_trace_id": {
+              "description": "A way to expose trace id in response headers",
+              "type": "object",
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "Expose the trace_id in response headers",
+                  "type": "boolean"
+                },
+                "header_name": {
+                  "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
             "jaeger": {
               "type": "object",
               "oneOf": [
@@ -1841,6 +1860,11 @@ expression: "&schema"
               "properties": {
                 "baggage": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "custom_header": {
+                  "description": "Select a custom header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
+                  "type": "string",
                   "nullable": true
                 },
                 "datadog": {
