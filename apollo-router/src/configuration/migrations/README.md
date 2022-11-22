@@ -50,3 +50,6 @@ See [proteus](https://github.com/rust-playground/proteus) for more options.
 If a migration is deemed to have changed the configuration then the description of the migration will be output to the user as a warning.
 
 In future we will be able to use these files to support offline migrations.
+
+# Testing
+Once you have made a new migration place a config file in `testdata/migrations`. It will automatically be picked up by the `upgrade_old_configuration` test.

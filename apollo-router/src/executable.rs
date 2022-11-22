@@ -10,10 +10,12 @@ use std::time::Duration;
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
+use clap::AppSettings;
+use clap::ArgAction;
+use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
-use clap::{AppSettings, Subcommand};
-use clap::{ArgAction, Args};
+use clap::Subcommand;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use tracing::dispatcher::with_default;
@@ -24,7 +26,7 @@ use url::ParseError;
 use url::Url;
 
 use crate::configuration::generate_config_schema;
-use crate::configuration::upgrade_configuration;
+use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ConfigurationSource;
@@ -125,13 +127,13 @@ enum ConfigSubcommand {
 
     /// Print upgraded configuration.
     Upgrade {
-        #[clap(
-            short,
-            long = "config",
-            parse(from_os_str),
-            env = "APOLLO_ROUTER_CONFIG_PATH"
-        )]
-        config: PathBuf,
+        /// The location of the config to upgrade.
+        #[clap(parse(from_os_str), env = "APOLLO_ROUTER_CONFIG_PATH")]
+        config_path: PathBuf,
+
+        /// Print a diff.
+        #[clap(parse(from_flag), long)]
+        diff: bool,
     },
 }
 
@@ -355,22 +357,22 @@ impl Executable {
                 eprintln!("`router schema` is deprecated. Use `router config schema`");
                 let schema = generate_config_schema();
                 println!("{}", serde_json::to_string_pretty(&schema)?);
-                return Ok(());
+                Ok(())
             }
             Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
             }) => {
                 let schema = generate_config_schema();
                 println!("{}", serde_json::to_string_pretty(&schema)?);
-                return Ok(());
+                Ok(())
             }
             Commands::Config(ConfigSubcommandArgs {
-                command: ConfigSubcommand::Upgrade { config },
+                command: ConfigSubcommand::Upgrade { config_path, diff },
             }) => {
-                let config = serde_yaml::from_str(&std::fs::read_to_string(config)?)?;
-                let upgraded_config = upgrade_configuration(config, true)?;
-                println!("{}", serde_yaml::to_string(&upgraded_config)?);
-                return Ok(());
+                let config_string = std::fs::read_to_string(config_path)?;
+                let output = generate_upgrade(&config_string, *diff)?;
+                println!("{}", output);
+                Ok(())
             }
             Commands::Run => {
                 // The dispatcher we created is passed explicitly here to make sure we display the logs

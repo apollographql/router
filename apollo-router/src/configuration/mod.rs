@@ -13,7 +13,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use crate::configuration::schema::Mode;
 use askama::Template;
 use bytes::Bytes;
 use cors::*;
@@ -22,7 +21,7 @@ use displaydoc::Display;
 use expansion::*;
 use itertools::Itertools;
 pub(crate) use schema::generate_config_schema;
-pub(crate) use schema::upgrade_configuration;
+pub(crate) use schema::generate_upgrade;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -35,6 +34,7 @@ use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
 

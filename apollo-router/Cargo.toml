@@ -70,6 +70,7 @@ derive_more = { version = "0.99.17", default-features = false, features = [
     "display",
 ] }
 dhat = { version = "0.3.2", optional = true }
+diff = "0.1.13"
 directories = "4.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.24"

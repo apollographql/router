@@ -18,6 +18,7 @@ use super::yaml;
 use super::Configuration;
 use super::ConfigurationError;
 use super::APOLLO_PLUGIN_PREFIX;
+pub(crate) use crate::configuration::upgrade::generate_upgrade;
 pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 /// Generate a JSON schema for the configuration.

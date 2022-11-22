@@ -1,9 +1,13 @@
-use crate::error::ConfigurationError;
+use std::fmt::Write as _;
+
 use itertools::Itertools;
-use proteus::{Parser, TransformBuilder};
+use proteus::Parser;
+use proteus::TransformBuilder;
 use rust_embed::RustEmbed;
 use serde::Deserialize;
 use serde_json::Value;
+
+use crate::error::ConfigurationError;
 
 #[derive(RustEmbed)]
 #[folder = "src/configuration/migrations"]
@@ -38,16 +42,20 @@ pub(crate) fn upgrade_configuration(
         .map(|data| serde_yaml::from_slice(&data).expect("migration must be valid"))
         .collect();
 
-    for migration in migrations {
-        let new_config = apply_migration(&config, &migration)?;
+    let mut effective_migrations = Vec::new();
+    for migration in &migrations {
+        let new_config = apply_migration(&config, migration)?;
 
         // If the config has been modified by the migration then let the user know
-        if log_warnings && new_config != config {
-            tracing::warn!("router configuration contains deprecated options: {}. This will become an error in the future", migration.description);
+        if new_config != config {
+            effective_migrations.push(migration);
         }
 
         // Get ready for the next migration
         config = new_config;
+    }
+    if !effective_migrations.is_empty() && log_warnings {
+        tracing::warn!("router configuration contains deprecated options: \n\n{}\n\nThese will become errors in the future. To upgrade run: `router config upgrade <your_router_yaml_location> > <your_router_yaml_location>`", effective_migrations.iter().enumerate().map(|(idx, m)|format!("  {}. {}", idx + 1, m.description)).join("\n\n"));
     }
     Ok(config)
 }
@@ -62,19 +70,19 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
             Action::Delete { path } => {
                 // Deleting isn't actually supported by protus so we add a magic value to delete later
                 transformer_builder = transformer_builder.add_action(
-                    Parser::parse(REMOVAL_EXPRESSION, &path).expect("migration must be valid"),
+                    Parser::parse(REMOVAL_EXPRESSION, path).expect("migration must be valid"),
                 );
             }
             Action::Copy { from, to } => {
                 transformer_builder = transformer_builder
-                    .add_action(Parser::parse(&from, &to).expect("migration must be valid"));
+                    .add_action(Parser::parse(from, to).expect("migration must be valid"));
             }
             Action::Move { from, to } => {
                 transformer_builder = transformer_builder
-                    .add_action(Parser::parse(&from, &to).expect("migration must be valid"));
+                    .add_action(Parser::parse(from, to).expect("migration must be valid"));
                 // Deleting isn't actually supported by protus so we add a magic value to delete later
                 transformer_builder = transformer_builder.add_action(
-                    Parser::parse(REMOVAL_EXPRESSION, &from).expect("migration must be valid"),
+                    Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
                 );
             }
         }
@@ -84,7 +92,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
         .expect("transformer for migration must be valid");
     let mut new_config =
         transformer
-            .apply(&config)
+            .apply(config)
             .map_err(|e| ConfigurationError::MigrationFailure {
                 error: e.to_string(),
             })?;
@@ -93,6 +101,72 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     cleanup(&mut new_config);
 
     Ok(new_config)
+}
+
+pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, ConfigurationError> {
+    let parsed_config =
+        serde_yaml::from_str(config).map_err(|e| ConfigurationError::MigrationFailure {
+            error: e.to_string(),
+        })?;
+    let upgraded_config = upgrade_configuration(parsed_config, true).map_err(|e| {
+        ConfigurationError::MigrationFailure {
+            error: e.to_string(),
+        }
+    })?;
+    let upgraded_config = serde_yaml::to_string(&upgraded_config).map_err(|e| {
+        ConfigurationError::MigrationFailure {
+            error: e.to_string(),
+        }
+    })?;
+    generate_upgrade_output(config, &upgraded_config, diff)
+}
+
+pub(crate) fn generate_upgrade_output(
+    config: &str,
+    upgraded_config: &str,
+    diff: bool,
+) -> Result<String, ConfigurationError> {
+    // serde doesn't deal with whitespace and comments, these are lost in the upgrade process, so instead we try and preserve this in the diff.
+    // It's not ideal, and ideally the upgrade process should work on a DOM that is not serde, but for now we just make a best effort to preserve comments and whitespace.
+    // There absolutely are issues where comments will get stripped, but the output should be `correct`.
+    let mut output = String::new();
+
+    let diff_result = diff::lines(config, upgraded_config);
+
+    for diff_line in diff_result {
+        match diff_line {
+            diff::Result::Left(l) => {
+                let trimmed = l.trim();
+                if !trimmed.starts_with('#') && !trimmed.is_empty() {
+                    if diff {
+                        writeln!(output, "-{}", l).expect("write will never fail");
+                    }
+                } else if diff {
+                    writeln!(output, " {}", l).expect("write will never fail");
+                } else {
+                    writeln!(output, "{}", l).expect("write will never fail");
+                }
+            }
+            diff::Result::Both(l, _) => {
+                if diff {
+                    writeln!(output, " {}", l).expect("write will never fail");
+                } else {
+                    writeln!(output, "{}", l).expect("write will never fail");
+                }
+            }
+            diff::Result::Right(r) => {
+                let trimmed = r.trim();
+                if trimmed != "---" && !trimmed.is_empty() {
+                    if diff {
+                        writeln!(output, "+{}", r).expect("write will never fail");
+                    } else {
+                        writeln!(output, "{}", r).expect("write will never fail");
+                    }
+                }
+            }
+        }
+    }
+    Ok(output)
 }
 
 fn cleanup(value: &mut Value) {
@@ -118,8 +192,13 @@ fn cleanup(value: &mut Value) {
 
 #[cfg(test)]
 mod test {
-    use crate::configuration::upgrade::{apply_migration, Action, Migration};
-    use serde_json::{json, Value};
+    use serde_json::json;
+    use serde_json::Value;
+
+    use crate::configuration::upgrade::apply_migration;
+    use crate::configuration::upgrade::generate_upgrade_output;
+    use crate::configuration::upgrade::Action;
+    use crate::configuration::upgrade::Migration;
 
     fn source_doc() -> Value {
         json!( {
@@ -218,6 +297,26 @@ mod test {
                 })
                 .description("copy arr[0]")
                 .build(),
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
+    fn diff_upgrade_output() {
+        insta::assert_snapshot!(generate_upgrade_output(
+            "changed: bar\nstable: 1.0\ndeleted: gone",
+            "changed: bif\nstable: 1.0\nadded: new",
+            true
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
+    fn upgrade_output() {
+        insta::assert_snapshot!(generate_upgrade_output(
+            "changed: bar\nstable: 1.0\ndeleted: gone",
+            "changed: bif\nstable: 1.0\nadded: new",
+            false
         )
         .expect("expected successful migration"));
     }
