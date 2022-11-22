@@ -87,7 +87,7 @@ pub(crate) fn expand_env_variables(
     expansion: &Expansion,
 ) -> Result<serde_json::Value, ConfigurationError> {
     let mut configuration = configuration.clone();
-    visit(&mut configuration, &expansion)?;
+    visit(&mut configuration, expansion)?;
     Ok(configuration)
 }
 
