@@ -21,8 +21,13 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::utils::accepts_json;
+use super::utils::accepts_multipart;
+use super::utils::accepts_wildcard;
 use super::utils::prefers_html;
 use super::utils::process_vary_header;
+use super::utils::APPLICATION_JSON_HEADER_VALUE;
+use super::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::graphql;
 use crate::http_ext;
 use crate::plugins::traffic_shaping::Elapsed;
@@ -134,6 +139,10 @@ where
 
     match service.ready_oneshot().await {
         Ok(mut service) => {
+            let accepts_multipart = accepts_multipart(req.supergraph_request.headers());
+            let accepts_json = accepts_json(req.supergraph_request.headers());
+            let accepts_wildcard = accepts_wildcard(req.supergraph_request.headers());
+
             match service.call(req).await {
                 Err(e) => {
                     if let Some(source_err) = e.source() {
@@ -166,7 +175,20 @@ where
                                 .into_response()
                         }
                         Some(response) => {
-                            if response.has_next.unwrap_or(false) {
+                            if !response.has_next.unwrap_or(false)
+                                && (accepts_json || accepts_wildcard)
+                            {
+                                parts.headers.insert(
+                                    CONTENT_TYPE,
+                                    HeaderValue::from_static("application/json"),
+                                );
+                                tracing::trace_span!("serialize_response").in_scope(|| {
+                                    http_ext::Response::from(http::Response::from_parts(
+                                        parts, response,
+                                    ))
+                                    .into_response()
+                                })
+                            } else if accepts_multipart {
                                 parts.headers.insert(
                                     CONTENT_TYPE,
                                     HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
@@ -178,7 +200,11 @@ where
                                     &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
                                 );
                                 serde_json::to_writer(&mut first_buf, &response).unwrap();
-                                first_buf.extend_from_slice(b"\r\n--graphql\r\n");
+                                if response.has_next.unwrap_or(false) {
+                                    first_buf.extend_from_slice(b"\r\n--graphql\r\n");
+                                } else {
+                                    first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
+                                }
 
                                 let body = once(ready(Ok(Bytes::from(first_buf)))).chain(
                                     stream.map(|res| {
@@ -200,16 +226,17 @@ where
 
                                 (parts, StreamBody::new(body)).into_response()
                             } else {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static("application/json"),
-                                );
-                                tracing::trace_span!("serialize_response").in_scope(|| {
-                                    http_ext::Response::from(http::Response::from_parts(
-                                        parts, response,
-                                    ))
+                                // this should be unreachable due to a previous check, but just to be sure...
+                                (
+                                    StatusCode::NOT_ACCEPTABLE,
+                                    format!(
+                                        r#"'accept' header can't be different than \"*/*\", {:?}, {:?} or {:?}"#,
+                                        APPLICATION_JSON_HEADER_VALUE,
+                                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                        MULTIPART_DEFER_CONTENT_TYPE
+                                    ),
+                                )
                                     .into_response()
-                                })
                             }
                         }
                     }

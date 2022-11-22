@@ -1,0 +1,11 @@
+rhai:
+  scripts: src
+  main: forbid_anonymous_operations.rhai
+sandbox:
+  enabled: true
+# make sure you enable introspection
+supergraph:
+  introspection: true
+# make sure homepage is disabled
+homepage:
+  enabled: false

@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -7,6 +6,8 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
 use self::storage::CacheStorage;
+use self::storage::KeyType;
+use self::storage::ValueType;
 
 pub(crate) mod storage;
 
@@ -15,24 +16,24 @@ pub(crate) const DEFAULT_CACHE_CAPACITY: usize = 512;
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
-pub(crate) struct DeduplicatingCache<K: Clone + Send + Eq + Hash, V: Clone> {
+pub(crate) struct DeduplicatingCache<K: KeyType, V: ValueType> {
     wait_map: WaitMap<K, V>,
     storage: CacheStorage<K, V>,
 }
 
 impl<K, V> DeduplicatingCache<K, V>
 where
-    K: Clone + Send + Eq + Hash + 'static,
-    V: Clone + Send + 'static,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
     pub(crate) async fn new() -> Self {
-        Self::with_capacity(DEFAULT_CACHE_CAPACITY).await
+        Self::with_capacity(DEFAULT_CACHE_CAPACITY, None).await
     }
 
-    pub(crate) async fn with_capacity(capacity: usize) -> Self {
+    pub(crate) async fn with_capacity(capacity: usize, redis_urls: Option<Vec<String>>) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity).await,
+            storage: CacheStorage::new(capacity, redis_urls).await,
         }
     }
 
@@ -55,23 +56,6 @@ where
             None => {
                 let (sender, _receiver) = broadcast::channel(1);
 
-                locked_wait_map.insert(key.clone(), sender.clone());
-
-                // we must not hold a lock over the wait map while we are waiting for a value from the
-                // cache. This way, other tasks can come and register interest in the same key, or
-                // request other keys independently
-                drop(locked_wait_map);
-
-                if let Some(value) = self.storage.get(key).await {
-                    let mut locked_wait_map = self.wait_map.lock().await;
-                    let _ = locked_wait_map.remove(key);
-                    let _ = sender.send(value.clone());
-
-                    return Entry {
-                        inner: EntryInner::Value(value),
-                    };
-                }
-
                 let k = key.clone();
                 // when _drop_signal is dropped, either by getting out of the block, returning
                 // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -83,6 +67,21 @@ where
                     let mut locked_wait_map = wait_map.lock().await;
                     let _ = locked_wait_map.remove(&k);
                 });
+
+                locked_wait_map.insert(key.clone(), sender.clone());
+
+                // we must not hold a lock over the wait map while we are waiting for a value from the
+                // cache. This way, other tasks can come and register interest in the same key, or
+                // request other keys independently
+                drop(locked_wait_map);
+
+                if let Some(value) = self.storage.get(key).await {
+                    self.send(sender, key, value.clone()).await;
+
+                    return Entry {
+                        inner: EntryInner::Value(value),
+                    };
+                }
 
                 Entry {
                     inner: EntryInner::First {
@@ -100,16 +99,19 @@ where
         self.storage.insert(key, value.clone()).await;
     }
 
-    pub(crate) async fn remove_wait(&self, key: &K) {
+    async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
+        // Lock the wait map to prevent more subscribers racing with our send
+        // notification
         let mut locked_wait_map = self.wait_map.lock().await;
         let _ = locked_wait_map.remove(key);
+        let _ = sender.send(value);
     }
 }
 
-pub(crate) struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+pub(crate) struct Entry<K: KeyType, V: ValueType> {
     inner: EntryInner<K, V>,
 }
-enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+enum EntryInner<K: KeyType, V: ValueType> {
     First {
         key: K,
         sender: broadcast::Sender<V>,
@@ -130,8 +132,8 @@ pub(crate) enum EntryError {
 
 impl<K, V> Entry<K, V>
 where
-    K: Clone + Send + Eq + Hash + 'static,
-    V: Clone + Send + 'static,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
     pub(crate) fn is_first(&self) -> bool {
         matches!(self.inner, EntryInner::First { .. })
@@ -157,8 +159,7 @@ where
         } = self.inner
         {
             cache.insert(key.clone(), value.clone()).await;
-            cache.remove_wait(&key).await;
-            let _ = sender.send(value);
+            cache.send(sender, &key, value).await;
         }
     }
 
@@ -169,8 +170,7 @@ where
             sender, cache, key, ..
         } = self.inner
         {
-            let _ = sender.send(value);
-            cache.remove_wait(&key).await;
+            cache.send(sender, &key, value).await;
         }
     }
 }
@@ -187,7 +187,7 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(1).await;
+        let cache = DeduplicatingCache::with_capacity(1, None).await;
 
         let entry = cache.get(&k).await;
 
@@ -203,7 +203,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(13).await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(13, None).await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -225,7 +226,8 @@ mod tests {
 
         mock.expect_retrieve().times(1).return_const(1usize);
 
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(10).await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(10, None).await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made

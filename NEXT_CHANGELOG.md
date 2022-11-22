@@ -24,97 +24,60 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
-
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### Support serviceMonitor in helm chart
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
 
-`kube-prometheus-stack` ignores scrape annotations, so a `serviceMonitor` CRD is required to scrape a given target to avoid scrape_configs. 
+From the next release, our Docker images will be multi-arch.
 
-By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1853
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
 
-### Add support of dynamic header injection ([Issue #1755](https://github.com/apollographql/router/issues/1755))
+### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
 
-+ Insert static header
-
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router"
-        value: "indeed"
-```
-
-+ Insert header from context
+Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
 
 ```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    - insert:
-        name: "sent-from-our-apollo-router-context"
-        from_context: "my_key_in_context"
+extraEnvVars:
+  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
+    value: /data/supergraph-schema.graphql
+
+extraVolumeMounts:
+  - name: supergraph-schema
+    mountPath: /data
+    readOnly: true
+
+extraVolumes:
+  - name: supergraph-schema
+    configMap:
+      name: "{{ .Release.Name }}-supergraph"
+      items:
+        - key: supergraph-schema.graphql
+          path: supergraph-schema.graphql
 ```
 
-+ Insert header from request body
+With that values.yaml content, and with your supergraph schema in a file name supergraph-schema.graphql, you can execute:
 
-```yaml
-headers:
-  all: # Header rules for all subgraphs
-    request:
-    + insert:
-        name: "sent-from-our-apollo-router-request-body"
-        path: ".operationName" # It's a JSON path query to fetch the operation name from request body
-        default: "UNKNOWN" # If no operationName has been specified
+```
+helm upgrade --install --create-namespace --namespace router-test --set-file supergraphFile=supergraph-schema.graphql router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.9 --values values.yaml
 ```
 
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1830
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
 
 ## 🐛 Fixes
 
-### Do not erase errors when missing `_entities` ([Issue #1863](https://github.com/apollographql/router/issues/1863))
+### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
 
-in a federated query, if the subgraph returned a response with errors and a null or absent data field, the router
-was ignoring the subgraph error and instead returning an error complaining about the missing` _entities` field.
-This will now aggregate the subgraph error and the missing `_entities` error.
+The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1870
-
-### Fix prometheus annotation and healthcheck default
-
-The prometheus annotation is breaking on a `helm upgrade` so this fixes the template and also sets defaults. Additionally
-defaults are set for `health-check` listen to `0.0.0.0:8088` in the helm chart.
-
-
-By [@hobbsh](https://github.com/hobbsh) in https://github.com/apollographql/router/pull/1883
+By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
 
 ## 🛠 Maintenance
-
-### Change span attribute names in otel to be more consistent ([PR #1876](https://github.com/apollographql/router/pull/1876))
-
-Change span attributes name in our tracing to be more consistent and use namespaced attributes to be compliant with opentelemetry specs.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1876
-
-### Have CI use rust-toolchain.toml and not install another redudant toolchain ([Issue #1313](https://github.com/apollographql/router/issues/1313))
-
-Avoids redundant work in CI and makes the YAML configuration less mis-leading.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1877
-
-### Query plan execution refactoring ([PR #1843](https://github.com/apollographql/router/pull/1843))
-
-This splits the query plan execution in multiple modules to make the code more manageable.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1843
-
-### Remove `Buffer` from APQ ([PR #1641](https://github.com/apollographql/router/pull/1641))
-
-This removes `tower::Buffer` usage from the Automated Persisted Queries implementation to improve reliability.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1641
-
 ## 📚 Documentation
+
+### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
+
+We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
+

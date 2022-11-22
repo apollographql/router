@@ -26,6 +26,7 @@ struct FormatTest {
     response: Option<serde_json_bytes::Value>,
     expected: Option<serde_json_bytes::Value>,
     expected_errors: Option<serde_json_bytes::Value>,
+    expected_extensions: Option<serde_json_bytes::Value>,
     federation_version: FederationVersion,
     is_deferred: bool,
 }
@@ -76,8 +77,8 @@ impl FormatTest {
         self
     }
 
-    fn expected_errors(mut self, v: serde_json_bytes::Value) -> Self {
-        self.expected_errors = Some(v);
+    fn expected_extensions(mut self, v: serde_json_bytes::Value) -> Self {
+        self.expected_extensions = Some(v);
         self
     }
 
@@ -128,6 +129,10 @@ impl FormatTest {
 
         if let Some(e) = self.expected_errors {
             assert_eq_and_ordered!(serde_json_bytes::to_value(&response.errors).unwrap(), e);
+        }
+
+        if let Some(e) = self.expected_extensions {
+            assert_eq_and_ordered!(serde_json_bytes::to_value(&response.extensions).unwrap(), e);
         }
     }
 }
@@ -1053,6 +1058,17 @@ fn variable_validation() {
     // When expected as an input type, both integer and float input values are accepted.
     assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2}));
     assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2.0}));
+    // double precision floats are valid
+    assert_validation!(
+        schema,
+        "query($foo:Float){x}",
+        json!({"foo":1600341978193i64})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:Float){x}",
+        json!({"foo":1600341978193f64})
+    );
     // All other input values, including strings with numeric content,
     // must raise a request error indicating an incorrect type.
     assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2.0"}));
@@ -1223,6 +1239,32 @@ fn variable_validation() {
             "content": "Hello",
             "author": "Me"
         }})
+    );
+
+    assert_validation!(
+        "type Mutation{
+            foo(input: FooInput!): FooResponse!
+        }
+        type Query{
+            data: String
+        }
+
+        input FooInput {
+          enumWithDefault: EnumWithDefault! = WEB
+        }
+        type FooResponse {
+            id: ID!
+        }
+
+        enum EnumWithDefault {
+          WEB
+          MOBILE
+        }",
+        "mutation foo($input: FooInput!) {
+            foo (input: $input) {
+            __typename
+        }}",
+        json!({"input":{}})
     );
 }
 
@@ -1454,12 +1496,14 @@ fn filter_list_errors() {
                 "l2": null,
             },
         }})
-        .expected_errors(json! {[
-            {
-                "message": "Cannot return null for non-nullable array element of type String at index 1",
-                "path": ["list", "l2", 1]
-            }
-        ]},)
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable array element of type String at index 1",
+                    "path": ["list", "l2", 1]
+                }
+            ]
+        }},)
         .test();
 
     FormatTest::builder()
@@ -1655,12 +1699,14 @@ fn filter_nested_object_errors() {
                 "reviews1": [ null ],
             },
         }})
-        .expected_errors(json! {[
-            {
-                "message": "Cannot return null for non-nullable field Review.text2",
-                "path": ["me", "reviews1", 0]
-            }
-        ]})
+        .expected_extensions(json! {{
+            "valueCompletion": [
+                {
+                    "message": "Cannot return null for non-nullable field Review.text2",
+                    "path": ["me", "reviews1", 0]
+                }
+            ]
+        }})
         .test();
 
     // text2 was null, reviews1 element should be nullified
@@ -2821,6 +2867,25 @@ fn merge_selections() {
 }
 
 #[test]
+fn it_parses_default_floats() {
+    let schema = with_supergraph_boilerplate(
+        r#"
+        type Query {
+            name: String
+        }
+
+        input WithAllKindsOfFloats {
+            a_regular_float: Float = 1.2
+            an_integer_float: Float = 1234
+            a_float_that_doesnt_fit_an_int: Float = 9876543210
+        }
+        "#,
+    );
+
+    Schema::parse(&schema, &Default::default()).unwrap();
+}
+
+#[test]
 fn it_statically_includes() {
     let schema = with_supergraph_boilerplate(
         "type Query {
@@ -3620,7 +3685,7 @@ fn check_fragment_on_interface() {
                 name
               }
             }
-        }}",
+        }",
         )
         .response(json! {{
             "get": {
@@ -4044,6 +4109,120 @@ fn include() {
                 "id": "a",
                 "name": "Chair",
             },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ...test @include(if: $shouldInclude)
+        }
+
+        fragment test on Query {
+            get {
+                id
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "shouldInclude": false
+        }})
+        .expected(json! {{
+            "get": {
+               "name": "a",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ...test @include(if: $shouldInclude)
+        }
+
+        fragment test on Query {
+            get {
+                id
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .expected(json! {{
+            "get": null,
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ... @include(if: $shouldInclude) {
+                get {
+                    id
+                }
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .variables(json! {{
+            "shouldInclude": false
+        }})
+        .expected(json! {{
+            "get": {
+               "name": "a",
+            },
+        }})
+        .test();
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(
+            "query Example($shouldInclude: Boolean) {
+            get {
+                name
+            }
+            ... @include(if: $shouldInclude) {
+                get {
+                    id
+                }
+            }
+        }",
+        )
+        .response(json! {{
+            "get": {
+                "name": "a",
+            },
+        }})
+        .operation("Example")
+        .expected(json! {{
+            "get": null,
         }})
         .test();
 }
@@ -4611,7 +4790,7 @@ fn parse_introspection_query() {
             }
           }
         }
-      }}";
+      }";
     assert!(Query::parse(query, api_schema, &Default::default())
         .unwrap()
         .operations

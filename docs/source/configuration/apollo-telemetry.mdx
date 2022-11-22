@@ -2,7 +2,7 @@
 title: Sending Apollo Router usage data to Apollo Studio
 ---
 
-The Apollo Router can transmit usage data to Apollo Studio via a reporting agent called **Spaceport**. By default, Spaceport runs automatically as a component _within_ the Apollo Router. Additional details on its modes of operation are provided below.
+The Apollo Router can transmit usage data to Apollo Studio via a reporting agent called **Spaceport**.
 
 ## Enabling usage reporting
 
@@ -15,51 +15,45 @@ export APOLLO_GRAPH_REF=<YOUR_GRAPH_ID>@<VARIANT>
 
 More information on usage reporting is available in the [Studio documentation](/studio/metrics/usage-reporting/).
 
-## Prometheus endpoint customization
+## Enabling field-level instrumentation
 
-You can customize the prometheus scrape URL in your yaml configuration: 
+Field-level instrumentation (also known as FTV1 tracing) is disabled by default. To enable it, add the following to your router configuration:
+
+```yaml
+telemetry:
+  apollo:
+    # This example will trace half of requests. This number can't
+    # be higher than tracing.trace_config.sampler.
+    field_level_instrumentation_sampler: 0.5
+  tracing:
+    trace_config:
+      # FTV1 uses the same trace sampling as other tracing options,
+      # so this value must be set as well.
+      sampler: 0.5
+```
+
+Note that `field_level_instrumentation_sampler` may not sample at a greater rate than `trace_config.sampler`.
+
+## Advanced configuration
 
 ```yaml title="router.yaml"
 telemetry:
-  metrics:
-    prometheus:
-      listen: 0.0.0.0:9090
-      path: /metrics
-      enabled: true
+  apollo:
+    # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
+    # This is expensive and should be left at a low value.
+    # This cannot be higher than tracing->trace_config->sampler
+    field_level_instrumentation_sampler: 0.01 # (default)
+
+    # Include HTTP request and response headers in traces sent to Apollo Studio
+    send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
+      except: # Send all headers except referer
+        - referer
+
+    # Include variable values in Apollo in traces sent to Apollo Studio
+    send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
+      except: # Send all variable values except for variable named first
+        - first
+  tracing:
+    trace_config:
+      sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
 ```
-
-## Advanced configuration (not recommended)
-
-Spaceport can run either as an internal component of a single Apollo Router instance, or as an external resource shared by _multiple_ router instances.
-
-For the majority of users, an internal Spaceport instance is sufficient.
-
-To connect the Apollo Router to an external Spaceport instance, specify its endpoint URL in your YAML config file:
-
-```yaml title="router.yaml"
-telemetry:
-    apollo:
-        # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
-        # This is expensive and should be left at a low value.
-        # This cannot be higher than tracing->trace_config->sampler
-        field_level_instrumentation_sampler: 0.01 # (default)
-        
-        # Include HTTP request and response headers in traces sent to Apollo Studio
-        send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
-            except: # Send all headers except referer
-            - referer
-
-        # Include variable values in Apollo in traces sent to Apollo Studio
-        send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
-            except: # Send all variable values except for variable named first
-            - first
-    tracing:
-        trace_config:
-            sampler: 0.5 # The percentage of requests that will generate traces (a rate or `always_on` or `always_off`)
-```
-
-Note that `field_level_instrumentation_sampler` may not sample at a greater rate than `trace_config/sampler`.****
-
-## Running Spaceport externally (not recommended)
-
-Running spaceport as a separate process currently requires building from [source](https://github.com/apollographql/router/tree/main/apollo-spaceport).

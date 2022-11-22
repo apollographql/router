@@ -12,22 +12,22 @@ use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::spec::query::SubSelection;
 use crate::*;
 
 /// Query planning options.
-#[derive(Clone, Eq, Hash, PartialEq, Debug, Default)]
+#[derive(Clone, Eq, Hash, PartialEq, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct QueryPlanOptions {
     /// Enable the variable deduplication optimization on the QueryPlan
     pub(crate) enable_deduplicate_variables: bool,
 }
 /// A planner key.
 ///
-/// This type consists of a query string, an optional operation string and the
-/// [`QueryPlanOptions`].
+/// This type consists of a query string and an optional operation string
 pub(crate) type QueryKey = (String, Option<String>);
 
 /// A plan for a given GraphQL query
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub(crate) usage_reporting: UsageReporting,
     pub(crate) root: PlanNode,
@@ -190,7 +190,7 @@ impl PlanNode {
     pub(crate) fn parse_subselections(
         &self,
         schema: &Schema,
-    ) -> Result<HashMap<(Option<Path>, String), Query>, QueryPlannerError> {
+    ) -> Result<HashMap<SubSelection, Query>, QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
@@ -203,7 +203,7 @@ impl PlanNode {
         &self,
         schema: &Schema,
         initial_path: &Path,
-        subselections: &mut HashMap<(Option<Path>, String), Query>,
+        subselections: &mut HashMap<SubSelection, Query>,
     ) -> Result<(), QueryPlannerError> {
         // re-create full query with the right path
         // parse the subselection
@@ -221,7 +221,6 @@ impl PlanNode {
                     .collect_subselections(schema, initial_path, subselections)
             }
             Self::Defer { primary, deferred } => {
-                // TODO rebuilt subselection from the root thanks to the path
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, primary_subselection);
@@ -230,7 +229,10 @@ impl PlanNode {
                     // ----------------------- END Parse ---------------------------------
 
                     subselections.insert(
-                        (Some(primary_path), primary_subselection.clone()),
+                        SubSelection {
+                            path: primary_path,
+                            subselection: primary_subselection.clone(),
+                        },
                         sub_selection,
                     );
                 }
@@ -243,7 +245,10 @@ impl PlanNode {
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
-                            (current.path.clone().into(), subselection.clone()),
+                            SubSelection {
+                                path: current.path.clone(),
+                                subselection: subselection.clone(),
+                            },
                             sub_selection,
                         );
                     }

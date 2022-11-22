@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.0.0-rc.3](https://img.shields.io/badge/Version-1.0.0--rc.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.0.0](https://img.shields.io/badge/AppVersion-v1.0.0-informational?style=flat-square)
+![Version: 1.0.0-rc.8](https://img.shields.io/badge/Version-1.0.0--rc.8-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.4.0](https://img.shields.io/badge/AppVersion-v1.4.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.3
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.8
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.3
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.3 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.8 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -29,7 +29,7 @@ _See [configuration](#configuration) below._
 See [Customizing the Chart Before Installing](https://helm.sh/docs/intro/using_helm/#customizing-the-chart-before-installing). To see all configurable options with detailed comments, visit the chart's [values.yaml](./values.yaml), or run these configuration commands:
 
 ```console
-helm show values apollographql/router
+helm show values oci://ghcr.io/apollographql/helm-charts/router
 ```
 
 ## Values
@@ -41,7 +41,9 @@ helm show values apollographql/router
 | autoscaling.maxReplicas | int | `100` |  |
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
+| containerPorts.health | int | `8088` | For exposing the healthcheck endpoint |
 | containerPorts.http | int | `80` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
+| containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
 | extraEnvVars | list | `[]` |  |
 | extraEnvVarsCM | string | `""` |  |
 | extraEnvVarsSecret | string | `""` |  |
@@ -68,9 +70,7 @@ helm show values apollographql/router
 | podSecurityContext | object | `{}` |  |
 | replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
-| rhai | object | `{"input_file":""}` | If using rhai, specify the location of your input file |
-| rhai.input_file | string | `""` | input rhai file, contents will be stored in a ConfigMap |
-| router | object | `{"args":["--hot-reload"],"configuration":{"supergraph":{"listen":"0.0.0.0:80"}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
+| router | object | `{"args":["--hot-reload"],"configuration":{"health-check":{"listen":"0.0.0.0:8088"},"supergraph":{"listen":"0.0.0.0:80"},"telemetry":{"metrics":{"prometheus":{"enabled":false,"listen":"0.0.0.0:9090","path":"/metrics"}}}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
 | securityContext | object | `{}` |  |
 | service.annotations | object | `{}` |  |
 | service.port | int | `80` |  |
@@ -78,6 +78,7 @@ helm show values apollographql/router
 | serviceAccount.annotations | object | `{}` |  |
 | serviceAccount.create | bool | `true` |  |
 | serviceAccount.name | string | `""` |  |
+| serviceMonitor.enabled | bool | `false` |  |
 | serviceentry.enabled | bool | `false` |  |
 | tolerations | list | `[]` |  |
 | virtualservice.enabled | bool | `false` |  |

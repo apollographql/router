@@ -82,10 +82,6 @@ wildcards = "warn"
 # * all - Both lowest-version and simplest-path are used
 highlight = "all"
 
-## TODO: FIGURE OUT WHY THIS IS A PROBLEM
-# [[bans.deny]]
-# name = "openssl-sys"
-
 # This section is considered when running `cargo deny check sources`.
 # More documentation about the 'sources' section can be found here:
 # https://embarkstudios.github.io/cargo-deny/checks/sources/cfg.html
@@ -102,5 +98,4 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-# FIXME: remove "geal" from the allowed orgs once we have a fix for `async-compression`
-github = ["open-telemetry", "apollographql", "tokio-rs", "geal"]
+github = ["open-telemetry", "apollographql", "tokio-rs"]

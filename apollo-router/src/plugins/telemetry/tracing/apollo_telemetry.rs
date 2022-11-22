@@ -119,6 +119,7 @@ impl Exporter {
         buffer_size: usize,
         field_execution_sampler: Option<SamplerOption>,
     ) -> Result<Self, BoxError> {
+        tracing::debug!("creating studio exporter");
         let apollo_exporter =
             ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
         Ok(Self {
@@ -425,11 +426,19 @@ impl Exporter {
             .into_iter()
             .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
             .collect();
-
+        // For now, only trace_id
+        // let mut response_headers = HashMap::with_capacity(1);
+        // FIXME: uncomment later
+        // response_headers.insert(
+        //     String::from("apollo_trace_id"),
+        //     Values {
+        //         value: vec![span.span_context.trace_id().to_string()],
+        //     },
+        // );
         Http {
             method: method.into(),
             request_headers,
-            response_headers: Default::default(),
+            response_headers: HashMap::new(),
             status_code: 0,
         }
     }
