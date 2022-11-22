@@ -27,9 +27,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### Provide multi-arch (amd64/arm64) docker images for the router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
 
-From the next release, our docker images will be multi-arch.
+From the next release, our Docker images will be multi-arch.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
 
