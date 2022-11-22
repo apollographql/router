@@ -103,14 +103,8 @@ extern "C" fn drop_ad_hoc_profiler() {
 /// Subcommands
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Runs the router (default).
-    Run,
-
     /// Configuration subcommands.
     Config(ConfigSubcommandArgs),
-
-    /// Print the configuration json schema (deprecated).
-    Schema,
 }
 
 #[derive(Args, Debug)]
@@ -189,6 +183,10 @@ pub(crate) struct Opt {
         env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
     )]
     supergraph_path: Option<PathBuf>,
+
+    /// Prints the configuration schema.
+    #[clap(long, action(ArgAction::SetTrue))]
+    schema: bool,
 
     /// Subcommands
     #[clap(subcommand)]
@@ -352,29 +350,30 @@ impl Executable {
             "failed setting the global env filter. The start() function should only be called once",
         );
 
-        match opt.command.as_ref().unwrap_or(&Commands::Run) {
-            Commands::Schema => {
-                eprintln!("`router schema` is deprecated. Use `router config schema`");
-                let schema = generate_config_schema();
-                println!("{}", serde_json::to_string_pretty(&schema)?);
-                Ok(())
-            }
-            Commands::Config(ConfigSubcommandArgs {
+        if opt.schema {
+            eprintln!("`router --schema` is deprecated. Use `router config schema`");
+            let schema = generate_config_schema();
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
+        match opt.command.as_ref() {
+            Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
-            }) => {
+            })) => {
                 let schema = generate_config_schema();
                 println!("{}", serde_json::to_string_pretty(&schema)?);
                 Ok(())
             }
-            Commands::Config(ConfigSubcommandArgs {
+            Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Upgrade { config_path, diff },
-            }) => {
+            })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
                 println!("{}", output);
                 Ok(())
             }
-            Commands::Run => {
+            None => {
                 // The dispatcher we created is passed explicitly here to make sure we display the logs
                 // in the initialization phase and in the state machine code, before a global subscriber
                 // is set using the configuration file

@@ -26,11 +26,43 @@ specified via flag, either by an absolute path, or a path relative to the curren
 directory.
 
 ```
+USAGE:
+    router [OPTIONS] [SUBCOMMAND]
+
 OPTIONS:
-    -c, --config <configuration-path>    Configuration file location
-    -s, --supergraph <supergraph-path>   Supergraph Schema location
-    --hr, --hot-reload                   Watches for changes in the supergraph and configuration file
-        --schema                         Prints out a JSON schema of the configuration file
+        --apollo-uplink-endpoints <APOLLO_UPLINK_ENDPOINTS>
+            The endpoints (comma separated) polled to fetch the latest supergraph schema [env:
+            APOLLO_UPLINK_ENDPOINTS=]
+
+        --apollo-uplink-poll-interval <APOLLO_UPLINK_POLL_INTERVAL>
+            The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_UPLINK_POLL_INTERVAL=]
+            [default: 10s]
+
+    -c, --config <CONFIG_PATH>
+            Configuration location relative to the project directory [env:
+            APOLLO_ROUTER_CONFIG_PATH=]
+
+    -h, --help
+            Print help information
+
+        --hot-reload
+            Reload configuration and schema files automatically [env: APOLLO_ROUTER_HOT_RELOAD=]
+
+        --log <LOG_LEVEL>
+            Log level (off|error|warn|info|debug|trace) [env: APOLLO_ROUTER_LOG=] [default: info]
+
+    -s, --supergraph <SUPERGRAPH_PATH>
+            Schema location relative to the project directory [env: APOLLO_ROUTER_SUPERGRAPH_PATH=]
+
+        --schema
+            Prints the configuration schema
+
+    -V, --version
+            Display version and exit
+
+SUBCOMMANDS:
+    config    Configuration subcommands
+    help      Print this message or the help of the given subcommand(s)
 ```
 
 ## Who is Apollo?

@@ -587,18 +587,19 @@ fn upgrade_old_configuration() {
                 .expect("expected utf8")
                 .to_string();
             let new_config = crate::configuration::upgrade::upgrade_configuration(
-                serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
                 true,
             )
             .expect("configuration could not be updated");
+            let new_config =
+                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+
             let result = validate_yaml_configuration(
-                &new_config.to_string(),
+                &new_config,
                 Expansion::builder().build(),
                 Mode::NoUpgrade,
             );
 
-            let new_config =
-                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
             match result {
                 Ok(_) => {
                     insta::with_settings!({snapshot_suffix => file_name}, {

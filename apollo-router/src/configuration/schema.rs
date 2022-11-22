@@ -79,10 +79,6 @@ pub(crate) fn validate_yaml_configuration(
             error: e.to_string(),
         }
     })?;
-    if migration == Mode::Upgrade {
-        yaml = upgrade_configuration(yaml, true)?;
-    }
-    let expanded_yaml = expand_env_variables(&yaml, expansion)?;
     let schema = serde_json::to_value(generate_config_schema()).map_err(|e| {
         ConfigurationError::InvalidConfiguration {
             message: "failed to parse schema",
@@ -96,6 +92,18 @@ pub(crate) fn validate_yaml_configuration(
             message: "failed to compile schema",
             error: e.to_string(),
         })?;
+
+    if migration == Mode::Upgrade {
+        let upgraded = upgrade_configuration(&yaml, true)?;
+        let expanded_yaml = expand_env_variables(&upgraded, &expansion)?;
+        if schema.validate(&expanded_yaml).is_ok() {
+            yaml = upgraded;
+        } else {
+            tracing::warn!("configuration could not be upgraded automatically as it had errors")
+        }
+    }
+    let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
+
     if let Err(errors) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
         // We have to reparse the yaml to get the line number information for each error.

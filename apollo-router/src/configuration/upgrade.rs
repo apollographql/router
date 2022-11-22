@@ -31,7 +31,7 @@ const REMOVAL_VALUE: &str = "__PLEASE_DELETE_ME";
 const REMOVAL_EXPRESSION: &str = r#"const("__PLEASE_DELETE_ME")"#;
 
 pub(crate) fn upgrade_configuration(
-    mut config: serde_json::Value,
+    config: &serde_json::Value,
     log_warnings: bool,
 ) -> Result<serde_json::Value, super::ConfigurationError> {
     // Transformers are loaded from a file and applied in order
@@ -41,6 +41,8 @@ pub(crate) fn upgrade_configuration(
         .map(|filename| Asset::get(&filename).expect("migration must exist").data)
         .map(|data| serde_yaml::from_slice(&data).expect("migration must be valid"))
         .collect();
+
+    let mut config = config.clone();
 
     let mut effective_migrations = Vec::new();
     for migration in &migrations {
@@ -55,7 +57,7 @@ pub(crate) fn upgrade_configuration(
         config = new_config;
     }
     if !effective_migrations.is_empty() && log_warnings {
-        tracing::warn!("router configuration contains deprecated options: \n\n{}\n\nThese will become errors in the future. To upgrade run: `router config upgrade <your_router_yaml_location> > <your_router_yaml_location>`", effective_migrations.iter().enumerate().map(|(idx, m)|format!("  {}. {}", idx + 1, m.description)).join("\n\n"));
+        tracing::warn!("router configuration contains deprecated options: \n\n{}\n\nThese will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.", effective_migrations.iter().enumerate().map(|(idx, m)|format!("  {}. {}", idx + 1, m.description)).join("\n\n"));
     }
     Ok(config)
 }
@@ -108,7 +110,7 @@ pub(crate) fn generate_upgrade(config: &str, diff: bool) -> Result<String, Confi
         serde_yaml::from_str(config).map_err(|e| ConfigurationError::MigrationFailure {
             error: e.to_string(),
         })?;
-    let upgraded_config = upgrade_configuration(parsed_config, true).map_err(|e| {
+    let upgraded_config = upgrade_configuration(&parsed_config, true).map_err(|e| {
         ConfigurationError::MigrationFailure {
             error: e.to_string(),
         }
