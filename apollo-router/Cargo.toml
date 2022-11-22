@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.3.0"
+version = "1.4.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://www.apollographql.com/docs/router/"
@@ -54,7 +54,7 @@ axum = { version = "0.5.17", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 base64 = "0.13.1"
 buildstructor = "0.5.1"
-bytes = "1.2.1"
+bytes = "1.3.0"
 clap = { version = "3.2.23", default-features = false, features = [
     "env",
     "derive",
@@ -83,7 +83,7 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.23", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.1", features = ["http1", "http2"] }
-indexmap = { version = "1.9.1", features = ["serde-1"] }
+indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
 jsonpath_lib = "0.3.0"
 jsonschema = { version = "0.16.1", default-features = false }
@@ -148,7 +148,7 @@ rhai = { version = "1.11.0", features = ["sync", "serde", "internals"] }
 redis = { version = "0.21.6", optional = true, features = ["cluster", "tokio-comp"] }
 redis_cluster_async =  { version = "0.7.0", optional = true }
 regex = "1.7.0"
-reqwest = { version = "0.11.12", default-features = false, features = [
+reqwest = { version = "0.11.13", default-features = false, features = [
     "rustls-tls",
     "json",
     "stream",
@@ -160,13 +160,13 @@ shellexpand = "2.1.2"
 sha2 = "0.10.6"
 serde = { version = "1.0.147", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
-serde_json = { version = "1.0.87", features = ["preserve_order"] }
+serde_json = { version = "1.0.88", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 sys-info = "0.9.1"
 thiserror = "1.0.37"
-tokio = { version = "1.21.2", features = ["full"] }
+tokio = { version = "1.22.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
 tokio-util = { version = "0.7.4", features = ["net", "codec"] }
 tonic = { version = "0.6.2", features = ["transport", "tls", "tls-roots"] }
@@ -216,7 +216,7 @@ maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
 mockall = "0.11.3"
 once_cell = "1.16.0"
-reqwest = { version = "0.11.12", default-features = false, features = [
+reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",
 ] }

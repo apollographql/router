@@ -3,7 +3,7 @@ services:
 
   apollo-router:
     container_name: apollo-router
-    image: ghcr.io/apollographql/router:v1.3.0
+    image: ghcr.io/apollographql/router:v1.4.0
     volumes:
       - ./supergraph.graphql:/etc/config/supergraph.graphql
       - ./router/datadog.router.yaml:/etc/config/configuration.yaml
