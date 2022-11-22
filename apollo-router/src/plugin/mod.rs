@@ -258,6 +258,7 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
+    /// Allow the plugin to be cast to Any.
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
