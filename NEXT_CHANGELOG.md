@@ -47,7 +47,7 @@ telemetry:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
 
-### CLI structure changes ([Issue #2076](https://github.com/apollographql/router/issues/2123))
+### CLI structure changes ([Issue #2123](https://github.com/apollographql/router/issues/2123))
 
 As the Router gains functionality the limitations of the current CLI structure are becoming apparent.
 
@@ -97,7 +97,7 @@ helm upgrade --install --create-namespace --namespace router-test --set-file sup
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
 
-### Configuration upgrades ([Issue #2076](https://github.com/apollographql/router/issues/2123))
+### Configuration upgrades ([Issue #2123](https://github.com/apollographql/router/issues/2123))
 
 Occasionally we will make changes to the Router yaml configuration format.
 When starting the Router if the configuration can be upgraded it will do so automatically and display a warning:
