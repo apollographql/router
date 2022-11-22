@@ -24,17 +24,54 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
-
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
-### **Experimental** 🥼 External cache storage in Redis ([PR #2024](https://github.com/apollographql/router/pull/2024))
+### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
 
-implement caching in external storage for query plans, introspection and APQ. This is done as a multi level cache, first in
-memory with LRU then with a redis cluster backend. Since it is still experimental, it is opt-in through a Cargo feature.
+Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
 
-By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
+```yaml
+extraEnvVars:
+  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
+    value: /data/supergraph-schema.graphql
+
+extraVolumeMounts:
+  - name: supergraph-schema
+    mountPath: /data
+    readOnly: true
+
+extraVolumes:
+  - name: supergraph-schema
+    configMap:
+      name: "{{ .Release.Name }}-supergraph"
+      items:
+        - key: supergraph-schema.graphql
+          path: supergraph-schema.graphql
+```
+
+With that values.yaml content, and with your supergraph schema in a file name supergraph-schema.graphql, you can execute:
+
+```
+helm upgrade --install --create-namespace --namespace router-test --set-file supergraphFile=supergraph-schema.graphql router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.9 --values values.yaml
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
 
 ## 🐛 Fixes
+
+### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
+
+The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
+
+By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
+
 ## 🛠 Maintenance
 ## 📚 Documentation
+
+### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
+
+We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
+
