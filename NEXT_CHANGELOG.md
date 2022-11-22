@@ -27,6 +27,24 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add configuration for trace ID ([Issue #2080](https://github.com/apollographql/router/issues/2080))
+
+If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    experimental_expose_trace_id:
+      enabled: true # default: false
+      header_name: "my-trace-id" # default: "apollo-trace-id"
+    propagation:
+      custom_header: "x-request-id" # Specify your own trace_id with a custom header in request headers
+```
+
+Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2131
+
 ### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
 
 Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
