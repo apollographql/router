@@ -9,7 +9,8 @@ WORKDIR /usr/src/router
 RUN apt-get update
 RUN apt-get -y install \
     npm \
-    nodejs
+    nodejs \
+    ca-certificates
 
 # Add rustfmt since build requires it
 RUN rustup component add rustfmt
@@ -36,6 +37,7 @@ LABEL org.opencontainers.image.source="https://github.com/apollographql/router"
 
 # Copy in the required files from our build image
 COPY --from=build --chown=root:root /dist /dist
+COPY --from=build --chown=root:root /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
 WORKDIR /dist
 
