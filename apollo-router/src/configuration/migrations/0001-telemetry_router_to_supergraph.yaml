@@ -1,0 +1,6 @@
+description: telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
+actions:
+  - type: move
+    from: telemetry.metrics.common.attributes.router
+    to: telemetry.metrics.common.attributes.supergraph
+

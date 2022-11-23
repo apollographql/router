@@ -801,7 +801,7 @@ impl Telemetry {
                 if let Some(MetricsCommon {
                     attributes:
                         Some(MetricsAttributesConf {
-                            router: Some(forward_attributes),
+                            supergraph: Some(forward_attributes),
                             ..
                         }),
                     ..
@@ -896,7 +896,7 @@ impl Telemetry {
                 .common
                 .as_ref()
                 .and_then(|c| c.attributes.as_ref())
-                .and_then(|a| a.router.as_ref())
+                .and_then(|a| a.supergraph.as_ref())
             {
                 attributes.extend(
                     router_attributes_conf
@@ -1097,7 +1097,7 @@ impl Telemetry {
                     .as_ref()
                     .and_then(|m| m.common.as_ref())
                     .and_then(|c| c.attributes.as_ref())
-                    .and_then(|c| c.router.as_ref())
+                    .and_then(|c| c.supergraph.as_ref())
                 {
                     metric_attrs.extend(
                         subgraph_attributes_conf
@@ -1368,7 +1368,7 @@ mod tests {
                     "metrics": {
                         "common": {
                             "attributes": {
-                                "router": {
+                                "supergraph": {
                                     "static": [
                                         {
                                             "name": "myname",
@@ -1569,7 +1569,7 @@ mod tests {
                     "common": {
                         "service_name": "apollo-router",
                         "attributes": {
-                            "router": {
+                            "supergraph": {
                                 "static": [
                                     {
                                         "name": "myname",
