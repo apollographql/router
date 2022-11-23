@@ -185,7 +185,7 @@ pub(crate) struct Opt {
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue))]
+    #[clap(long, action(ArgAction::SetTrue), hide(true))]
     schema: bool,
 
     /// Subcommands

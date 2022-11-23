@@ -54,9 +54,6 @@ OPTIONS:
     -s, --supergraph <SUPERGRAPH_PATH>
             Schema location relative to the project directory [env: APOLLO_ROUTER_SUPERGRAPH_PATH=]
 
-        --schema
-            Prints the configuration schema
-
     -V, --version
             Display version and exit
 
