@@ -27,5 +27,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+
+### ca-certificates issue on the 1.4.0 version's docker image ([Issue #2145](https://github.com/apollographql/router/issues/2145))
+
+A regression has been fixed which caused the router to panic when running on Uplink mode from the docker image
+
+By [@eole1712](https://github.com/eole1712) in https://github.com/apollographql/router/pull/2146
+
 ## 🛠 Maintenance
 ## 📚 Documentation
