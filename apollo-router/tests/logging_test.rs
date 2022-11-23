@@ -67,7 +67,7 @@ async fn setup_router(
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
             "tracing": {},
-            "logging": logging_config,
+            "experimental_logging": logging_config,
             "apollo": {
                 "schema_id": ""
             }
@@ -103,10 +103,12 @@ async fn query_with_router(
 
 #[derive(Default, Clone, PartialEq, Debug)]
 struct LoggingCount {
-    supergraph_request_count: usize,
+    supergraph_request_headers_count: usize,
+    supergraph_request_body_count: usize,
     supergraph_response_body_count: usize,
     supergraph_response_headers_count: usize,
-    subgraph_request_count: usize,
+    subgraph_request_body_count: usize,
+    subgraph_request_headers_count: usize,
     subgraph_response_body_count: usize,
     subgraph_response_headers_count: usize,
 }
@@ -114,7 +116,8 @@ struct LoggingCount {
 impl LoggingCount {
     const RESPONSE_BODY: &'static str = "http.response.body";
     const RESPONSE_HEADERS: &'static str = "http.response.headers";
-    const REQUEST: &'static str = "http.request";
+    const REQUEST_HEADERS: &'static str = "http.request.headers";
+    const REQUEST_BODY: &'static str = "http.request.body";
 
     fn count(&mut self, fields: &field::FieldSet) {
         let fields_name: Vec<&str> = fields.iter().map(|f| f.name()).collect();
@@ -125,8 +128,11 @@ impl LoggingCount {
             if fields_name.contains(&Self::RESPONSE_HEADERS) {
                 self.subgraph_response_headers_count += 1;
             }
-            if fields_name.contains(&Self::REQUEST) {
-                self.subgraph_request_count += 1;
+            if fields_name.contains(&Self::REQUEST_HEADERS) {
+                self.subgraph_request_headers_count += 1;
+            }
+            if fields_name.contains(&Self::REQUEST_BODY) {
+                self.subgraph_request_body_count += 1;
             }
         } else {
             if fields_name.contains(&Self::RESPONSE_BODY) {
@@ -135,8 +141,11 @@ impl LoggingCount {
             if fields_name.contains(&Self::RESPONSE_HEADERS) {
                 self.supergraph_response_headers_count += 1;
             }
-            if fields_name.contains(&Self::REQUEST) {
-                self.supergraph_request_count += 1;
+            if fields_name.contains(&Self::REQUEST_HEADERS) {
+                self.supergraph_request_headers_count += 1;
+            }
+            if fields_name.contains(&Self::REQUEST_BODY) {
+                self.supergraph_request_body_count += 1;
             }
         }
     }
@@ -145,21 +154,14 @@ impl LoggingCount {
 #[tokio::test(flavor = "multi_thread")]
 async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
     let logging_config = serde_json::json!({
-        "subgraph": {
-            "all": {
-                "contains_attributes": ["http.response.body"]
-            },
-            "subgraphs": {
-                "accounts": {
-                    "contains_attributes": ["http.response.headers"]
-                }
-            }
-        },
-        "supergraph": {
-            "contains_attributes": ["http.request"]
-        }
+        "when_header": [{
+            "name": "custom-header",
+            "match": "^foo.*",
+            "headers": true
+        }]
     });
     let request = supergraph::Request::fake_builder()
+        .header("custom-header", "foobar")
         .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
         .variable("topProductsFirst", 2_i32)
         .variable("reviewsForAuthorAuthorId", 1_i32)
@@ -184,10 +186,12 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
         logging_count.count(event.fields());
     }
 
-    assert_eq!(logging_count.supergraph_request_count, 1);
+    assert_eq!(logging_count.supergraph_request_headers_count, 1);
+    assert_eq!(logging_count.supergraph_request_body_count, 0);
     assert_eq!(logging_count.supergraph_response_body_count, 0);
-    assert_eq!(logging_count.supergraph_response_headers_count, 0);
-    assert_eq!(logging_count.subgraph_response_body_count, 4);
-    assert_eq!(logging_count.subgraph_response_headers_count, 1);
-    assert_eq!(logging_count.subgraph_request_count, 0);
+    assert_eq!(logging_count.supergraph_response_headers_count, 1);
+    assert_eq!(logging_count.subgraph_response_body_count, 0);
+    assert_eq!(logging_count.subgraph_response_headers_count, 4);
+    assert_eq!(logging_count.subgraph_request_headers_count, 4);
+    assert_eq!(logging_count.subgraph_request_body_count, 0);
 }

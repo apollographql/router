@@ -787,7 +787,7 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         },
-        "logging": {
+        "experimental_logging": {
           "type": "object",
           "properties": {
             "display_filename": {
@@ -800,77 +800,88 @@ expression: "&schema"
             },
             "format": {
               "description": "Log format",
-              "type": "string",
-              "enum": [
-                "pretty",
-                "json"
+              "oneOf": [
+                {
+                  "description": "Pretty text format (default if you're running from a tty)",
+                  "type": "string",
+                  "enum": [
+                    "pretty"
+                  ]
+                },
+                {
+                  "description": "Json log format",
+                  "type": "string",
+                  "enum": [
+                    "json"
+                  ]
+                }
               ]
             },
-            "subgraph": {
-              "description": "Log configuration for subgraphs",
-              "type": "object",
-              "properties": {
-                "all": {
-                  "type": "object",
-                  "required": [
-                    "contains_attributes"
-                  ],
-                  "properties": {
-                    "contains_attributes": {
-                      "description": "Include logs which contain these logs",
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      },
-                      "uniqueItems": true
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                },
-                "subgraphs": {
-                  "type": "object",
-                  "additionalProperties": {
+            "when_header": {
+              "description": "Log configuration to log request and response for subgraphs and supergraph",
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "description": "Match header value given a regex to display logs",
                     "type": "object",
                     "required": [
-                      "contains_attributes"
+                      "match",
+                      "name"
                     ],
                     "properties": {
-                      "contains_attributes": {
-                        "description": "Include logs which contain these logs",
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "uniqueItems": true
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "match": {
+                        "description": "Regex to match the header value",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
                       }
                     },
                     "additionalProperties": false
                   },
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            },
-            "supergraph": {
-              "description": "Log configuration at supergraph level",
-              "type": "object",
-              "required": [
-                "contains_attributes"
-              ],
-              "properties": {
-                "contains_attributes": {
-                  "description": "Include logs which contain these logs",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  },
-                  "uniqueItems": true
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
+                  {
+                    "description": "Match header value given a value to display logs",
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Header value",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
             }
           },
           "additionalProperties": false,

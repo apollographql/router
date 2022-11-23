@@ -74,21 +74,20 @@ Here is an example on how you can configure it:
 
 ```yaml title="router.yaml"
 telemetry:
-  logging:
+  experimental_logging:
     format: json # By default it's "pretty" if you are in an interactive shell session
     display_filename: true # Display filename where the log is coming from. Default: true
     display_line_number: false # Display line number in the file where the log is coming from. Default: true
-    supergraph:
-      contains_attributes: # Available attributes are request|response_body|response_headers|operation_name
-        - request # Display the request at the supergraph level
-    subgraph:
-      all: # Display logs that contains these attributes
-        contains_attributes: # Available attributes are request|response_body|response_headers|operation_name
-          - response_body # Display the response_body for all the subgraph calls
-      subgraphs:
-        accounts: # Display logs that contains these attributes
-          contains_attributes: # Available attributes are request|response_body|response_headers|operation_name
-            - response_headers # Display the response_headers for the subgraph "accounts"
+    # If one of these headers matches we will log supergraph and subgraphs requests/responses
+    when_header:
+      - name: apollo-router-log-request
+        value: my_client
+        headers: true # default: false
+        body: true # default: false
+      # log request for all requests coming from Iphones
+      - name: user-agent
+        match: ^Mozilla/5.0 (iPhone*
+        headers: true
 ```
 
 ## Advanced configuration

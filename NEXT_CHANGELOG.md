@@ -27,6 +27,30 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Add configuration for logging and add more logs 
+
+By default some logs containing sensible data (like request body, response body, headers) are not displayed even if we set the right log level.
+For example if you need to display raw responses from one of your subgraph it won't be displayed by default. To enable them you have to configure it thanks to the `when_header` setting in the new section `experimental_logging`. It let's you set different headers to enable more logs (request/response headers/body for supergraph and subgraphs) when the request contains these headers with corresponding values/regex.
+Here is an example how you can configure it:
+
+```yaml title="router.yaml"
+telemetry:
+  experimental_logging:
+    format: json # By default it's "pretty" if you are in an interactive shell session
+    display_filename: true # Display filename where the log is coming from. Default: true
+    display_line_number: false # Display line number in the file where the log is coming from. Default: true
+    # If one of these headers matches we will log supergraph and subgraphs requests/responses
+    when_header:
+      - name: apollo-router-log-request
+        value: my_client
+        headers: true # default: false
+        body: true # default: false
+      # log request for all requests/responses headers coming from Iphones
+      - name: user-agent
+        match: ^Mozilla/5.0 (iPhone*
+        headers: true
+```
+
 ### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
 
 From the next release, our Docker images will be multi-arch.
