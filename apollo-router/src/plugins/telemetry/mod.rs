@@ -68,7 +68,6 @@ use crate::plugins::telemetry::config::default_display_filename;
 use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::filtering_layer::FilterLayer;
 use crate::plugins::telemetry::formatters::JsonFields;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -102,7 +101,6 @@ use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
-mod filtering_layer;
 pub(crate) mod formatters;
 mod metrics;
 mod otlp;
@@ -116,6 +114,8 @@ const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
+pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
+pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
@@ -207,19 +207,20 @@ impl Plugin for Telemetry {
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
-                ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
+                if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
+                    ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
+                }
+                let display_body = resp.context.contains_key(LOGGING_DISPLAY_BODY);
                 resp.map_stream(move |gql_response| {
-                    ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
+                    if display_body {
+                        ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
+                    }
                     gql_response
                 })
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
                     Self::populate_context(config.clone(), req);
-                    ::tracing::info!(http.request = ?req.supergraph_request, "Supergraph request");
-                    if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-                        ::tracing::info!(graphql.operation.name = %operation_name,  "Supergraph request with operation name");
-                    }
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
@@ -435,11 +436,6 @@ impl Telemetry {
 
             #[cfg(not(feature = "console"))]
             {
-                let attributes_to_exclude = config
-                    .logging
-                    .as_ref()
-                    .map(|l| l.get_attributes_to_exclude());
-
                 let log_level = GLOBAL_ENV_FILTER
                     .get()
                     .map(|s| s.as_str())
@@ -464,12 +460,10 @@ impl Telemetry {
                             .map(|l| l.display_line_number)
                             .unwrap_or(default_display_line_number()),
                     );
-                // To filter logs with attributes
-                let filter_layer = FilterLayer::new(attributes_to_exclude);
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                    let subscriber = sub.with(filter_layer).with(telemetry);
+                    let subscriber = sub.with(telemetry);
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
@@ -486,7 +480,6 @@ impl Telemetry {
                             let subscriber = sub_builder
                                 .event_format(formatters::TextFormatter::new())
                                 .finish()
-                                .with(filter_layer)
                                 .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
@@ -504,7 +497,6 @@ impl Telemetry {
                                 })
                                 .map_fmt_fields(|_f| JsonFields::new())
                                 .finish()
-                                .with(filter_layer)
                                 .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {
                                 ::tracing::error!("cannot set global subscriber: {:?}", e);
@@ -877,6 +869,22 @@ impl Telemetry {
                 .unwrap_or_default()
                 .to_string(),
         );
+        let (should_log_headers, should_log_body) = config
+            .logging
+            .as_ref()
+            .map(|cfg| cfg.should_log(req))
+            .unwrap_or_default();
+        if should_log_headers {
+            ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
+
+            let _ = req.context.insert(LOGGING_DISPLAY_HEADERS, true);
+        }
+        if should_log_body {
+            ::tracing::info!(http.request.body = ?req.supergraph_request.body(), "Supergraph request body");
+
+            let _ = req.context.insert(LOGGING_DISPLAY_BODY, true);
+        }
+
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
             let mut attributes: HashMap<String, String> = HashMap::new();

@@ -39,6 +39,8 @@ use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
 use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -115,10 +117,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
         Box::pin(async move {
             let (parts, body) = subgraph_request.into_parts();
-
-            if let Some(operation_name) = &body.operation_name {
-                tracing::info!(graphql.operation.name = %operation_name, apollo.subgraph.name = %service_name, "Request to subgraph {service_name:?} with operation_name");
-            }
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
             let compressed_body = compress(body, &parts.headers)
@@ -160,7 +158,14 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     0
                 }
             });
-            tracing::info!(http.request = ?request, apollo.subgraph.name = %service_name, "Request to subgraph {service_name:?}");
+            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+            let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+            if display_headers {
+                tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
+            }
+            if display_body {
+                tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
+            }
 
             let path = schema_uri.path().to_string();
             let response = client
@@ -184,9 +189,11 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 })?;
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();
-            tracing::info!(
-                http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-            );
+            if display_headers {
+                tracing::info!(
+                    http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+                );
+            }
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
@@ -224,9 +231,11 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     }
                 })?;
 
-            tracing::info!(
-                http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-            );
+            if display_body {
+                tracing::info!(
+                    http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                );
+            }
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
