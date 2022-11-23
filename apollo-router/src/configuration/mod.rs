@@ -207,7 +207,7 @@ impl Configuration {
         self.apollo_plugins
             .plugins
             .insert("include_subgraph_errors".to_string(), json!({"all": true}));
-        // Enable experimental_expose_trace_id
+        // Enable experimental_response_trace_id
         self.apollo_plugins
             .plugins
             .get_mut("telemetry")
@@ -218,13 +218,13 @@ impl Configuration {
             .and_modify(|e| {
                 e.as_object_mut()
                     .expect("configuration for telemetry.tracing must be an object")
-                    .entry("experimental_expose_trace_id")
+                    .entry("experimental_response_trace_id")
                     .and_modify(|e| *e = json!({"enabled": true, "header_name": null}))
                     .or_insert_with(|| json!({"enabled": true, "header_name": null}));
             })
             .or_insert_with(|| {
                 json!({
-                    "experimental_expose_trace_id": {
+                    "experimental_response_trace_id": {
                         "enabled": true,
                         "header_name": null
                     }

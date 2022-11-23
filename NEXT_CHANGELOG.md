@@ -34,11 +34,11 @@ If you want to expose in response headers the generated trace ID or the one you 
 ```yaml title="router.yaml"
 telemetry:
   tracing:
-    experimental_expose_trace_id:
+    experimental_response_trace_id:
       enabled: true # default: false
       header_name: "my-trace-id" # default: "apollo-trace-id"
     propagation:
-      custom_header: "x-request-id" # Specify your own trace_id with a custom header in request headers
+      from_request_header: "x-request-id" # Specify your own trace_id with a custom header in request headers
 ```
 
 Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.

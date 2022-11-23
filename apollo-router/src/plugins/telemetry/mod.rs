@@ -216,10 +216,11 @@ impl Plugin for Telemetry {
                 }
                 // To expose trace_id or not
                 let expose_trace_id_header = config.tracing.as_ref().and_then(|t| {
-                    t.expose_trace_id.enabled.then(|| {
-                        t.expose_trace_id.header_name.clone().unwrap_or(
-                            HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER)
-                        )
+                    t.response_trace_id.enabled.then(|| {
+                        t.response_trace_id
+                            .header_name
+                            .clone()
+                            .unwrap_or(HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER))
                     })
                 });
                 if let (Some(header_name), Some(trace_id)) = (
@@ -389,7 +390,7 @@ impl Telemetry {
             .as_mut()
             .expect("telemetry apollo config must be present");
         if let Some(tracing_conf) = &config.tracing {
-            apollo.expose_trace_id = tracing_conf.expose_trace_id.clone();
+            apollo.expose_trace_id = tracing_conf.response_trace_id.clone();
         }
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
@@ -566,9 +567,9 @@ impl Telemetry {
         if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
         }
-        if let Some(custom_header) = &propagation.custom_header {
+        if let Some(from_request_header) = &propagation.from_request_header {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
-                custom_header.to_string(),
+                from_request_header.to_string(),
             )));
         }
 
