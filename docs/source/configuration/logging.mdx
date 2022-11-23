@@ -68,6 +68,11 @@ JSON-formatted logging provides compatibility with common searchable logging too
 
 ## Basic configuration
 
+### Disclaimer
+
+This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we could change the configuration shape or adding/removing features.
+If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/1961).
+
 By default some of our logs containing sensible data (like request body, response body, headers) are not displayed even if we are in the right log level.
 For example if you need to display raw responses from one of your subgraph it won't be displayed by default. To enable them you have to configure it thanks to the `contains_attributes` setting.
 Here is an example on how you can configure it:
