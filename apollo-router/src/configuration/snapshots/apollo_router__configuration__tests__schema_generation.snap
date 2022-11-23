@@ -1862,13 +1862,13 @@ expression: "&schema"
                   "type": "boolean",
                   "nullable": true
                 },
-                "from_request_header": {
-                  "description": "Select a custom header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
-                  "type": "string",
-                  "nullable": true
-                },
                 "datadog": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "from_request_header": {
+                  "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
+                  "type": "string",
                   "nullable": true
                 },
                 "jaeger": {
