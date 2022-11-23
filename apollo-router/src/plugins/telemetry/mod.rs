@@ -217,9 +217,9 @@ impl Plugin for Telemetry {
                 // To expose trace_id or not
                 let expose_trace_id_header = config.tracing.as_ref().and_then(|t| {
                     t.expose_trace_id.enabled.then(|| {
-                        t.expose_trace_id.header_name.clone().unwrap_or_else(|| {
+                        t.expose_trace_id.header_name.clone().unwrap_or(
                             HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER)
-                        })
+                        )
                     })
                 });
                 if let (Some(header_name), Some(trace_id)) = (
