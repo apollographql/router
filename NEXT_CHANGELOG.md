@@ -64,6 +64,31 @@ helm upgrade --install --create-namespace --namespace router-test --set-file sup
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
 
+### *Experimental* subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
+
+Implements subgraph request retries, using Finagle's retry buckets algorithm:
+- it defines a minimal number of retries per second (`min_per_sec`, default is 10 retries per second), to
+bootstrap the system or for low traffic deployments
+- for each successful request, we add a "token" to the bucket, those tokens expire after `ttl` (default: 10 seconds)
+- the number of available additional retries is a part of the number of tokens, defined by `retry_percent` (default is 0.2)
+
+This is activated in the `traffic_shaping` plugin, either globally or per subgraph:
+
+```yaml
+traffic_shaping:
+  all:
+    experimental_retry:
+      min_per_sec: 10
+      ttl: 10s
+      retry_percent: 0.2
+  subgraphs:
+    accounts:
+      experimental_retry:
+        min_per_sec: 20
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006
+
 ## 🐛 Fixes
 
 ### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
