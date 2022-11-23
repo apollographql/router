@@ -45,6 +45,12 @@ Using this configuration you will have a response header called `my-trace-id` co
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2131
 
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
+
+From the next release, our Docker images will be multi-arch.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
+
 ### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
 
 Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
