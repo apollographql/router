@@ -106,7 +106,7 @@ impl TracingTest {
                 propagator.inject_context(
                     &span.context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
             });
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
@@ -115,7 +115,7 @@ impl TracingTest {
                     return (id, result);
                 }
                 Err(e) => {
-                    println!("query failed: {}", e);
+                    eprintln!("query failed: {}", e);
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;

@@ -5,6 +5,7 @@ mod expansion;
 mod schema;
 #[cfg(test)]
 mod tests;
+mod upgrade;
 mod yaml;
 
 use std::fmt;
@@ -20,6 +21,7 @@ use displaydoc::Display;
 use expansion::*;
 use itertools::Itertools;
 pub(crate) use schema::generate_config_schema;
+pub(crate) use schema::generate_upgrade;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -32,6 +34,7 @@ use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
 
+use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
 
@@ -60,6 +63,9 @@ pub enum ConfigurationError {
 
     /// APOLLO_ROUTER_CONFIG_SUPPORTED_MODES must be of the format env,file,... Possible modes are 'env' and 'file'.
     InvalidExpansionModeConfig,
+
+    /// could not migrate configuration: {error}.
+    MigrationFailure { error: String },
 }
 
 /// The configuration for the router.
@@ -376,7 +382,7 @@ impl FromStr for Configuration {
     type Err = ConfigurationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        schema::validate_yaml_configuration(s, Expansion::default()?)?.validate()
+        schema::validate_yaml_configuration(s, Expansion::default()?, Mode::Upgrade)?.validate()
     }
 }
 

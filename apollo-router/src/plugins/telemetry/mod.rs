@@ -72,6 +72,8 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::config::default_display_filename;
+use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::formatters::JsonFields;
@@ -84,6 +86,7 @@ use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
@@ -111,6 +114,7 @@ pub(crate) mod formatters;
 mod metrics;
 mod otlp;
 mod tracing;
+// Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
@@ -119,6 +123,8 @@ const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
+pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
+pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
@@ -210,7 +216,7 @@ impl Plugin for Telemetry {
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        "apollo_private.operation_signature",
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
@@ -229,7 +235,17 @@ impl Plugin for Telemetry {
                 ) {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
-                resp
+
+                if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
+                    ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
+                }
+                let display_body = resp.context.contains_key(LOGGING_DISPLAY_BODY);
+                resp.map_stream(move |gql_response| {
+                    if display_body {
+                        ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
+                    }
+                    gql_response
+                })
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
@@ -413,6 +429,9 @@ impl Telemetry {
             _ => None,
         };
 
+        if let Some(logging_conf) = &config.logging {
+            logging_conf.validate()?;
+        }
         // Setup metrics
         // The act of setting up metrics will overwrite a global meter. However it is essential that
         // we use the aggregate meter provider that is created below. It enables us to support
@@ -460,8 +479,20 @@ impl Telemetry {
                         EnvFilter::try_new(log_level)
                             .context("could not parse log configuration")?,
                     )
-                    .with_file(true)
-                    .with_line_number(true);
+                    .with_file(
+                        config
+                            .logging
+                            .as_ref()
+                            .map(|l| l.display_filename)
+                            .unwrap_or(default_display_filename()),
+                    )
+                    .with_line_number(
+                        config
+                            .logging
+                            .as_ref()
+                            .map(|l| l.display_line_number)
+                            .unwrap_or(default_display_line_number()),
+                    );
 
                 if let Some(sub) = subscriber {
                     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -469,33 +500,43 @@ impl Telemetry {
                     if let Err(e) = set_global_default(subscriber) {
                         ::tracing::error!("cannot set global subscriber: {:?}", e);
                     }
-                } else if atty::is(atty::Stream::Stdout) {
-                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-                    let subscriber = sub_builder
-                        .event_format(formatters::TextFormatter::new())
-                        .finish()
-                        .with(telemetry);
-                    if let Err(e) = set_global_default(subscriber) {
-                        ::tracing::error!("cannot set global subscriber: {:?}", e);
-                    }
                 } else {
-                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+                    match config
+                        .logging
+                        .as_ref()
+                        .map(|l| l.format)
+                        .unwrap_or_default()
+                    {
+                        config::LoggingFormat::Pretty => {
+                            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
-                    let subscriber = sub_builder
-                        .map_event_format(|e| {
-                            e.json()
-                                .with_current_span(true)
-                                .with_span_list(true)
-                                .flatten_event(true)
-                        })
-                        .map_fmt_fields(|_f| JsonFields::new())
-                        .finish()
-                        .with(telemetry);
-                    if let Err(e) = set_global_default(subscriber) {
-                        ::tracing::error!("cannot set global subscriber: {:?}", e);
+                            let subscriber = sub_builder
+                                .event_format(formatters::TextFormatter::new())
+                                .finish()
+                                .with(telemetry);
+                            if let Err(e) = set_global_default(subscriber) {
+                                ::tracing::error!("cannot set global subscriber: {:?}", e);
+                            }
+                        }
+                        config::LoggingFormat::Json => {
+                            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
+
+                            let subscriber = sub_builder
+                                .map_event_format(|e| {
+                                    e.json()
+                                        .with_current_span(true)
+                                        .with_span_list(true)
+                                        .flatten_event(true)
+                                })
+                                .map_fmt_fields(|_f| JsonFields::new())
+                                .finish()
+                                .with(telemetry);
+                            if let Err(e) = set_global_default(subscriber) {
+                                ::tracing::error!("cannot set global subscriber: {:?}", e);
+                            }
+                        }
                     }
-                };
+                }
             }
 
             Ok(true)
@@ -798,7 +839,7 @@ impl Telemetry {
                 if let Some(MetricsCommon {
                     attributes:
                         Some(MetricsAttributesConf {
-                            router: Some(forward_attributes),
+                            supergraph: Some(forward_attributes),
                             ..
                         }),
                     ..
@@ -866,6 +907,22 @@ impl Telemetry {
                 .unwrap_or_default()
                 .to_string(),
         );
+        let (should_log_headers, should_log_body) = config
+            .logging
+            .as_ref()
+            .map(|cfg| cfg.should_log(req))
+            .unwrap_or_default();
+        if should_log_headers {
+            ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
+
+            let _ = req.context.insert(LOGGING_DISPLAY_HEADERS, true);
+        }
+        if should_log_body {
+            ::tracing::info!(http.request.body = ?req.supergraph_request.body(), "Supergraph request body");
+
+            let _ = req.context.insert(LOGGING_DISPLAY_BODY, true);
+        }
+
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
             let mut attributes: HashMap<String, String> = HashMap::new();
@@ -877,7 +934,7 @@ impl Telemetry {
                 .common
                 .as_ref()
                 .and_then(|c| c.attributes.as_ref())
-                .and_then(|a| a.router.as_ref())
+                .and_then(|a| a.supergraph.as_ref())
             {
                 attributes.extend(
                     router_attributes_conf
@@ -1078,7 +1135,7 @@ impl Telemetry {
                     .as_ref()
                     .and_then(|m| m.common.as_ref())
                     .and_then(|c| c.attributes.as_ref())
-                    .and_then(|c| c.router.as_ref())
+                    .and_then(|c| c.supergraph.as_ref())
                 {
                     metric_attrs.extend(
                         subgraph_attributes_conf
@@ -1419,7 +1476,7 @@ mod tests {
                     "metrics": {
                         "common": {
                             "attributes": {
-                                "router": {
+                                "supergraph": {
                                     "static": [
                                         {
                                             "name": "myname",
@@ -1620,7 +1677,7 @@ mod tests {
                     "common": {
                         "service_name": "apollo-router",
                         "attributes": {
-                            "router": {
+                            "supergraph": {
                                 "static": [
                                     {
                                         "name": "myname",

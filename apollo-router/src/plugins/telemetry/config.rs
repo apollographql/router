@@ -7,13 +7,16 @@ use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
+use crate::configuration::ConfigurationError;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_option_header_name;
+use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::metrics;
 
 #[derive(thiserror::Error, Debug)]
@@ -49,7 +52,8 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
-    #[allow(dead_code)]
+    #[serde(rename = "experimental_logging")]
+    pub(crate) logging: Option<Logging>,
     pub(crate) metrics: Option<Metrics>,
     pub(crate) tracing: Option<Tracing>,
     pub(crate) apollo: Option<apollo::Config>,
@@ -92,6 +96,162 @@ pub(crate) struct Tracing {
     pub(crate) jaeger: Option<tracing::jaeger::Config>,
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
     pub(crate) datadog: Option<tracing::datadog::Config>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Logging {
+    /// Log format
+    #[serde(default)]
+    pub(crate) format: LoggingFormat,
+    #[serde(default = "default_display_filename")]
+    pub(crate) display_filename: bool,
+    #[serde(default = "default_display_line_number")]
+    pub(crate) display_line_number: bool,
+    /// Log configuration to log request and response for subgraphs and supergraph
+    #[serde(default)]
+    pub(crate) when_header: Vec<HeaderLoggingCondition>,
+}
+
+pub(crate) const fn default_display_filename() -> bool {
+    true
+}
+
+pub(crate) const fn default_display_line_number() -> bool {
+    true
+}
+
+impl Logging {
+    pub(crate) fn validate(&self) -> Result<(), ConfigurationError> {
+        let misconfiguration = self.when_header.iter().any(|cfg| match cfg {
+            HeaderLoggingCondition::Matching { headers, body, .. }
+            | HeaderLoggingCondition::Value { headers, body, .. } => !body && !headers,
+        });
+
+        if misconfiguration {
+            Err(ConfigurationError::InvalidConfiguration {
+                message: "'when_header' configuration for logging is invalid",
+                error: String::from(
+                    "body and headers must not be both false because it doesn't enable any logs",
+                ),
+            })
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
+    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
+        self.when_header
+            .iter()
+            .fold((false, false), |(log_headers, log_body), current| {
+                let (current_log_headers, current_log_body) = current.should_log(req);
+                (
+                    log_headers || current_log_headers,
+                    log_body || current_log_body,
+                )
+            })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(untagged, deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum HeaderLoggingCondition {
+    /// Match header value given a regex to display logs
+    Matching {
+        /// Header name
+        name: String,
+        /// Regex to match the header value
+        #[schemars(schema_with = "string_schema", rename = "match")]
+        #[serde(deserialize_with = "deserialize_regex", rename = "match")]
+        matching: Regex,
+        /// Display request/response headers (default: false)
+        #[serde(default)]
+        headers: bool,
+        /// Display request/response body (default: false)
+        #[serde(default)]
+        body: bool,
+    },
+    /// Match header value given a value to display logs
+    Value {
+        /// Header name
+        name: String,
+        /// Header value
+        value: String,
+        /// Display request/response headers (default: false)
+        #[serde(default)]
+        headers: bool,
+        /// Display request/response body (default: false)
+        #[serde(default)]
+        body: bool,
+    },
+}
+
+impl HeaderLoggingCondition {
+    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
+    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
+        match self {
+            HeaderLoggingCondition::Matching {
+                name,
+                matching: matched,
+                headers,
+                body,
+            } => {
+                let header_match = req
+                    .supergraph_request
+                    .headers()
+                    .get(name)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|h| matched.is_match(h))
+                    .unwrap_or_default();
+
+                if header_match {
+                    (*headers, *body)
+                } else {
+                    (false, false)
+                }
+            }
+            HeaderLoggingCondition::Value {
+                name,
+                value,
+                headers,
+                body,
+            } => {
+                let header_match = req
+                    .supergraph_request
+                    .headers()
+                    .get(name)
+                    .and_then(|h| h.to_str().ok())
+                    .map(|h| value.as_str() == h)
+                    .unwrap_or_default();
+
+                if header_match {
+                    (*headers, *body)
+                } else {
+                    (false, false)
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum LoggingFormat {
+    /// Pretty text format (default if you're running from a tty)
+    Pretty,
+    /// Json log format
+    Json,
+}
+
+impl Default for LoggingFormat {
+    fn default() -> Self {
+        if atty::is(atty::Stream::Stdout) {
+            Self::Pretty
+        } else {
+            Self::Json
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
@@ -361,5 +521,114 @@ impl Conf {
                 (_, _) => 0.0,
             },
         )
+    }
+}
+
+fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+    String::json_schema(gen)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_logging_conf_validation() {
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            when_header: vec![HeaderLoggingCondition::Value {
+                name: "test".to_string(),
+                value: String::new(),
+                headers: true,
+                body: false,
+            }],
+        };
+
+        logging_conf.validate().unwrap();
+
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            when_header: vec![HeaderLoggingCondition::Value {
+                name: "test".to_string(),
+                value: String::new(),
+                headers: false,
+                body: false,
+            }],
+        };
+
+        let validate_res = logging_conf.validate();
+        assert!(validate_res.is_err());
+        assert_eq!(validate_res.unwrap_err().to_string(), "'when_header' configuration for logging is invalid: body and headers must not be both false because it doesn't enable any logs");
+    }
+
+    #[test]
+    fn test_logging_conf_should_log() {
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            when_header: vec![HeaderLoggingCondition::Matching {
+                name: "test".to_string(),
+                matching: Regex::new("^foo*").unwrap(),
+                headers: true,
+                body: false,
+            }],
+        };
+        let req = SupergraphRequest::fake_builder()
+            .header("test", "foobar")
+            .build()
+            .unwrap();
+        assert_eq!(logging_conf.should_log(&req), (true, false));
+
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            when_header: vec![HeaderLoggingCondition::Value {
+                name: "test".to_string(),
+                value: String::from("foobar"),
+                headers: true,
+                body: false,
+            }],
+        };
+        assert_eq!(logging_conf.should_log(&req), (true, false));
+
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            when_header: vec![
+                HeaderLoggingCondition::Matching {
+                    name: "test".to_string(),
+                    matching: Regex::new("^foo*").unwrap(),
+                    headers: true,
+                    body: false,
+                },
+                HeaderLoggingCondition::Matching {
+                    name: "test".to_string(),
+                    matching: Regex::new("^*bar$").unwrap(),
+                    headers: false,
+                    body: true,
+                },
+            ],
+        };
+        assert_eq!(logging_conf.should_log(&req), (true, true));
+
+        let logging_conf = Logging {
+            format: LoggingFormat::default(),
+            display_filename: false,
+            display_line_number: false,
+            when_header: vec![HeaderLoggingCondition::Matching {
+                name: "testtest".to_string(),
+                matching: Regex::new("^foo*").unwrap(),
+                headers: true,
+                body: false,
+            }],
+        };
+        assert_eq!(logging_conf.should_log(&req), (false, false));
     }
 }

@@ -278,7 +278,5 @@ async fn subgraph() {
 
     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
     let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
+    server.await.unwrap();
 }

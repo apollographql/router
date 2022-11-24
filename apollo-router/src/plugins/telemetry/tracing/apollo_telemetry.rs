@@ -49,7 +49,7 @@ const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
     Key::from_static_str("apollo_private.graphql.variables");
 const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
     Key::from_static_str("apollo_private.http.request_headers");
-const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
+pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const APOLLO_PRIVATE_PATH: Key = Key::from_static_str("apollo_private.path");
