@@ -201,6 +201,13 @@ The error response will now contain the status code and status name. Example: `H
 
 By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
 
+### handle mutations containing @defer ([Issue #2099](https://github.com/apollographql/router/issues/2099))
+
+The Router generates partial query shapes corresponding to the primary and deferred responses,
+to validate the data sent back to the client. Those query shapes were invalid for mutations.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
+
 ## 🛠 Maintenance
 ## 📚 Documentation
 
