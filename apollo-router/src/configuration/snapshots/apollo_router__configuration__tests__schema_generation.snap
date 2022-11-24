@@ -787,6 +787,106 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         },
+        "experimental_logging": {
+          "type": "object",
+          "properties": {
+            "display_filename": {
+              "default": true,
+              "type": "boolean"
+            },
+            "display_line_number": {
+              "default": true,
+              "type": "boolean"
+            },
+            "format": {
+              "description": "Log format",
+              "oneOf": [
+                {
+                  "description": "Pretty text format (default if you're running from a tty)",
+                  "type": "string",
+                  "enum": [
+                    "pretty"
+                  ]
+                },
+                {
+                  "description": "Json log format",
+                  "type": "string",
+                  "enum": [
+                    "json"
+                  ]
+                }
+              ]
+            },
+            "when_header": {
+              "description": "Log configuration to log request and response for subgraphs and supergraph",
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "description": "Match header value given a regex to display logs",
+                    "type": "object",
+                    "required": [
+                      "match",
+                      "name"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "match": {
+                        "description": "Regex to match the header value",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "description": "Match header value given a value to display logs",
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Header value",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
         "metrics": {
           "type": "object",
           "properties": {
