@@ -30,6 +30,10 @@ managedFederation:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
 
+# This should not be specified in values.yaml. It's much simpler to use --set-file from helm command line.
+# e.g.: helm ... --set-file supergraphFile="location of your supergraph file"
+supergraphFile:
+
 # An array of extra environmental variables
 # Example:
 # extraEnvVars:

@@ -110,7 +110,7 @@ message Trace {
 
   // represents a node in the query plan, under which there is a trace tree for that service fetch.
   // In particular, each fetch node represents a call to an implementing service, and calls to implementing
-  // services may not be unique. See https://github.com/apollographql/apollo-server/blob/main/packages/apollo-gateway/src/QueryPlan.ts
+  // services may not be unique. See https://github.com/apollographql/federation/blob/main/query-planner-js/src/QueryPlan.ts
   // for more information and details.
   message QueryPlanNode {
     // This represents a set of nodes to be executed sequentially by the Gateway executor
@@ -150,6 +150,33 @@ message Trace {
       repeated ResponsePathElement response_path = 1;
       QueryPlanNode node = 2;
     }
+
+    // A `DeferNode` corresponds to one or more @defer at the same level of "nestedness" in the planned query.
+    message DeferNode {
+      DeferNodePrimary primary = 1;
+      repeated DeferredNode deferred = 2;
+    }
+
+    message ConditionNode {
+      string condition = 1;
+      QueryPlanNode if_clause = 2;
+      QueryPlanNode else_clause = 3;
+    }
+
+    message DeferNodePrimary {
+      QueryPlanNode node = 1;
+    }
+    message DeferredNode {
+      repeated DeferredNodeDepends depends = 1;
+      string label = 2;
+      ResponsePathElement path = 3;
+      QueryPlanNode node = 4;
+    }
+    message DeferredNodeDepends {
+      string id = 1;
+      string defer_label = 2;
+    }
+
     message ResponsePathElement {
       oneof id {
         string field_name = 1;
@@ -161,6 +188,8 @@ message Trace {
       ParallelNode parallel = 2;
       FetchNode fetch = 3;
       FlattenNode flatten = 4;
+      DeferNode defer = 5;
+      ConditionNode condition = 6;
     }
   }
 
@@ -174,6 +203,15 @@ message Trace {
   // A tree containing information about all resolvers run directly by this
   // service, including errors.
   Node root = 14;
+
+  // If this is true, the trace is potentially missing some nodes that were
+  // present on the query plan. This can happen if the trace span buffer used
+  // in the router fills up and some spans have to be dropped. In these cases
+  // the overall trace timing will still be correct, but the trace data could
+  // be missing some referenced or executed fields, and some nodes may be
+  // missing. If this is true we should display a warning to the user when they
+  // view the trace in Explorer.
+  bool is_incomplete = 33;
 
   // -------------------------------------------------------------------------
   // Fields below this line are *not* included in federated traces (the traces

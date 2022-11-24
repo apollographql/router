@@ -24,117 +24,130 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
-
 ## ❗ BREAKING ❗
+### Fix naming inconsistency of telemetry.metrics.common.attributes.router ([Issue #2076](https://github.com/apollographql/router/issues/2076))
+
+Mirroring the rest of the config `router` should be `supergraph`
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        router: # old
+```
+becomes
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        supergraph: # new
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
+
+### CLI structure changes ([Issue #2123](https://github.com/apollographql/router/issues/2123))
+
+As the Router gains functionality the limitations of the current CLI structure are becoming apparent.
+
+There is now a separate subcommand for config related operations:
+* `config`
+  * `schema` - Output the configuration schema
+  * `upgrade` - Upgrade the configuration with optional diff support.
+
+`router --schema` has been deprecated and users should move to `router config schema`.
+
 ## 🚀 Features
 
-### Add support for returning different HTTP status codes to rhai engine ([Issue #2023](https://github.com/apollographql/router/issues/2023))
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
 
-This feature now makes it possible to return different HTTP status codes when raising an exception in Rhai. You do this by providing an objectmap with two keys: status and message.
+From the next release, our Docker images will be multi-arch.
 
-```
-    throw #{
-        status: 403,
-        message: "I have raised a 403"
-    };
-```
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
 
-This would short-circuit request/response processing and set an HTTP status code of 403 in the client response and also set the error message.
+### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
 
-It is still possible to return errors as per the current method:
+Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
 
-```
-    throw "I have raised an error";
-```
-This will have a 500 HTTP status code with the specified message.
+```yaml
+extraEnvVars:
+  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
+    value: /data/supergraph-schema.graphql
 
-It is not currently possible to return a 200 "error". If you try, it will be implicitly converted into a 500 error.
+extraVolumeMounts:
+  - name: supergraph-schema
+    mountPath: /data
+    readOnly: true
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2097
-
-### Add support for urlencode/decode to rhai engine ([Issue #2052](https://github.com/apollographql/router/issues/2052))
-
-Two new functions, `urlencode()` and `urldecode()` may now be used to urlencode/decode strings.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2053
-
-### **Experimental** 🥼 External cache storage in Redis ([PR #2024](https://github.com/apollographql/router/pull/2024))
-
-implement caching in external storage for query plans, introspection and APQ. This is done as a multi level cache, first in
-memory with LRU then with a redis cluster backend. Since it is still experimental, it is opt-in through a Cargo feature.
-
-By [@garypen](https://github.com/garypen) and [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2024
-
-### Add Query Plan access to ExecutionRequest ([PR #2081](https://github.com/apollographql/router/pull/2081))
-
-You can now access the query plan from an execution request:
-
-```
-request.query_plan
+extraVolumes:
+  - name: supergraph-schema
+    configMap:
+      name: "{{ .Release.Name }}-supergraph"
+      items:
+        - key: supergraph-schema.graphql
+          path: supergraph-schema.graphql
 ```
 
-`request.context` also now supports the rhai `in` keyword.
+With that values.yaml content, and with your supergraph schema in a file name supergraph-schema.graphql, you can execute:
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2081
+```
+helm upgrade --install --create-namespace --namespace router-test --set-file supergraphFile=supergraph-schema.graphql router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.9 --values values.yaml
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
+
+### Configuration upgrades ([Issue #2123](https://github.com/apollographql/router/issues/2123))
+
+Occasionally we will make changes to the Router yaml configuration format.
+When starting the Router if the configuration can be upgraded it will do so automatically and display a warning:
+
+```
+2022-11-22T14:01:46.884897Z  WARN router configuration contains deprecated options: 
+
+  1. telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
+
+These will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.
+```
+
+Note: If a configuration has errors after upgrading then the configuration will not be upgraded automatically.
+
+From the CLI users can run:
+* `router config upgrade <path_to_router.yaml>` to output configuration that has been upgraded to match the latest config format.
+* `router config upgrade --diff <path_to_router.yaml>` to output a diff e.g.
+```
+ telemetry:
+   apollo:
+     client_name_header: apollographql-client-name
+   metrics:
+     common:
+       attributes:
+-        router:
++        supergraph:
+           request:
+             header:
+             - named: "1" # foo
+```
+
+There are situations where comments and whitespace are not preserved. This may be improved in future.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
+
 
 ## 🐛 Fixes
 
-### Move the nullifying error messages to extension ([Issue #2071](https://github.com/apollographql/router/issues/2071))
+### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
 
-The Router was generating error messages when triggering nullability rules (when a non nullable field is null,
-it will nullify the parent object). Adding those messages in the list of errors was potentially redundant
-(subgraph can already add an error message indicating why a field is null) and could be treated as a failure by
-clients, while nullifying fields is a part of normal operation. We still add the messages in extensions so
-clients can easily debug why parts of the response were removed
+The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2077
-
-### Fix `Float` input-type coercion for default values with values larger than 32-bits ([Issue #2087](https://github.com/apollographql/router/issues/2087))
-
-A regression has been fixed which caused the Router to reject integers larger than 32-bits used as the default values on `Float` fields in input types.
-
-In other words, the following will once again work as expected:
-
-```graphql
-input MyInputType {
-    a_float_input: Float = 9876543210
-}
-```
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2090
-
-### Assume `Accept: application/json` when no `Accept` header is present [Issue #1990](https://github.com/apollographql/router/issues/1990))
-
-the `Accept` header means `*/*` when it is absent.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2078
-
-### Missing `@skip` and `@include` implementation for root operations ([Issue #2072](https://github.com/apollographql/router/issues/2072))
-
-`@skip` and `@include` were not implemented for inline fragments and fragment spreads on top level operations.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2096
+By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
 
 ## 🛠 Maintenance
-
-### Use `debian:bullseye-slim` as our base Docker image ([PR #2085](https://github.com/apollographql/router/pull/2085))
-
-A while ago, when we added compression support to the router, we discovered that the Distroless base-images we were using didn't ship with a copy of `libz.so.1`. We addressed that problem by copying in a version of the library from the Distroless image (Java) which does ship it. While that worked, we found challenges in adding support for both `aarch64` and `amd64` Docker images that would make it less than ideal to continue using those Distroless images.
-
-Rather than persist with this complexity, we've concluded that it would be better to just use a base image which ships with `libz.so.1`, hence the change to `debian:bullseye-slim`.  Those images are still quite minimal and the resulting images are similar in size.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2085
-
-### Update `apollo-parser` to `v0.3.2` ([PR #2103](https://github.com/apollographql/router/pull/2103))
-
-This updates our dependency on our `apollo-parser` package which brings a few improvements, including more defensive parsing of some operations.  See its CHANGELOG in [the `apollo-rs` repository](https://github.com/apollographql/apollo-rs/blob/main/crates/apollo-parser/CHANGELOG.md#032---2022-11-15) for more details.
-
-By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2103
-
 ## 📚 Documentation
 
-### Fix example `helm show values` command ([PR #2088](https://github.com/apollographql/router/pull/2088))
+### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
 
-The `helm show vaues` command needs to use the correct Helm chart reference `oci://ghcr.io/apollographql/helm-charts/router`.
+We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
 
-By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2088
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
+
