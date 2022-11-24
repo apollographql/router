@@ -60,14 +60,13 @@ docker run -p 4000:4000 \
   --tty \
   --entrypoint=bash \
   ghcr.io/apollographql/router:<image version>
-root@0c6ae96a2bbd:/dist# pwd
+dist# pwd
 /dist
-root@0c6ae96a2bbd:/dist# ls
+dist# ls
 config	router	schema
-root@0c6ae96a2bbd:/dist# exit
+dist# exit
 exit
 ```
-(The prompt will vary since it's based on your container ID.)
 
 In this case, we've added interactive and tty flags and changed the entrypoint of the image to be a shell.
 
