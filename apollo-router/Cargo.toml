@@ -70,6 +70,7 @@ derive_more = { version = "0.99.17", default-features = false, features = [
     "display",
 ] }
 dhat = { version = "0.3.2", optional = true }
+diff = "0.1.13"
 directories = "4.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.24"
@@ -84,13 +85,14 @@ hyper = { version = "0.14.23", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.1", features = ["http1", "http2"] }
 indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
+jsonpath_lib = "0.3.0"
 jsonschema = { version = "0.16.1", default-features = false }
 lazy_static = "1.4.0"
 libc = "0.2.137"
 lru = "0.7.8"
 mediatype = "0.19.11"
 mockall = "0.11.3"
-miette = { version = "5.4.1", features = ["fancy"] }
+miette = { version = "5.5.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
 # To avoid tokio issues
@@ -140,6 +142,7 @@ pin-project-lite = "0.2.9"
 prometheus = "0.13"
 prost = "0.9.0"
 prost-types = "0.9.0"
+proteus = "0.5.0"
 rand = "0.8.5"
 rhai = { version = "1.11.0", features = ["sync", "serde", "internals"] }
 redis = { version = "0.21.6", optional = true, features = ["cluster", "tokio-comp"] }
@@ -151,6 +154,7 @@ reqwest = { version = "0.11.13", default-features = false, features = [
     "stream",
 ] }
 router-bridge = "0.1.11"
+rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "2.1.2"
 sha2 = "0.10.6"
@@ -193,7 +197,6 @@ tracing-core = "=0.1.26"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
 tracing-opentelemetry = "0.17.4"
 tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
-
 url = { version = "2.3.1", features = ["serde"] }
 urlencoding = "2.1.2"
 uuid = { version = "1.2.2", features = ["serde", "v4"] }
@@ -209,7 +212,6 @@ uname = "0.1.1"
 [dev-dependencies]
 insta = { version = "1.21.1", features = ["json", "redactions"] }
 introspector-gadget = "0.1.0"
-jsonpath_lib = "0.3.0"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
 mockall = "0.11.3"

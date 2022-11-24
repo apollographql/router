@@ -25,6 +25,50 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+
+### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
+
+From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
+
+Do not run debug images in performance sensitive contexts. The tracking of memory allocations will significantly impact performance. In general, the debug image should only be used in consultation with Apollo engineering and support.
+
+Look at our documentation for examples of how to use the image in either Docker or Kubernetes.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2142
+
+### Fix naming inconsistency of telemetry.metrics.common.attributes.router ([Issue #2076](https://github.com/apollographql/router/issues/2076))
+
+Mirroring the rest of the config `router` should be `supergraph`
+
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        router: # old
+```
+becomes
+```yaml
+telemetry:
+  metrics:
+    common:
+      attributes:
+        supergraph: # new
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
+
+### CLI structure changes ([Issue #2123](https://github.com/apollographql/router/issues/2123))
+
+As the Router gains functionality the limitations of the current CLI structure are becoming apparent.
+
+There is now a separate subcommand for config related operations:
+* `config`
+  * `schema` - Output the configuration schema
+  * `upgrade` - Upgrade the configuration with optional diff support.
+
+`router --schema` has been deprecated and users should move to `router config schema`.
+
 ## 🚀 Features
 
 ### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
@@ -64,6 +108,42 @@ helm upgrade --install --create-namespace --namespace router-test --set-file sup
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
 
+### Configuration upgrades ([Issue #2123](https://github.com/apollographql/router/issues/2123))
+
+Occasionally we will make changes to the Router yaml configuration format.
+When starting the Router if the configuration can be upgraded it will do so automatically and display a warning:
+
+```
+2022-11-22T14:01:46.884897Z  WARN router configuration contains deprecated options: 
+
+  1. telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
+
+These will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.
+```
+
+Note: If a configuration has errors after upgrading then the configuration will not be upgraded automatically.
+
+From the CLI users can run:
+* `router config upgrade <path_to_router.yaml>` to output configuration that has been upgraded to match the latest config format.
+* `router config upgrade --diff <path_to_router.yaml>` to output a diff e.g.
+```
+ telemetry:
+   apollo:
+     client_name_header: apollographql-client-name
+   metrics:
+     common:
+       attributes:
+-        router:
++        supergraph:
+           request:
+             header:
+             - named: "1" # foo
+```
+
+There are situations where comments and whitespace are not preserved. This may be improved in future.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
+
 ### *Experimental* subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
 
 Implements subgraph request retries, using Finagle's retry buckets algorithm:
@@ -99,6 +179,13 @@ By [@col](https://github.com/col) in https://github.com/apollographql/router/pul
 
 ## 🛠 Maintenance
 ## 📚 Documentation
+
+### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
+
+The docs CORS regex example now displays a working and safe way to allow `HTTPS` subdomains of `api.example.com`.
+
+By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
+
 
 ### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
 
