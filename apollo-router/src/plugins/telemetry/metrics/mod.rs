@@ -43,7 +43,7 @@ pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 /// Configuration to add custom attributes/labels on metrics
 pub(crate) struct MetricsAttributesConf {
     /// Configuration to forward header values or body values from router request/response in metric attributes/labels
-    pub(crate) router: Option<AttributesForwardConf>,
+    pub(crate) supergraph: Option<AttributesForwardConf>,
     /// Configuration to forward header values or body values from subgraph request/response in metric attributes/labels
     pub(crate) subgraph: Option<SubgraphAttributesConf>,
 }

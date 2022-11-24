@@ -787,6 +787,106 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         },
+        "experimental_logging": {
+          "type": "object",
+          "properties": {
+            "display_filename": {
+              "default": true,
+              "type": "boolean"
+            },
+            "display_line_number": {
+              "default": true,
+              "type": "boolean"
+            },
+            "format": {
+              "description": "Log format",
+              "oneOf": [
+                {
+                  "description": "Pretty text format (default if you're running from a tty)",
+                  "type": "string",
+                  "enum": [
+                    "pretty"
+                  ]
+                },
+                {
+                  "description": "Json log format",
+                  "type": "string",
+                  "enum": [
+                    "json"
+                  ]
+                }
+              ]
+            },
+            "when_header": {
+              "description": "Log configuration to log request and response for subgraphs and supergraph",
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "description": "Match header value given a regex to display logs",
+                    "type": "object",
+                    "required": [
+                      "match",
+                      "name"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "match": {
+                        "description": "Regex to match the header value",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "description": "Match header value given a value to display logs",
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Header value",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
         "metrics": {
           "type": "object",
           "properties": {
@@ -797,257 +897,6 @@ expression: "&schema"
                   "description": "Configuration to add custom labels/attributes to metrics",
                   "type": "object",
                   "properties": {
-                    "router": {
-                      "description": "Configuration to forward header values or body values from router request/response in metric attributes/labels",
-                      "type": "object",
-                      "properties": {
-                        "context": {
-                          "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
-                          "type": "array",
-                          "items": {
-                            "description": "Configuration to forward context values in metric attributes/labels",
-                            "type": "object",
-                            "required": [
-                              "named"
-                            ],
-                            "properties": {
-                              "default": {
-                                "type": "string",
-                                "nullable": true
-                              },
-                              "named": {
-                                "type": "string"
-                              },
-                              "rename": {
-                                "type": "string",
-                                "nullable": true
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          "nullable": true
-                        },
-                        "errors": {
-                          "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
-                          "type": "object",
-                          "properties": {
-                            "extensions": {
-                              "description": "Forward extensions values as custom attributes/labels in metrics",
-                              "type": "array",
-                              "items": {
-                                "description": "Configuration to forward body values in metric attributes/labels",
-                                "type": "object",
-                                "required": [
-                                  "name",
-                                  "path"
-                                ],
-                                "properties": {
-                                  "default": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "path": {
-                                    "type": "string"
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              "nullable": true
-                            },
-                            "include_messages": {
-                              "description": "Will include the error message in a \"message\" attribute",
-                              "default": false,
-                              "type": "boolean"
-                            }
-                          },
-                          "additionalProperties": false,
-                          "nullable": true
-                        },
-                        "request": {
-                          "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
-                          "type": "object",
-                          "properties": {
-                            "body": {
-                              "description": "Forward body values as custom attributes/labels in metrics",
-                              "type": "array",
-                              "items": {
-                                "description": "Configuration to forward body values in metric attributes/labels",
-                                "type": "object",
-                                "required": [
-                                  "name",
-                                  "path"
-                                ],
-                                "properties": {
-                                  "default": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "path": {
-                                    "type": "string"
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              "nullable": true
-                            },
-                            "header": {
-                              "description": "Forward header values as custom attributes/labels in metrics",
-                              "type": "array",
-                              "items": {
-                                "description": "Configuration to forward header values in metric labels",
-                                "anyOf": [
-                                  {
-                                    "description": "Using a named header",
-                                    "type": "object",
-                                    "required": [
-                                      "named"
-                                    ],
-                                    "properties": {
-                                      "default": {
-                                        "type": "string",
-                                        "nullable": true
-                                      },
-                                      "named": {
-                                        "type": "string"
-                                      },
-                                      "rename": {
-                                        "type": "string",
-                                        "nullable": true
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "description": "Using a regex on the header name",
-                                    "type": "object",
-                                    "required": [
-                                      "matching"
-                                    ],
-                                    "properties": {
-                                      "matching": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  }
-                                ]
-                              },
-                              "nullable": true
-                            }
-                          },
-                          "additionalProperties": false,
-                          "nullable": true
-                        },
-                        "response": {
-                          "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
-                          "type": "object",
-                          "properties": {
-                            "body": {
-                              "description": "Forward body values as custom attributes/labels in metrics",
-                              "type": "array",
-                              "items": {
-                                "description": "Configuration to forward body values in metric attributes/labels",
-                                "type": "object",
-                                "required": [
-                                  "name",
-                                  "path"
-                                ],
-                                "properties": {
-                                  "default": {
-                                    "type": "string",
-                                    "nullable": true
-                                  },
-                                  "name": {
-                                    "type": "string"
-                                  },
-                                  "path": {
-                                    "type": "string"
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              "nullable": true
-                            },
-                            "header": {
-                              "description": "Forward header values as custom attributes/labels in metrics",
-                              "type": "array",
-                              "items": {
-                                "description": "Configuration to forward header values in metric labels",
-                                "anyOf": [
-                                  {
-                                    "description": "Using a named header",
-                                    "type": "object",
-                                    "required": [
-                                      "named"
-                                    ],
-                                    "properties": {
-                                      "default": {
-                                        "type": "string",
-                                        "nullable": true
-                                      },
-                                      "named": {
-                                        "type": "string"
-                                      },
-                                      "rename": {
-                                        "type": "string",
-                                        "nullable": true
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  },
-                                  {
-                                    "description": "Using a regex on the header name",
-                                    "type": "object",
-                                    "required": [
-                                      "matching"
-                                    ],
-                                    "properties": {
-                                      "matching": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  }
-                                ]
-                              },
-                              "nullable": true
-                            }
-                          },
-                          "additionalProperties": false,
-                          "nullable": true
-                        },
-                        "static": {
-                          "description": "Configuration to insert custom attributes/labels in metrics",
-                          "type": "array",
-                          "items": {
-                            "description": "Configuration to insert custom attributes/labels in metrics",
-                            "type": "object",
-                            "required": [
-                              "name",
-                              "value"
-                            ],
-                            "properties": {
-                              "name": {
-                                "type": "string"
-                              },
-                              "value": {
-                                "type": "string"
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          "nullable": true
-                        }
-                      },
-                      "additionalProperties": false,
-                      "nullable": true
-                    },
                     "subgraph": {
                       "description": "Configuration to forward header values or body values from subgraph request/response in metric attributes/labels",
                       "type": "object",
@@ -1549,6 +1398,257 @@ expression: "&schema"
                                   "additionalProperties": false
                                 },
                                 "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "nullable": true
+                        }
+                      },
+                      "additionalProperties": false,
+                      "nullable": true
+                    },
+                    "supergraph": {
+                      "description": "Configuration to forward header values or body values from router request/response in metric attributes/labels",
+                      "type": "object",
+                      "properties": {
+                        "context": {
+                          "description": "Configuration to forward values from the context to custom attributes/labels in metrics",
+                          "type": "array",
+                          "items": {
+                            "description": "Configuration to forward context values in metric attributes/labels",
+                            "type": "object",
+                            "required": [
+                              "named"
+                            ],
+                            "properties": {
+                              "default": {
+                                "type": "string",
+                                "nullable": true
+                              },
+                              "named": {
+                                "type": "string"
+                              },
+                              "rename": {
+                                "type": "string",
+                                "nullable": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "nullable": true
+                        },
+                        "errors": {
+                          "description": "Configuration to forward values from the error to custom attributes/labels in metrics",
+                          "type": "object",
+                          "properties": {
+                            "extensions": {
+                              "description": "Forward extensions values as custom attributes/labels in metrics",
+                              "type": "array",
+                              "items": {
+                                "description": "Configuration to forward body values in metric attributes/labels",
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "path"
+                                ],
+                                "properties": {
+                                  "default": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "path": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "nullable": true
+                            },
+                            "include_messages": {
+                              "description": "Will include the error message in a \"message\" attribute",
+                              "default": false,
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "request": {
+                          "description": "Configuration to forward headers or body values from the request to custom attributes/labels in metrics",
+                          "type": "object",
+                          "properties": {
+                            "body": {
+                              "description": "Forward body values as custom attributes/labels in metrics",
+                              "type": "array",
+                              "items": {
+                                "description": "Configuration to forward body values in metric attributes/labels",
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "path"
+                                ],
+                                "properties": {
+                                  "default": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "path": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "nullable": true
+                            },
+                            "header": {
+                              "description": "Forward header values as custom attributes/labels in metrics",
+                              "type": "array",
+                              "items": {
+                                "description": "Configuration to forward header values in metric labels",
+                                "anyOf": [
+                                  {
+                                    "description": "Using a named header",
+                                    "type": "object",
+                                    "required": [
+                                      "named"
+                                    ],
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "nullable": true
+                                      },
+                                      "named": {
+                                        "type": "string"
+                                      },
+                                      "rename": {
+                                        "type": "string",
+                                        "nullable": true
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "Using a regex on the header name",
+                                    "type": "object",
+                                    "required": [
+                                      "matching"
+                                    ],
+                                    "properties": {
+                                      "matching": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "nullable": true
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "response": {
+                          "description": "Configuration to forward headers or body values from the response to custom attributes/labels in metrics",
+                          "type": "object",
+                          "properties": {
+                            "body": {
+                              "description": "Forward body values as custom attributes/labels in metrics",
+                              "type": "array",
+                              "items": {
+                                "description": "Configuration to forward body values in metric attributes/labels",
+                                "type": "object",
+                                "required": [
+                                  "name",
+                                  "path"
+                                ],
+                                "properties": {
+                                  "default": {
+                                    "type": "string",
+                                    "nullable": true
+                                  },
+                                  "name": {
+                                    "type": "string"
+                                  },
+                                  "path": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "nullable": true
+                            },
+                            "header": {
+                              "description": "Forward header values as custom attributes/labels in metrics",
+                              "type": "array",
+                              "items": {
+                                "description": "Configuration to forward header values in metric labels",
+                                "anyOf": [
+                                  {
+                                    "description": "Using a named header",
+                                    "type": "object",
+                                    "required": [
+                                      "named"
+                                    ],
+                                    "properties": {
+                                      "default": {
+                                        "type": "string",
+                                        "nullable": true
+                                      },
+                                      "named": {
+                                        "type": "string"
+                                      },
+                                      "rename": {
+                                        "type": "string",
+                                        "nullable": true
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "description": "Using a regex on the header name",
+                                    "type": "object",
+                                    "required": [
+                                      "matching"
+                                    ],
+                                    "properties": {
+                                      "matching": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
+                              "nullable": true
+                            }
+                          },
+                          "additionalProperties": false,
+                          "nullable": true
+                        },
+                        "static": {
+                          "description": "Configuration to insert custom attributes/labels in metrics",
+                          "type": "array",
+                          "items": {
+                            "description": "Configuration to insert custom attributes/labels in metrics",
+                            "type": "object",
+                            "required": [
+                              "name",
+                              "value"
+                            ],
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "value": {
+                                "type": "string"
                               }
                             },
                             "additionalProperties": false
@@ -2080,6 +2180,31 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_retry": {
+              "type": "object",
+              "properties": {
+                "min_per_sec": {
+                  "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0,
+                  "nullable": true
+                },
+                "retry_percent": {
+                  "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
+                  "type": "number",
+                  "format": "float",
+                  "nullable": true
+                },
+                "ttl": {
+                  "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
+                  "default": null,
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "global_rate_limit": {
               "description": "Enable global rate limiting",
               "type": "object",
@@ -2187,6 +2312,31 @@ expression: "&schema"
               "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
+                "nullable": true
+              },
+              "experimental_retry": {
+                "type": "object",
+                "properties": {
+                  "min_per_sec": {
+                    "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0.0,
+                    "nullable": true
+                  },
+                  "retry_percent": {
+                    "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
+                    "type": "number",
+                    "format": "float",
+                    "nullable": true
+                  },
+                  "ttl": {
+                    "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
+                    "default": null,
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "global_rate_limit": {
