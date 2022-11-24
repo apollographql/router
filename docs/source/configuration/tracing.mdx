@@ -81,8 +81,29 @@ telemetry:
       # https://zipkin.io/ (compliant with opentracing)
       zipkin: false
 
+      # If you have your own way to generate a trace id and you want to pass it via a custom request header
+      request:
+        header_name: my-trace-id
 ```
+
 Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).
+
+### Trace ID
+
+> This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape or adding/removing features.
+> If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/2147).
+
+If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    experimental_response_trace_id:
+      enabled: true # default: false
+      header_name: "my-trace-id" # default: "apollo-trace-id"
+```
+
+Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
 
 ## Using Datadog
 
@@ -109,7 +130,6 @@ telemetry:
       agent:
         # Either 'default' or a URL
         endpoint: docker_jaeger:14268
-
 ```
 
 ### Collector config

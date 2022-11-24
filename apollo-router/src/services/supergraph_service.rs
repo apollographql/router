@@ -120,19 +120,6 @@ where
                     .build()
                     .expect("building a response like this should not fail"))
             });
-        // FIXME: Enable it later
-        // .and_then(|mut res| async move {
-        //     if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-        //         let header_value = HeaderValue::from_str(trace_id.as_str());
-        //         if let Ok(header_value) = header_value {
-        //             res.response
-        //                 .headers_mut()
-        //                 .insert(HeaderName::from_static("apollo_trace_id"), header_value);
-        //         }
-        //     }
-
-        //     Ok(res)
-        // });
 
         Box::pin(fut)
     }
