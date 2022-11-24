@@ -7,16 +7,16 @@ import { Link } from "gatsby";
 
 The Apollo Router supports [OpenTelemetry](https://opentelemetry.io/), with exporters for:
 
-- [Jaeger](https://www.jaegertracing.io/)
-- [Zipkin](https://zipkin.io/)
-- [Datadog](https://www.datadoghq.com/)
-- [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC
+* [Jaeger](https://www.jaegertracing.io/)
+* [Zipkin](https://zipkin.io/)
+* [Datadog](https://www.datadoghq.com/)
+* [OpenTelemetry Protocol (OTLP)](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/protocol/otlp.md) over HTTP or gRPC
 
 The Apollo Router generates spans that include the various phases of serving a request and associated dependencies. This is useful for showing how response time is affected by:
 
-- Sub-request response times
-- Query shape (sub-request dependencies)
-- Apollo Router post-processing
+* Sub-request response times
+* Query shape (sub-request dependencies)
+* Apollo Router post-processing
 
 Span data is sent to a collector such as [Jaeger](https://www.jaegertracing.io/), which can assemble spans into a gantt chart for analysis.
 
