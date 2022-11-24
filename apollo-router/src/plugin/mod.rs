@@ -174,6 +174,13 @@ pub trait Plugin: Send + Sync + 'static {
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn http_service(&self, service: transport::BoxService) -> transport::BoxService {
+        service
+    }
+
+    /// This service runs at the very beginning and very end of the request lifecycle.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
+    /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         service
     }

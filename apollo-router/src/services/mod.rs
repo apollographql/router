@@ -18,6 +18,8 @@ pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
+pub(crate) use crate::services::transport::Request as TransportRequest;
+pub(crate) use crate::services::transport::Response as TransportResponse;
 
 pub mod execution;
 mod execution_service;

@@ -36,14 +36,18 @@ use crate::services::layers::apq::APQLayer;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
+use crate::TransportRequest;
+use crate::TransportResponse;
 
 pub(super) async fn handle_get_with_static(
     static_page: Bytes,
     Host(host): Host,
     apq: APQLayer,
-    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
+    service: BoxService<TransportRequest, TransportResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
+    // TODO: deal with transport* BEFORE
+    // TODO: Let users know the http_service is not CORS / CSRF safe
     if prefers_html(http_request.headers()) {
         return Html(static_page).into_response();
     }
@@ -68,7 +72,7 @@ pub(super) async fn handle_get_with_static(
 pub(super) async fn handle_get(
     Host(host): Host,
     apq: APQLayer,
-    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
+    service: BoxService<TransportRequest, TransportResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     return run_graphql_request(service, apq, http_request)
@@ -93,7 +97,7 @@ pub(super) async fn handle_post(
     OriginalUri(uri): OriginalUri,
     http_request: Request<Body>,
     apq: APQLayer,
-    service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
+    service: BoxService<TransportRequest, TransportResponse, BoxError>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
     run_graphql_request(service, apq, http_request)
@@ -107,10 +111,12 @@ async fn run_graphql_request<RS>(
     http_request: Request<Body>,
 ) -> impl IntoResponse
 where
-    RS: Service<HTTPRequest, Response = HTTPResponse, Error = BoxError> + Send,
+    RS: Service<TransportRequest, Response = TransportResponse, Error = BoxError> + Send,
 {
     let (head, body) = http_request.into_parts();
-    let mut req: SupergraphRequest = Request::from_parts(head, body).into();
+    let transport_request: TransportRequest = Request::from_parts(head, body).into();
+
+    let mut req: SupergraphRequest = todo!();
     req = match apq.apq_request(req).await {
         Ok(req) => req,
         Err(res) => {

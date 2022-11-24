@@ -299,8 +299,10 @@ where
     })?;
 
     let main_route = main_router::<RF>(configuration, apq)
+        // .layer(my_http_service_stack_except_its_layered_now)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(
+            // TODO: move it to the telemetry plugin.
             TraceLayer::new_for_http()
                 .make_span_with(PropagatingMakeSpan::new())
                 .on_request(|_: &Request<_>, span: &Span| {
