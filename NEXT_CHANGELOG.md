@@ -209,6 +209,15 @@ to validate the data sent back to the client. Those query shapes were invalid fo
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
 
 ## 🛠 Maintenance
+
+
+### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
+
+Remove duplicated code.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
+
+
 ## 📚 Documentation
 
 ### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
