@@ -145,6 +145,13 @@ By [@col](https://github.com/col) in https://github.com/apollographql/router/pul
 ## 🛠 Maintenance
 ## 📚 Documentation
 
+### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
+
+The docs CORS regex example now displays a working and safe way to allow `HTTPS` subdomains of `api.example.com`.
+
+By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
+
+
 ### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
 
 We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
