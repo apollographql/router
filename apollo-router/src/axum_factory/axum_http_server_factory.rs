@@ -163,7 +163,9 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: SupergraphServiceFactory,
     {
         Box::pin(async move {
-            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+            let apq = APQLayer::with_cache(
+                DeduplicatingCache::from_configuration(&configuration.supergraph.apq.cache).await,
+            );
 
             let all_routers =
                 make_axum_router(service_factory, &configuration, extra_endpoints, apq)?;
