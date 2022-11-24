@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
+use axum::headers::HeaderName;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
@@ -13,6 +14,8 @@ use serde::Deserialize;
 use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::configuration::ConfigurationError;
+use crate::plugin::serde::deserialize_header_name;
+use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::metrics;
 
@@ -82,6 +85,11 @@ pub(crate) struct MetricsCommon {
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Tracing {
+    // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
+    // When deleting, put a #[serde(alias = "experimental_response_trace_id")] if we don't want to break things
+    /// A way to expose trace id in response headers
+    #[serde(default, rename = "experimental_response_trace_id")]
+    pub(crate) response_trace_id: ExposeTraceId,
     pub(crate) propagation: Option<Propagation>,
     pub(crate) trace_config: Option<Trace>,
     pub(crate) otlp: Option<otlp::Config>,
@@ -248,12 +256,34 @@ impl Default for LoggingFormat {
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) struct ExposeTraceId {
+    /// Expose the trace_id in response headers
+    pub(crate) enabled: bool,
+    /// Choose the header name to expose trace_id (default: apollo-trace-id)
+    #[schemars(with = "Option<String>")]
+    #[serde(deserialize_with = "deserialize_option_header_name")]
+    pub(crate) header_name: Option<HeaderName>,
+}
+
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Propagation {
+    /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
+    pub(crate) request: Option<PropagationRequestTraceId>,
     pub(crate) baggage: Option<bool>,
     pub(crate) trace_context: Option<bool>,
     pub(crate) jaeger: Option<bool>,
     pub(crate) datadog: Option<bool>,
     pub(crate) zipkin: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) struct PropagationRequestTraceId {
+    /// Choose the header name to expose trace_id (default: apollo-trace-id)
+    #[schemars(with = "String")]
+    #[serde(deserialize_with = "deserialize_header_name")]
+    pub(crate) header_name: HeaderName,
 }
 
 #[derive(Default, Debug, Clone, Deserialize, JsonSchema)]

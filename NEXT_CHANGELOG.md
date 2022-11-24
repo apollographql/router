@@ -71,6 +71,26 @@ There is now a separate subcommand for config related operations:
 
 ## 🚀 Features
 
+### Add configuration for trace ID ([Issue #2080](https://github.com/apollographql/router/issues/2080))
+
+If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    experimental_response_trace_id:
+      enabled: true # default: false
+      header_name: "my-trace-id" # default: "apollo-trace-id"
+    propagation:
+      # If you have your own way to generate a trace id and you want to pass it via a custom request header
+      request:
+        header_name: my-trace-id
+```
+
+Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2131
+
 ### Add configuration for logging and add more logs 
 
 By default some logs containing sensible data (like request body, response body, headers) are not displayed even if we set the right log level.
@@ -201,7 +221,23 @@ The error response will now contain the status code and status name. Example: `H
 
 By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
 
+### handle mutations containing @defer ([Issue #2099](https://github.com/apollographql/router/issues/2099))
+
+The Router generates partial query shapes corresponding to the primary and deferred responses,
+to validate the data sent back to the client. Those query shapes were invalid for mutations.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
+
 ## 🛠 Maintenance
+
+
+### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
+
+Remove duplicated code.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
+
+
 ## 📚 Documentation
 
 ### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))

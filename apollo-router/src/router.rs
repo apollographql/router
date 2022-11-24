@@ -742,10 +742,18 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_dev_mode_without_file() {
-        let mut stream =
-            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
-                .into_stream()
-                .boxed();
+        let telemetry_configuration = serde_json::json!({
+            "telemetry": {}
+        });
+        let mut stream = ConfigurationSource::from(
+            Configuration::builder()
+                .apollo_plugin("telemetry", telemetry_configuration)
+                .dev(true)
+                .build()
+                .unwrap(),
+        )
+        .into_stream()
+        .boxed();
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,

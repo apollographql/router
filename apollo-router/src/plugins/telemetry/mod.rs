@@ -16,6 +16,7 @@ use ::tracing::info_span;
 use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
 use ::tracing::Subscriber;
+use axum::headers::HeaderName;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
@@ -27,13 +28,20 @@ use http::HeaderValue;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
+use opentelemetry::propagation::text_map_propagator::FieldIter;
+use opentelemetry::propagation::Extractor;
+use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::trace::SpanContext;
+use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use rand::Rng;
@@ -90,6 +98,7 @@ use crate::spaceport::server::ReportSpaceport;
 use crate::spaceport::StatsContext;
 use crate::subgraph::Request;
 use crate::subgraph::Response;
+use crate::tracer::TraceId;
 use crate::Context;
 use crate::ExecutionRequest;
 use crate::ListenAddr;
@@ -117,6 +126,8 @@ pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_n
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
+const GLOBAL_TRACER_NAME: &str = "apollo-router";
+const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 
 static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
 static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
@@ -191,13 +202,15 @@ impl Plugin for Telemetry {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = BasicMetrics::new(&self.meter_provider);
         let config = Arc::new(self.config.clone());
+        let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_response(|resp: SupergraphResponse| {
+            .map_response(move |mut resp: SupergraphResponse| {
+                let config = config_map_res_first.clone();
                 if let Ok(Some(usage_reporting)) =
                     resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
@@ -207,6 +220,22 @@ impl Plugin for Telemetry {
                         &usage_reporting.stats_report_key.as_str(),
                     );
                 }
+                // To expose trace_id or not
+                let expose_trace_id_header = config.tracing.as_ref().and_then(|t| {
+                    t.response_trace_id.enabled.then(|| {
+                        t.response_trace_id
+                            .header_name
+                            .clone()
+                            .unwrap_or(HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER))
+                    })
+                });
+                if let (Some(header_name), Some(trace_id)) = (
+                    expose_trace_id_header,
+                    TraceId::maybe_new().and_then(|t| HeaderValue::from_str(&t.to_string()).ok()),
+                ) {
+                    resp.response.headers_mut().append(header_name, trace_id);
+                }
+
                 if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
                     ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
                 }
@@ -228,6 +257,7 @@ impl Plugin for Telemetry {
                     let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
+
                     async move {
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
                         result = Self::update_otel_metrics(
@@ -375,6 +405,9 @@ impl Telemetry {
             .apollo
             .as_mut()
             .expect("telemetry apollo config must be present");
+        if let Some(tracing_conf) = &config.tracing {
+            apollo.expose_trace_id = tracing_conf.response_trace_id.clone();
+        }
 
         // If we have key and graph ref but no endpoint we start embedded spaceport
         let spaceport = match apollo {
@@ -413,7 +446,7 @@ impl Telemetry {
             let tracer_provider = Self::create_tracer_provider(&config)?;
 
             let tracer = tracer_provider.versioned_tracer(
-                "apollo-router",
+                GLOBAL_TRACER_NAME,
                 Some(env!("CARGO_PKG_VERSION")),
                 None,
             );
@@ -574,6 +607,11 @@ impl Telemetry {
         }
         if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
+        }
+        if let Some(from_request_header) = &propagation.request.as_ref().map(|r| &r.header_name) {
+            propagators.push(Box::new(CustomTraceIdPropagator::new(
+                from_request_header.to_string(),
+            )));
         }
 
         TextMapCompositePropagator::new(propagators)
@@ -1298,6 +1336,76 @@ impl ApolloFtv1Handler {
             }
         }
         resp
+    }
+}
+
+/// CustomTraceIdPropagator to set custom trace_id for our tracing system
+/// coming from headers
+#[derive(Debug)]
+struct CustomTraceIdPropagator {
+    header_name: String,
+    fields: [String; 1],
+}
+
+impl CustomTraceIdPropagator {
+    fn new(header_name: String) -> Self {
+        Self {
+            fields: [header_name.clone()],
+            header_name,
+        }
+    }
+
+    fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
+        let trace_id = extractor.get(&self.header_name)?;
+
+        opentelemetry::global::tracer_provider().versioned_tracer(
+            GLOBAL_TRACER_NAME,
+            Some(env!("CARGO_PKG_VERSION")),
+            None,
+        );
+        // extract trace id
+        let trace_id = match opentelemetry::trace::TraceId::from_hex(trace_id) {
+            Ok(trace_id) => trace_id,
+            Err(err) => {
+                ::tracing::error!("cannot generate custom trace_id: {err}");
+                return None;
+            }
+        };
+
+        SpanContext::new(
+            trace_id,
+            SpanId::INVALID,
+            TraceFlags::default().with_sampled(true),
+            true,
+            TraceState::default(),
+        )
+        .into()
+    }
+}
+
+impl TextMapPropagator for CustomTraceIdPropagator {
+    fn inject_context(&self, cx: &opentelemetry::Context, injector: &mut dyn Injector) {
+        let span = cx.span();
+        let span_context = span.span_context();
+        if span_context.is_valid() {
+            let header_value = format!("{}", span_context.trace_id());
+            injector.set(&self.header_name, header_value);
+        }
+    }
+
+    fn extract_with_context(
+        &self,
+        cx: &opentelemetry::Context,
+        extractor: &dyn Extractor,
+    ) -> opentelemetry::Context {
+        cx.with_remote_span_context(
+            self.extract_span_context(extractor)
+                .unwrap_or_else(SpanContext::empty_context),
+        )
+    }
+
+    fn fields(&self) -> FieldIter<'_> {
+        FieldIter::new(self.fields.as_ref())
     }
 }
 
