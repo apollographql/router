@@ -43,7 +43,7 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
 
     for _ in 0..10 {
         let (id, result) = router.run_query().await;
-        assert!(result
+        assert!(!result
             .headers()
             .get("apollo-custom-trace-id")
             .unwrap()

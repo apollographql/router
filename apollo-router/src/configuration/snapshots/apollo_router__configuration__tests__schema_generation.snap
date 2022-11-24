@@ -1866,13 +1866,23 @@ expression: "&schema"
                   "type": "boolean",
                   "nullable": true
                 },
-                "from_request_header": {
-                  "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
-                  "type": "string",
-                  "nullable": true
-                },
                 "jaeger": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "request": {
+                  "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
+                  "type": "object",
+                  "required": [
+                    "header_name"
+                  ],
+                  "properties": {
+                    "header_name": {
+                      "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
                   "nullable": true
                 },
                 "trace_context": {

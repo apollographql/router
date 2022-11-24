@@ -81,8 +81,9 @@ telemetry:
       # https://zipkin.io/ (compliant with opentracing)
       zipkin: false
 
-      # If you have your own way to generate a trace id and you want to pass it via a custom header
-      from_request_header: "x-request-id"
+      # If you have your own way to generate a trace id and you want to pass it via a custom request header
+      request:
+        header_name: my-trace-id
 ```
 
 Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).

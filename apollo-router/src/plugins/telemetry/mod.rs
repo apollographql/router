@@ -567,7 +567,7 @@ impl Telemetry {
         if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
         }
-        if let Some(from_request_header) = &propagation.from_request_header {
+        if let Some(from_request_header) = &propagation.request.as_ref().map(|r| &r.header_name) {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
             )));
