@@ -25,6 +25,17 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
+
+### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
+
+From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
+
+Do not run debug images in performance sensitive contexts. The tracking of memory allocations will significantly impact performance. In general, the debug image should only be used in consultation with Apollo engineering and support.
+
+Look at our documentation for examples of how to use the image in either Docker or Kubernetes.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2142
+
 ### Fix naming inconsistency of telemetry.metrics.common.attributes.router ([Issue #2076](https://github.com/apollographql/router/issues/2076))
 
 Mirroring the rest of the config `router` should be `supergraph`
@@ -151,6 +162,13 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 ## 📚 Documentation
+
+### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
+
+The docs CORS regex example now displays a working and safe way to allow `HTTPS` subdomains of `api.example.com`.
+
+By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
+
 
 ### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
 
