@@ -2080,6 +2080,31 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_retry": {
+              "type": "object",
+              "properties": {
+                "min_per_sec": {
+                  "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0,
+                  "nullable": true
+                },
+                "retry_percent": {
+                  "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
+                  "type": "number",
+                  "format": "float",
+                  "nullable": true
+                },
+                "ttl": {
+                  "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
+                  "default": null,
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "global_rate_limit": {
               "description": "Enable global rate limiting",
               "type": "object",
@@ -2187,6 +2212,31 @@ expression: "&schema"
               "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
+                "nullable": true
+              },
+              "experimental_retry": {
+                "type": "object",
+                "properties": {
+                  "min_per_sec": {
+                    "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0.0,
+                    "nullable": true
+                  },
+                  "retry_percent": {
+                    "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
+                    "type": "number",
+                    "format": "float",
+                    "nullable": true
+                  },
+                  "ttl": {
+                    "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
+                    "default": null,
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "global_rate_limit": {
