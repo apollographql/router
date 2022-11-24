@@ -48,20 +48,21 @@ pub(super) async fn handle_get_with_static(
         return Html(static_page).into_response();
     }
 
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, apq, http_request)
-            .await
-            .into_response();
-    }
+    return run_graphql_request(service, apq, http_request)
+        .await
+        .into_response();
+    // if let Some(request) = http_request
+    //     .uri()
+    //     .query()
+    //     .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    // {
+    //     let mut http_request = http_request.map(|_| request);
+    //     *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+    //         .expect("the URL is already valid because it comes from axum; qed");
 
-    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
+    // }
+
+    // (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
 }
 
 pub(super) async fn handle_get(
@@ -70,38 +71,31 @@ pub(super) async fn handle_get(
     service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, apq, http_request)
-            .await
-            .into_response();
-    }
+    return run_graphql_request(service, apq, http_request)
+        .await
+        .into_response();
+    // if let Some(request) = http_request
+    //     .uri()
+    //     .query()
+    //     .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+    // {
+    //     let mut http_request = http_request.map(|_| request);
+    //     *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
+    //         .expect("the URL is already valid because it comes from axum; qed");
 
-    (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
+    // }
+
+    // (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
 }
 
 pub(super) async fn handle_post(
     Host(host): Host,
     OriginalUri(uri): OriginalUri,
-    Json(request): Json<graphql::Request>,
+    http_request: Request<Body>,
     apq: APQLayer,
     service: BoxService<SupergraphRequest, SupergraphResponse, BoxError>,
     header_map: HeaderMap,
 ) -> impl IntoResponse {
-    let mut http_request = Request::post(
-        Uri::from_str(&format!("http://{}{}", host, uri))
-            .expect("the URL is already valid because it comes from axum; qed"),
-    )
-    .body(request)
-    .expect("body has already been parsed; qed");
-    *http_request.headers_mut() = header_map;
-
     run_graphql_request(service, apq, http_request)
         .await
         .into_response()
@@ -110,10 +104,10 @@ pub(super) async fn handle_post(
 async fn run_graphql_request<RS>(
     service: RS,
     apq: APQLayer,
-    http_request: Request<graphql::Request>,
+    http_request: Request<Body>,
 ) -> impl IntoResponse
 where
-    RS: Service<SupergraphRequest, Response = SupergraphResponse, Error = BoxError> + Send,
+    RS: Service<HTTPRequest, Response = HTTPResponse, Error = BoxError> + Send,
 {
     let (head, body) = http_request.into_parts();
     let mut req: SupergraphRequest = Request::from_parts(head, body).into();

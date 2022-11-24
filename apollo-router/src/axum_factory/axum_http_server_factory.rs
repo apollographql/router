@@ -391,14 +391,14 @@ where
             .post({
                 move |host: Host,
                       uri: OriginalUri,
-                      request: Json<graphql::Request>,
+                      http_request: Request<Body>,
                       Extension(service): Extension<RF>,
                       header_map: HeaderMap| {
                     {
                         handle_post(
                             host,
                             uri,
-                            request,
+                            http_request,
                             apq,
                             service.new_service().boxed(),
                             header_map,
