@@ -783,7 +783,6 @@ mod tests {
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
             .schema(schema)
-            //.extra_plugin(subgraphs)
             .build()
             .await
             .unwrap();
