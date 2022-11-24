@@ -92,7 +92,7 @@ libc = "0.2.137"
 lru = "0.7.8"
 mediatype = "0.19.11"
 mockall = "0.11.3"
-miette = { version = "5.4.1", features = ["fancy"] }
+miette = { version = "5.5.0", features = ["fancy"] }
 mime = "0.3.16"
 multimap = "0.8.3"
 # To avoid tokio issues
