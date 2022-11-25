@@ -5,9 +5,13 @@ use std::time::Duration;
 use tower::retry::budget::Budget;
 use tower::retry::Policy;
 
+use crate::query_planner::OperationKind;
+use crate::services::subgraph;
+
 #[derive(Clone, Default)]
 pub(crate) struct RetryPolicy {
     budget: Arc<Budget>,
+    retryable_mutations: bool,
 }
 
 impl RetryPolicy {
@@ -15,6 +19,7 @@ impl RetryPolicy {
         duration: Option<Duration>,
         min_per_sec: Option<u32>,
         retry_percent: Option<f32>,
+        retryable_mutations: Option<bool>,
     ) -> Self {
         Self {
             budget: Arc::new(Budget::new(
@@ -22,14 +27,15 @@ impl RetryPolicy {
                 min_per_sec.unwrap_or(10),
                 retry_percent.unwrap_or(0.2),
             )),
+            retryable_mutations: retryable_mutations.unwrap_or(false),
         }
     }
 }
 
-impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryPolicy {
+impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
     type Future = future::Ready<Self>;
 
-    fn retry(&self, _req: &Req, result: Result<&Res, &E>) -> Option<Self::Future> {
+    fn retry(&self, req: &subgraph::Request, result: Result<&Res, &E>) -> Option<Self::Future> {
         match result {
             Ok(_) => {
                 // Treat all `Response`s as success,
@@ -38,6 +44,10 @@ impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryPolicy {
                 None
             }
             Err(_e) => {
+                if req.operation_kind == OperationKind::Mutation && !self.retryable_mutations {
+                    return None;
+                }
+
                 let withdrew = self.budget.withdraw();
                 if withdrew.is_err() {
                     return None;
@@ -48,7 +58,7 @@ impl<Req: Clone, Res, E> Policy<Req, Res, E> for RetryPolicy {
         }
     }
 
-    fn clone_request(&self, req: &Req) -> Option<Req> {
+    fn clone_request(&self, req: &subgraph::Request) -> Option<subgraph::Request> {
         Some(req.clone())
     }
 }
