@@ -16,7 +16,8 @@ async fn test_tracing() -> Result<(), BoxError> {
         opentelemetry_zipkin::Propagator::new(),
         Path::new("zipkin.router.yaml"),
     );
-    router.run_query().await;
+    let (_, response) = router.run_query().await;
+    assert!(response.headers().get("apollo-trace-id").is_none());
 
     Ok(())
 }

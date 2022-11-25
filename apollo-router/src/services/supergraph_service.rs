@@ -120,19 +120,6 @@ where
                     .build()
                     .expect("building a response like this should not fail"))
             });
-        // FIXME: Enable it later
-        // .and_then(|mut res| async move {
-        //     if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-        //         let header_value = HeaderValue::from_str(trace_id.as_str());
-        //         if let Ok(header_value) = header_value {
-        //             res.response
-        //                 .headers_mut()
-        //                 .insert(HeaderName::from_static("apollo_trace_id"), header_value);
-        //         }
-        //     }
-
-        //     Ok(res)
-        // });
 
         Box::pin(fut)
     }
@@ -519,6 +506,104 @@ mod tests {
         let mut stream = service.oneshot(request).await.unwrap();
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn query_reconstruction() {
+        let schema = r#"schema
+    @link(url: "https://specs.apollo.dev/link/v1.0")
+    @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+    @link(url: "https://specs.apollo.dev/tag/v0.2")
+    @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY)
+  {
+    query: Query
+    mutation: Mutation
+  }
+  
+  directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+  
+  directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+  
+  directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+  
+  directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+  
+  directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+  
+  directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+  
+  directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+  
+  scalar join__FieldSet
+  
+  enum join__Graph {
+    PRODUCTS @join__graph(name: "products", url: "http://products:4000/graphql")
+    USERS @join__graph(name: "users", url: "http://users:4000/graphql")
+  }
+  
+  scalar link__Import
+  
+  enum link__Purpose {
+    SECURITY
+    EXECUTION
+  }
+  
+  type MakePaymentResult
+    @join__type(graph: USERS)
+  {
+    id: ID!
+    paymentStatus: PaymentStatus
+  }
+  
+  type Mutation
+    @join__type(graph: USERS)
+  {
+    makePayment(userId: ID!): MakePaymentResult!
+  }
+  
+  
+ type PaymentStatus
+    @join__type(graph: USERS)
+  {
+    id: ID!
+  }
+  
+  type Query
+    @join__type(graph: PRODUCTS)
+    @join__type(graph: USERS)
+  {
+    name: String
+  }
+  "#;
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query(
+                r#"mutation ($userId: ID!) {
+                    makePayment(userId: $userId) {
+                      id
+                      ... @defer {
+                        paymentStatus {
+                          id
+                        }
+                      }
+                    }
+                  }"#,
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }

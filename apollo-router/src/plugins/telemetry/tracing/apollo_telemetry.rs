@@ -49,7 +49,7 @@ const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
     Key::from_static_str("apollo_private.graphql.variables");
 const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
     Key::from_static_str("apollo_private.http.request_headers");
-const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
+pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const APOLLO_PRIVATE_PATH: Key = Key::from_static_str("apollo_private.path");
@@ -57,6 +57,7 @@ const FTV1_DO_NOT_SAMPLE_REASON: Key = Key::from_static_str("ftv1.do_not_sample_
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 const CLIENT_NAME: Key = Key::from_static_str("client.name");
 const CLIENT_VERSION: Key = Key::from_static_str("client.version");
+pub(crate) const DEFAULT_TRACE_ID_HEADER_NAME: &str = "apollo-trace-id";
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -86,6 +87,7 @@ pub(crate) enum Error {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
+    expose_trace_id_config: config::ExposeTraceId,
     trace_config: config::Trace,
     spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     endpoint: Url,
@@ -111,6 +113,7 @@ enum TreeData {
 impl Exporter {
     #[builder]
     pub(crate) fn new(
+        expose_trace_id_config: config::ExposeTraceId,
         trace_config: config::Trace,
         endpoint: Url,
         apollo_key: String,
@@ -123,6 +126,7 @@ impl Exporter {
         let apollo_exporter =
             ApolloExporter::new(&endpoint, &apollo_key, &apollo_graph_ref, &schema_id)?;
         Ok(Self {
+            expose_trace_id_config,
             spans_by_parent_id: LruCache::new(buffer_size),
             trace_config,
             endpoint,
@@ -427,18 +431,28 @@ impl Exporter {
             .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
             .collect();
         // For now, only trace_id
-        // let mut response_headers = HashMap::with_capacity(1);
-        // FIXME: uncomment later
-        // response_headers.insert(
-        //     String::from("apollo_trace_id"),
-        //     Values {
-        //         value: vec![span.span_context.trace_id().to_string()],
-        //     },
-        // );
+        let response_headers = if self.expose_trace_id_config.enabled {
+            let mut res = HashMap::with_capacity(1);
+            res.insert(
+                self.expose_trace_id_config
+                    .header_name
+                    .as_ref()
+                    .map(|h| h.to_string())
+                    .unwrap_or_else(|| DEFAULT_TRACE_ID_HEADER_NAME.to_string()),
+                Values {
+                    value: vec![span.span_context.trace_id().to_string()],
+                },
+            );
+
+            res
+        } else {
+            HashMap::new()
+        };
+
         Http {
             method: method.into(),
             request_headers,
-            response_headers: HashMap::new(),
+            response_headers,
             status_code: 0,
         }
     }
