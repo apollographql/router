@@ -84,6 +84,12 @@ pub(super) async fn handle_get(
             .into_response();
     }
 
+    ::tracing::error!(
+        monotonic_counter.apollo_router_http_requests_total = 1u64,
+        status = %400,
+        error = "missing query string",
+        "missing query string"
+    );
     (StatusCode::BAD_REQUEST, "Invalid Graphql request").into_response()
 }
 
