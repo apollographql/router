@@ -55,23 +55,20 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct TransportService<ExecutionFactory> {
-    execution_service_factory: ExecutionFactory,
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    schema: Arc<Schema>,
+    supergraph_service: SupergraphService<ExecutionFactory>,
+    // apq_layer: APQ,
 }
 
 #[buildstructor::buildstructor]
 impl<ExecutionFactory> TransportService<ExecutionFactory> {
     #[builder]
     pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-        execution_service_factory: ExecutionFactory,
-        schema: Arc<Schema>,
+        supergraph_service: SupergraphService<ExecutionFactory>,
+        // apq_layer: APQ,
     ) -> Self {
-        TransportService {
-            query_planner_service,
-            execution_service_factory,
-            schema,
+        Self {
+            supergraph_service,
+            // apq,
         }
     }
 }
@@ -85,184 +82,17 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.query_planner_service
+        self.supergraph_service
             .poll_ready(cx)
             .map_err(|err| err.into())
     }
 
     fn call(&mut self, req: TransportRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
-        let clone = self.query_planner_service.clone();
-
-        let planning = std::mem::replace(&mut self.query_planner_service, clone);
-        let execution = self.execution_service_factory.new_service();
-
-        let schema = self.schema.clone();
-
-        let context_cloned = req.context.clone();
-        let fut =
-            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
-                let errors = vec![crate::error::Error {
-                    message: error.to_string(),
-                    extensions: serde_json_bytes::json!({
-                        "code": "INTERNAL_SERVER_ERROR",
-                    })
-                    .as_object()
-                    .unwrap()
-                    .to_owned(),
-                    ..Default::default()
-                }];
-
-                Ok(TransportResponse::builder()
-                    .errors(errors)
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context_cloned)
-                    .build()
-                    .expect("building a response like this should not fail"))
-            });
-        // FIXME: Enable it later
-        // .and_then(|mut res| async move {
-        //     if let Some(trace_id) = TraceId::maybe_new().map(|t| t.to_string()) {
-        //         let header_value = HeaderValue::from_str(trace_id.as_str());
-        //         if let Ok(header_value) = header_value {
-        //             res.response
-        //                 .headers_mut()
-        //                 .insert(HeaderName::from_static("apollo_trace_id"), header_value);
-        //         }
-        //     }
-
-        //     Ok(res)
-        // });
-
-        Box::pin(fut)
+        let clone = self.supergraph_service.clone();
+        let supergraph_service = std::mem::replace(&mut self.supergraph_service, clone);
+        supergraph_service.call(req)
     }
-}
-
-async fn service_call<ExecutionService>(
-    planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    execution: ExecutionService,
-    schema: Arc<Schema>,
-    req: TransportRequest,
-) -> Result<TransportResponse, BoxError>
-where
-    ExecutionService:
-        Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
-{
-    let context = req.context;
-    let body = req.Transport_request.body();
-    let variables = body.variables.clone();
-    let QueryPlannerResponse {
-        content,
-        context,
-        errors,
-    } = match plan_query(planning, body, context.clone()).await {
-        Ok(resp) => resp,
-        Err(err) => match err.into_graphql_errors() {
-            Ok(gql_errors) => {
-                return Ok(TransportResponse::builder()
-                    .context(context)
-                    .errors(gql_errors)
-                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                    .build()
-                    .expect("this response build must not fail"));
-            }
-            Err(err) => return Err(err.into()),
-        },
-    };
-
-    if !errors.is_empty() {
-        return Ok(TransportResponse::builder()
-            .context(context)
-            .errors(errors)
-            .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-            .build()
-            .expect("this response build must not fail"));
-    }
-
-    match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
-            TransportResponse::new_from_graphql_response(*response, context),
-        ),
-        Some(QueryPlannerContent::IntrospectionDisabled) => {
-            let mut response = TransportResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("introspection has been disabled"))
-                        .build()])
-                    .build(),
-                context,
-            );
-            *response.response.status_mut() = StatusCode::BAD_REQUEST;
-            Ok(response)
-        }
-
-        Some(QueryPlannerContent::Plan { plan }) => {
-            let operation_name = body.operation_name.clone();
-            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            if is_deferred && !accepts_multipart(req.Transport_request.headers()) {
-                let mut response = TransportResponse::new_from_graphql_response(graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
-                        .build()])
-                    .build(), context);
-                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                Ok(response)
-            } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
-                let mut res = TransportResponse::new_from_graphql_response(err, context);
-                *res.response.status_mut() = StatusCode::BAD_REQUEST;
-                Ok(res)
-            } else {
-                let execution_response = execution
-                    .oneshot(
-                        ExecutionRequest::builder()
-                            .Transport_request(req.Transport_request)
-                            .query_plan(plan.clone())
-                            .context(context)
-                            .build(),
-                    )
-                    .await?;
-
-                let ExecutionResponse { response, context } = execution_response;
-
-                let (parts, response_stream) = response.into_parts();
-
-                Ok(TransportResponse {
-                    context,
-                    response: http::Response::from_parts(
-                        parts,
-                        response_stream.in_current_span().boxed(),
-                    ),
-                })
-            }
-        }
-        // This should never happen because if we have an empty query plan we should have error in errors vec
-        None => Err(BoxError::from("cannot compute a query plan")),
-    }
-}
-
-async fn plan_query(
-    mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    body: &graphql::Request,
-    context: Context,
-) -> Result<QueryPlannerResponse, CacheResolverError> {
-    planning
-        .call(
-            QueryPlannerRequest::builder()
-                .query(
-                    body.query
-                        .clone()
-                        .expect("the query presence was already checked by a plugin"),
-                )
-                .and_operation_name(body.operation_name.clone())
-                .context(context)
-                .build(),
-        )
-        .instrument(tracing::info_span!("query_planning",
-            graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
-            graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
-            "otel.kind" = %SpanKind::Internal
-        ))
-        .await
 }
 
 /// Builder which generates a plugin pipeline.
