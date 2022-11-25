@@ -196,6 +196,8 @@ bootstrap the system or for low traffic deployments
 - for each successful request, we add a "token" to the bucket, those tokens expire after `ttl` (default: 10 seconds)
 - the number of available additional retries is a part of the number of tokens, defined by `retry_percent` (default is 0.2)
 
+Request retries are disabled by default on mutations.
+
 This is activated in the `traffic_shaping` plugin, either globally or per subgraph:
 
 ```yaml
@@ -205,13 +207,14 @@ traffic_shaping:
       min_per_sec: 10
       ttl: 10s
       retry_percent: 0.2
+      retryable_mutations: false
   subgraphs:
     accounts:
       experimental_retry:
         min_per_sec: 20
 ```
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006 and https://github.com/apollographql/router/pull/2160
 
 ## 🐛 Fixes
 
