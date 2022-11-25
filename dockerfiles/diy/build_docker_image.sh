@@ -118,11 +118,11 @@ else
     if [ "${BUILD_IMAGE}" = false ]; then
         usage
     fi
-    if [ -z "${GIT_REPO}" ]; then
-        GIT_REPO="${DEFAULT_REPO}"
-    fi
 fi
 
+if [ -z "${GIT_REPO}" ]; then
+    GIT_REPO="${DEFAULT_REPO}"
+fi
 
 # We need a place to build
 if ! BUILD_DIR=$(mktemp -d -t "router-build.XXXXXXXXXX"); then
@@ -150,7 +150,7 @@ if [ "${BUILD_IMAGE}" = true ]; then
         ROUTER_VERSION=$(git rev-parse HEAD)
     fi
     # Let the user know what we are going to do
-    echo "Building image: ${ROUTER_VERSION}" from repo""
+    echo "Building image: ${ROUTER_VERSION}" from repo: ${GIT_REPO}""
     git checkout "${ROUTER_VERSION}" > /dev/null 2>&1 || terminate "Couldn't checkout ${ROUTER_VERSION}"
     # Build our docker images
     docker build -q -t "router:${ROUTER_VERSION}" \
