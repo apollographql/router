@@ -115,7 +115,8 @@ where
 
                     async move {
                         Ok(http::Response::builder()
-                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?)
+                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?
+                            .into())
                     }
                 })
                 .boxed(),

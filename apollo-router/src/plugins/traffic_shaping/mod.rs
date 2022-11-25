@@ -339,7 +339,7 @@ mod test {
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
+    use crate::PluggableTransportServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
     use crate::SupergraphResponse;
@@ -422,7 +422,7 @@ mod test {
         )
         .unwrap();
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone())
+        let builder = PluggableTransportServiceBuilder::new(schema.clone())
             .with_configuration(Arc::new(config));
 
         let builder = builder

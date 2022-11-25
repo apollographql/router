@@ -21,11 +21,11 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::NewService;
 use crate::services::RouterCreator;
 use crate::services::SubgraphService;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
+use crate::services::TransportRequest;
+use crate::services::TransportResponse;
 use crate::transport;
 use crate::ListenAddr;
-use crate::PluggableSupergraphServiceBuilder;
+use crate::PluggableTransportServiceBuilder;
 use crate::Schema;
 
 #[derive(Clone)]
@@ -67,16 +67,16 @@ impl Endpoint {
         axum::Router::new().route(self.path.as_str(), service_fn(handler))
     }
 }
-/// Factory for creating a SupergraphService
+/// Factory for creating a TransportService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
-/// SupergraphService on each request
+/// TransportService on each request
 pub(crate) trait TransportServiceFactory:
-    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
+    NewService<TransportRequest, Service = Self::TransportService> + Clone + Send + Sync + 'static
 {
-    type SupergraphService: Service<
-            SupergraphRequest,
-            Response = SupergraphResponse,
+    type TransportService: Service<
+            TransportRequest,
+            Response = TransportResponse,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
@@ -102,7 +102,7 @@ pub(crate) trait TransportServiceConfigurator: Send + Sync + 'static {
     ) -> Result<Self::TransportServiceFactory, BoxError>;
 }
 
-/// Main implementation of the SupergraphService factory, supporting the extensions system
+/// Main implementation of the TransportService factory, supporting the extensions system
 #[derive(Default)]
 pub(crate) struct YamlTransportServiceFactory;
 
@@ -120,7 +120,7 @@ impl TransportServiceConfigurator for YamlTransportServiceFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let mut builder = PluggableTransportServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
