@@ -38,8 +38,9 @@ The most important goal is usability, so do break the rules if it makes sense, b
 1. [Avoid empty config](#avoid-empty-config).
 2. [Do use `#[serde(deny_unknown_fields)]`](#do-use-serdedeny_unknown_fields).
 3. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
-4. [Document your configuration options](#document-your-configuration-options).
-5. [Plan for the future](#plan-for-the-future).
+4. [Use consistent terminology](#use-consistent-terminology).
+5. [Document your configuration options](#document-your-configuration-options).
+6. [Plan for the future](#plan-for-the-future).
 
 ### Avoid empty config
 
@@ -87,7 +88,7 @@ export: # The user is not aware that url was defaulted.
 
 #### UGLY
 In the case where you genuinely have no config then it may be acceptable to have an `enabled: bool` flag.
-The reason to avoid this is that it creates a disconnect between the user ant the thing that they are trying to do
+The reason to avoid this is that it creates a disconnect between the user and the thing that they are trying to do
 ```rust
 #[serde(deny_unknown_fields)]
 struct Export {
@@ -158,6 +159,32 @@ struct Export {
 export: 
   url: http://example.com
   backup: http://example2.com # The user will NOT receive an error for this
+```
+
+### Use consistent terminology
+Be consistent with the rust API terminology.
+* request - functionality that modifies the request or retrieves data from the request of a service.
+* response - functionality that modifies the response or retrieves data from the response of a service.
+* supergraph - functionality within Plugin::subgraph_service
+* execution - functionality within Plugin::execution_service
+* subgraph(s) - functionality within Plugin::subgraph_service
+
+If you use the above terminology then changes are you are doing something that will take place on every request. In this case make sure to include an `action` verb so the user know what the config is doing.
+
+#### GOOD
+```yaml
+headers:
+  subgraphs: # Modifies the subgraph service  
+    products: 
+      request: # Retrieves data from the request
+        - propagate: # The action.
+            named: foo
+```
+
+#### BAD
+```yaml
+headers:
+  named: foo # From where, what are we doing, when is it happening?
 ```
 
 ### Document your configuration options
