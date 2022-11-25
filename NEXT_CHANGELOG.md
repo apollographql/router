@@ -151,3 +151,8 @@ We recently updated the examples directory structure. This fixes the documentati
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
 
+### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
+
+Added some yaml design guidance to help us create consistent yaml config for new and existing features.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2159
