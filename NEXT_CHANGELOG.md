@@ -215,6 +215,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
+
+Adding the `-r` flag recently broke the existing functionality to build from the default repo using `-b`. This fixes that.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2163
+
 ### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
 
 The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
@@ -247,7 +253,7 @@ The docs CORS regex example now displays a working and safe way to allow `HTTPS`
 By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
 
 
-### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
+### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/issues/2095))
 
 We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
 
