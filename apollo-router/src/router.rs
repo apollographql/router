@@ -40,9 +40,9 @@ use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
-use crate::router_factory::SupergraphServiceConfigurator;
-use crate::router_factory::SupergraphServiceFactory;
-use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::router_factory::TransportServiceConfigurator;
+use crate::router_factory::TransportServiceFactory;
+use crate::router_factory::YamlTransportServiceFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::transport;
 use crate::spec::Schema;
@@ -61,7 +61,7 @@ async fn make_transport_service<RF>(
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
 ) -> Result<transport::BoxCloneService, BoxError> {
     let schema = Arc::new(Schema::parse(schema, &configuration)?);
-    let service_factory = YamlSupergraphServiceFactory
+    let service_factory = YamlTransportServiceFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
 
@@ -537,7 +537,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlSupergraphServiceFactory::default();
+        let router_factory = YamlTransportServiceFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
         let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
         let graphql_listen_address = state_machine.graphql_listen_address.clone();

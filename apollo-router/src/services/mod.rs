@@ -31,6 +31,7 @@ pub(crate) mod subgraph_service;
 pub mod supergraph;
 mod supergraph_service;
 pub mod transport;
+mod transport_service;
 
 impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {

@@ -71,7 +71,7 @@ impl Endpoint {
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
 /// SupergraphService on each request
-pub(crate) trait SupergraphServiceFactory:
+pub(crate) trait TransportServiceFactory:
     NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
 {
     type SupergraphService: Service<
@@ -85,38 +85,38 @@ pub(crate) trait SupergraphServiceFactory:
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
-/// Factory for creating a SupergraphServiceFactory
+/// Factory for creating a TransportServiceFactory
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
-/// SupergraphServiceFactory from configuration when it changes
+/// TransportServiceFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait SupergraphServiceConfigurator: Send + Sync + 'static {
-    type SupergraphServiceFactory: SupergraphServiceFactory;
+pub(crate) trait TransportServiceConfigurator: Send + Sync + 'static {
+    type TransportServiceFactory: TransportServiceFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::SupergraphServiceFactory>,
+        previous_router: Option<&'a Self::TransportServiceFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<Self::SupergraphServiceFactory, BoxError>;
+    ) -> Result<Self::TransportServiceFactory, BoxError>;
 }
 
 /// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlSupergraphServiceFactory;
+pub(crate) struct YamlTransportServiceFactory;
 
 #[async_trait::async_trait]
-impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
-    type SupergraphServiceFactory = RouterCreator;
+impl TransportServiceConfigurator for YamlTransportServiceFactory {
+    type TransportServiceFactory = RouterCreator;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::SupergraphServiceFactory>,
+        _previous_router: Option<&'a Self::TransportServiceFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<Self::SupergraphServiceFactory, BoxError> {
+    ) -> Result<Self::TransportServiceFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
@@ -156,7 +156,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
 
     let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
-    let service = YamlSupergraphServiceFactory::default()
+    let service = YamlTransportServiceFactory::default()
         .create(Arc::new(config), Arc::new(schema), None, None)
         .await;
     assert_eq!(
@@ -338,8 +338,8 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::SupergraphServiceConfigurator;
-    use crate::router_factory::YamlSupergraphServiceFactory;
+    use crate::router_factory::TransportServiceConfigurator;
+    use crate::router_factory::YamlTransportServiceFactory;
     use crate::Schema;
 
     #[derive(Debug)]
@@ -455,7 +455,7 @@ mod test {
         let schema = include_str!("testdata/supergraph.graphql");
         let schema = Schema::parse(schema, &config).unwrap();
 
-        let service = YamlSupergraphServiceFactory::default()
+        let service = YamlTransportServiceFactory::default()
             .create(Arc::new(config), Arc::new(schema), None, None)
             .await;
         service.map(|_| ())

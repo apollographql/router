@@ -46,29 +46,29 @@ use crate::ListenAddr;
 use crate::QueryPlannerRequest;
 use crate::QueryPlannerResponse;
 use crate::Schema;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
+use crate::TransportRequest;
+use crate::TransportResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct SupergraphService<ExecutionFactory> {
+pub(crate) struct TransportService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
 }
 
 #[buildstructor::buildstructor]
-impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
+impl<ExecutionFactory> TransportService<ExecutionFactory> {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
     ) -> Self {
-        SupergraphService {
+        TransportService {
             query_planner_service,
             execution_service_factory,
             schema,
@@ -76,11 +76,11 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     }
 }
 
-impl<ExecutionFactory> Service<SupergraphRequest> for SupergraphService<ExecutionFactory>
+impl<ExecutionFactory> Service<TransportRequest> for TransportService<ExecutionFactory>
 where
     ExecutionFactory: ExecutionServiceFactory,
 {
-    type Response = SupergraphResponse;
+    type Response = TransportResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -90,7 +90,7 @@ where
             .map_err(|err| err.into())
     }
 
-    fn call(&mut self, req: SupergraphRequest) -> Self::Future {
+    fn call(&mut self, req: TransportRequest) -> Self::Future {
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let clone = self.query_planner_service.clone();
 
@@ -113,7 +113,7 @@ where
                     ..Default::default()
                 }];
 
-                Ok(SupergraphResponse::builder()
+                Ok(TransportResponse::builder()
                     .errors(errors)
                     .status_code(StatusCode::INTERNAL_SERVER_ERROR)
                     .context(context_cloned)
@@ -142,14 +142,14 @@ async fn service_call<ExecutionService>(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
     execution: ExecutionService,
     schema: Arc<Schema>,
-    req: SupergraphRequest,
-) -> Result<SupergraphResponse, BoxError>
+    req: TransportRequest,
+) -> Result<TransportResponse, BoxError>
 where
     ExecutionService:
         Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
 {
     let context = req.context;
-    let body = req.supergraph_request.body();
+    let body = req.Transport_request.body();
     let variables = body.variables.clone();
     let QueryPlannerResponse {
         content,
@@ -159,7 +159,7 @@ where
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
-                return Ok(SupergraphResponse::builder()
+                return Ok(TransportResponse::builder()
                     .context(context)
                     .errors(gql_errors)
                     .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
@@ -171,7 +171,7 @@ where
     };
 
     if !errors.is_empty() {
-        return Ok(SupergraphResponse::builder()
+        return Ok(TransportResponse::builder()
             .context(context)
             .errors(errors)
             .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
@@ -181,10 +181,10 @@ where
 
     match content {
         Some(QueryPlannerContent::Introspection { response }) => Ok(
-            SupergraphResponse::new_from_graphql_response(*response, context),
+            TransportResponse::new_from_graphql_response(*response, context),
         ),
         Some(QueryPlannerContent::IntrospectionDisabled) => {
-            let mut response = SupergraphResponse::new_from_graphql_response(
+            let mut response = TransportResponse::new_from_graphql_response(
                 graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("introspection has been disabled"))
@@ -199,8 +199,8 @@ where
         Some(QueryPlannerContent::Plan { plan }) => {
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
-                let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
+            if is_deferred && !accepts_multipart(req.Transport_request.headers()) {
+                let mut response = TransportResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
                         .build()])
@@ -208,14 +208,14 @@ where
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
                 Ok(response)
             } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
-                let mut res = SupergraphResponse::new_from_graphql_response(err, context);
+                let mut res = TransportResponse::new_from_graphql_response(err, context);
                 *res.response.status_mut() = StatusCode::BAD_REQUEST;
                 Ok(res)
             } else {
                 let execution_response = execution
                     .oneshot(
                         ExecutionRequest::builder()
-                            .supergraph_request(req.supergraph_request)
+                            .Transport_request(req.Transport_request)
                             .query_plan(plan.clone())
                             .context(context)
                             .build(),
@@ -226,7 +226,7 @@ where
 
                 let (parts, response_stream) = response.into_parts();
 
-                Ok(SupergraphResponse {
+                Ok(TransportResponse {
                     context,
                     response: http::Response::from_parts(
                         parts,
@@ -271,14 +271,14 @@ async fn plan_query(
 /// collection of plugins, collection of subgraph services are assembled to generate a
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
-pub(crate) struct PluggableSupergraphServiceBuilder {
+pub(crate) struct PluggableTransportServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
 }
 
-impl PluggableSupergraphServiceBuilder {
+impl PluggableTransportServiceBuilder {
     pub(crate) fn new(schema: Arc<Schema>) -> Self {
         Self {
             schema,
@@ -292,7 +292,7 @@ impl PluggableSupergraphServiceBuilder {
         mut self,
         plugin_name: String,
         plugin: Box<dyn DynPlugin>,
-    ) -> PluggableSupergraphServiceBuilder {
+    ) -> PluggableTransportServiceBuilder {
         self.plugins.insert(plugin_name, plugin);
         self
     }
@@ -301,7 +301,7 @@ impl PluggableSupergraphServiceBuilder {
         mut self,
         name: &str,
         service_maker: S,
-    ) -> PluggableSupergraphServiceBuilder
+    ) -> PluggableTransportServiceBuilder
     where
         S: MakeSubgraphService,
     {
@@ -313,7 +313,7 @@ impl PluggableSupergraphServiceBuilder {
     pub(crate) fn with_configuration(
         mut self,
         configuration: Arc<Configuration>,
-    ) -> PluggableSupergraphServiceBuilder {
+    ) -> PluggableTransportServiceBuilder {
         self.configuration = Some(configuration);
         self
     }
@@ -332,9 +332,9 @@ impl PluggableSupergraphServiceBuilder {
             .ok()
             .and_then(|x| x.parse().ok())
             .unwrap_or(100);
-        let redis_urls = configuration.supergraph.cache();
+        let redis_urls = configuration.Transport.cache();
 
-        let introspection = if configuration.supergraph.introspection {
+        let introspection = if configuration.Transport.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
         } else {
             None
@@ -378,18 +378,18 @@ pub(crate) struct RouterCreator {
     plugins: Arc<Plugins>,
 }
 
-impl NewService<SupergraphRequest> for RouterCreator {
-    type Service = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
+impl NewService<TransportRequest> for RouterCreator {
+    type Service = BoxService<TransportRequest, TransportResponse, BoxError>;
     fn new_service(&self) -> Self::Service {
         self.make().boxed()
     }
 }
 
 impl TransportServiceFactory for RouterCreator {
-    type SupergraphService = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
+    type TransportService = BoxService<TransportRequest, TransportResponse, BoxError>;
 
-    type Future = <<RouterCreator as NewService<SupergraphRequest>>::Service as Service<
-        SupergraphRequest,
+    type Future = <<RouterCreator as NewService<TransportRequest>>::Service as Service<
+        TransportRequest,
     >>::Future;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -405,12 +405,12 @@ impl RouterCreator {
     pub(crate) fn make(
         &self,
     ) -> impl Service<
-        SupergraphRequest,
-        Response = SupergraphResponse,
+        TransportRequest,
+        Response = TransportResponse,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
+        Future = BoxFuture<'static, Result<TransportResponse, BoxError>>,
     > + Send {
-        let supergraph_service = SupergraphService::builder()
+        let Transport_service = TransportService::builder()
             .query_planner_service(self.query_planner_service.clone())
             .execution_service_factory(ExecutionCreator {
                 schema: self.schema.clone(),
@@ -420,14 +420,14 @@ impl RouterCreator {
             .schema(self.schema.clone())
             .build();
 
-        let supergraph_service = match self
+        let Transport_service = match self
             .plugins
             .iter()
             .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
         {
-            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
-            None => Either::B(supergraph_service),
+            Some(shaping) => Either::A(shaping.Transport_service_internal(Transport_service)),
+            None => Either::B(Transport_service),
         };
 
         ServiceBuilder::new()
@@ -436,8 +436,8 @@ impl RouterCreator {
                 self.plugins
                     .iter()
                     .rev()
-                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
-                        e.supergraph_service(acc)
+                    .fold(BoxService::new(Transport_service), |acc, (_, e)| {
+                        e.Transport_service(acc)
                     }),
             )
     }
@@ -446,7 +446,7 @@ impl RouterCreator {
     #[cfg(test)]
     pub(crate) fn test_service(
         &self,
-    ) -> tower::util::BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
+    ) -> tower::util::BoxCloneService<TransportRequest, TransportResponse, BoxError> {
         use tower::buffer::Buffer;
 
         Buffer::new(self.make(), 512).boxed_clone()
@@ -457,7 +457,7 @@ impl RouterCreator {
 mod tests {
     use super::*;
     use crate::plugin::test::MockSubgraph;
-    use crate::services::supergraph;
+    use crate::services::Transport;
     use crate::test_harness::MockedSubgraphs;
     use crate::TestHarness;
 
@@ -524,7 +524,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = supergraph::Request::fake_builder()
+        let request = Transport::Request::fake_builder()
             .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
             // Request building here
             .build()
@@ -559,7 +559,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = supergraph::Request::fake_builder()
+        let request = Transport::Request::fake_builder()
             .query(
                 "query { currentUser { activeOrganization { nonNullId creatorUser { name } } } }",
             )
@@ -616,7 +616,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = supergraph::Request::fake_builder()
+        let request = Transport::Request::fake_builder()
             .header("Accept", "multipart/mixed; deferSpec=20220824")
             .query("query { currentUser { id  ...@defer { name } } }")
             .build()
@@ -696,7 +696,7 @@ mod tests {
             .await
             .unwrap();
 
-        let request = supergraph::Request::fake_builder()
+        let request = Transport::Request::fake_builder()
             .header("Accept", "multipart/mixed; deferSpec=20220824")
             .query(
                 "query { currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
