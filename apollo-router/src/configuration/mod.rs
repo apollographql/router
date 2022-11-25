@@ -14,6 +14,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use cors::*;
 use derivative::Derivative;
@@ -77,6 +78,10 @@ pub enum ConfigurationError {
 #[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
+    /// The raw configuration string.
+    #[serde(skip)]
+    pub(crate) string: Arc<String>,
+
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
@@ -104,7 +109,7 @@ pub struct Configuration {
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
     #[serde(flatten)]
-    apollo_plugins: ApolloPlugins,
+    pub(crate) apollo_plugins: ApolloPlugins,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -168,6 +173,7 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
+        string: Option<String>,
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -179,6 +185,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
+            string: Arc::new(string.unwrap_or_default()),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -306,6 +313,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
+            string: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),

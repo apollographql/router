@@ -1,0 +1,17 @@
+---
+source: apollo-router/src/orbiter/mod.rs
+expression: usage
+---
+configurationheaders.all.request.insert.len: 1
+configurationheaders.all.request.insert.name.redacted: 1
+configurationheaders.all.request.insert.value.redacted: 1
+configurationheaders.all.request.propagate.len: 2
+configurationheaders.all.request.propagate.named.redacted: 2
+configurationheaders.subgraphs.redacted.request.insert.len: 1
+configurationheaders.subgraphs.redacted.request.insert.name.redacted: 1
+configurationheaders.subgraphs.redacted.request.insert.value.redacted: 1
+configurationheaders.subgraphs.redacted.request.remove.len: 1
+configurationtelemetry.apollo.send_headers.len: 1
+configurationtelemetry.tracing.otlp.endpoint.redacted: 1
+configurationtelemetry.tracing.otlp.protocol.redacted: 1
+

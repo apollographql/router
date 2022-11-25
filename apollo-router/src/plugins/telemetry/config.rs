@@ -163,7 +163,7 @@ pub(crate) enum HeaderLoggingCondition {
         /// Header name
         name: String,
         /// Regex to match the header value
-        #[schemars(schema_with = "string_schema", rename = "match")]
+        #[schemars(with = "String", rename = "match")]
         #[serde(deserialize_with = "deserialize_regex", rename = "match")]
         matching: Regex,
         /// Display request/response headers (default: false)
@@ -572,10 +572,6 @@ impl Conf {
             },
         )
     }
-}
-
-fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    String::json_schema(gen)
 }
 
 #[cfg(test)]

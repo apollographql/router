@@ -145,11 +145,18 @@ impl Default for Config {
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardHeaders {
+    /// Don't send any headers
     None,
+
+    /// Send all headers
     All,
+
+    /// Send only the headers specified
     #[serde(deserialize_with = "deserialize_vec_header_name")]
     #[schemars(with = "Vec<String>")]
     Only(Vec<HeaderName>),
+
+    /// Send all headers except those specified
     #[schemars(with = "Vec<String>")]
     #[serde(deserialize_with = "deserialize_vec_header_name")]
     Except(Vec<HeaderName>),

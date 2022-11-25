@@ -23,7 +23,7 @@ use crate::*;
 /// A GraphQL schema.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Schema {
-    string: Arc<String>,
+    pub(crate) string: Arc<String>,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,

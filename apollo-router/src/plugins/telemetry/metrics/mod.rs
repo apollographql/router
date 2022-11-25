@@ -112,7 +112,7 @@ pub(crate) struct ErrorsForward {
 pub(crate) enum HeaderForward {
     /// Using a named header
     Named {
-        #[schemars(schema_with = "string_schema")]
+        #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
         rename: Option<String>,
@@ -120,7 +120,7 @@ pub(crate) enum HeaderForward {
     },
     /// Using a regex on the header name
     Matching {
-        #[schemars(schema_with = "string_schema")]
+        #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,
     },
@@ -130,7 +130,7 @@ pub(crate) enum HeaderForward {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_json_query")]
     pub(crate) path: JSONQuery,
     pub(crate) name: String,
@@ -448,10 +448,6 @@ impl AttributesForwardConf {
             .map(|e| e.get_attributes_from_error(err))
             .unwrap_or_default()
     }
-}
-
-fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    String::json_schema(gen)
 }
 
 #[derive(Default)]

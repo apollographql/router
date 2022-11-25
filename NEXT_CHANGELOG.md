@@ -51,6 +51,45 @@ telemetry:
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
 
 ## 🚀 Features
+### Configuration upgrades ([Issue #2124](https://github.com/apollographql/router/issues/2124))
+
+The Router will now send anonymous usage telemetry to Apollo that includes a subset of the information listed in the [privacy policy](https://www.apollographql.com/docs/router/privacy/)
+
+It includes information about the environment that the Router is running in, version of the router, the command line args, and configuration shape.
+Note that strings are output as `set` so that we do not leak confidential or sensitive information. 
+Boolean and numerics are output.
+
+For example:
+```json
+{
+   "session_id": "fbe09da3-ebdb-4863-8086-feb97464b8d7",
+   "version": "1.4.0", // The version of the router
+   "os": "linux",
+   "ci": null,
+   "supergraph_hash": "anebfoiwhefowiefj",
+   "apollo-key": "<the actualy key>|anonymous",
+   "apollo-graph-ref": "<the actual graph ref>|unmanaged"
+   "usage": {
+     "configuration.headers.all.request.propagate.named.redacted": 3
+     "configuration.headers.all.request.propagate.default.redacted": 1
+     "configuration.headers.all.request.len": 3
+     "configuration.headers.subgraphs.redacted.request.propagate.named.redacted": 2
+     "configuration.headers.subgraphs.redacted.request.len": 2
+     "configuration.headers.subgraphs.len": 1
+     "configuration.homepage.enabled.true": 1
+     "args.config-path.redacted": 1,
+     "args.hot-reload.true": 1,
+     //Many more keys. This is dynamic and will change over time.
+     //More...
+     //More...
+     //More...
+   }
+ }
+```
+
+Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173
 
 ### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
 

@@ -66,7 +66,7 @@ enum Remove {
     /// Remove a header given a header name
     Named(HeaderName),
 
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_regex")]
     /// Remove a header given a regex matching header name
     Matching(Regex),
@@ -89,10 +89,13 @@ enum Insert {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert static header
 struct InsertStatic {
-    #[schemars(schema_with = "string_schema")]
+    /// The name of the header
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_header_name")]
     name: HeaderName,
-    #[schemars(schema_with = "string_schema")]
+
+    /// The value for the header
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_header_value")]
     value: HeaderValue,
 }
@@ -101,7 +104,7 @@ struct InsertStatic {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert header with a value coming from context key
 struct InsertFromContext {
-    #[schemars(schema_with = "string_schema")]
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_header_name")]
     /// Specify header name
     name: HeaderName,
@@ -113,13 +116,18 @@ struct InsertFromContext {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Insert header with a value coming from body
 struct InsertFromBody {
-    #[schemars(schema_with = "string_schema")]
+    /// The target header name
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_header_name")]
     name: HeaderName,
-    #[schemars(schema_with = "string_schema")]
+
+    /// The path in the request body
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_json_query")]
     path: JSONQuery,
-    #[schemars(schema_with = "option_string_schema", default)]
+
+    /// The default if the path in the body did not resolve to an element
+    #[schemars(with = "Option<String>", default)]
     #[serde(deserialize_with = "deserialize_option_header_value")]
     default: Option<HeaderValue>,
 }
@@ -131,19 +139,24 @@ struct InsertFromBody {
 enum Propagate {
     /// Propagate header given a header name
     Named {
-        #[schemars(schema_with = "string_schema")]
+        /// The source header name
+        #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
-        #[schemars(schema_with = "option_string_schema", default)]
+
+        /// An optional target header name
+        #[schemars(with = "Option<String>", default)]
         #[serde(deserialize_with = "deserialize_option_header_name", default)]
         rename: Option<HeaderName>,
-        #[schemars(schema_with = "option_string_schema", default)]
+
+        /// Default value for the header.
+        #[schemars(with = "Option<String>", default)]
         #[serde(deserialize_with = "deserialize_option_header_value", default)]
         default: Option<HeaderValue>,
     },
     /// Propagate header given a regex to match header name
     Matching {
-        #[schemars(schema_with = "string_schema")]
+        #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,
     },
@@ -152,22 +165,16 @@ enum Propagate {
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
+    /// Rules to apply to all subgraphs
     #[serde(default)]
     all: Option<HeadersLocation>,
+    /// Rules to specific subgraphs
     #[serde(default)]
     subgraphs: HashMap<String, HeadersLocation>,
 }
 
 struct Headers {
     config: Config,
-}
-
-fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    String::json_schema(gen)
-}
-
-fn option_string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    Option::<String>::json_schema(gen)
 }
 
 #[async_trait::async_trait]

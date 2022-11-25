@@ -118,6 +118,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "all": {
+          "description": "Rules to apply to all subgraphs",
           "type": "object",
           "required": [
             "request"
@@ -146,9 +147,11 @@ expression: "&schema"
                             ],
                             "properties": {
                               "name": {
+                                "description": "The name of the header",
                                 "type": "string"
                               },
                               "value": {
+                                "description": "The value for the header",
                                 "type": "string"
                               }
                             },
@@ -182,13 +185,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "The default if the path in the body did not resolve to an element",
                                 "type": "string",
                                 "nullable": true
                               },
                               "name": {
+                                "description": "The target header name",
                                 "type": "string"
                               },
                               "path": {
+                                "description": "The path in the request body",
                                 "type": "string"
                               }
                             },
@@ -256,13 +262,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "Default value for the header.",
                                 "type": "string",
                                 "nullable": true
                               },
                               "named": {
+                                "description": "The source header name",
                                 "type": "string"
                               },
                               "rename": {
+                                "description": "An optional target header name",
                                 "type": "string",
                                 "nullable": true
                               }
@@ -295,6 +304,7 @@ expression: "&schema"
           "nullable": true
         },
         "subgraphs": {
+          "description": "Rules to specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -325,9 +335,11 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "name": {
+                                  "description": "The name of the header",
                                   "type": "string"
                                 },
                                 "value": {
+                                  "description": "The value for the header",
                                   "type": "string"
                                 }
                               },
@@ -361,13 +373,16 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "default": {
+                                  "description": "The default if the path in the body did not resolve to an element",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "name": {
+                                  "description": "The target header name",
                                   "type": "string"
                                 },
                                 "path": {
+                                  "description": "The path in the request body",
                                   "type": "string"
                                 }
                               },
@@ -435,13 +450,16 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "default": {
+                                  "description": "Default value for the header.",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "named": {
+                                  "description": "The source header name",
                                   "type": "string"
                                 },
                                 "rename": {
+                                  "description": "An optional target header name",
                                   "type": "string",
                                   "nullable": true
                                 }
@@ -940,13 +958,21 @@ expression: "&schema"
               "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
               "oneOf": [
                 {
+                  "description": "Don't send any headers",
                   "type": "string",
                   "enum": [
-                    "none",
+                    "none"
+                  ]
+                },
+                {
+                  "description": "Send all headers",
+                  "type": "string",
+                  "enum": [
                     "all"
                   ]
                 },
                 {
+                  "description": "Send only the headers specified",
                   "type": "object",
                   "required": [
                     "only"
@@ -962,6 +988,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 {
+                  "description": "Send all headers except those specified",
                   "type": "object",
                   "required": [
                     "except"
@@ -1929,6 +1956,7 @@ expression: "&schema"
               ],
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor settings",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -1984,9 +2012,11 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send data to",
                   "type": "string"
                 },
                 "grpc": {
+                  "description": "GRPC configuration settings",
                   "default": {
                     "domain_name": null,
                     "ca": null,
@@ -1997,23 +2027,28 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
+                      "description": "The optional ca for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
+                      "description": "The optional cert for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
+                      "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
                       "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "key": {
+                      "description": "The optional key for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
+                      "description": "GRPC metadata",
                       "default": {},
                       "type": "object",
                       "additionalProperties": true
@@ -2022,6 +2057,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "http": {
+                  "description": "HTTP configuration settings",
                   "default": {
                     "headers": {}
                   },
@@ -2038,6 +2074,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "protocol": {
+                  "description": "The protocol to use when sending data",
                   "default": "grpc",
                   "type": "string",
                   "enum": [
@@ -2372,6 +2409,7 @@ expression: "&schema"
               ],
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor settings",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2427,9 +2465,11 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send data to",
                   "type": "string"
                 },
                 "grpc": {
+                  "description": "GRPC configuration settings",
                   "default": {
                     "domain_name": null,
                     "ca": null,
@@ -2440,23 +2480,28 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
+                      "description": "The optional ca for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
+                      "description": "The optional cert for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
+                      "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
                       "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "key": {
+                      "description": "The optional key for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
+                      "description": "GRPC metadata",
                       "default": {},
                       "type": "object",
                       "additionalProperties": true
@@ -2465,6 +2510,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "http": {
+                  "description": "HTTP configuration settings",
                   "default": {
                     "headers": {}
                   },
@@ -2481,6 +2527,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "protocol": {
+                  "description": "The protocol to use when sending data",
                   "default": "grpc",
                   "type": "string",
                   "enum": [
