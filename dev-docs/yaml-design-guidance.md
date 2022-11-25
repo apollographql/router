@@ -130,35 +130,53 @@ export:
 ```
 
 ### Don't use `#[serde(flatten)]`
-Serde flatten is tempting to use where you have identified common functionality, but creates a bad user experience as it is incompatible with `#[serde(deny_unknown_fields)]`. There isn't a great solution to this, but you can use a macro to make things dry.
+Serde flatten is tempting to use where you have identified common functionality, but creates a bad user experience as it is incompatible with `#[serde(deny_unknown_fields)]`. There isn't a great solution to this, but nesting config can sometimes help.
 
 See [serde documentation](https://serde.rs/field-attrs.html#flatten) for more details.
 
-#### UGLY
+#### MAYBE
 ```rust
 #[serde(deny_unknown_fields)]
 struct Export {
-    common_export_fields!()
+    url: Url,
+    backup: Url
+}
+#[serde(deny_unknown_fields)]
+struct Telemetry {
+    export: Export
+}
+#[serde(deny_unknown_fields)]
+struct Metrics {
+    export: Export
 }
 ```
 ```yaml
-export: 
-  url: http://example.com
-  backup: http://example2.com
+telemetry:
+  export: 
+    url: http://example.com
+    backup: http://example2.com
+metrics:
+  export:
+    url: http://example.com
+    backup: http://example2.com
 ```
 
 #### BAD
 ```rust
 #[serde(deny_unknown_fields)]
 struct Export {
-    #[serde(flatten)]
-    export_fields: CommonExportFields
+    url: Url,
+    backup: Url
+}
+struct Telemetry {
+    export: Export
 }
 ```
 ```yaml
-export: 
+telemetry: 
   url: http://example.com
-  backup: http://example2.com # The user will NOT receive an error for this
+  backup: http://example2.com
+  unknown: sadness # The user will NOT receive an error for this
 ```
 
 ### Use consistent terminology
@@ -230,7 +248,7 @@ Examples of things that typically require extending later:
 * Connection info to other systems.
 * An action that retrieves information from a domain object e.g. `request.body`, `request.header`
 
-Often adding container objects can
+Often adding container objects can help.
 
 #### GOOD
 ```rust
