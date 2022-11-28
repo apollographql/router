@@ -605,10 +605,66 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true
+        "preview_defer_support": true,
+        "apq": {
+          "experimental_cache": {
+            "in_memory": {
+              "limit": 512
+            }
+          }
+        },
+        "query_planning": {
+          "experimental_cache": {
+            "in_memory": {
+              "limit": 512
+            }
+          }
+        }
       },
       "type": "object",
       "properties": {
+        "apq": {
+          "description": "Configures automatic persisted queries",
+          "default": {
+            "experimental_cache": {
+              "in_memory": {
+                "limit": 512
+              }
+            }
+          },
+          "type": "object",
+          "required": [
+            "experimental_cache"
+          ],
+          "properties": {
+            "experimental_cache": {
+              "type": "object",
+              "required": [
+                "in_memory"
+              ],
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "introspection": {
           "description": "Enable introspection Default: false",
           "default": false,
@@ -636,6 +692,48 @@ expression: "&schema"
         "preview_defer_support": {
           "default": true,
           "type": "boolean"
+        },
+        "query_planning": {
+          "description": "Query planning options",
+          "default": {
+            "experimental_cache": {
+              "in_memory": {
+                "limit": 512
+              }
+            }
+          },
+          "type": "object",
+          "required": [
+            "experimental_cache"
+          ],
+          "properties": {
+            "experimental_cache": {
+              "type": "object",
+              "required": [
+                "in_memory"
+              ],
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
