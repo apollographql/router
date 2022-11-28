@@ -183,7 +183,7 @@ telemetry:
 Be consistent with the rust API terminology.
 * request - functionality that modifies the request or retrieves data from the request of a service.
 * response - functionality that modifies the response or retrieves data from the response of a service.
-* supergraph - functionality within Plugin::subgraph_service
+* supergraph - functionality within Plugin::supergraph_service
 * execution - functionality within Plugin::execution_service
 * subgraph(s) - functionality within Plugin::subgraph_service
 
