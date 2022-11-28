@@ -186,7 +186,7 @@ From the CLI users can run:
 
 There are situations where comments and whitespace are not preserved. This may be improved in future.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116, https://github.com/apollographql/router/pull/2162
 
 ### *Experimental* subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
 
