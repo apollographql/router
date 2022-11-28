@@ -188,7 +188,7 @@ There are situations where comments and whitespace are not preserved. This may b
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116, https://github.com/apollographql/router/pull/2162
 
-### *Experimental* subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
+### *Experimental* 🥼 subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
 
 Implements subgraph request retries, using Finagle's retry buckets algorithm:
 - it defines a minimal number of retries per second (`min_per_sec`, default is 10 retries per second), to
@@ -215,6 +215,28 @@ traffic_shaping:
 ```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006 and https://github.com/apollographql/router/pull/2160
+
+### *Experimental* 🥼 Caching configuration ([Issue #2075](https://github.com/apollographql/router/issues/2075))
+
+Split Redis cache configuration for APQ and query planning:
+
+```yaml
+supergraph:
+  apq:
+    experimental_cache:
+      in_memory:
+        limit: 512
+      redis:
+        urls: ["redis://..."]
+  query_planning:
+    experimental_cache:
+      in_memory:
+        limit: 512
+      redis:
+        urls: ["redis://..."]
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
 
 ## 🐛 Fixes
 

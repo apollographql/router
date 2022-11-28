@@ -315,12 +315,6 @@ impl PluggableSupergraphServiceBuilder {
 
         let configuration = self.configuration.unwrap_or_default();
 
-        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(100);
-        let redis_urls = configuration.supergraph.cache();
-
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(&configuration).await))
         } else {
@@ -329,14 +323,13 @@ impl PluggableSupergraphServiceBuilder {
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
         let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
+            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration.clone())
                 .await
                 .map_err(ServiceBuildError::QueryPlannerError)?;
         let query_planner_service = CachingQueryPlanner::new(
             bridge_query_planner,
-            plan_cache_limit,
             self.schema.schema_id.clone(),
-            redis_urls,
+            &configuration.supergraph.query_planning,
         )
         .await;
 

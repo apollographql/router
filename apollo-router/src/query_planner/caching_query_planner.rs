@@ -35,11 +35,11 @@ where
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(
         delegate: T,
-        plan_cache_limit: usize,
         schema_id: Option<String>,
-        redis_urls: Option<Vec<String>>,
+        config: &crate::configuration::QueryPlanning,
     ) -> CachingQueryPlanner<T> {
-        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit, redis_urls).await);
+        let cache =
+            Arc::new(DeduplicatingCache::from_configuration(&config.experimental_cache).await);
         Self {
             cache,
             delegate,
@@ -262,7 +262,12 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10, None, None).await;
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            None,
+            &crate::configuration::QueryPlanning::default(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner
@@ -318,7 +323,12 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10, None, None).await;
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            None,
+            &crate::configuration::QueryPlanning::default(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner
