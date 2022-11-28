@@ -70,7 +70,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     for action in &migration.actions {
         match action {
             Action::Delete { path } => {
-                if !jsonpath_lib::select(config, path)
+                if !jsonpath_lib::select(config, &format!("$.{}", path))
                     .unwrap_or_default()
                     .is_empty()
                 {
@@ -81,7 +81,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Copy { from, to } => {
-                if !jsonpath_lib::select(config, from)
+                if !jsonpath_lib::select(config, &format!("$.{}", from))
                     .unwrap_or_default()
                     .is_empty()
                 {
@@ -90,7 +90,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Move { from, to } => {
-                if !jsonpath_lib::select(config, from)
+                if !jsonpath_lib::select(config, &format!("$.{}", from))
                     .unwrap_or_default()
                     .is_empty()
                 {
@@ -276,7 +276,7 @@ mod test {
     #[test]
     fn move_non_existent_field() {
         insta::assert_json_snapshot!(apply_migration(
-            &json!({}),
+            &json!({"should": "stay"}),
             &Migration::builder()
                 .action(Action::Move {
                     from: "obj.field1".to_string(),
