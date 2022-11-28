@@ -57,7 +57,7 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::services::new_service::NewService;
+use crate::services::create::ServiceFactory;
 use crate::services::transport;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -123,10 +123,10 @@ struct TestRouterFactory {
     inner: MockSupergraphServiceType,
 }
 
-impl NewService<SupergraphRequest> for TestRouterFactory {
+impl ServiceFactory<SupergraphRequest> for TestRouterFactory {
     type Service = MockSupergraphServiceType;
 
-    fn new_service(&self) -> Self::Service {
+    fn create(&self) -> Self::Service {
         self.inner.clone()
     }
 }
@@ -134,7 +134,7 @@ impl NewService<SupergraphRequest> for TestRouterFactory {
 impl RouterFactory for TestRouterFactory {
     type SupergraphService = MockSupergraphServiceType;
 
-    type Future = <<TestRouterFactory as NewService<SupergraphRequest>>::Service as Service<
+    type Future = <<TestRouterFactory as ServiceFactory<SupergraphRequest>>::Service as Service<
         SupergraphRequest,
     >>::Future;
 

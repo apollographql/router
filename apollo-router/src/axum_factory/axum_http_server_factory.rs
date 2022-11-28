@@ -360,7 +360,7 @@ where
                     Sandbox::display_page(),
                     host,
                     apq2,
-                    service.new_service().boxed(),
+                    service.create().boxed(),
                     http_request,
                 )
             }
@@ -372,7 +372,7 @@ where
                     Homepage::display_page(),
                     host,
                     apq2,
-                    service.new_service().boxed(),
+                    service.create().boxed(),
                     http_request,
                 )
             }
@@ -380,7 +380,7 @@ where
     } else {
         get({
             move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get(host, apq2, service.new_service().boxed(), http_request)
+                handle_get(host, apq2, service.create().boxed(), http_request)
             }
         })
     };
@@ -400,7 +400,7 @@ where
                             uri,
                             request,
                             apq,
-                            service.new_service().boxed(),
+                            service.create().boxed(),
                             header_map,
                         )
                     }

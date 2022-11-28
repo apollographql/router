@@ -302,7 +302,7 @@ pub(crate) trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
         + 'static;
     type Future: Send + 'static;
 
-    fn new_service(&self, name: &str) -> Option<Self::SubgraphService>;
+    fn create(&self, name: &str) -> Option<Self::SubgraphService>;
 }
 
 #[derive(Clone)]
@@ -352,7 +352,7 @@ impl SubgraphServiceFactory for SubgraphCreator {
             crate::SubgraphRequest,
         >>::Future;
 
-    fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
+    fn create(&self, name: &str) -> Option<Self::SubgraphService> {
         self.services.get(name).map(|service| {
             let service = service.make();
             self.plugins

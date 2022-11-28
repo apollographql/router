@@ -24,7 +24,7 @@ use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterFactoryBuilder;
+use crate::router_factory::RouterSuperServiceFactory;
 use crate::Schema;
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -67,7 +67,7 @@ impl<T> Display for State<T> {
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterFactoryBuilder,
+    FA: RouterSuperServiceFactory,
 {
     http_server_factory: S,
     router_configurator: FA,
@@ -82,7 +82,7 @@ where
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: RouterFactoryBuilder + Send,
+    FA: RouterSuperServiceFactory + Send,
     FA::RouterFactory: RouterFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
@@ -262,7 +262,7 @@ where
 
     async fn maybe_update_listen_addresses(
         &mut self,
-        state: &mut State<<FA as RouterFactoryBuilder>::RouterFactory>,
+        state: &mut State<<FA as RouterSuperServiceFactory>::RouterFactory>,
     ) {
         let (graphql_listen_address, extra_listen_addresses) =
             if let Running { server_handle, .. } = &state {
@@ -288,10 +288,10 @@ where
 
     async fn maybe_transition_to_running(
         &mut self,
-        state: State<<FA as RouterFactoryBuilder>::RouterFactory>,
+        state: State<<FA as RouterSuperServiceFactory>::RouterFactory>,
     ) -> Result<
-        State<<FA as RouterFactoryBuilder>::RouterFactory>,
-        State<<FA as RouterFactoryBuilder>::RouterFactory>,
+        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
+        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
     > {
         if let Startup {
             configuration: Some(configuration),
@@ -354,13 +354,13 @@ where
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        router_service: <FA as RouterFactoryBuilder>::RouterFactory,
+        router_service: <FA as RouterSuperServiceFactory>::RouterFactory,
         server_handle: HttpServerHandle,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
-        State<<FA as RouterFactoryBuilder>::RouterFactory>,
-        State<<FA as RouterFactoryBuilder>::RouterFactory>,
+        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
+        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
@@ -450,8 +450,8 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
-    use crate::router_factory::RouterFactoryBuilder;
-    use crate::services::new_service::NewService;
+    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::services::create::ServiceFactory;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
 
@@ -654,7 +654,7 @@ mod tests {
         MyRouterConfigurator {}
 
         #[async_trait::async_trait]
-        impl RouterFactoryBuilder for MyRouterConfigurator {
+        impl RouterSuperServiceFactory for MyRouterConfigurator {
             type RouterFactory = MockMyRouterFactory;
 
             async fn create<'a>(
@@ -676,9 +676,9 @@ mod tests {
             type Future = <Self::SupergraphService as Service<SupergraphRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
-        impl  NewService<SupergraphRequest> for MyRouterFactory {
+        impl  ServiceFactory<SupergraphRequest> for MyRouterFactory {
             type Service = MockMyRouter;
-            fn new_service(&self) -> MockMyRouter;
+            fn create(&self) -> MockMyRouter;
         }
 
         impl Clone for MyRouterFactory {

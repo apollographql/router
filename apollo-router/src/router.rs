@@ -41,7 +41,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterFactoryBuilder;
+use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::layers::apq::APQLayer;
 use crate::services::router;

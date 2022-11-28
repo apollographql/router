@@ -11,7 +11,7 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::router_factory::RouterFactoryBuilder;
+use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
 use crate::services::layers::apq::APQLayer;

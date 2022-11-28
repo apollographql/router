@@ -18,12 +18,12 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::services::new_service::NewService;
+use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::RouterCreator;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
 use crate::services::SubgraphService;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
@@ -67,19 +67,15 @@ impl Endpoint {
         axum::Router::new().route(self.path.as_str(), service_fn(handler))
     }
 }
-/// Factory for creating a SupergraphService
+/// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
-/// SupergraphService on each request
+/// RouterService on each request
 pub(crate) trait RouterFactory:
-    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
+    ServiceFactory<RouterRequest, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
-    type SupergraphService: Service<
-            SupergraphRequest,
-            Response = SupergraphResponse,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
+    type RouterService: Service<RouterRequest, Response = RouterResponse, Error = BoxError, Future = Self::Future>
+        + Send;
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
@@ -90,7 +86,7 @@ pub(crate) trait RouterFactory:
 /// Instances of this traits are used by the StateMachine to generate a new
 /// RouterFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait RouterFactoryBuilder: Send + Sync + 'static {
+pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
     type RouterFactory: RouterFactory;
 
     async fn create<'a>(
@@ -107,7 +103,7 @@ pub(crate) trait RouterFactoryBuilder: Send + Sync + 'static {
 pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
-impl RouterFactoryBuilder for YamlRouterFactory {
+impl RouterSuperServiceFactory for YamlRouterFactory {
     type RouterFactory = RouterCreator;
 
     async fn create<'a>(
@@ -338,7 +334,7 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::RouterFactoryBuilder;
+    use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
     use crate::Schema;
 
