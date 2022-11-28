@@ -233,7 +233,7 @@ struct Export {
 }
 ```
 
-In addition, make sure to update the html documentation. 
+In addition, make sure to update the published documentation in the `docs/` folder.
 
 ### Don't leak config
 There are exceptions, but in general config should not be leaked from plugins. By reaching into a plugin config from outside of a plugin, there is leakage of functionality outside of compilation units.
