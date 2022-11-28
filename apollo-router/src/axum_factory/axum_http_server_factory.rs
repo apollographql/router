@@ -164,7 +164,10 @@ impl HttpServerFactory for AxumHttpServerFactory {
     {
         Box::pin(async move {
             let apq = APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(&configuration.supergraph.apq.cache).await,
+                DeduplicatingCache::from_configuration(
+                    &configuration.supergraph.apq.experimental_cache,
+                )
+                .await,
             );
 
             let all_routers =

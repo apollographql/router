@@ -607,14 +607,14 @@ expression: "&schema"
         "introspection": false,
         "preview_defer_support": true,
         "apq": {
-          "cache": {
+          "experimental_cache": {
             "in_memory": {
               "limit": 512
             }
           }
         },
         "query_planning": {
-          "cache": {
+          "experimental_cache": {
             "in_memory": {
               "limit": 512
             }
@@ -626,7 +626,7 @@ expression: "&schema"
         "apq": {
           "description": "Configures automatic persisted queries",
           "default": {
-            "cache": {
+            "experimental_cache": {
               "in_memory": {
                 "limit": 512
               }
@@ -634,10 +634,10 @@ expression: "&schema"
           },
           "type": "object",
           "required": [
-            "cache"
+            "experimental_cache"
           ],
           "properties": {
-            "cache": {
+            "experimental_cache": {
               "type": "object",
               "required": [
                 "in_memory"
@@ -696,7 +696,7 @@ expression: "&schema"
         "query_planning": {
           "description": "Query planning options",
           "default": {
-            "cache": {
+            "experimental_cache": {
               "in_memory": {
                 "limit": 512
               }
@@ -704,10 +704,10 @@ expression: "&schema"
           },
           "type": "object",
           "required": [
-            "cache"
+            "experimental_cache"
           ],
           "properties": {
-            "cache": {
+            "experimental_cache": {
               "type": "object",
               "required": [
                 "in_memory"

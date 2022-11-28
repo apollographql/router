@@ -220,16 +220,16 @@ Split Redis cache configuration for APQ and query planning:
 ```yaml
 supergraph:
   apq:
-    cache:
+    experimental_cache:
       in_memory:
         limit: 512
-      experimental_redis:
+      redis:
         urls: ["redis://..."]
   query_planning:
-    cache:
+    experimental_cache:
       in_memory:
         limit: 512
-      experimental_redis:
+      redis:
         urls: ["redis://..."]
 ```
 

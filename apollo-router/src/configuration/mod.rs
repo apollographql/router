@@ -553,13 +553,13 @@ impl Default for Supergraph {
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
-    pub(crate) cache: Cache,
+    pub(crate) experimental_cache: Cache,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
-    pub(crate) cache: Cache,
+    pub(crate) experimental_cache: Cache,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -570,7 +570,7 @@ pub(crate) struct Cache {
     pub(crate) in_memory: InMemoryCache,
     #[cfg(feature = "experimental_cache")]
     /// Configures and activates the Redis cache
-    pub(crate) experimental_redis: Option<RedisCache>,
+    pub(crate) redis: Option<RedisCache>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
