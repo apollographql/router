@@ -570,7 +570,7 @@ pub(crate) struct Cache {
     pub(crate) in_memory: InMemoryCache,
     #[cfg(feature = "experimental_cache")]
     /// Configures and activates the Redis cache
-    pub(crate) redis: Option<RedisCache>,
+    pub(crate) experimental_redis: Option<RedisCache>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
