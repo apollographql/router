@@ -18,7 +18,7 @@ Make sure you:
 ## Process
 It should be obvious to the user what they are configuring and how it will affect Router behaviour. It's tricky for us as developers to know when something isn't obvious to users as often we are too close to the domain.
 
-Complex config should be run by the rest of the team. Ideally before writing any code, as coming to the team late can cause code churn and frustration. The process is as follows:
+Complex configuration changes should be discussed with the team before starting the implementation, since they will drive the code's design. The process is as follows:
 1. In the github issue put the proposed config in.
 2. List any concerns.
 3. Notify the team that you are looking for request for comment.
