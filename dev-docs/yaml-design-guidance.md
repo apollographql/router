@@ -187,7 +187,7 @@ Be consistent with the rust API terminology.
 * execution - functionality within Plugin::execution_service
 * subgraph(s) - functionality within Plugin::subgraph_service
 
-If you use the above terminology then changes are you are doing something that will take place on every request. In this case make sure to include an `action` verb so the user know what the config is doing.
+If you use the above terminology then chances are you are doing something that will take place on every request. In this case make sure to include an `action` verb so the user know what the config is doing.
 
 #### GOOD
 ```yaml
