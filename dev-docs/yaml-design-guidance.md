@@ -206,7 +206,7 @@ headers:
 ```
 
 ### Document your configuration options
-If your config is well documented in Rust then it will be well documented in the generated Json Schema. This means that when users are modifying their config either in their IDE or in Apollo GraphOS documentation is available.
+If your config is well documented in Rust then it will be well documented in the generated JSON Schema. This means that when users are modifying their config either in their IDE or in Apollo GraphOS, documentation is available.
 
 Example configuration should be included on all containers.
 
