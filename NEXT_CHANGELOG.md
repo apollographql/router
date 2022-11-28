@@ -207,7 +207,7 @@ traffic_shaping:
       min_per_sec: 10
       ttl: 10s
       retry_percent: 0.2
-      retryable_mutations: false
+      retry_mutations: false
   subgraphs:
     accounts:
       experimental_retry:

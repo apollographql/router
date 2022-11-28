@@ -112,7 +112,7 @@ struct RetryConfig {
     retry_percent: Option<f32>,
     /// allows request retries on mutations. This should only be activated if mutations
     /// are idempotent. Disabled by default
-    retryable_mutations: Option<bool>,
+    retry_mutations: Option<bool>,
 }
 
 impl Merge for RetryConfig {
@@ -123,7 +123,7 @@ impl Merge for RetryConfig {
                 ttl: self.ttl.or(fallback.ttl),
                 min_per_sec: self.min_per_sec.or(fallback.min_per_sec),
                 retry_percent: self.retry_percent.or(fallback.retry_percent),
-                retryable_mutations: self.retryable_mutations.or(fallback.retryable_mutations),
+                retry_mutations: self.retry_mutations.or(fallback.retry_mutations),
             },
         }
     }
@@ -326,7 +326,7 @@ impl TrafficShaping {
                     config.ttl,
                     config.min_per_sec,
                     config.retry_percent,
-                    config.retryable_mutations,
+                    config.retry_mutations,
                 );
                 tower::retry::RetryLayer::new(retry_policy)
             });

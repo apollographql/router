@@ -2224,6 +2224,11 @@ expression: "&schema"
                   "minimum": 0.0,
                   "nullable": true
                 },
+                "retry_mutations": {
+                  "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
+                  "type": "boolean",
+                  "nullable": true
+                },
                 "retry_percent": {
                   "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
                   "type": "number",
@@ -2356,6 +2361,11 @@ expression: "&schema"
                     "type": "integer",
                     "format": "uint32",
                     "minimum": 0.0,
+                    "nullable": true
+                  },
+                  "retry_mutations": {
+                    "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
+                    "type": "boolean",
                     "nullable": true
                   },
                   "retry_percent": {

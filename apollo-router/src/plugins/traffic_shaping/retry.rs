@@ -11,7 +11,7 @@ use crate::services::subgraph;
 #[derive(Clone, Default)]
 pub(crate) struct RetryPolicy {
     budget: Arc<Budget>,
-    retryable_mutations: bool,
+    retry_mutations: bool,
 }
 
 impl RetryPolicy {
@@ -19,7 +19,7 @@ impl RetryPolicy {
         duration: Option<Duration>,
         min_per_sec: Option<u32>,
         retry_percent: Option<f32>,
-        retryable_mutations: Option<bool>,
+        retry_mutations: Option<bool>,
     ) -> Self {
         Self {
             budget: Arc::new(Budget::new(
@@ -27,7 +27,7 @@ impl RetryPolicy {
                 min_per_sec.unwrap_or(10),
                 retry_percent.unwrap_or(0.2),
             )),
-            retryable_mutations: retryable_mutations.unwrap_or(false),
+            retry_mutations: retry_mutations.unwrap_or(false),
         }
     }
 }
@@ -44,7 +44,7 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                 None
             }
             Err(_e) => {
-                if req.operation_kind == OperationKind::Mutation && !self.retryable_mutations {
+                if req.operation_kind == OperationKind::Mutation && !self.retry_mutations {
                     return None;
                 }
 

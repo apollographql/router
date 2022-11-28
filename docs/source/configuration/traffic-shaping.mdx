@@ -43,7 +43,7 @@ traffic_shaping:
         min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
         ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
         retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
-        retryable_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
+        retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
 
 ```
 
