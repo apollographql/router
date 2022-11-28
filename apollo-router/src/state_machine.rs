@@ -23,8 +23,8 @@ use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
-use crate::router_factory::SupergraphServiceConfigurator;
-use crate::router_factory::SupergraphServiceFactory;
+use crate::router_factory::RouterFactory;
+use crate::router_factory::RouterFactoryBuilder;
 use crate::Schema;
 
 /// This state maintains private information that is not exposed to the user via state listener.
@@ -67,7 +67,7 @@ impl<T> Display for State<T> {
 pub(crate) struct StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: SupergraphServiceConfigurator,
+    FA: RouterFactoryBuilder,
 {
     http_server_factory: S,
     router_configurator: FA,
@@ -82,8 +82,8 @@ where
 impl<S, FA> StateMachine<S, FA>
 where
     S: HttpServerFactory,
-    FA: SupergraphServiceConfigurator + Send,
-    FA::SupergraphServiceFactory: SupergraphServiceFactory,
+    FA: RouterFactoryBuilder + Send,
+    FA::RouterFactory: RouterFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
         let graphql_ready = Arc::new(RwLock::new(None));
@@ -262,7 +262,7 @@ where
 
     async fn maybe_update_listen_addresses(
         &mut self,
-        state: &mut State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
+        state: &mut State<<FA as RouterFactoryBuilder>::RouterFactory>,
     ) {
         let (graphql_listen_address, extra_listen_addresses) =
             if let Running { server_handle, .. } = &state {
@@ -288,10 +288,10 @@ where
 
     async fn maybe_transition_to_running(
         &mut self,
-        state: State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
+        state: State<<FA as RouterFactoryBuilder>::RouterFactory>,
     ) -> Result<
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
+        State<<FA as RouterFactoryBuilder>::RouterFactory>,
+        State<<FA as RouterFactoryBuilder>::RouterFactory>,
     > {
         if let Startup {
             configuration: Some(configuration),
@@ -354,13 +354,13 @@ where
         &mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        router_service: <FA as SupergraphServiceConfigurator>::SupergraphServiceFactory,
+        router_service: <FA as RouterFactoryBuilder>::RouterFactory,
         server_handle: HttpServerHandle,
         new_configuration: Option<Arc<Configuration>>,
         new_schema: Option<Arc<Schema>>,
     ) -> Result<
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
-        State<<FA as SupergraphServiceConfigurator>::SupergraphServiceFactory>,
+        State<<FA as RouterFactoryBuilder>::RouterFactory>,
+        State<<FA as RouterFactoryBuilder>::RouterFactory>,
     > {
         let new_schema = new_schema.unwrap_or_else(|| schema.clone());
         let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
@@ -449,8 +449,8 @@ mod tests {
     use crate::http_server_factory::Listener;
     use crate::plugin::DynPlugin;
     use crate::router_factory::Endpoint;
-    use crate::router_factory::SupergraphServiceConfigurator;
-    use crate::router_factory::SupergraphServiceFactory;
+    use crate::router_factory::RouterFactory;
+    use crate::router_factory::RouterFactoryBuilder;
     use crate::services::new_service::NewService;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
@@ -654,8 +654,8 @@ mod tests {
         MyRouterConfigurator {}
 
         #[async_trait::async_trait]
-        impl SupergraphServiceConfigurator for MyRouterConfigurator {
-            type SupergraphServiceFactory = MockMyRouterFactory;
+        impl RouterFactoryBuilder for MyRouterConfigurator {
+            type RouterFactory = MockMyRouterFactory;
 
             async fn create<'a>(
                 &'a mut self,
@@ -671,7 +671,7 @@ mod tests {
         #[derive(Debug)]
         MyRouterFactory {}
 
-        impl SupergraphServiceFactory for MyRouterFactory {
+        impl RouterFactory for MyRouterFactory {
             type SupergraphService = MockMyRouter;
             type Future = <Self::SupergraphService as Service<SupergraphRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
@@ -734,7 +734,7 @@ mod tests {
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
         ) -> Self::Future
         where
-            RF: SupergraphServiceFactory,
+            RF: RouterFactory,
         {
             let res = self.create_server(configuration, main_listener);
             Box::pin(async move { res })

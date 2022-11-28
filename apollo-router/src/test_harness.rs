@@ -11,8 +11,8 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::router_factory::SupergraphServiceConfigurator;
-use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::router_factory::RouterFactoryBuilder;
+use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
 use crate::services::layers::apq::APQLayer;
 use crate::services::subgraph;
@@ -201,7 +201,7 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        let router_creator = YamlSupergraphServiceFactory
+        let router_creator = YamlRouterFactory
             .create(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
 
@@ -226,7 +226,7 @@ impl<'a> TestHarness<'a> {
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
         use crate::axum_factory::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
-        use crate::router_factory::SupergraphServiceFactory;
+        use crate::router_factory::RouterFactory;
 
         let (config, router_creator) = self.build_common().await?;
         let web_endpoints = router_creator.web_endpoints();

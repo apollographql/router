@@ -24,11 +24,12 @@ mod execution_service;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;
+pub mod router;
+pub(crate) mod router_service;
 pub mod subgraph;
 pub(crate) mod subgraph_service;
 pub mod supergraph;
 mod supergraph_service;
-pub mod transport;
 
 impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {

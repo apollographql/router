@@ -59,9 +59,9 @@ use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
-use crate::router_factory::SupergraphServiceFactory;
+use crate::router_factory::RouterFactory;
 use crate::services::layers::apq::APQLayer;
-use crate::services::transport;
+use crate::services::router;
 use crate::tracer::TraceId;
 
 /// A basic http server using Axum.
@@ -95,7 +95,7 @@ pub(crate) fn make_axum_router<RF>(
     apq: APQLayer,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
-    RF: SupergraphServiceFactory,
+    RF: RouterFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
@@ -108,7 +108,7 @@ where
             configuration.health_check.listen.clone(),
             Endpoint::new(
                 "/health".to_string(),
-                service_fn(move |_req: transport::Request| {
+                service_fn(move |_req: router::Request| {
                     let health = Health {
                         status: HealthStatus::Up,
                     };
@@ -160,7 +160,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
-        RF: SupergraphServiceFactory,
+        RF: RouterFactory,
     {
         Box::pin(async move {
             let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
@@ -292,7 +292,7 @@ fn main_endpoint<RF>(
     apq: APQLayer,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
-    RF: SupergraphServiceFactory,
+    RF: RouterFactory,
 {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
@@ -344,7 +344,7 @@ where
 
 pub(super) fn main_router<RF>(configuration: &Configuration, apq: APQLayer) -> axum::Router
 where
-    RF: SupergraphServiceFactory,
+    RF: RouterFactory,
 {
     let mut graphql_configuration = configuration.supergraph.clone();
     if graphql_configuration.path.ends_with("/*") {

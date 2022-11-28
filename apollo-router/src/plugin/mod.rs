@@ -42,9 +42,9 @@ use tower::ServiceBuilder;
 use crate::layers::ServiceBuilderExt;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::transport;
 use crate::ListenAddr;
 
 type InstanceFactory =
@@ -316,19 +316,19 @@ macro_rules! register_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<transport::BoxService, transport::Request>,
+    service: Buffer<router::BoxService, router::Request>,
 }
 
 impl Handler {
-    pub(crate) fn new(service: transport::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
 
-impl Service<transport::Request> for Handler {
-    type Response = transport::Response;
+impl Service<router::Request> for Handler {
+    type Response = router::Response;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -336,13 +336,13 @@ impl Service<transport::Request> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: transport::Request) -> Self::Future {
+    fn call(&mut self, req: router::Request) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<transport::BoxService> for Handler {
-    fn from(original: transport::BoxService) -> Self {
+impl From<router::BoxService> for Handler {
+    fn from(original: router::BoxService) -> Self {
         Self::new(original)
     }
 }

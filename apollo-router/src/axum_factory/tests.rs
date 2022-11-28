@@ -56,7 +56,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::router_factory::Endpoint;
-use crate::router_factory::SupergraphServiceFactory;
+use crate::router_factory::RouterFactory;
 use crate::services::new_service::NewService;
 use crate::services::transport;
 use crate::services::SupergraphRequest;
@@ -119,11 +119,11 @@ mock! {
 type MockSupergraphServiceType = tower_test::mock::Mock<SupergraphRequest, SupergraphResponse>;
 
 #[derive(Clone)]
-struct TestSupergraphServiceFactory {
+struct TestRouterFactory {
     inner: MockSupergraphServiceType,
 }
 
-impl NewService<SupergraphRequest> for TestSupergraphServiceFactory {
+impl NewService<SupergraphRequest> for TestRouterFactory {
     type Service = MockSupergraphServiceType;
 
     fn new_service(&self) -> Self::Service {
@@ -131,13 +131,12 @@ impl NewService<SupergraphRequest> for TestSupergraphServiceFactory {
     }
 }
 
-impl SupergraphServiceFactory for TestSupergraphServiceFactory {
+impl RouterFactory for TestRouterFactory {
     type SupergraphService = MockSupergraphServiceType;
 
-    type Future =
-        <<TestSupergraphServiceFactory as NewService<SupergraphRequest>>::Service as Service<
-            SupergraphRequest,
-        >>::Future;
+    type Future = <<TestRouterFactory as NewService<SupergraphRequest>>::Service as Service<
+        SupergraphRequest,
+    >>::Future;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
@@ -160,7 +159,7 @@ async fn init(mut mock: MockSupergraphService) -> (HttpServerHandle, Client) {
     });
     let server = server_factory
         .create(
-            TestSupergraphServiceFactory {
+            TestRouterFactory {
                 inner: service.into_inner(),
             },
             Arc::new(
@@ -221,7 +220,7 @@ pub(super) async fn init_with_config(
     });
     let server = server_factory
         .create(
-            TestSupergraphServiceFactory {
+            TestRouterFactory {
                 inner: service.into_inner(),
             },
             Arc::new(conf),
@@ -263,7 +262,7 @@ async fn init_unix(
 
     server_factory
         .create(
-            TestSupergraphServiceFactory {
+            TestRouterFactory {
                 inner: service.into_inner(),
             },
             Arc::new(
@@ -1662,7 +1661,7 @@ async fn it_supports_server_restart() {
     let server_factory = AxumHttpServerFactory::new();
     let (service, _) = tower_test::mock::spawn();
 
-    let supergraph_service_factory = TestSupergraphServiceFactory {
+    let supergraph_service_factory = TestRouterFactory {
         inner: service.into_inner(),
     };
 
