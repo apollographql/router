@@ -6,29 +6,54 @@ This is a list of the things that need to happen during a release.
 Build a Release
 ---------------
 
-### Prepare the Changelog (Full release only)
+### Prereqs
 
-If you are releasing a beta or a release candidate, no official changelog is
-needed, but you're not off the hook! You'll need to write testing instructions
-in lieu of an official changelog.
+1. Make sure you have `cargo` installed on your machine and in your `PATH`.  Run `command -v cargo` to verify it is available.
+2. These instructions will assume that you have a Git remote named `origin` which points to the GitHub repository that has the source code the release will be done from.  **If you use a Git remote other than `origin`, use that name instead in the following instructions.**  Run `git remote -v` to see the configuration of your Git remotes.
+3. Install `helm-docs` if it is not installed already by following the instructions [on their repository](https://github.com/norwoodj/helm-docs/#Installation).  Run `command -v helm-docs` to confirm that it is already installed.
 
-1. Open the associated GitHub milestone for the release. All issues and PRs should be closed. If
-    they are not you should reassign all open issues and PRs to future
-    milestones.
-2. Go through the commit history since the last release. Ensure that all PRs
-    that have landed are marked with the milestone. You can use this to
-    show all the PRs that are merged on or after YYYY-MM-DD:
-    `https://github.com/issues?utf8=%E2%9C%93&q=repo%3Aapollographql%2Frouter+merged%3A%3E%3DYYYY-MM-DD`
-3. Go through the closed PRs in the milestone. Each should have a changelog
-    label indicating if the change is documentation, feature, fix, or
-    maintenance. If there is a missing label, please add one. If it is a
-    breaking change, also add a BREAKING label.
-4. Set the release date in `NEXT_CHANGELOG.md`. Add this release to the
-    `CHANGELOG.md`. Use the structure of previous entries.
+### Overview
 
-### Start a release PR
+1. Determine the version bump for the release
+1. Create the release branch for later steps.
+2. Release preparation PR
+    * This PR will consist of version bumps and CHANGELOG changes.
+3. Release PR
+    * This PR will be the merge commit from the release branch into the `main` branch.
+4. Performing the release
+   * This step consists of running commands that start the actual release on CircleCI that releasing the packages onto GitHub Releases, and a follow-up step which publishes the packages to Crates.io.
+5. Reconciling the `dev` branch
+   * This will consist of a PR that merges `main` back into `dev` after the release.
 
-1. Make sure you have `cargo` installed on your machine and in your `PATH`.
+### Determine the version bump for the release
+
+This project uses the Semantic Versioning Specification v2.0.0 for its version numbers.
+
+1. Open the `NEXT_CHANGELOG.md` and analyze the changes:
+
+    1. If this is a follow-up to a previous "prerelease" (e.g., alpha, beta), then it might be sufficient to merely increment the prerelease identifier (i.e., `alpha.0` becomes `alpha.1`).
+    1. If there are "Breaking Changes", then the _major_ version should be bumped.  Keep in mind that major versions must be agreed to by the entire team ahead of time.
+    2. If there are entries in the "Features" section, then the _minor_ version should be bumped.
+    3. In all other cases, a _patch_ version bump will be sufficient.
+
+2. If this is going to be a prerelease version, a prerelease identifier will be added to the end of the version number.  For example, `-alpha.0` or
+
+### Create the release branch
+
+We won't use the release branch right away, but instead use it as the target for the release preparation PR.  In a later step, the release branch will be a _different_ PR that lands into `main`.  Create the branch and push it so it can be used for the following step:
+
+1. Ensure that you have the latest reference to the current `dev` on your local machine:
+
+    ```
+    git fetch origin
+    ```
+
+2. Create a branch named `#.#.#`
+
+### Create a release preparation PR
+
+The release preparation PR
+
 2. Create a new branch "#.#.#" where "#.#.#" is this release's version
     (release) or "#.#.#-rc.#" (release candidate)
 3. Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
@@ -41,7 +66,7 @@ in lieu of an official changelog.
   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
 9. Update the kubernetes section of the docs:
   - go to the `helm/chart/router` folder
-  - run 
+  - run
   ```helm template --set router.configuration.telemetry.metrics.prometheus.enabled=true  --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --debug .```
   - Paste the output in the `Kubernetes Configuration` example of the `docs/source/containerization/kubernetes.mdx` file
 9. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
