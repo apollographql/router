@@ -70,22 +70,37 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     for action in &migration.actions {
         match action {
             Action::Delete { path } => {
-                // Deleting isn't actually supported by protus so we add a magic value to delete later
-                transformer_builder = transformer_builder.add_action(
-                    Parser::parse(REMOVAL_EXPRESSION, path).expect("migration must be valid"),
-                );
+                if !jsonpath_lib::select(config, &format!("$.{}", path))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    // Deleting isn't actually supported by protus so we add a magic value to delete later
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(REMOVAL_EXPRESSION, path).expect("migration must be valid"),
+                    );
+                }
             }
             Action::Copy { from, to } => {
-                transformer_builder = transformer_builder
-                    .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                if !jsonpath_lib::select(config, &format!("$.{}", from))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    transformer_builder = transformer_builder
+                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                }
             }
             Action::Move { from, to } => {
-                transformer_builder = transformer_builder
-                    .add_action(Parser::parse(from, to).expect("migration must be valid"));
-                // Deleting isn't actually supported by protus so we add a magic value to delete later
-                transformer_builder = transformer_builder.add_action(
-                    Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
-                );
+                if !jsonpath_lib::select(config, &format!("$.{}", from))
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    transformer_builder = transformer_builder
+                        .add_action(Parser::parse(from, to).expect("migration must be valid"));
+                    // Deleting isn't actually supported by protus so we add a magic value to delete later
+                    transformer_builder = transformer_builder.add_action(
+                        Parser::parse(REMOVAL_EXPRESSION, from).expect("migration must be valid"),
+                    );
+                }
             }
         }
     }
@@ -247,6 +262,21 @@ mod test {
     fn move_field() {
         insta::assert_json_snapshot!(apply_migration(
             &source_doc(),
+            &Migration::builder()
+                .action(Action::Move {
+                    from: "obj.field1".to_string(),
+                    to: "new.obj.field1".to_string()
+                })
+                .description("move field1")
+                .build(),
+        )
+        .expect("expected successful migration"));
+    }
+
+    #[test]
+    fn move_non_existent_field() {
+        insta::assert_json_snapshot!(apply_migration(
+            &json!({"should": "stay"}),
             &Migration::builder()
                 .action(Action::Move {
                     from: "obj.field1".to_string(),
