@@ -3,10 +3,13 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use axum::body::StreamBody;
+use bytes::Buf;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
+use hyper::body;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use opentelemetry::trace::SpanKind;
@@ -24,6 +27,7 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use super::SupergraphService;
 use crate::axum_factory::utils::accepts_multipart;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
@@ -49,6 +53,8 @@ use crate::QueryPlannerResponse;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::Schema;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -56,24 +62,14 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct RouterService<ExecutionFactory> {
-    execution_service_factory: ExecutionFactory,
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    schema: Arc<Schema>,
+    supergraph_service: SupergraphService<ExecutionFactory>,
 }
 
 #[buildstructor::buildstructor]
 impl<ExecutionFactory> RouterService<ExecutionFactory> {
     #[builder]
-    pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-        execution_service_factory: ExecutionFactory,
-        schema: Arc<Schema>,
-    ) -> Self {
-        RouterService {
-            query_planner_service,
-            execution_service_factory,
-            schema,
-        }
+    pub(crate) fn new(supergraph_service: SupergraphService<ExecutionFactory>) -> Self {
+        RouterService { supergraph_service }
     }
 }
 
@@ -86,171 +82,43 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.query_planner_service
+        self.supergraph_service
             .poll_ready(cx)
             .map_err(|err| err.into())
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
-        // Consume our cloned services and allow ownership to be transferred to the async block.
-        let clone = self.query_planner_service.clone();
+        let RouterRequest {
+            router_request,
+            context,
+        } = req;
+        let (parts, body) = router_request.into_parts();
+        let fut = async move {
+            let bytes = hyper::body::to_bytes(body).await.unwrap();
 
-        let planning = std::mem::replace(&mut self.query_planner_service, clone);
-        let execution = self.execution_service_factory.create();
+            let request = SupergraphRequest {
+                supergraph_request: http::Request::from_parts(
+                    parts,
+                    serde_json::from_reader(bytes.reader()).unwrap(),
+                ),
+                context,
+            };
 
-        let schema = self.schema.clone();
+            let SupergraphResponse { response, context } =
+                self.supergraph_service.call(request).await.unwrap();
 
-        let context_cloned = req.context.clone();
-        let fut =
-            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
-                let errors = vec![crate::error::Error {
-                    message: error.to_string(),
-                    extensions: serde_json_bytes::json!({
-                        "code": "INTERNAL_SERVER_ERROR",
-                    })
-                    .as_object()
-                    .unwrap()
-                    .to_owned(),
-                    ..Default::default()
-                }];
+            let (parts, body) = response.into_parts();
 
-                Ok(RouterResponse::builder()
-                    .errors(errors)
-                    .status_code(StatusCode::INTERNAL_SERVER_ERROR)
-                    .context(context_cloned)
-                    .build()
-                    .expect("building a response like this should not fail"))
-            });
-
+            Ok(RouterResponse {
+                response: http::Response::from_parts(
+                    parts,
+                    hyper::Body::wrap_stream(body.map(|chunk| serde_json::to_vec(&chunk))),
+                ),
+                context,
+            })
+        };
         Box::pin(fut)
     }
-}
-
-async fn service_call<ExecutionService>(
-    planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    execution: ExecutionService,
-    schema: Arc<Schema>,
-    req: RouterRequest,
-) -> Result<RouterResponse, BoxError>
-where
-    ExecutionService:
-        Service<ExecutionRequest, Response = ExecutionResponse, Error = BoxError> + Send,
-{
-    let context = req.context;
-    let body = req.supergraph_request.body();
-    let variables = body.variables.clone();
-    let QueryPlannerResponse {
-        content,
-        context,
-        errors,
-    } = match plan_query(planning, body, context.clone()).await {
-        Ok(resp) => resp,
-        Err(err) => match err.into_graphql_errors() {
-            Ok(gql_errors) => {
-                return Ok(RouterResponse::builder()
-                    .context(context)
-                    .errors(gql_errors)
-                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-                    .build()
-                    .expect("this response build must not fail"));
-            }
-            Err(err) => return Err(err.into()),
-        },
-    };
-
-    if !errors.is_empty() {
-        return Ok(RouterResponse::builder()
-            .context(context)
-            .errors(errors)
-            .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
-            .build()
-            .expect("this response build must not fail"));
-    }
-
-    match content {
-        Some(QueryPlannerContent::Introspection { response }) => Ok(
-            RouterResponse::new_from_graphql_response(*response, context),
-        ),
-        Some(QueryPlannerContent::IntrospectionDisabled) => {
-            let mut response = RouterResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("introspection has been disabled"))
-                        .build()])
-                    .build(),
-                context,
-            );
-            *response.response.status_mut() = StatusCode::BAD_REQUEST;
-            Ok(response)
-        }
-
-        Some(QueryPlannerContent::Plan { plan }) => {
-            let operation_name = body.operation_name.clone();
-            let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
-                let mut response = RouterResponse::new_from_graphql_response(graphql::Response::builder()
-                    .errors(vec![crate::error::Error::builder()
-                        .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
-                        .build()])
-                    .build(), context);
-                *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
-                Ok(response)
-            } else if let Some(err) = plan.query.validate_variables(body, &schema).err() {
-                let mut res = RouterResponse::new_from_graphql_response(err, context);
-                *res.response.status_mut() = StatusCode::BAD_REQUEST;
-                Ok(res)
-            } else {
-                let execution_response = execution
-                    .oneshot(
-                        ExecutionRequest::builder()
-                            .supergraph_request(req.supergraph_request)
-                            .query_plan(plan.clone())
-                            .context(context)
-                            .build(),
-                    )
-                    .await?;
-
-                let ExecutionResponse { response, context } = execution_response;
-
-                let (parts, response_stream) = response.into_parts();
-
-                Ok(RouterResponse {
-                    context,
-                    response: http::Response::from_parts(
-                        parts,
-                        response_stream.in_current_span().boxed(),
-                    ),
-                })
-            }
-        }
-        // This should never happen because if we have an empty query plan we should have error in errors vec
-        None => Err(BoxError::from("cannot compute a query plan")),
-    }
-}
-
-async fn plan_query(
-    mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    body: &graphql::Request,
-    context: Context,
-) -> Result<QueryPlannerResponse, CacheResolverError> {
-    planning
-        .call(
-            QueryPlannerRequest::builder()
-                .query(
-                    body.query
-                        .clone()
-                        .expect("the query presence was already checked by a plugin"),
-                )
-                .and_operation_name(body.operation_name.clone())
-                .context(context)
-                .build(),
-        )
-        .instrument(tracing::info_span!("query_planning",
-            graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
-            graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
-            "otel.kind" = %SpanKind::Internal
-        ))
-        .await
 }
 
 /// Builder which generates a plugin pipeline.
@@ -398,7 +266,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
     > + Send {
-        let supergraph_service = RouterService::builder()
+        let router_service = RouterService::builder()
             .query_planner_service(self.query_planner_service.clone())
             .execution_service_factory(ExecutionCreator {
                 schema: self.schema.clone(),
@@ -408,14 +276,14 @@ impl RouterCreator {
             .schema(self.schema.clone())
             .build();
 
-        let supergraph_service = match self
+        let router_service = match self
             .plugins
             .iter()
             .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
         {
-            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
-            None => Either::B(supergraph_service),
+            Some(shaping) => Either::A(shaping.router_service_internal(router_service)),
+            None => Either::B(router_service),
         };
 
         ServiceBuilder::new()
@@ -424,8 +292,8 @@ impl RouterCreator {
                 self.plugins
                     .iter()
                     .rev()
-                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
-                        e.supergraph_service(acc)
+                    .fold(BoxService::new(router_service), |acc, (_, e)| {
+                        e.router_service(acc)
                     }),
             )
     }

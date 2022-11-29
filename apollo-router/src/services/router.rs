@@ -1,5 +1,6 @@
 #![allow(missing_docs)] // FIXME
 
+use axum::body::BoxBody;
 use futures::future::ready;
 use futures::stream::once;
 use futures::stream::StreamExt;
@@ -8,6 +9,7 @@ use http::method::Method;
 use http::HeaderValue;
 use http::StatusCode;
 use http::Uri;
+use hyper::Body;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
@@ -157,181 +159,8 @@ impl Request {
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<graphql::ResponseStream>,
+    pub response: http::Response<Body>,
     pub context: Context,
-}
-
-#[buildstructor::buildstructor]
-impl Response {
-    /// This is the constructor (or builder) to use when constructing a real Response..
-    ///
-    /// Required parameters are required in non-testing code to create a Response..
-    #[allow(clippy::too_many_arguments)]
-    #[builder(visibility = "pub")]
-    fn new(
-        label: Option<String>,
-        data: Option<Value>,
-        path: Option<Path>,
-        errors: Vec<Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
-        status_code: Option<StatusCode>,
-        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
-        context: Context,
-    ) -> Result<Self, BoxError> {
-        // Build a response
-        let b = graphql::Response::builder()
-            .and_label(label)
-            .and_path(path)
-            .errors(errors)
-            .extensions(extensions);
-        let res = match data {
-            Some(data) => b.data(data).build(),
-            None => b.build(),
-        };
-
-        // Build an http Response
-        let mut builder = http::Response::builder().status(status_code.unwrap_or(StatusCode::OK));
-        for (key, values) in headers {
-            let header_name: HeaderName = key.try_into()?;
-            for value in values {
-                let header_value: HeaderValue = value.try_into()?;
-                builder = builder.header(header_name.clone(), header_value);
-            }
-        }
-
-        let response = builder.body(once(ready(res)).boxed())?;
-
-        Ok(Self { response, context })
-    }
-
-    /// This is the constructor (or builder) to use when constructing a "fake" Response.
-    ///
-    /// This does not enforce the provision of the data that is required for a fully functional
-    /// Response. It's usually enough for testing, when a fully constructed Response is
-    /// difficult to construct and not required for the purposes of the test.
-    ///
-    /// In addition, fake responses are expected to be valid, and will panic if given invalid values.
-    #[allow(clippy::too_many_arguments)]
-    #[builder(visibility = "pub")]
-    fn fake_new(
-        label: Option<String>,
-        data: Option<Value>,
-        path: Option<Path>,
-        errors: Vec<Error>,
-        // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
-        status_code: Option<StatusCode>,
-        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
-        context: Option<Context>,
-    ) -> Result<Self, BoxError> {
-        Response::new(
-            label,
-            data,
-            path,
-            errors,
-            extensions,
-            status_code,
-            headers,
-            context.unwrap_or_default(),
-        )
-    }
-
-    /// This is the constructor (or builder) to use when constructing a Response that represents a global error.
-    /// It has no path and no response data.
-    /// This is useful for things such as authentication errors.
-    #[builder(visibility = "pub")]
-    fn error_new(
-        errors: Vec<Error>,
-        status_code: Option<StatusCode>,
-        headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue>,
-        context: Context,
-    ) -> Result<Self, BoxError> {
-        Response::new(
-            Default::default(),
-            Default::default(),
-            None,
-            errors,
-            Default::default(),
-            status_code,
-            headers,
-            context,
-        )
-    }
-
-    pub(crate) fn new_from_graphql_response(response: graphql::Response, context: Context) -> Self {
-        Self {
-            response: http::Response::new(once(ready(response)).boxed()),
-            context,
-        }
-    }
-}
-
-impl Response {
-    pub async fn next_response(&mut self) -> Option<graphql::Response> {
-        self.response.body_mut().next().await
-    }
-
-    pub(crate) fn new_from_response(
-        response: http::Response<graphql::ResponseStream>,
-        context: Context,
-    ) -> Self {
-        Self { response, context }
-    }
-
-    pub fn map<F>(self, f: F) -> Response
-    where
-        F: FnOnce(graphql::ResponseStream) -> graphql::ResponseStream,
-    {
-        Response {
-            context: self.context,
-            response: self.response.map(f),
-        }
-    }
-
-    /// Returns a new router response where each [`graphql::Response`] is mapped through `f`.
-    ///
-    /// In router and execution services, the service response contains
-    /// not just one GraphQL response but a stream of them,
-    /// in order to support features such as `@defer`.
-    /// This method uses [`futures::stream::StreamExt::map`] to map over each item in the stream.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// use apollo_router::services::router;
-    /// use apollo_router::layers::ServiceExt as _;
-    /// use tower::ServiceExt as _;
-    ///
-    /// struct ExamplePlugin;
-    ///
-    /// #[async_trait::async_trait]
-    /// impl apollo_router::plugin::Plugin for ExamplePlugin {
-    ///     # type Config = ();
-    ///     # async fn new(
-    ///     #     _init: apollo_router::plugin::PluginInit<Self::Config>,
-    ///     # ) -> Result<Self, tower::BoxError> {
-    ///     #     Ok(Self)
-    ///     # }
-    ///     // …
-    ///     fn router_service(&self, inner: router::BoxService) -> router::BoxService {
-    ///         inner
-    ///             .map_response(|router_response| {
-    ///                 router_response.map_stream(|graphql_response| {
-    ///                     // Something interesting here
-    ///                     graphql_response
-    ///                 })
-    ///             })
-    ///             .boxed()
-    ///     }
-    /// }
-    /// ```
-    pub fn map_stream<F>(self, f: F) -> Self
-    where
-        F: 'static + Send + FnMut(graphql::Response) -> graphql::Response,
-    {
-        self.map(move |stream| stream.map(f).boxed())
-    }
 }
 
 #[cfg(test)]
