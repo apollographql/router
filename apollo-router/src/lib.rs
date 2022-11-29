@@ -91,7 +91,10 @@ pub use crate::test_harness::TestHarness;
 #[doc(hidden)]
 pub mod _private {
     // Reexports for macros
-    pub use ctor;
+    pub use crate::plugin::PluginFactory;
+    pub use crate::plugin::PLUGINS;
+    pub use linkme;
+    pub use once_cell;
     pub use router_bridge;
     pub use serde_json;
 

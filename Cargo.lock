@@ -159,7 +159,6 @@ dependencies = [
  "bytes",
  "clap 3.2.23",
  "console-subscriber",
- "ctor",
  "dashmap 5.4.0",
  "deadpool",
  "derivative",
@@ -186,6 +185,7 @@ dependencies = [
  "jsonschema",
  "lazy_static",
  "libc",
+ "linkme",
  "lru",
  "maplit",
  "mediatype",
@@ -369,6 +369,7 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
+ "linkme",
  "schemars",
  "serde",
  "serde_json",
@@ -854,6 +855,7 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "futures",
+ "linkme",
  "serde_json",
  "tokio",
  "tower",
@@ -989,6 +991,7 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
+ "linkme",
  "tower",
  "tracing",
 ]
@@ -1630,6 +1633,7 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
+ "linkme",
  "serde_json",
  "tokio",
  "tower",
@@ -2035,6 +2039,7 @@ dependencies = [
  "apollo-router",
  "async-trait",
  "futures",
+ "linkme",
  "schemars",
  "serde",
  "serde_json",
@@ -2454,6 +2459,7 @@ dependencies = [
  "hex",
  "http",
  "jwt-simple",
+ "linkme",
  "schemars",
  "serde",
  "serde_json",
@@ -2610,6 +2616,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "linkme"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cab56277eeaacac09e1398bcefc113319c6c8d4fb464f11c54ba247cdb65776e"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "624b78e5a5f99b2c751812a14785a2c661f894a34bc3dd1f2ec3e3fffb4605e7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -3603,6 +3629,7 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
+ "linkme",
  "schemars",
  "serde",
  "serde_json",
@@ -4773,6 +4800,7 @@ dependencies = [
  "async-trait",
  "futures",
  "http",
+ "linkme",
  "once_cell",
  "tower",
  "tracing",

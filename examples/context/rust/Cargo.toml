@@ -10,5 +10,6 @@ apollo-router = { path = "../../../apollo-router" }
 async-trait = "0.1"
 futures = "0.3"
 http = "0.2"
+linkme = "0.3.5"
 tower = { version = "0.4", features = ["full"] }
 tracing = "0.1"
