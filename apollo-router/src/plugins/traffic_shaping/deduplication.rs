@@ -104,7 +104,7 @@ where
                     let http_request = (&request.subgraph_request).into();
                     let res = {
                         // when _drop_signal is dropped, either by getting out of the block, returning
-                        // the error from ready_oneshot or by cancellation, the drop_sentinel future will
+                        // the error from oneshot or by cancellation, the drop_sentinel future will
                         // return with Err(), then we remove the entry from the wait map
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                         tokio::task::spawn(async move {
@@ -113,12 +113,7 @@ where
                             locked_wait_map.remove(&http_request);
                         });
 
-                        service
-                            .ready_oneshot()
-                            .await?
-                            .call(request)
-                            .await
-                            .map(CloneSubgraphResponse)
+                        service.oneshot(request).await.map(CloneSubgraphResponse)
                     };
 
                     // Let our waiters know

@@ -61,9 +61,7 @@ impl Service<RouterRequest> for RouterService {
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.supergraph_service
-            .poll_ready(cx)
-            .map_err(|err| err.into())
+        Ok(())
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
@@ -95,6 +93,8 @@ impl Service<RouterRequest> for RouterService {
                 supergraph_request: http::Request::from_parts(parts, graphql_request),
                 context,
             };
+
+            // todo: factory.create et oneshot.
 
             let SupergraphResponse { response, context } =
                 self.supergraph_service.call(request).await.unwrap();
