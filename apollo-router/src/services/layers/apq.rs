@@ -123,14 +123,14 @@ pub(crate) async fn apq_request(
             if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
                 let _ = request.context.insert("persisted_query_hit", false);
-                cache.insert(format!("apq|{query_hash}"), query).await;
+                cache.insert(redis_key(&query_hash), query).await;
             } else {
                 tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
             }
             Ok(request)
         }
         (Some((apq_hash, _)), _) => {
-            if let Ok(cached_query) = cache.get(&format!("apq|{apq_hash}")).await.get().await {
+            if let Ok(cached_query) = cache.get(&redis_key(&apq_hash)).await.get().await {
                 let _ = request.context.insert("persisted_query_hit", true);
                 tracing::trace!("apq: cache hit");
                 request.supergraph_request.body_mut().query = Some(cached_query);
@@ -169,6 +169,10 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
     let mut digest = Sha256::new();
     digest.update(query.as_bytes());
     hash == digest.finalize().as_slice()
+}
+
+fn redis_key(query_hash: &str) -> String {
+    format!("apq\0{query_hash}")
 }
 
 #[cfg(test)]
