@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::Layer;
 use tower::ServiceExt;
 
 use crate::configuration::Configuration;
@@ -14,7 +13,7 @@ use crate::plugin::PluginInit;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
-use crate::services::layers::apq::APQLayer;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::RouterCreator;
@@ -209,15 +208,13 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the GraphQL service
-    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
+    pub async fn build(self) -> Result<router::BoxCloneService, BoxError> {
         let (_config, router_creator) = self.build_common().await?;
-        let apq = APQLayer::new().await;
 
         Ok(tower::service_fn(move |request| {
-            // APQ must be added here because it is implemented in the HTTP server
-            let service = apq.layer(router_creator.make()).boxed();
+            let router = router_creator.make();
 
-            async move { service.oneshot(request).await }
+            async move { router.oneshot(request).await }
         })
         .boxed_clone())
     }
@@ -246,9 +243,26 @@ pub(crate) type HttpService = tower::util::BoxService<
     std::convert::Infallible,
 >;
 
+struct RouterServicePlugin<F>(F);
 struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
+
+#[async_trait::async_trait]
+impl<F> Plugin for RouterServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        (self.0)(service)
+    }
+}
 
 #[async_trait::async_trait]
 impl<F> Plugin for SupergraphServicePlugin<F>

@@ -4,9 +4,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::Extension;
-use axum::extract::Host;
-use axum::extract::OriginalUri;
-use axum::http::header::HeaderMap;
 use axum::http::StatusCode;
 use axum::middleware;
 use axum::response::*;
@@ -47,12 +44,10 @@ use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
 use crate::configuration::Sandbox;
-use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
@@ -60,7 +55,6 @@ use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::apq::APQLayer;
 use crate::services::router;
 use crate::tracer::TraceId;
 
@@ -92,7 +86,6 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    apq: APQLayer,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -115,7 +108,8 @@ where
 
                     async move {
                         Ok(http::Response::builder()
-                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?)
+                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?
+                            .into())
                     }
                 })
                 .boxed(),
@@ -131,7 +125,6 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
-        apq,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -163,10 +156,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         RF: RouterFactory,
     {
         Box::pin(async move {
-            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, apq)?;
+            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
 
             // serve main router
 
@@ -289,7 +279,6 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    apq: APQLayer,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -298,7 +287,7 @@ where
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
 
-    let main_route = main_router::<RF>(configuration, apq)
+    let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(
             TraceLayer::new_for_http()
@@ -342,7 +331,7 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration, apq: APQLayer) -> axum::Router
+pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: RouterFactory,
 {
@@ -352,14 +341,11 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
-    let apq2 = apq.clone();
     let get_handler = if configuration.sandbox.enabled {
         get({
-            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+            move |Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
                     Sandbox::display_page(),
-                    host,
-                    apq2,
                     service.create().boxed(),
                     http_request,
                 )
@@ -367,11 +353,9 @@ where
         })
     } else if configuration.homepage.enabled {
         get({
-            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
+            move |Extension(service): Extension<RF>, http_request: Request<Body>| {
                 handle_get_with_static(
                     Homepage::display_page(),
-                    host,
-                    apq2,
                     service.create().boxed(),
                     http_request,
                 )
@@ -379,8 +363,8 @@ where
         })
     } else {
         get({
-            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get(host, apq2, service.create().boxed(), http_request)
+            move |Extension(service): Extension<RF>, http_request: Request<Body>| {
+                handle_get(service.create().boxed(), http_request)
             }
         })
     };
@@ -389,20 +373,9 @@ where
         &graphql_configuration.path,
         get_handler
             .post({
-                move |host: Host,
-                      uri: OriginalUri,
-                      request: Json<graphql::Request>,
-                      Extension(service): Extension<RF>,
-                      header_map: HeaderMap| {
+                move |request: Request<Body>, Extension(service): Extension<RF>| {
                     {
-                        handle_post(
-                            host,
-                            uri,
-                            request,
-                            apq,
-                            service.create().boxed(),
-                            header_map,
-                        )
+                        handle_post(request, service.create().boxed())
                     }
                 }
             })

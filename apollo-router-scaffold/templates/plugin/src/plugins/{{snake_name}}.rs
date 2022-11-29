@@ -46,6 +46,22 @@ impl Plugin for {{pascal_name}} {
     }
 
     // Delete this function if you are not customizing it.
+    fn router_service(
+        &self,
+        service: router::BoxService,
+    ) -> router::BoxService {
+        // Always use service builder to compose your plugins.
+        // It provides off the shelf building blocks for your plugin.
+        //
+        // ServiceBuilder::new()
+        //             .service(service)
+        //             .boxed()
+
+        // Returning the original service means that we didn't add any extra functionality for at this point in the lifecycle.
+        service
+    }
+
+    // Delete this function if you are not customizing it.
     fn supergraph_service(
         &self,
         service: supergraph::BoxService,

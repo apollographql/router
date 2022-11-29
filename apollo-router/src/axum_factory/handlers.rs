@@ -1,85 +1,54 @@
 //! Http handlers
-use std::str::FromStr;
 
-use axum::body::StreamBody;
-use axum::extract::Host;
-use axum::extract::OriginalUri;
-use axum::http::header::HeaderMap;
 use axum::http::StatusCode;
 use axum::response::*;
 use bytes::Bytes;
-use futures::future::ready;
-use futures::stream::once;
-use futures::StreamExt;
-use http::header::CONTENT_TYPE;
-use http::HeaderValue;
 use http::Request;
-use http::Uri;
 use hyper::Body;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceExt;
 use tower_service::Service;
 
-use super::utils::accepts_json;
-use super::utils::accepts_multipart;
-use super::utils::accepts_wildcard;
 use super::utils::prefers_html;
-use super::utils::process_vary_header;
-use super::utils::APPLICATION_JSON_HEADER_VALUE;
-use super::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
-use crate::graphql;
-use crate::http_ext;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
-use crate::services::layers::apq::APQLayer;
 use crate::services::router;
 use crate::RouterRequest;
 use crate::RouterResponse;
 
 pub(super) async fn handle_get_with_static(
     static_page: Bytes,
-    Host(host): Host,
-    apq: APQLayer,
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     if prefers_html(http_request.headers()) {
         return Html(static_page).into_response();
     }
-    run_graphql_request(service, apq, http_request)
+    run_graphql_request(service, http_request)
         .await
         .into_response()
 }
 
 pub(super) async fn handle_get(
-    Host(host): Host,
-    apq: APQLayer,
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    run_graphql_request(service, apq, http_request)
+    run_graphql_request(service, http_request)
         .await
         .into_response()
 }
 
 pub(super) async fn handle_post(
-    Host(host): Host,
-    OriginalUri(uri): OriginalUri,
     http_request: Request<Body>,
-    apq: APQLayer,
     service: BoxService<RouterRequest, RouterResponse, BoxError>,
 ) -> impl IntoResponse {
-    run_graphql_request(service, apq, http_request)
+    run_graphql_request(service, http_request)
         .await
         .into_response()
 }
 
-async fn run_graphql_request<RS>(
-    service: RS,
-    apq: APQLayer,
-    http_request: Request<Body>,
-) -> impl IntoResponse
+async fn run_graphql_request<RS>(service: RS, http_request: Request<Body>) -> impl IntoResponse
 where
     RS: Service<RouterRequest, Response = RouterResponse, Error = BoxError> + Send,
 {

@@ -3,38 +3,27 @@
 use std::sync::Arc;
 use std::task::Poll;
 
-use axum::body::StreamBody;
 use bytes::Buf;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-use futures::TryFutureExt;
 use http::Method;
-use http::StatusCode;
-use hyper::body;
 use indexmap::IndexMap;
 use multimap::MultiMap;
-use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
-use tracing_futures::Instrument;
 
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::supergraph;
 use super::ExecutionCreator;
-use super::ExecutionServiceFactory;
-use super::QueryPlannerContent;
 use super::SupergraphService;
-use crate::axum_factory::utils::accepts_multipart;
-use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
-use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
 use crate::plugins::traffic_shaping::TrafficShaping;
@@ -43,15 +32,9 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::router_factory::RouterSuperServiceFactory;
 use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::Configuration;
-use crate::Context;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
 use crate::ListenAddr;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
 use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::Schema;
@@ -62,7 +45,6 @@ use crate::SupergraphResponse;
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
-#[derive(Clone)]
 pub(crate) struct RouterService {
     supergraph_service: supergraph::BoxService,
 }
@@ -90,8 +72,13 @@ impl Service<RouterRequest> for RouterService {
             context,
         } = req;
 
-        // TODO[igni]: deal with errors
+        // let clone = self.supergraph_service.clone();
+        // let supergraph_service = std::mem::replace(&mut self.supergraph_service, clone);
+
         let (parts, body) = router_request.into_parts();
+
+        // TODO[igni]: deal with errors
+        //     (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response() will help
         let fut = async move {
             let graphql_request = if parts.method == Method::GET {
                 parts

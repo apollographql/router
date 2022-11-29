@@ -106,10 +106,11 @@ impl Service<router::Request> for PrometheusService {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
-            http::Response::builder()
+            Ok(http::Response::builder()
                 .status(StatusCode::OK)
                 .body(result.into())
-                .map_err(|err| BoxError::from(err.to_string()))
+                .unwrap() // TODO: can this fail ?
+                .into())
         })
     }
 }
