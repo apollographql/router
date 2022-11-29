@@ -40,10 +40,7 @@ where
     pub(crate) async fn from_configuration(config: &crate::configuration::Cache) -> Self {
         Self::with_capacity(
             config.in_memory.limit,
-            #[cfg(feature = "experimental_cache")]
             config.redis.as_ref().map(|c| c.urls.clone()),
-            #[cfg(not(feature = "experimental_cache"))]
-            None,
         )
         .await
     }

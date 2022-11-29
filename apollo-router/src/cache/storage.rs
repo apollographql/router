@@ -34,7 +34,6 @@ where
     // It has the functions it needs already
 }
 
-#[cfg(feature = "experimental_cache")]
 use redis_storage::*;
 
 // placeholder storage module
@@ -44,7 +43,6 @@ use redis_storage::*;
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     inner: Arc<Mutex<LruCache<K, V>>>,
-    #[cfg(feature = "experimental_cache")]
     redis: Option<RedisCacheStorage>,
 }
 
@@ -53,11 +51,10 @@ where
     K: KeyType,
     V: ValueType,
 {
-    pub(crate) async fn new(max_capacity: usize, _redis_urls: Option<Vec<String>>) -> Self {
+    pub(crate) async fn new(max_capacity: usize, redis_urls: Option<Vec<String>>) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            #[cfg(feature = "experimental_cache")]
-            redis: if let Some(urls) = _redis_urls {
+            redis: if let Some(urls) = redis_urls {
                 Some(RedisCacheStorage::new(urls).await)
             } else {
                 None
@@ -69,7 +66,6 @@ where
         let mut guard = self.inner.lock().await;
         match guard.get(key) {
             Some(v) => Some(v.clone()),
-            #[cfg(feature = "experimental_cache")]
             None => {
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
@@ -84,15 +80,12 @@ where
                     None
                 }
             }
-            #[cfg(not(feature = "experimental_cache"))]
-            None => None,
         }
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.inner.lock().await.put(key.clone(), value.clone());
 
-        #[cfg(feature = "experimental_cache")]
         if let Some(redis) = self.redis.as_ref() {
             redis.insert(RedisKey(key), RedisValue(value)).await;
         }
@@ -104,7 +97,6 @@ where
     }
 }
 
-#[cfg(feature = "experimental_cache")]
 mod redis_storage {
     use std::fmt;
     use std::sync::Arc;
