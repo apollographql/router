@@ -1,6 +1,7 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 mod test {
-    use apollo_router::{graphql, services::supergraph};
+    use apollo_router::graphql;
+    use apollo_router::services::supergraph;
     use http::Method;
     use redis::AsyncCommands;
     use redis_cluster_async::Client;
