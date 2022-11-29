@@ -50,6 +50,94 @@ mod test {
         insta::assert_json_snapshot!(query_plan);
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn apq() {
+        let config = json!({
+            "supergraph": {
+                "apq": {
+                    "experimental_cache": {
+                        "in_memory": {
+                            "limit": 2
+                        },
+                        "redis": {
+                            "urls": ["redis://:router@127.0.0.1:6379", "redis://:router@127.0.0.1:6380", "redis://:router@127.0.0.1:6381"]
+                        }
+                    }
+                }
+            }
+        });
+
+        let router = setup_router(config.clone()).await;
+
+        let client = Client::open(vec![
+            "redis://:router@127.0.0.1:6379",
+            "redis://:router@127.0.0.1:6380",
+            "redis://:router@127.0.0.1:6381",
+        ])
+        .expect("opening ClusterClient");
+        let mut connection = client.get_connection().await.expect("got redis connection");
+
+        let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
+
+        let _: () = connection.del(&format!("apq\0{query_hash}")).await.unwrap();
+        //let apq_query: serde_json::Value = serde_json::from_str(&s).unwrap();
+        //insta::assert_json_snapshot!(apq_query);
+
+        let persisted = json!({
+            "version" : 1,
+            "sha256Hash" : query_hash
+        });
+
+        // an APQ should fail if we do not know about the hash
+        // it should not set a value in Redis
+        let request = supergraph::Request::fake_builder()
+            .extension("persistedQuery", persisted.clone())
+            .method(Method::POST)
+            .build()
+            .unwrap();
+
+        let res = query_with_router(router.clone(), request).await;
+        assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
+
+        println!("got res: {:?}", res);
+
+        let r: Option<String> = connection.get(&format!("apq\0{query_hash}")).await.unwrap();
+        assert!(r.is_none());
+
+        // Now we register the query
+        // it should set a value in Redis
+        let request = supergraph::Request::fake_builder()
+            .query(r#"{ topProducts { name name2:name } }"#)
+            .extension("persistedQuery", persisted.clone())
+            .method(Method::POST)
+            .build()
+            .unwrap();
+
+        let res = query_with_router(router.clone(), request).await;
+        assert!(res.data.is_some());
+        assert!(res.errors.is_empty());
+        println!("got res: {:?}", res);
+
+        let s: Option<String> = connection.get(&format!("apq\0{query_hash}")).await.unwrap();
+        insta::assert_display_snapshot!(s.unwrap());
+
+        // we start a new router with the same config
+        // it should have the same connection to Redis, but the in memory cache has been reset
+        let router = setup_router(config.clone()).await;
+
+        // a request with only the hash should succeed because it is stored in Redis
+        let request = supergraph::Request::fake_builder()
+            .extension("persistedQuery", persisted.clone())
+            .method(Method::POST)
+            .build()
+            .unwrap();
+
+        let res = query_with_router(router.clone(), request).await;
+        assert!(res.data.is_some());
+        assert!(res.errors.is_empty());
+        println!("got res: {:?}", res);
+    }
+
     async fn setup_router(config: serde_json::Value) -> supergraph::BoxCloneService {
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
