@@ -238,6 +238,12 @@ supergraph:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
 
+### *Experimental* 🥼 Remove the `experimental_cache` Cargo feature ([PR #2176](https://github.com/apollographql/router/issues/2176))
+
+The Redis cache implementation was gated by a Cargo feature, so only available in custom builds of the Router. This is now available in all builds.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2176
+
 ## 🐛 Fixes
 
 ### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
