@@ -24,6 +24,7 @@ use tracing_futures::Instrument;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
+use super::supergraph;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
@@ -61,22 +62,17 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct RouterService<ExecutionFactory> {
-    supergraph_service: SupergraphService<ExecutionFactory>,
+pub(crate) struct RouterService {
+    supergraph_service: supergraph::BoxService,
 }
 
-#[buildstructor::buildstructor]
-impl<ExecutionFactory> RouterService<ExecutionFactory> {
-    #[builder]
-    pub(crate) fn new(supergraph_service: SupergraphService<ExecutionFactory>) -> Self {
+impl RouterService {
+    pub(crate) fn new(supergraph_service: supergraph::BoxService) -> Self {
         RouterService { supergraph_service }
     }
 }
 
-impl<ExecutionFactory> Service<RouterRequest> for RouterService<ExecutionFactory>
-where
-    ExecutionFactory: ExecutionServiceFactory,
-{
+impl Service<RouterRequest> for RouterService {
     type Response = RouterResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -268,7 +264,7 @@ impl RouterCreator {
         Error = BoxError,
         Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
     > + Send {
-        let router_service = RouterService::builder()
+        let supergraph_service = SupergraphService::builder()
             .query_planner_service(self.query_planner_service.clone())
             .execution_service_factory(ExecutionCreator {
                 schema: self.schema.clone(),
@@ -278,26 +274,35 @@ impl RouterCreator {
             .schema(self.schema.clone())
             .build();
 
-        let router_service = match self
+        let supergraph_service = match self
             .plugins
             .iter()
             .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
             .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
         {
-            Some(shaping) => Either::A(shaping.router_service_internal(router_service)),
-            None => Either::B(router_service),
+            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
+            None => Either::B(supergraph_service),
         };
 
-        ServiceBuilder::new()
+        let supergraph_service = ServiceBuilder::new()
             .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins
                     .iter()
                     .rev()
-                    .fold(BoxService::new(router_service), |acc, (_, e)| {
-                        e.router_service(acc)
+                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
+                        e.supergraph_service(acc)
                     }),
-            )
+            );
+
+        let router_service = RouterService::new(supergraph_service.boxed());
+
+        ServiceBuilder::new().service(
+            self.plugins
+                .iter()
+                .rev()
+                .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+        )
     }
 
     /// Create a test service.

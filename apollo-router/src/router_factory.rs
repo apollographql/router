@@ -58,8 +58,9 @@ impl Endpoint {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
-                    .oneshot(req)
+                    .oneshot(req.into())
                     .await
+                    .map(|res| res.response)
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
                     .into_response())
             }

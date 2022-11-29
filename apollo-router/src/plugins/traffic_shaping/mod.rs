@@ -41,9 +41,9 @@ use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::router;
 use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
+use crate::services::supergraph;
 use crate::Configuration;
 use crate::SubgraphRequest;
 
@@ -231,27 +231,27 @@ impl TrafficShaping {
         merged_subgraph_config.or_else(|| all_config.cloned())
     }
 
-    pub(crate) fn router_service_internal<S>(
+    pub(crate) fn supergraph_service_internal<S>(
         &self,
         service: S,
     ) -> impl Service<
-        router::Request,
-        Response = router::Response,
+        supergraph::Request,
+        Response = supergraph::Response,
         Error = BoxError,
         Future = timeout::future::ResponseFuture<
-            Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, router::Request>,
+            Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, supergraph::Request>,
         >,
     > + Clone
            + Send
            + Sync
            + 'static
     where
-        S: Service<router::Request, Response = router::Response, Error = BoxError>
+        S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
             + Clone
             + Send
             + Sync
             + 'static,
-        <S as Service<router::Request>>::Future: std::marker::Send,
+        <S as Service<supergraph::Request>>::Future: std::marker::Send,
     {
         ServiceBuilder::new()
             .layer(TimeoutLayer::new(
@@ -663,7 +663,7 @@ mod test {
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
-            .router_service_internal(mock_service.clone())
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()
@@ -675,7 +675,7 @@ mod test {
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
-            .router_service_internal(mock_service.clone())
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
@@ -688,7 +688,7 @@ mod test {
             .as_any()
             .downcast_ref::<TrafficShaping>()
             .unwrap()
-            .router_service_internal(mock_service.clone())
+            .supergraph_service_internal(mock_service.clone())
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .unwrap()

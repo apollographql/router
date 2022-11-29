@@ -235,6 +235,11 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
@@ -265,6 +270,10 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        self.router_service(service)
+    }
+
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         self.supergraph_service(service)
     }
