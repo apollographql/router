@@ -1,0 +1,93 @@
+---
+source: apollo-router/tests/redis_test.rs
+expression: query_plan
+---
+{
+  "Ok": {
+    "Plan": {
+      "plan": {
+        "usage_reporting": {
+          "statsReportKey": "# -\n{topProducts{name name}}",
+          "referencedFieldsByType": {
+            "Product": {
+              "fieldNames": [
+                "name"
+              ],
+              "isInterface": false
+            },
+            "Query": {
+              "fieldNames": [
+                "topProducts"
+              ],
+              "isInterface": false
+            }
+          }
+        },
+        "root": {
+          "kind": "Fetch",
+          "serviceName": "products",
+          "variableUsages": [],
+          "operation": "{topProducts{name name2:name}}",
+          "operationName": null,
+          "operationKind": "query",
+          "id": null
+        },
+        "formatted_query_plan": "QueryPlan {\n  Fetch(service: \"products\") {\n    {\n      topProducts {\n        name\n        name2: name\n      }\n    }\n  },\n}",
+        "query": {
+          "string": "{ topProducts { name name2:name } }",
+          "fragments": {
+            "map": {}
+          },
+          "operations": [
+            {
+              "name": null,
+              "kind": "query",
+              "selection_set": [
+                {
+                  "Field": {
+                    "name": "topProducts",
+                    "alias": null,
+                    "selection_set": [
+                      {
+                        "Field": {
+                          "name": "name",
+                          "alias": null,
+                          "selection_set": null,
+                          "field_type": "String",
+                          "skip": "No",
+                          "include": "Yes"
+                        }
+                      },
+                      {
+                        "Field": {
+                          "name": "name",
+                          "alias": "name2",
+                          "selection_set": null,
+                          "field_type": "String",
+                          "skip": "No",
+                          "include": "Yes"
+                        }
+                      }
+                    ],
+                    "field_type": {
+                      "List": {
+                        "Named": "Product"
+                      }
+                    },
+                    "skip": "No",
+                    "include": "Yes"
+                  }
+                }
+              ],
+              "variables": {}
+            }
+          ],
+          "subselections": {}
+        },
+        "options": {
+          "enable_deduplicate_variables": false
+        }
+      }
+    }
+  }
+}
