@@ -8,6 +8,7 @@ use bytes::Buf;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
+use http::Method;
 use http::StatusCode;
 use hyper::body;
 use indexmap::IndexMap;
@@ -92,13 +93,19 @@ impl Service<RouterRequest> for RouterService {
         // TODO[igni]: deal with errors
         let (parts, body) = router_request.into_parts();
         let fut = async move {
-            let bytes = hyper::body::to_bytes(body).await.unwrap();
+            let graphql_request = if parts.method == Method::GET {
+                parts
+                    .uri
+                    .query()
+                    .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
+                    .unwrap()
+            } else {
+                let bytes = hyper::body::to_bytes(body).await.unwrap();
+                serde_json::from_reader(bytes.reader()).unwrap()
+            };
 
             let request = SupergraphRequest {
-                supergraph_request: http::Request::from_parts(
-                    parts,
-                    serde_json::from_reader(bytes.reader()).unwrap(),
-                ),
+                supergraph_request: http::Request::from_parts(parts, graphql_request),
                 context,
             };
 
