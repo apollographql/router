@@ -9,7 +9,6 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
 
-#[cfg(feature = "experimental_cache")]
 use super::redis::*;
 
 pub(crate) trait KeyType:
@@ -46,7 +45,6 @@ where
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     inner: Arc<Mutex<LruCache<K, V>>>,
-    #[cfg(feature = "experimental_cache")]
     redis: Option<RedisCacheStorage>,
 }
 
@@ -57,18 +55,17 @@ where
 {
     pub(crate) async fn new(
         max_capacity: usize,
-        _redis_urls: Option<Vec<String>>,
-        _caller: &str,
+        redis_urls: Option<Vec<String>>,
+        caller: &str,
     ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            #[cfg(feature = "experimental_cache")]
-            redis: if let Some(urls) = _redis_urls {
+            redis: if let Some(urls) = redis_urls {
                 match RedisCacheStorage::new(urls).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
-                            _caller,
+                            caller,
                             e
                         );
                         None
@@ -85,7 +82,6 @@ where
         let mut guard = self.inner.lock().await;
         match guard.get(key) {
             Some(v) => Some(v.clone()),
-            #[cfg(feature = "experimental_cache")]
             None => {
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
@@ -100,15 +96,12 @@ where
                     None
                 }
             }
-            #[cfg(not(feature = "experimental_cache"))]
-            None => None,
         }
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.inner.lock().await.put(key.clone(), value.clone());
 
-        #[cfg(feature = "experimental_cache")]
         if let Some(redis) = self.redis.as_ref() {
             redis.insert(RedisKey(key), RedisValue(value)).await;
         }

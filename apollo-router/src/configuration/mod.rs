@@ -569,7 +569,6 @@ pub(crate) struct QueryPlanning {
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
-    #[cfg(feature = "experimental_cache")]
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<RedisCache>,
 }
@@ -590,7 +589,6 @@ impl Default for InMemoryCache {
     }
 }
 
-#[cfg(feature = "experimental_cache")]
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration

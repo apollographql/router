@@ -9,7 +9,6 @@ use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
 
-#[cfg(feature = "experimental_cache")]
 mod redis;
 pub(crate) mod storage;
 
@@ -50,10 +49,7 @@ where
     ) -> Self {
         Self::with_capacity(
             config.in_memory.limit,
-            #[cfg(feature = "experimental_cache")]
             config.redis.as_ref().map(|c| c.urls.clone()),
-            #[cfg(not(feature = "experimental_cache"))]
-            None,
             caller,
         )
         .await
