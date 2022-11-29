@@ -1,0 +1,39 @@
+version: '2'
+services:
+  redis-node-0:
+    image: docker.io/bitnami/redis-cluster:7.0
+    volumes:
+      - redis-cluster_data-0:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=router'
+      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2'
+    ports:
+      - 6379:6379
+
+  redis-node-1:
+    image: docker.io/bitnami/redis-cluster:7.0
+    volumes:
+      - redis-cluster_data-1:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=router'
+      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2'
+    ports:
+      - 6380:6379
+
+  redis-node-2:
+    image: docker.io/bitnami/redis-cluster:7.0
+    volumes:
+      - redis-cluster_data-2:/bitnami/redis/data
+    environment:
+      - 'REDIS_PASSWORD=router'
+      - 'REDIS_NODES=redis-node-0 redis-node-1 redis-node-2'
+    ports:
+      - 6381:6379
+
+volumes:
+  redis-cluster_data-0:
+    driver: local
+  redis-cluster_data-1:
+    driver: local
+  redis-cluster_data-2:
+    driver: local
