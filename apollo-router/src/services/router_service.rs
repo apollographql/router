@@ -92,6 +92,8 @@ where
             router_request,
             context,
         } = req;
+
+        // TODO[igni]: deal with errors
         let (parts, body) = router_request.into_parts();
         let fut = async move {
             let bytes = hyper::body::to_bytes(body).await.unwrap();
