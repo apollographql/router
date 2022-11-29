@@ -43,7 +43,7 @@ mod test {
         let mut connection = client.get_connection().await.expect("got redis connection");
 
         let s:String = connection
-          .get("plan\05abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\0{ topProducts { name name2:name } }\0-")
+          .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
         let query_plan: serde_json::Value = serde_json::from_str(&s).unwrap();
@@ -79,9 +79,10 @@ mod test {
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
-        let _: () = connection.del(&format!("apq\0{query_hash}")).await.unwrap();
-        //let apq_query: serde_json::Value = serde_json::from_str(&s).unwrap();
-        //insta::assert_json_snapshot!(apq_query);
+        connection
+            .del::<String, ()>(format!("apq\x00{query_hash}"))
+            .await
+            .unwrap();
 
         let persisted = json!({
             "version" : 1,
@@ -101,7 +102,10 @@ mod test {
 
         println!("got res: {:?}", res);
 
-        let r: Option<String> = connection.get(&format!("apq\0{query_hash}")).await.unwrap();
+        let r: Option<String> = connection
+            .get(&format!("apq\x00{query_hash}"))
+            .await
+            .unwrap();
         assert!(r.is_none());
 
         // Now we register the query
@@ -118,7 +122,10 @@ mod test {
         assert!(res.errors.is_empty());
         println!("got res: {:?}", res);
 
-        let s: Option<String> = connection.get(&format!("apq\0{query_hash}")).await.unwrap();
+        let s: Option<String> = connection
+            .get(&format!("apq\x00{query_hash}"))
+            .await
+            .unwrap();
         insta::assert_display_snapshot!(s.unwrap());
 
         // we start a new router with the same config
@@ -139,15 +146,14 @@ mod test {
     }
 
     async fn setup_router(config: serde_json::Value) -> supergraph::BoxCloneService {
-        let router = apollo_router::TestHarness::builder()
+        apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
             .configuration_json(config)
             .unwrap()
             .schema(include_str!("fixtures/supergraph.graphql"))
             .build()
             .await
-            .unwrap();
-        router
+            .unwrap()
     }
 
     async fn query_with_router(
