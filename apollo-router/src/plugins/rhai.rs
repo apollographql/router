@@ -964,6 +964,7 @@ struct ErrorDetails {
     status: StatusCode,
     message: String,
     position: Option<Position>,
+    // Add support for extension_code ?
 }
 
 impl fmt::Display for ErrorDetails {

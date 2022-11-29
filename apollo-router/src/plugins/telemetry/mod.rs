@@ -1646,6 +1646,7 @@ mod tests {
                         Error::builder()
                             .message(String::from("an error occured"))
                             .extensions(extension)
+                            .extension_code("FETCH_ERROR")
                             .build(),
                     )
                     .build())
@@ -1712,8 +1713,8 @@ mod tests {
                                     "errors": {
                                         "include_messages": true,
                                         "extensions": [{
-                                            "name": "subgraph_error_extended_type",
-                                            "path": ".type"
+                                            "name": "subgraph_error_extended_code",
+                                            "path": ".code"
                                         }, {
                                             "name": "message",
                                             "path": ".reason"
@@ -1868,7 +1869,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
         let prom_metrics = String::from_utf8_lossy(&body);
-        assert!(prom_metrics.contains(r#"apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_type="SubrequestHttpError"} 1"#));
+        assert!(prom_metrics.contains(r#"apollo_router_http_requests_error_total{message="cannot contact the subgraph",service_name="apollo-router",subgraph="my_subgraph_name_error",subgraph_error_extended_code="SUBREQUEST_HTTP_ERROR"} 1"#));
         assert!(prom_metrics.contains(r#"apollo_router_http_requests_total{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"} 1"#));
         assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_count{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header"}"#));
         assert!(prom_metrics.contains(r#"apollo_router_http_request_duration_seconds_bucket{another_test="my_default_value",my_value="2",myname="label_value",renamed_value="my_value_set",service_name="apollo-router",status="200",x_custom="coming_from_header",le="0.001"}"#));

@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use displaydoc::Display;
+use heck::ToShoutySnakeCase;
 use lazy_static::__Deref;
 use miette::Diagnostic;
 use miette::NamedSource;
@@ -18,6 +19,7 @@ use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
+use crate::graphql::ErrorExtensionType;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::json_ext::Path;
@@ -28,8 +30,8 @@ use crate::spec::SpecError;
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
 /// [`struct@Error`].
-#[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Error, Display, Debug, Clone, Serialize)]
+#[serde(untagged)]
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
@@ -113,7 +115,12 @@ pub(crate) enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
-        let value: Value = serde_json::to_value(self).unwrap().into();
+        let mut value: Value = serde_json::to_value(self).unwrap_or_default().into();
+        if let Some(extensions) = value.as_object_mut() {
+            extensions
+                .entry("code")
+                .or_insert_with(|| self.extension_code().into());
+        }
 
         Error {
             message: self.to_string(),
@@ -129,6 +136,28 @@ impl FetchError {
             errors: vec![self.to_graphql_error(None)],
             ..Response::default()
         }
+    }
+}
+
+impl ErrorExtensionType for FetchError {
+    fn extension_code(&self) -> String {
+        match self {
+            FetchError::ValidationUnknownServiceError { .. } => "ValidationUnknownServiceError",
+            FetchError::ValidationInvalidTypeVariable { .. } => "ValidationInvalidTypeVariable",
+            FetchError::ValidationPlanningError { .. } => "ValidationPlanningError",
+            FetchError::MalformedResponse { .. } => "MalformedResponse",
+            FetchError::SubrequestNoResponse { .. } => "SubrequestNoResponse",
+            FetchError::SubrequestMalformedResponse { .. } => "SubrequestMalformedResponse",
+            FetchError::SubrequestUnexpectedPatchResponse { .. } => {
+                "SubrequestUnexpectedPatchResponse"
+            }
+            FetchError::SubrequestHttpError { .. } => "SubrequestHttpError",
+            FetchError::ExecutionFieldNotFound { .. } => "ExecutionFieldNotFound",
+            FetchError::ExecutionInvalidContent { .. } => "ExecutionInvalidContent",
+            FetchError::ExecutionPathNotFound { .. } => "ExecutionPathNotFound",
+            FetchError::CompressionError { .. } => "CompressionError",
+        }
+        .to_shouty_snake_case()
     }
 }
 
@@ -205,10 +234,10 @@ pub(crate) enum QueryPlannerError {
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            QueryPlannerError::SpecError(err) => Ok(vec![Error {
-                message: err.to_string(),
-                ..Default::default()
-            }]),
+            QueryPlannerError::SpecError(err) => Ok(vec![Error::builder()
+                .message(err.to_string())
+                .extension_code(err.extension_code())
+                .build()]),
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
@@ -219,6 +248,23 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 .collect()),
             err => Err(err),
         }
+    }
+}
+
+impl ErrorExtensionType for QueryPlannerError {
+    fn extension_code(&self) -> String {
+        match self {
+            QueryPlannerError::SchemaValidationErrors(_) => "SchemaValidationErrors",
+            QueryPlannerError::PlanningErrors(_) => "PlanningErrors",
+            QueryPlannerError::JoinError(_) => "JoinError",
+            QueryPlannerError::CacheResolverError(_) => "CacheResolverError",
+            QueryPlannerError::EmptyPlan(_) => "EmptyPlan",
+            QueryPlannerError::UnhandledPlannerResult => "UnhandledPlannerResult",
+            QueryPlannerError::RouterBridgeError(_) => "RouterBridgeError",
+            QueryPlannerError::SpecError(_) => "SpecError",
+            QueryPlannerError::Introspection(_) => "Introspection",
+        }
+        .to_shouty_snake_case()
     }
 }
 

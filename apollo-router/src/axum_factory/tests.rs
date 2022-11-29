@@ -1934,18 +1934,22 @@ async fn test_defer_is_not_buffered() {
                 },
                 "errors": [
                     {
-                        "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}"
+                        "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}",
+                        "extensions": {
+                            "code": "FETCH_ERROR"
+                        }
                     },
                     {
                         "message": "Subgraph response from 'reviews' was missing key `_entities`",
-                        "path": [ "topProducts", "@" ]
+                        "path": [ "topProducts", "@" ],
+                        "extensions": {
+                            "code": "PARSE_ERROR"
+                        }
                     }],
                 "hasNext": true,
             },
             {"hasNext": false}
-        ]),
-        "{}",
-        serde_json::to_string(&parts).unwrap()
+        ])
     );
 
     // Non-regression test for https://github.com/apollographql/router/issues/1572

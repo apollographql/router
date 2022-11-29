@@ -11,6 +11,7 @@ mod selection;
 use displaydoc::Display;
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
+use heck::ToShoutySnakeCase;
 pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
 pub(crate) use schema::Schema;
@@ -18,6 +19,8 @@ pub(crate) use selection::*;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
+
+use crate::graphql::ErrorExtensionType;
 
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
@@ -41,5 +44,18 @@ impl SpecError {
             SpecError::ParsingError(_) => "## GraphQLParseFailure\n",
             _ => "## GraphQLValidationFailure\n",
         }
+    }
+}
+
+impl ErrorExtensionType for SpecError {
+    fn extension_code(&self) -> String {
+        match self {
+            SpecError::RecursionLimitExceeded => "RecursionLimitExceeded",
+            SpecError::InvalidType(_) => "InvalidType",
+            SpecError::InvalidField(_, _) => "InvalidField",
+            SpecError::ParsingError(_) => "ParsingError",
+            SpecError::SubscriptionNotSupported => "SubscriptionNotSupported",
+        }
+        .to_shouty_snake_case()
     }
 }

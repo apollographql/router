@@ -171,6 +171,7 @@ dependencies = [
  "flate2",
  "futures",
  "graphql_client",
+ "heck 0.4.0",
  "hex",
  "http",
  "http-body",
