@@ -34,11 +34,8 @@ use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::services::layers::apq::APQLayer;
 use crate::services::router;
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::RouterRequest;
 use crate::RouterResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 pub(super) async fn handle_get_with_static(
     static_page: Bytes,
@@ -50,21 +47,9 @@ pub(super) async fn handle_get_with_static(
     if prefers_html(http_request.headers()) {
         return Html(static_page).into_response();
     }
-
-    if let Some(request) = http_request
-        .uri()
-        .query()
-        .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-    {
-        let mut http_request = http_request.map(|_| request);
-        *http_request.uri_mut() = Uri::from_str(&format!("http://{}{}", host, http_request.uri()))
-            .expect("the URL is already valid because it comes from axum; qed");
-        return run_graphql_request(service, apq, http_request)
-            .await
-            .into_response();
-    }
-
-    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response()
+    run_graphql_request(service, apq, http_request)
+        .await
+        .into_response()
 }
 
 pub(super) async fn handle_get(
