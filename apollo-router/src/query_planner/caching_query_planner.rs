@@ -190,7 +190,7 @@ impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "plan|{}|{}|{}",
+            "plan\0{}\0{}\0{}",
             self.schema_id.as_deref().unwrap_or("-"),
             self.query,
             self.operation.as_deref().unwrap_or("-")
