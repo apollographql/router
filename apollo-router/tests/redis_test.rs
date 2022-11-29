@@ -10,6 +10,19 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() {
+        let client = Client::open(vec![
+            "redis://:router@127.0.0.1:6379",
+            "redis://:router@127.0.0.1:6380",
+            "redis://:router@127.0.0.1:6381",
+        ])
+        .expect("opening ClusterClient");
+        let mut connection = client.get_connection().await.expect("got redis connection");
+
+        connection
+        .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
+          .await
+          .unwrap();
+
         let router = setup_router(json!({
             "supergraph": {
                 "query_planning": {
@@ -34,13 +47,6 @@ mod test {
         let res = query_with_router(router.clone(), request).await;
 
         println!("got res: {:?}", res);
-        let client = Client::open(vec![
-            "redis://:router@127.0.0.1:6379",
-            "redis://:router@127.0.0.1:6380",
-            "redis://:router@127.0.0.1:6381",
-        ])
-        .expect("opening ClusterClient");
-        let mut connection = client.get_connection().await.expect("got redis connection");
 
         let s:String = connection
           .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
@@ -52,6 +58,14 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() {
+        let client = Client::open(vec![
+            "redis://:router@127.0.0.1:6379",
+            "redis://:router@127.0.0.1:6380",
+            "redis://:router@127.0.0.1:6381",
+        ])
+        .expect("opening ClusterClient");
+        let mut connection = client.get_connection().await.expect("got redis connection");
+
         let config = json!({
             "supergraph": {
                 "apq": {
@@ -68,14 +82,6 @@ mod test {
         });
 
         let router = setup_router(config.clone()).await;
-
-        let client = Client::open(vec![
-            "redis://:router@127.0.0.1:6379",
-            "redis://:router@127.0.0.1:6380",
-            "redis://:router@127.0.0.1:6381",
-        ])
-        .expect("opening ClusterClient");
-        let mut connection = client.get_connection().await.expect("got redis connection");
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
