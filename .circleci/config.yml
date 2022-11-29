@@ -250,6 +250,9 @@ commands:
           condition:
             equal: [linux_amd, << parameters.os >>]
           steps:
+            - run:
+                name: Start Redis cluster
+                command: docker-compose -f dockerfiles/docker-compose-redis.yml up
             - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=6
       - when:
           condition:
