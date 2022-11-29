@@ -17,6 +17,7 @@ mod tests {
     use http::StatusCode;
     use tower::util::ServiceExt;
 
+    #[cfg(not(windows))]
     #[tokio::test]
     async fn test_router_service_adds_timestamp_header() {
         let mut mock_service = test::MockSupergraphService::new();
