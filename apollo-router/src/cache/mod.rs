@@ -26,6 +26,7 @@ where
     K: KeyType + 'static,
     V: ValueType + 'static,
 {
+    #[cfg(test)]
     pub(crate) async fn new() -> Self {
         Self::with_capacity(DEFAULT_CACHE_CAPACITY, None).await
     }
