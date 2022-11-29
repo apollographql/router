@@ -75,6 +75,10 @@ pub struct TestHarness<'a> {
 impl<'a> TestHarness<'a> {
     /// Creates a new builder.
     pub fn builder() -> Self {
+        // Trigger the build of plugins. We won't be using the list here, but do require all
+        // plugins to be built when using the test harness.
+        let _ = crate::plugin::plugins();
+
         Self {
             schema: None,
             configuration: None,
