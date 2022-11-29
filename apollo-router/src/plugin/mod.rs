@@ -113,14 +113,14 @@ impl fmt::Debug for PluginFactory {
 impl PluginFactory {
     /// Create a plugin factory.
     pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
-        let qualified_name = if group == "" {
+        let plugin_factory_name = if group.is_empty() {
             name.to_string()
         } else {
             format!("{}.{}", group, name)
         };
-        println!("CREATING PLUGIN FACTORY: '{}'", qualified_name);
+        tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
-            name: qualified_name,
+            name: plugin_factory_name,
             instance_factory: |configuration, schema| {
                 Box::pin(async move {
                     let init = PluginInit::try_new(configuration.clone(), schema)?;
