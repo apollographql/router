@@ -26,6 +26,19 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
+### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
+
+This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
+
+This is marked as a "breaking" change, because any existing rust plugins will need to add:
+
+```
+linkme = "0.3"
+```
+to their list of `Cargo.toml` dependencies. No router interfaces are incompatibly changed by this.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
+
 ### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
 
 From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
