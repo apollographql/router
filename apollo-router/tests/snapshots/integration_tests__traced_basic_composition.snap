@@ -153,10 +153,6 @@ expression: get_spans()
                 "internal"
               ],
               [
-                "ftv1.do_not_sample_reason",
-                ""
-              ],
-              [
                 "message",
                 "dropping telemetry..."
               ]
@@ -170,8 +166,7 @@ expression: get_spans()
                 "names": [
                   "graphql.document",
                   "graphql.operation.name",
-                  "otel.kind",
-                  "ftv1.do_not_sample_reason"
+                  "otel.kind"
                 ]
               }
             }
@@ -399,7 +394,7 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "apollo_private.path",
+                        "path",
                         "/topProducts/@"
                       ]
                     ],
@@ -410,7 +405,7 @@ expression: get_spans()
                       "module_path": "apollo_router::query_planner::execution",
                       "fields": {
                         "names": [
-                          "apollo_private.path"
+                          "path"
                         ]
                       }
                     }
@@ -640,7 +635,7 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "apollo_private.path",
+                            "path",
                             "/topProducts/@/reviews/@/product"
                           ]
                         ],
@@ -651,7 +646,7 @@ expression: get_spans()
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "apollo_private.path"
+                              "path"
                             ]
                           }
                         }
@@ -866,7 +861,7 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "apollo_private.path",
+                            "path",
                             "/topProducts/@/reviews/@/author"
                           ]
                         ],
@@ -877,7 +872,7 @@ expression: get_spans()
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "apollo_private.path"
+                              "path"
                             ]
                           }
                         }

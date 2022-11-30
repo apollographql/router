@@ -238,6 +238,12 @@ supergraph:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
 
+### `@defer` Apollo tracing support ([Issue #1600](https://github.com/apollographql/router/issues/1600))
+
+Added Apollo tracing support for queries that use `@defer`. You can now view traces in Apollo Studio as normal.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2190
+
 ## 🐛 Fixes
 
 ### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))

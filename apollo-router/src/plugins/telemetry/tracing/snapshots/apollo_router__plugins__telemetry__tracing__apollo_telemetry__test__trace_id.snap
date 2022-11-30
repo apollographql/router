@@ -1,0 +1,598 @@
+---
+source: apollo-router/src/plugins/telemetry/tracing/apollo_telemetry.rs
+expression: report
+---
+Traces:
+  traces:
+    - - "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}"
+      - start_time:
+          seconds: 1669889687
+          nanos: 752748920
+        end_time:
+          seconds: 1669889687
+          nanos: 943291968
+        duration_ns: 63124634
+        root: ~
+        is_incomplete: false
+        signature: ""
+        unexecuted_operation_body: ""
+        unexecuted_operation_name: ""
+        details:
+          variables_json: {}
+          operation_name: ""
+        client_name: ""
+        client_version: ""
+        http:
+          method: 4
+          request_headers:
+            accept:
+              value:
+                - ""
+            content-length:
+              value:
+                - ""
+            content-type:
+              value:
+                - ""
+            host:
+              value:
+                - ""
+            user-agent:
+              value:
+                - ""
+          response_headers:
+            trace_id:
+              value:
+                - 339b696e9d17212c0cab33a94c7242c5
+          status_code: 0
+        cache_policy: ~
+        query_plan:
+          node:
+            Condition:
+              condition: if
+              if_clause:
+                node:
+                  Defer:
+                    primary:
+                      node:
+                        node:
+                          Fetch:
+                            service_name: products
+                            trace_parsing_failed: false
+                            trace:
+                              start_time:
+                                seconds: 1669889687
+                                nanos: 794000000
+                              end_time:
+                                seconds: 1669889687
+                                nanos: 794000000
+                              duration_ns: 784177
+                              root:
+                                original_field_name: ""
+                                type: ""
+                                parent_type: ""
+                                cache_policy: ~
+                                start_time: 0
+                                end_time: 0
+                                error: []
+                                child:
+                                  - original_field_name: ""
+                                    type: "[Product]"
+                                    parent_type: Query
+                                    cache_policy: ~
+                                    start_time: 350743
+                                    end_time: 493944
+                                    error: []
+                                    child:
+                                      - original_field_name: ""
+                                        type: ""
+                                        parent_type: ""
+                                        cache_policy: ~
+                                        start_time: 0
+                                        end_time: 0
+                                        error: []
+                                        child:
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: 562659
+                                            end_time: 583693
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
+                                          - original_field_name: ""
+                                            type: String!
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: 600586
+                                            end_time: 609457
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: upc
+                                        id:
+                                          Index: 0
+                                      - original_field_name: ""
+                                        type: ""
+                                        parent_type: ""
+                                        cache_policy: ~
+                                        start_time: 0
+                                        end_time: 0
+                                        error: []
+                                        child:
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: 633111
+                                            end_time: 640651
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
+                                          - original_field_name: ""
+                                            type: String!
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: 651537
+                                            end_time: 657500
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: upc
+                                        id:
+                                          Index: 1
+                                      - original_field_name: ""
+                                        type: ""
+                                        parent_type: ""
+                                        cache_policy: ~
+                                        start_time: 0
+                                        end_time: 0
+                                        error: []
+                                        child:
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: 677060
+                                            end_time: 682744
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
+                                          - original_field_name: ""
+                                            type: String!
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: 688877
+                                            end_time: 697275
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: upc
+                                        id:
+                                          Index: 2
+                                    id:
+                                      ResponseName: topProducts
+                                id: ~
+                              is_incomplete: false
+                              signature: ""
+                              unexecuted_operation_body: ""
+                              unexecuted_operation_name: ""
+                              details: ~
+                              client_name: ""
+                              client_version: ""
+                              http: ~
+                              cache_policy: ~
+                              query_plan: ~
+                              full_query_cache_hit: false
+                              persisted_query_hit: false
+                              persisted_query_register: false
+                              registered_operation: false
+                              forbidden_operation: false
+                              field_execution_weight: 1
+                            sent_time_offset: 2064512
+                            sent_time:
+                              seconds: 1669889687
+                              nanos: 755593491
+                            received_time:
+                              seconds: 1669889687
+                              nanos: 814463456
+                    deferred:
+                      - depends:
+                          - id: "0"
+                            defer_label: ""
+                        label: ""
+                        path: []
+                        node:
+                          node:
+                            Sequence:
+                              nodes:
+                                - node:
+                                    Flatten:
+                                      response_path: []
+                                      node:
+                                        node:
+                                          Fetch:
+                                            service_name: reviews
+                                            trace_parsing_failed: false
+                                            trace:
+                                              start_time:
+                                                seconds: 1669889687
+                                                nanos: 860000000
+                                              end_time:
+                                                seconds: 1669889687
+                                                nanos: 867000000
+                                              duration_ns: 6005878
+                                              root:
+                                                original_field_name: ""
+                                                type: ""
+                                                parent_type: ""
+                                                cache_policy: ~
+                                                start_time: 0
+                                                end_time: 0
+                                                error: []
+                                                child:
+                                                  - original_field_name: ""
+                                                    type: "[_Entity]!"
+                                                    parent_type: Query
+                                                    cache_policy: ~
+                                                    start_time: 2932541
+                                                    end_time: 3488078
+                                                    error: []
+                                                    child:
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: "[Review]"
+                                                            parent_type: Product
+                                                            cache_policy: ~
+                                                            start_time: 3693575
+                                                            end_time: 4527824
+                                                            error: []
+                                                            child:
+                                                              - original_field_name: ""
+                                                                type: ""
+                                                                parent_type: ""
+                                                                cache_policy: ~
+                                                                start_time: 0
+                                                                end_time: 0
+                                                                error: []
+                                                                child:
+                                                                  - original_field_name: ""
+                                                                    type: User
+                                                                    parent_type: Review
+                                                                    cache_policy: ~
+                                                                    start_time: 4597341
+                                                                    end_time: 5459524
+                                                                    error: []
+                                                                    child:
+                                                                      - original_field_name: ""
+                                                                        type: ID!
+                                                                        parent_type: User
+                                                                        cache_policy: ~
+                                                                        start_time: 5570216
+                                                                        end_time: 5599387
+                                                                        error: []
+                                                                        child: []
+                                                                        id:
+                                                                          ResponseName: id
+                                                                    id:
+                                                                      ResponseName: author
+                                                                id:
+                                                                  Index: 0
+                                                              - original_field_name: ""
+                                                                type: ""
+                                                                parent_type: ""
+                                                                cache_policy: ~
+                                                                start_time: 0
+                                                                end_time: 0
+                                                                error: []
+                                                                child:
+                                                                  - original_field_name: ""
+                                                                    type: User
+                                                                    parent_type: Review
+                                                                    cache_policy: ~
+                                                                    start_time: 4838978
+                                                                    end_time: 5607133
+                                                                    error: []
+                                                                    child:
+                                                                      - original_field_name: ""
+                                                                        type: ID!
+                                                                        parent_type: User
+                                                                        cache_policy: ~
+                                                                        start_time: 5622455
+                                                                        end_time: 5639696
+                                                                        error: []
+                                                                        child: []
+                                                                        id:
+                                                                          ResponseName: id
+                                                                    id:
+                                                                      ResponseName: author
+                                                                id:
+                                                                  Index: 1
+                                                            id:
+                                                              ResponseName: reviews
+                                                        id:
+                                                          Index: 0
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: "[Review]"
+                                                            parent_type: Product
+                                                            cache_policy: ~
+                                                            start_time: 3909794
+                                                            end_time: 4991206
+                                                            error: []
+                                                            child:
+                                                              - original_field_name: ""
+                                                                type: ""
+                                                                parent_type: ""
+                                                                cache_policy: ~
+                                                                start_time: 0
+                                                                end_time: 0
+                                                                error: []
+                                                                child:
+                                                                  - original_field_name: ""
+                                                                    type: User
+                                                                    parent_type: Review
+                                                                    cache_policy: ~
+                                                                    start_time: 5025853
+                                                                    end_time: 5644192
+                                                                    error: []
+                                                                    child:
+                                                                      - original_field_name: ""
+                                                                        type: ID!
+                                                                        parent_type: User
+                                                                        cache_policy: ~
+                                                                        start_time: 5665477
+                                                                        end_time: 5680785
+                                                                        error: []
+                                                                        child: []
+                                                                        id:
+                                                                          ResponseName: id
+                                                                    id:
+                                                                      ResponseName: author
+                                                                id:
+                                                                  Index: 0
+                                                            id:
+                                                              ResponseName: reviews
+                                                        id:
+                                                          Index: 1
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: "[Review]"
+                                                            parent_type: Product
+                                                            cache_policy: ~
+                                                            start_time: 4207856
+                                                            end_time: 5214904
+                                                            error: []
+                                                            child:
+                                                              - original_field_name: ""
+                                                                type: ""
+                                                                parent_type: ""
+                                                                cache_policy: ~
+                                                                start_time: 0
+                                                                end_time: 0
+                                                                error: []
+                                                                child:
+                                                                  - original_field_name: ""
+                                                                    type: User
+                                                                    parent_type: Review
+                                                                    cache_policy: ~
+                                                                    start_time: 5254081
+                                                                    end_time: 5691578
+                                                                    error: []
+                                                                    child:
+                                                                      - original_field_name: ""
+                                                                        type: ID!
+                                                                        parent_type: User
+                                                                        cache_policy: ~
+                                                                        start_time: 5739015
+                                                                        end_time: 5754897
+                                                                        error: []
+                                                                        child: []
+                                                                        id:
+                                                                          ResponseName: id
+                                                                    id:
+                                                                      ResponseName: author
+                                                                id:
+                                                                  Index: 0
+                                                            id:
+                                                              ResponseName: reviews
+                                                        id:
+                                                          Index: 2
+                                                    id:
+                                                      ResponseName: _entities
+                                                id: ~
+                                              is_incomplete: false
+                                              signature: ""
+                                              unexecuted_operation_body: ""
+                                              unexecuted_operation_name: ""
+                                              details: ~
+                                              client_name: ""
+                                              client_version: ""
+                                              http: ~
+                                              cache_policy: ~
+                                              query_plan: ~
+                                              full_query_cache_hit: false
+                                              persisted_query_hit: false
+                                              persisted_query_register: false
+                                              registered_operation: false
+                                              forbidden_operation: false
+                                              field_execution_weight: 1
+                                            sent_time_offset: 61661177
+                                            sent_time:
+                                              seconds: 1669889687
+                                              nanos: 815176886
+                                            received_time:
+                                              seconds: 1669889687
+                                              nanos: 891210939
+                                - node:
+                                    Flatten:
+                                      response_path: []
+                                      node:
+                                        node:
+                                          Fetch:
+                                            service_name: accounts
+                                            trace_parsing_failed: false
+                                            trace:
+                                              start_time:
+                                                seconds: 1669889687
+                                                nanos: 921000000
+                                              end_time:
+                                                seconds: 1669889687
+                                                nanos: 922000000
+                                              duration_ns: 568841
+                                              root:
+                                                original_field_name: ""
+                                                type: ""
+                                                parent_type: ""
+                                                cache_policy: ~
+                                                start_time: 0
+                                                end_time: 0
+                                                error: []
+                                                child:
+                                                  - original_field_name: ""
+                                                    type: "[_Entity]!"
+                                                    parent_type: Query
+                                                    cache_policy: ~
+                                                    start_time: 309661
+                                                    end_time: 415501
+                                                    error: []
+                                                    child:
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: String
+                                                            parent_type: User
+                                                            cache_policy: ~
+                                                            start_time: 452871
+                                                            end_time: 463761
+                                                            error: []
+                                                            child: []
+                                                            id:
+                                                              ResponseName: name
+                                                        id:
+                                                          Index: 0
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: String
+                                                            parent_type: User
+                                                            cache_policy: ~
+                                                            start_time: 483151
+                                                            end_time: 489351
+                                                            error: []
+                                                            child: []
+                                                            id:
+                                                              ResponseName: name
+                                                        id:
+                                                          Index: 1
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: String
+                                                            parent_type: User
+                                                            cache_policy: ~
+                                                            start_time: 498601
+                                                            end_time: 503561
+                                                            error: []
+                                                            child: []
+                                                            id:
+                                                              ResponseName: name
+                                                        id:
+                                                          Index: 2
+                                                      - original_field_name: ""
+                                                        type: ""
+                                                        parent_type: ""
+                                                        cache_policy: ~
+                                                        start_time: 0
+                                                        end_time: 0
+                                                        error: []
+                                                        child:
+                                                          - original_field_name: ""
+                                                            type: String
+                                                            parent_type: User
+                                                            cache_policy: ~
+                                                            start_time: 512121
+                                                            end_time: 515331
+                                                            error: []
+                                                            child: []
+                                                            id:
+                                                              ResponseName: name
+                                                        id:
+                                                          Index: 3
+                                                    id:
+                                                      ResponseName: _entities
+                                                id: ~
+                                              is_incomplete: false
+                                              signature: ""
+                                              unexecuted_operation_body: ""
+                                              unexecuted_operation_name: ""
+                                              details: ~
+                                              client_name: ""
+                                              client_version: ""
+                                              http: ~
+                                              cache_policy: ~
+                                              query_plan: ~
+                                              full_query_cache_hit: false
+                                              persisted_query_hit: false
+                                              persisted_query_register: false
+                                              registered_operation: false
+                                              forbidden_operation: false
+                                              field_execution_weight: 1
+                                            sent_time_offset: 138211218
+                                            sent_time:
+                                              seconds: 1669889687
+                                              nanos: 891727207
+                                            received_time:
+                                              seconds: 1669889687
+                                              nanos: 941912460
+              else_clause: ~
+        full_query_cache_hit: false
+        persisted_query_hit: false
+        persisted_query_register: false
+        registered_operation: false
+        forbidden_operation: false
+        field_execution_weight: 1
+
