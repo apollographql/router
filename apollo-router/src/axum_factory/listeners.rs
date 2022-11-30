@@ -370,7 +370,7 @@ mod tests {
     use crate::axum_factory::tests::MockSupergraphService;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
-    use crate::services::transport;
+    use crate::services::router;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
@@ -393,7 +393,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let endpoint = service_fn(|_req: transport::Request| async move {
+        let endpoint = service_fn(|_req: router::Request| async move {
             Ok::<_, BoxError>(
                 http::Response::builder()
                     .body("this is a test".to_string().into())
@@ -427,7 +427,7 @@ mod tests {
             )
             .build()
             .unwrap();
-        let endpoint = service_fn(|_req: transport::Request| async move {
+        let endpoint = service_fn(|_req: router::Request| async move {
             Ok::<_, BoxError>(
                 http::Response::builder()
                     .body("this is a test".to_string().into())

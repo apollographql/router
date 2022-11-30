@@ -221,15 +221,14 @@ impl<'a> TestHarness<'a> {
 
     #[cfg(test)]
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_factory::make_axum_router;
+        use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::RouterFactory;
 
         let (config, router_creator) = self.build_common().await?;
         let web_endpoints = router_creator.web_endpoints();
-        let apq = APQLayer::new().await;
 
-        let routers = make_axum_router(router_creator, &config, web_endpoints, apq)?;
+        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
     }

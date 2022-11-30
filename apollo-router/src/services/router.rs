@@ -1,9 +1,12 @@
 #![allow(missing_docs)] // FIXME
 
+use super::supergraph;
+use bytes::Bytes;
+use futures::StreamExt;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-use crate::Context;
+use crate::{graphql, Context};
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
@@ -31,6 +34,18 @@ impl From<http::Request<hyper::Body>> for Request {
     }
 }
 
+impl TryFrom<supergraph::Request> for Request {
+    type Error = u32;
+    fn try_from(request: supergraph::Request) -> Result<Self, Self::Error> {
+        Ok(Self {
+            router_request: request
+                .supergraph_request
+                .map(|req| hyper::Body::from(serde_json::to_vec(&req).unwrap())),
+            context: request.context,
+        })
+    }
+}
+
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
@@ -43,6 +58,22 @@ impl From<http::Response<hyper::Body>> for Response {
         Self {
             response,
             context: Context::new(),
+        }
+    }
+}
+
+impl Response {
+    pub async fn next_response(&mut self) -> Option<Result<Bytes, hyper::Error>> {
+        self.response.body_mut().next().await
+    }
+
+    pub fn map<F>(self, f: F) -> Response
+    where
+        F: FnOnce(hyper::Body) -> hyper::Body,
+    {
+        Response {
+            context: self.context,
+            response: self.response.map(f),
         }
     }
 }
