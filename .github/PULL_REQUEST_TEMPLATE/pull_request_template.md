@@ -1,8 +1,8 @@
 ---
-name: Feature
-about: Add new features
+name: Checklist
+about: PR Acceptance Checklist.
 title: ''
-labels: ['triage']
+labels: []
 assignees: ''
 
 ---
