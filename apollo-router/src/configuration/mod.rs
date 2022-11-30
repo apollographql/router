@@ -104,6 +104,9 @@ pub struct Configuration {
     #[serde(default)]
     #[serde(flatten)]
     apollo_plugins: ApolloPlugins,
+
+    #[serde(skip)]
+    license_key: LicenseKey,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -184,6 +187,7 @@ impl Configuration {
             sandbox: sandbox.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
+            license_key: LicenseKey::default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -287,6 +291,10 @@ impl Configuration {
             Err("incompatible telemetry configuration. Telemetry cannot be reloaded and its configuration must stay the same for the entire life of the process")
         }
     }
+
+    pub(crate) fn has_valid_license_key(&self) -> bool {
+        self.license_key.is_valid()
+    }
 }
 
 #[cfg(test)]
@@ -303,6 +311,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        license_key: Option<LicenseKey>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
             server: server.unwrap_or_default(),
@@ -311,6 +320,7 @@ impl Configuration {
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
+            license_key: license_key.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -375,6 +385,31 @@ impl Configuration {
             );
         }
 
+        if !self.has_valid_license_key() {
+            if self.supergraph.apq.experimental_cache.redis.is_some() {
+                return Err(
+                    ConfigurationError::InvalidConfiguration {
+                        message: "Invalid license key",
+                        error: "APQ caching in Redis is only available for routers with a valid license key".to_string(),
+                    },
+                );
+            }
+
+            if self
+                .supergraph
+                .query_planning
+                .experimental_cache
+                .redis
+                .is_some()
+            {
+                return Err(
+                    ConfigurationError::InvalidConfiguration {
+                        message: "Invalid license key",
+                        error: "Query planner caching in Redis is only available for routers with a valid license key".to_string(),
+                    },
+                );
+            }
+        }
         Ok(self)
     }
 }
@@ -841,5 +876,26 @@ fn default_parser_recursion_limit() -> usize {
 impl Default for Server {
     fn default() -> Self {
         Server::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the home page.
+#[derive(Debug, Clone, JsonSchema)]
+pub(crate) struct LicenseKey {
+    pub(crate) apollo_key: Option<String>,
+    pub(crate) apollo_graph_ref: Option<String>,
+}
+
+impl LicenseKey {
+    fn is_valid(&self) -> bool {
+        self.apollo_key.is_some() && self.apollo_graph_ref.is_some()
+    }
+}
+impl Default for LicenseKey {
+    fn default() -> Self {
+        Self {
+            apollo_key: std::env::var("APOLLO_KEY").ok(),
+            apollo_graph_ref: std::env::var("APOLLO_GRAPH_REF").ok(),
+        }
     }
 }
