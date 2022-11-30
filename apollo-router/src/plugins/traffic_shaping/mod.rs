@@ -110,6 +110,9 @@ struct RetryConfig {
     /// retries allowed for via min_per_sec. Must be between 0 and 1000, default value
     /// is 0.2
     retry_percent: Option<f32>,
+    /// allows request retries on mutations. This should only be activated if mutations
+    /// are idempotent. Disabled by default
+    retry_mutations: Option<bool>,
 }
 
 impl Merge for RetryConfig {
@@ -120,6 +123,7 @@ impl Merge for RetryConfig {
                 ttl: self.ttl.or(fallback.ttl),
                 min_per_sec: self.min_per_sec.or(fallback.min_per_sec),
                 retry_percent: self.retry_percent.or(fallback.retry_percent),
+                retry_mutations: self.retry_mutations.or(fallback.retry_mutations),
             },
         }
     }
@@ -318,8 +322,12 @@ impl TrafficShaping {
             });
 
             let retry = config.experimental_retry.as_ref().map(|config| {
-                let retry_policy =
-                    RetryPolicy::new(config.ttl, config.min_per_sec, config.retry_percent);
+                let retry_policy = RetryPolicy::new(
+                    config.ttl,
+                    config.min_per_sec,
+                    config.retry_percent,
+                    config.retry_mutations,
+                );
                 tower::retry::RetryLayer::new(retry_policy)
             });
 

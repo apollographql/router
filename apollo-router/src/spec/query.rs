@@ -209,10 +209,8 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let string = query.into();
 
-        let parser = apollo_parser::Parser::with_recursion_limit(
-            string.as_str(),
-            configuration.server.experimental_parser_recursion_limit,
-        );
+        let parser = apollo_parser::Parser::new(string.as_str())
+            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let tree = parser.parse();
 
         // Trace log recursion limit data
@@ -1112,8 +1110,8 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
 pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
-        ast::Value::StringValue(s) => Some(String::from(s).into()),
-        ast::Value::FloatValue(f) => Some(f64::from(f).into()),
+        ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
+        ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
         ast::Value::IntValue(i) => {
             let s = i.source_string();
             s.parse::<i64>()
@@ -1121,7 +1119,7 @@ pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
                 .map(Into::into)
                 .or_else(|| s.parse::<u64>().ok().map(Into::into))
         }
-        ast::Value::BooleanValue(b) => Some(bool::from(b).into()),
+        ast::Value::BooleanValue(b) => bool::try_from(b).ok().map(Into::into),
         ast::Value::NullValue(_) => Some(Value::Null),
         ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
         ast::Value::ListValue(l) => l
