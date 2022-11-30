@@ -1,6 +1,5 @@
 #![allow(missing_docs)] // FIXME
 
-use hyper::Body;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -35,7 +34,7 @@ impl From<http::Request<hyper::Body>> for Request {
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<Body>,
+    pub response: http::Response<hyper::Body>,
     pub context: Context,
 }
 
