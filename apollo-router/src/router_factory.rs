@@ -20,9 +20,8 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
-use crate::services::RouterCreator;
-use crate::services::RouterRequest;
-use crate::services::RouterResponse;
+use crate::services::router_service::RouterCreator;
+use crate::services::router_service::RouterService;
 use crate::services::SubgraphService;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
@@ -73,10 +72,14 @@ impl Endpoint {
 /// Instances of this traits are used by the HTTP server to generate a new
 /// RouterService on each request
 pub(crate) trait RouterFactory:
-    ServiceFactory<RouterRequest, Service = Self::RouterService> + Clone + Send + Sync + 'static
+    ServiceFactory<router::Request, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
-    type RouterService: Service<RouterRequest, Response = RouterResponse, Error = BoxError, Future = Self::Future>
-        + Send;
+    type RouterService: Service<
+            router::Request,
+            Response = router::Response,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send;
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
@@ -139,9 +142,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         // We're good to go with the new service.
-        let pluggable_router_service = builder.build().await?;
+        let router_creator = builder.build().await?;
 
-        Ok(pluggable_router_service)
+        let router_service = RouterService::new(router_creator);
+
+        let router_service = router_creator.router_service(router_service);
+
+        Ok(router_service)
     }
 }
 

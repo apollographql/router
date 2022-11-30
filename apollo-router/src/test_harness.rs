@@ -14,9 +14,9 @@ use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
 use crate::services::router;
+use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::RouterCreator;
 use crate::Schema;
 
 #[cfg(test)]

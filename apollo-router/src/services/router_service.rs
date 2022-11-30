@@ -10,30 +10,24 @@ use http::Method;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 use tower::util::BoxService;
-use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
 use super::new_service::ServiceFactory;
+use super::router;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
-use super::supergraph;
-use super::ExecutionCreator;
-use super::SupergraphService;
+use super::SupergraphCreator;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
-use crate::plugins::traffic_shaping::TrafficShaping;
-use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::router_factory::Endpoint;
-use crate::router_factory::RouterFactory;
-use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
 use crate::Configuration;
+use crate::Endpoint;
 use crate::ListenAddr;
 use crate::RouterRequest;
 use crate::RouterResponse;
@@ -45,13 +39,14 @@ use crate::SupergraphResponse;
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
+#[derive(Clone)]
 pub(crate) struct RouterService {
-    supergraph_service: supergraph::BoxService,
+    supergraph_creator: SupergraphCreator,
 }
 
 impl RouterService {
-    pub(crate) fn new(supergraph_service: supergraph::BoxService) -> Self {
-        RouterService { supergraph_service }
+    pub(crate) fn new(supergraph_creator: SupergraphCreator) -> Self {
+        RouterService { supergraph_creator }
     }
 }
 
@@ -60,8 +55,8 @@ impl Service<RouterRequest> for RouterService {
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Ok(())
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, req: RouterRequest) -> Self::Future {
@@ -70,10 +65,11 @@ impl Service<RouterRequest> for RouterService {
             context,
         } = req;
 
-        // let clone = self.supergraph_service.clone();
-        // let supergraph_service = std::mem::replace(&mut self.supergraph_service, clone);
-
         let (parts, body) = router_request.into_parts();
+
+        let this = self.clone();
+
+        let supergraph_service = self.supergraph_creator.make();
 
         // TODO[igni]: deal with errors
         //     (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response() will help
@@ -94,10 +90,8 @@ impl Service<RouterRequest> for RouterService {
                 context,
             };
 
-            // todo: factory.create et oneshot.
-
             let SupergraphResponse { response, context } =
-                self.supergraph_service.call(request).await.unwrap();
+                supergraph_service.oneshot(request).await.unwrap();
 
             let (parts, body) = response.into_parts();
 
@@ -208,36 +202,57 @@ impl PluggableRouterServiceBuilder {
             plugins.clone(),
         ));
 
-        Ok(RouterCreator {
+        let supergraph_creator = SupergraphCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
+            plugins: plugins.clone(),
+        };
+
+        Ok(RouterCreator {
+            supergraph_creator,
             plugins,
         })
     }
 }
 
+/// Factory for creating a RouterService
+///
+/// Instances of this traits are used by the HTTP server to generate a new
+/// RouterService on each request
+pub(crate) trait RouterFactory:
+    ServiceFactory<router::Request, Service = Self::RouterService> + Clone + Send + Sync + 'static
+{
+    type RouterService: Service<
+            router::Request,
+            Response = router::Response,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send;
+    type Future: Send;
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+}
+
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
-    query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    subgraph_creator: Arc<SubgraphCreator>,
-    schema: Arc<Schema>,
+    supergraph_creator: SupergraphCreator,
     plugins: Arc<Plugins>,
 }
 
-impl ServiceFactory<RouterRequest> for RouterCreator {
-    type Service = BoxService<RouterRequest, RouterResponse, BoxError>;
+impl ServiceFactory<router::Request> for RouterCreator {
+    type Service = router::BoxService;
     fn create(&self) -> Self::Service {
         self.make().boxed()
     }
 }
 
 impl RouterFactory for RouterCreator {
-    type RouterService = BoxService<RouterRequest, RouterResponse, BoxError>;
+    type RouterService = BoxService<router::Request, router::Response, BoxError>;
 
-    type Future = <<RouterCreator as ServiceFactory<RouterRequest>>::Service as Service<
-        RouterRequest,
+    type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
+        router::Request,
     >>::Future;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
@@ -253,43 +268,12 @@ impl RouterCreator {
     pub(crate) fn make(
         &self,
     ) -> impl Service<
-        RouterRequest,
-        Response = RouterResponse,
+        router::Request,
+        Response = router::Response,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<RouterResponse, BoxError>>,
+        Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let supergraph_service = SupergraphService::builder()
-            .query_planner_service(self.query_planner_service.clone())
-            .execution_service_factory(ExecutionCreator {
-                schema: self.schema.clone(),
-                plugins: self.plugins.clone(),
-                subgraph_creator: self.subgraph_creator.clone(),
-            })
-            .schema(self.schema.clone())
-            .build();
-
-        let supergraph_service = match self
-            .plugins
-            .iter()
-            .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-            .and_then(|plugin| plugin.1.as_any().downcast_ref::<TrafficShaping>())
-        {
-            Some(shaping) => Either::A(shaping.supergraph_service_internal(supergraph_service)),
-            None => Either::B(supergraph_service),
-        };
-
-        let supergraph_service = ServiceBuilder::new()
-            .layer(EnsureQueryPresence::default())
-            .service(
-                self.plugins
-                    .iter()
-                    .rev()
-                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
-                        e.supergraph_service(acc)
-                    }),
-            );
-
-        let router_service = RouterService::new(supergraph_service.boxed());
+        let router_service = RouterService::new(self.supergraph_creator.clone());
 
         ServiceBuilder::new().service(
             self.plugins
@@ -301,9 +285,7 @@ impl RouterCreator {
 
     /// Create a test service.
     #[cfg(test)]
-    pub(crate) fn test_service(
-        &self,
-    ) -> tower::util::BoxCloneService<RouterRequest, RouterResponse, BoxError> {
+    pub(crate) fn test_service(&self) -> router::BoxCloneService {
         use tower::buffer::Buffer;
 
         Buffer::new(self.make(), 512).boxed_clone()

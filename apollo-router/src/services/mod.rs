@@ -16,11 +16,11 @@ pub(crate) use crate::services::query_planner::Request as QueryPlannerRequest;
 pub(crate) use crate::services::query_planner::Response as QueryPlannerResponse;
 pub(crate) use crate::services::router::Request as RouterRequest;
 pub(crate) use crate::services::router::Response as RouterResponse;
-pub(crate) use crate::services::router_service::RouterCreator;
 pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
+pub(crate) use crate::services::supergraph_service::SupergraphCreator;
 
 pub mod execution;
 mod execution_service;
