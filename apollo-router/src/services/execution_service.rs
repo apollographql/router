@@ -100,7 +100,11 @@ where
                         None => false,
                         Some(response_path) => response_path.starts_with(path),
                     }) {
-                        return ready(None);
+                        if response.has_next == Some(false) {
+                            return ready(Some(Response::builder().has_next(false).build()));
+                        } else {
+                            return ready(None);
+                        }
                     }
 
                     let has_next = response.has_next.unwrap_or(true);

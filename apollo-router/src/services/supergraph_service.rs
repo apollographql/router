@@ -910,7 +910,9 @@ mod tests {
         let deferred = response.next_response().await.unwrap();
         insta::assert_json_snapshot!(deferred);
 
-        // the second deferred response was canceled
-        assert_eq!(None, response.next_response().await);
+        // the last deferred response was replace with an empty response,
+        // to still have one containing has_next = false
+        let last = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(last);
     }
 }
