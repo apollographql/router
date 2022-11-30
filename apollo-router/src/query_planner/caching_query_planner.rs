@@ -1,3 +1,5 @@
+// This entire file is license key functionality
+
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;

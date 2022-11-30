@@ -374,6 +374,7 @@ impl Configuration {
                 },
             );
         }
+
         Ok(self)
     }
 }
