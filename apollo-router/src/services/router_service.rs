@@ -67,8 +67,6 @@ impl Service<RouterRequest> for RouterService {
 
         let (parts, body) = router_request.into_parts();
 
-        let this = self.clone();
-
         let supergraph_service = self.supergraph_creator.make();
 
         // TODO[igni]: deal with errors
@@ -202,17 +200,14 @@ impl PluggableRouterServiceBuilder {
             plugins.clone(),
         ));
 
-        let supergraph_creator = SupergraphCreator {
+        let supergraph_creator = SupergraphCreator::new(
             query_planner_service,
             subgraph_creator,
-            schema: self.schema,
-            plugins: plugins.clone(),
-        };
-
-        Ok(RouterCreator {
-            supergraph_creator,
+            self.schema,
             plugins,
-        })
+        );
+
+        Ok(RouterCreator { supergraph_creator })
     }
 }
 
@@ -220,7 +215,6 @@ impl PluggableRouterServiceBuilder {
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
     supergraph_creator: SupergraphCreator,
-    plugins: Arc<Plugins>,
 }
 
 impl ServiceFactory<router::Request> for RouterCreator {
@@ -239,7 +233,8 @@ impl RouterFactory for RouterCreator {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut mm = MultiMap::new();
-        self.plugins
+        self.supergraph_creator
+            .plugins()
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
@@ -247,6 +242,9 @@ impl RouterFactory for RouterCreator {
 }
 
 impl RouterCreator {
+    pub(crate) fn new(supergraph_creator: SupergraphCreator) -> Self {
+        Self { supergraph_creator }
+    }
     pub(crate) fn make(
         &self,
     ) -> impl Service<
@@ -258,7 +256,8 @@ impl RouterCreator {
         let router_service = RouterService::new(self.supergraph_creator.clone());
 
         ServiceBuilder::new().service(
-            self.plugins
+            self.supergraph_creator
+                .plugins()
                 .iter()
                 .rev()
                 .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),

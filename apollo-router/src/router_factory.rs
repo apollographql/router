@@ -21,7 +21,6 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
-use crate::services::router_service::RouterService;
 use crate::services::SubgraphService;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
@@ -144,10 +143,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // We're good to go with the new service.
         let supergraph_creator = builder.build().await?;
 
-        Ok(Self::RouterFactory {
-            supergraph_creator,
-            plugins: Arc::new(plugins.into_iter().collect()),
-        })
+        Ok(Self::RouterFactory::new(supergraph_creator))
     }
 }
 

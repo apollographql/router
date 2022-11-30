@@ -394,6 +394,19 @@ impl ServiceFactory<supergraph::Request> for SupergraphCreator {
 }
 
 impl SupergraphCreator {
+    pub(crate) fn new(
+        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
+        subgraph_creator: Arc<SubgraphCreator>,
+        schema: Arc<Schema>,
+        plugins: Arc<Plugins>,
+    ) -> Self {
+        Self {
+            query_planner_service,
+            subgraph_creator,
+            schema,
+            plugins,
+        }
+    }
     pub(crate) fn make(
         &self,
     ) -> impl Service<
@@ -432,6 +445,10 @@ impl SupergraphCreator {
                         e.supergraph_service(acc)
                     }),
             )
+    }
+
+    pub(crate) fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
     }
 
     /// Create a test service.
