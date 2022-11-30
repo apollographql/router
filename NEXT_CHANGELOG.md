@@ -267,13 +267,17 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-
 ### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
 
 Remove duplicated code.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
 
+### Update apollo-rs ([PR #2177](https://github.com/apollographql/router/pull/2177))
+
+Updates to new apollo-rs APIs, and fixes some potential panics on unexpected user input.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/2177
 
 ## 📚 Documentation
 
