@@ -1,13 +1,11 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::sync::Arc;
 use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use http::Method;
-use indexmap::IndexMap;
 use multimap::MultiMap;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -16,27 +14,15 @@ use tower_service::Service;
 
 use super::new_service::ServiceFactory;
 use super::router;
-use super::subgraph_service::MakeSubgraphService;
-use super::subgraph_service::SubgraphCreator;
 use super::SupergraphCreator;
-use crate::error::ServiceBuildError;
 use crate::graphql;
-use crate::introspection::Introspection;
-use crate::plugin::DynPlugin;
-use crate::query_planner::BridgeQueryPlanner;
-use crate::query_planner::CachingQueryPlanner;
 use crate::router_factory::RouterFactory;
-use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::RouterRequest;
 use crate::RouterResponse;
-use crate::Schema;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
-
-/// An [`IndexMap`] of available plugins.
-pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -102,112 +88,6 @@ impl Service<RouterRequest> for RouterService {
             })
         };
         Box::pin(fut)
-    }
-}
-
-/// Builder which generates a plugin pipeline.
-///
-/// This is at the heart of the delegation of responsibility model for the router. A schema,
-/// collection of plugins, collection of subgraph services are assembled to generate a
-/// [`tower::util::BoxCloneService`] capable of processing a router request
-/// through the entire stack to return a response.
-pub(crate) struct PluggableRouterServiceBuilder {
-    schema: Arc<Schema>,
-    plugins: Plugins,
-    subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
-    configuration: Option<Arc<Configuration>>,
-}
-
-impl PluggableRouterServiceBuilder {
-    pub(crate) fn new(schema: Arc<Schema>) -> Self {
-        Self {
-            schema,
-            plugins: Default::default(),
-            subgraph_services: Default::default(),
-            configuration: None,
-        }
-    }
-
-    pub(crate) fn with_dyn_plugin(
-        mut self,
-        plugin_name: String,
-        plugin: Box<dyn DynPlugin>,
-    ) -> PluggableRouterServiceBuilder {
-        self.plugins.insert(plugin_name, plugin);
-        self
-    }
-
-    pub(crate) fn with_subgraph_service<S>(
-        mut self,
-        name: &str,
-        service_maker: S,
-    ) -> PluggableRouterServiceBuilder
-    where
-        S: MakeSubgraphService,
-    {
-        self.subgraph_services
-            .push((name.to_string(), Arc::new(service_maker)));
-        self
-    }
-
-    pub(crate) fn with_configuration(
-        mut self,
-        configuration: Arc<Configuration>,
-    ) -> PluggableRouterServiceBuilder {
-        self.configuration = Some(configuration);
-        self
-    }
-
-    pub(crate) async fn build(self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
-        // Note: The plugins are always applied in reverse, so that the
-        // fold is applied in the correct sequence. We could reverse
-        // the list of plugins, but we want them back in the original
-        // order at the end of this function. Instead, we reverse the
-        // various iterators that we create for folding and leave
-        // the plugins in their original order.
-
-        let configuration = self.configuration.unwrap_or_default();
-
-        let plan_cache_limit = std::env::var("ROUTER_PLAN_CACHE_LIMIT")
-            .ok()
-            .and_then(|x| x.parse().ok())
-            .unwrap_or(100);
-        let redis_urls = configuration.supergraph.cache();
-
-        let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(&configuration).await))
-        } else {
-            None
-        };
-
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration)
-                .await
-                .map_err(ServiceBuildError::QueryPlannerError)?;
-        let query_planner_service = CachingQueryPlanner::new(
-            bridge_query_planner,
-            plan_cache_limit,
-            self.schema.schema_id.clone(),
-            redis_urls,
-        )
-        .await;
-
-        let plugins = Arc::new(self.plugins);
-
-        let subgraph_creator = Arc::new(SubgraphCreator::new(
-            self.subgraph_services,
-            plugins.clone(),
-        ));
-
-        let supergraph_creator = SupergraphCreator::new(
-            query_planner_service,
-            subgraph_creator,
-            self.schema,
-            plugins,
-        );
-
-        Ok(RouterCreator { supergraph_creator })
     }
 }
 
