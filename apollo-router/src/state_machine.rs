@@ -451,9 +451,9 @@ mod tests {
     use crate::router_factory::Endpoint;
     use crate::router_factory::RouterFactory;
     use crate::router_factory::RouterSuperServiceFactory;
-    use crate::services::create::ServiceFactory;
-    use crate::services::SupergraphRequest;
-    use crate::services::SupergraphResponse;
+    use crate::services::new_service::ServiceFactory;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -672,11 +672,11 @@ mod tests {
         MyRouterFactory {}
 
         impl RouterFactory for MyRouterFactory {
-            type SupergraphService = MockMyRouter;
-            type Future = <Self::SupergraphService as Service<SupergraphRequest>>::Future;
+            type RouterService = MockMyRouter;
+            type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
         }
-        impl  ServiceFactory<SupergraphRequest> for MyRouterFactory {
+        impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = MockMyRouter;
             fn create(&self) -> MockMyRouter;
         }
@@ -690,7 +690,7 @@ mod tests {
         #[derive(Debug)]
         MyRouter {
             fn poll_ready(&mut self) -> Poll<Result<(), BoxError>>;
-            fn service_call(&mut self, req: SupergraphRequest) -> <MockMyRouter as Service<SupergraphRequest>>::Future;
+            fn service_call(&mut self, req: RouterRequest) -> <MockMyRouter as Service<RouterRequest>>::Future;
         }
 
         impl Clone for MyRouter {
@@ -699,15 +699,15 @@ mod tests {
     }
 
     //mockall does not handle well the lifetime on Context
-    impl Service<SupergraphRequest> for MockMyRouter {
-        type Response = SupergraphResponse;
+    impl Service<RouterRequest> for MockMyRouter {
+        type Response = RouterResponse;
         type Error = BoxError;
         type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
         fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), BoxError>> {
             self.poll_ready()
         }
-        fn call(&mut self, req: SupergraphRequest) -> Self::Future {
+        fn call(&mut self, req: RouterRequest) -> Self::Future {
             self.service_call(req)
         }
     }
