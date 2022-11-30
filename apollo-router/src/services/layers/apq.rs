@@ -3,6 +3,8 @@
 //!  For more information on APQ see:
 //!  <https://www.apollographql.com/docs/apollo-server/performance/apq/>
 
+// This entire file is license key functionality
+
 use std::ops::ControlFlow;
 
 use futures::future::BoxFuture;
