@@ -18,7 +18,6 @@ pub mod serde;
 pub mod test;
 
 use std::any::TypeId;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::task::Context;
@@ -154,20 +153,10 @@ impl PluginFactory {
     }
 }
 
-// If we wanted to exclude plugins or re-order plugins or ...
-// This is where we would do it.
-static PLUGIN_REGISTRY: Lazy<Arc<HashMap<String, PluginFactory>>> = Lazy::new(|| {
-    let mut map = HashMap::new();
-    for pf in PLUGINS.iter() {
-        map.insert(pf.name.clone(), (*pf).clone());
-    }
-    Arc::new(map)
-});
-
 // If we wanted to create a custom subset of plugins, this is where we would do it
 /// Get a copy of the registered plugin factories.
-pub(crate) fn plugins() -> Arc<HashMap<String, PluginFactory>> {
-    (*PLUGIN_REGISTRY).clone()
+pub(crate) fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
+    PLUGINS.iter()
 }
 
 /// All router plugins must implement the Plugin trait.

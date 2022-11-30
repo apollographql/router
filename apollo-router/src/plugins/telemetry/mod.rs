@@ -1440,7 +1440,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
         crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
@@ -1453,7 +1453,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
         crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &serde_json::json!({
@@ -1663,7 +1663,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(
