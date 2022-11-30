@@ -9,7 +9,6 @@ use futures::stream::StreamExt;
 use http::Method;
 use indexmap::IndexMap;
 use multimap::MultiMap;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -26,6 +25,7 @@ use crate::introspection::Introspection;
 use crate::plugin::DynPlugin;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::router_factory::RouterFactory;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -216,24 +216,6 @@ impl PluggableRouterServiceBuilder {
     }
 }
 
-/// Factory for creating a RouterService
-///
-/// Instances of this traits are used by the HTTP server to generate a new
-/// RouterService on each request
-pub(crate) trait RouterFactory:
-    ServiceFactory<router::Request, Service = Self::RouterService> + Clone + Send + Sync + 'static
-{
-    type RouterService: Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
-
-    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-}
-
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
 pub(crate) struct RouterCreator {
@@ -249,7 +231,7 @@ impl ServiceFactory<router::Request> for RouterCreator {
 }
 
 impl RouterFactory for RouterCreator {
-    type RouterService = BoxService<router::Request, router::Response, BoxError>;
+    type RouterService = router::BoxService;
 
     type Future = <<RouterCreator as ServiceFactory<router::Request>>::Service as Service<
         router::Request,

@@ -116,15 +116,15 @@ mock! {
     }
 }
 
-type MockSupergraphServiceType = tower_test::mock::Mock<SupergraphRequest, SupergraphResponse>;
+type MockRouterServiceType = tower_test::mock::Mock<SupergraphRequest, SupergraphResponse>;
 
 #[derive(Clone)]
 struct TestRouterFactory {
-    inner: MockSupergraphServiceType,
+    inner: MockRouterServiceType,
 }
 
 impl ServiceFactory<SupergraphRequest> for TestRouterFactory {
-    type Service = MockSupergraphServiceType;
+    type Service = MockRouterServiceType;
 
     fn create(&self) -> Self::Service {
         self.inner.clone()
@@ -132,7 +132,7 @@ impl ServiceFactory<SupergraphRequest> for TestRouterFactory {
 }
 
 impl RouterFactory for TestRouterFactory {
-    type SupergraphService = MockSupergraphServiceType;
+    type RouterService = MockRouterServiceType;
 
     type Future = <<TestRouterFactory as ServiceFactory<SupergraphRequest>>::Service as Service<
         SupergraphRequest,

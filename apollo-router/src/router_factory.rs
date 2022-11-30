@@ -142,13 +142,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         // We're good to go with the new service.
-        let router_creator = builder.build().await?;
+        let supergraph_creator = builder.build().await?;
 
-        let router_service = RouterService::new(router_creator);
-
-        let router_service = router_creator.router_service(router_service);
-
-        Ok(router_service)
+        Ok(Self::RouterFactory {
+            supergraph_creator,
+            plugins: Arc::new(plugins.into_iter().collect()),
+        })
     }
 }
 
