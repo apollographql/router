@@ -18,7 +18,7 @@ RUN rustup component add rustfmt
 COPY . .
 
 # Build and install the router
-RUN cargo install --profile release-dhat --features dhat-heap --path apollo-router
+RUN cargo install --path apollo-router
 
 # Make directories for config and schema
 RUN mkdir -p /dist/config && \
