@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/services/router_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "currentUser": {
+      "id": "0"
+    }
+  },
+  "hasNext": true
+}
