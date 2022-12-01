@@ -9,6 +9,7 @@ use axum::middleware;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
+use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;
@@ -108,7 +109,9 @@ where
 
                     async move {
                         Ok(http::Response::builder()
-                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?
+                            .body::<hyper::Body>(
+                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                            )?
                             .into())
                     }
                 })

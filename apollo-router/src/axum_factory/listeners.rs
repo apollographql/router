@@ -367,7 +367,7 @@ mod tests {
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
-    use crate::axum_factory::tests::MockSupergraphService;
+    use crate::axum_factory::tests::MockRouterService;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
@@ -376,7 +376,7 @@ mod tests {
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
-        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
+        init_with_config(MockRouterService::new(), configuration, MultiMap::new())
             .await
             .unwrap();
     }
@@ -396,8 +396,9 @@ mod tests {
         let endpoint = service_fn(|_req: router::Request| async move {
             Ok::<_, BoxError>(
                 http::Response::builder()
-                    .body("this is a test".to_string().into())
-                    .unwrap(),
+                    .body::<hyper::Body>("this is a test".to_string().into())
+                    .unwrap()
+                    .into(),
             )
         })
         .boxed();
@@ -408,7 +409,7 @@ mod tests {
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(MockSupergraphService::new(), configuration, web_endpoints)
+        let error = init_with_config(MockRouterService::new(), configuration, web_endpoints)
             .await
             .unwrap_err();
         assert_eq!(
@@ -430,8 +431,9 @@ mod tests {
         let endpoint = service_fn(|_req: router::Request| async move {
             Ok::<_, BoxError>(
                 http::Response::builder()
-                    .body("this is a test".to_string().into())
-                    .unwrap(),
+                    .body::<hyper::Body>("this is a test".to_string().into())
+                    .unwrap()
+                    .into(),
             )
         })
         .boxed();
@@ -442,7 +444,7 @@ mod tests {
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(MockSupergraphService::new(), configuration, mm)
+        let error = init_with_config(MockRouterService::new(), configuration, mm)
             .await
             .unwrap_err();
 

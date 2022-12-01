@@ -11,6 +11,7 @@ use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
+use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use http::header::ACCEPT;
@@ -826,7 +827,7 @@ async fn query_rust_with_config(
 
 async fn setup_router_and_registry(
     config: serde_json::Value,
-) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
+) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({

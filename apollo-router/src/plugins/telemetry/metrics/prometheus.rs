@@ -108,7 +108,7 @@ impl Service<router::Request> for PrometheusService {
             encoder.encode(&metric_families, &mut result)?;
             Ok(http::Response::builder()
                 .status(StatusCode::OK)
-                .body(result.into())
+                .body::<hyper::Body>(result.into())
                 .unwrap() // TODO: can this fail ?
                 .into())
         })
