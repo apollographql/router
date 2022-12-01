@@ -149,7 +149,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 }
 
 impl YamlRouterFactory {
-    async fn create_supergraph<'a>(
+    pub(crate) async fn create_supergraph<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,

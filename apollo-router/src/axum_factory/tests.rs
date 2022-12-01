@@ -11,6 +11,7 @@ use async_compression::tokio::write::GzipEncoder;
 use axum::body::BoxBody;
 use futures::stream;
 use futures::stream::poll_fn;
+use futures::Future;
 use futures::StreamExt;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
@@ -115,7 +116,7 @@ macro_rules! assert_header_contains {
 mock! {
     #[derive(Debug)]
     pub(super) RouterService {
-        fn service_call(&mut self, req: RouterRequest) -> Result<RouterResponse, BoxError>;
+        fn service_call(&mut self, req: RouterRequest) -> impl Future<Output = Result<RouterResponse, BoxError>> + Send + 'static;
     }
 }
 
@@ -153,7 +154,7 @@ async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {
     tokio::spawn(async move {
         loop {
             while let Some((request, responder)) = handle.next_request().await {
-                match mock.service_call(request) {
+                match mock.service_call(request).await {
                     Ok(response) => responder.send_response(response),
                     Err(err) => responder.send_error(err),
                 }
@@ -214,7 +215,7 @@ pub(super) async fn init_with_config(
     tokio::spawn(async move {
         loop {
             while let Some((request, responder)) = handle.next_request().await {
-                match mock.service_call(request) {
+                match mock.service_call(request).await {
                     Ok(response) => responder.send_response(response),
                     Err(err) => responder.send_error(err),
                 }
@@ -252,7 +253,7 @@ async fn init_unix(mut mock: MockRouterService, temp_dir: &tempfile::TempDir) ->
     tokio::spawn(async move {
         loop {
             while let Some((request, responder)) = handle.next_request().await {
-                match mock.service_call(request) {
+                match mock.service_call(request).await {
                     Ok(response) => responder.send_response(response),
                     Err(err) => responder.send_error(err),
                 }
@@ -451,11 +452,13 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     expectations
         .expect_service_call()
         .times(1)
-        .withf(move |req| {
-            assert_eq!(req.router_request.body(), r#"{ "query": "query" }"#);
-            true
-        })
-        .returning(move |_req| {
+        .returning(move |req| async {
+            assert_eq!(
+                hyper::body::to_bytes(req.router_request.into_body())
+                    .await
+                    .unwrap(),
+                r#"{ "query": "query" }"#
+            );
             let example_response = example_response.clone();
             Ok(
                 SupergraphResponse::new_from_graphql_response(example_response, Context::new())
@@ -675,10 +678,12 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .times(2)
         .returning(move |_| {
             let example_response = example_response.clone();
-            Ok(
-                SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                    .into(),
-            )
+            Box::pin(async move {
+                Ok(
+                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
+                        .into(),
+                )
+            })
         });
     let conf = Configuration::fake_builder()
         .supergraph(
@@ -740,10 +745,12 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         .times(4)
         .returning(move |_| {
             let example_response = example_response.clone();
-            Ok(
-                SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                    .into(),
-            )
+            Box::pin(async move {
+                Ok(
+                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
+                        .into(),
+                )
+            })
         });
     let conf = Configuration::fake_builder()
         .supergraph(
@@ -816,10 +823,7 @@ async fn it_extracts_query_and_operation_name_on_get_requests() -> Result<(), Ap
         .expect_service_call()
         .times(1)
         .withf(move |req| {
-            assert_eq!(
-                req.router_request.body().query.as_deref().unwrap(),
-                expected_query
-            );
+            assert_eq!(req.router_request.body(), expected_query);
             assert_eq!(
                 req.router_request.body().operation_name.as_deref().unwrap(),
                 expected_operation_name
@@ -828,10 +832,12 @@ async fn it_extracts_query_and_operation_name_on_get_requests() -> Result<(), Ap
         })
         .returning(move |_| {
             let example_response = example_response.clone();
-            Ok(
-                SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                    .into(),
-            )
+            Box::pin(async move {
+                Ok(
+                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
+                        .into(),
+                )
+            })
         });
     let (server, client) = init(expectations).await;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
@@ -1285,18 +1291,20 @@ async fn it_checks_the_shape_of_router_request() -> Result<(), ApolloRouterError
         .expect_service_call()
         .times(2)
         .returning(move |req| {
-            Ok(SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .data(json!(format!(
-                        "{} + {} + {:?}",
-                        req.router_request.method(),
-                        req.router_request.uri(),
-                        req.router_request.body() // TODO[igni]: is this what we actually expect?
-                    )))
-                    .build(),
-                Context::new(),
-            )
-            .into())
+            Box::pin(async move {
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!(format!(
+                            "{} + {} + {:?}",
+                            req.router_request.method(),
+                            req.router_request.uri(),
+                            req.router_request.body() // TODO[igni]: is this what we actually expect?
+                        )))
+                        .build(),
+                    Context::new(),
+                )
+                .into())
+            })
         });
     let (server, client) = init(expectations).await;
     let query = json!(
@@ -1483,15 +1491,17 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
         .expect_service_call()
         .times(1)
         .returning(move |_| {
-            Ok(SupergraphResponse::new_from_graphql_response(
-                graphql::Response::builder()
-                    .data(json!({
-                        "test": "hello"
-                    }))
-                    .build(),
-                Context::new(),
-            )
-            .into())
+            Box::pin(async move {
+                Ok(SupergraphResponse::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(json!({
+                            "test": "hello"
+                        }))
+                        .build(),
+                    Context::new(),
+                )
+                .into())
+            })
         });
     let (server, client) = init(expectations).await;
     let query = json!(
@@ -1552,11 +1562,13 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
                 graphql::Response::builder().has_next(false).build(),
             ])
             .boxed();
-            Ok(SupergraphResponse::new_from_response(
-                http::Response::builder().status(200).body(body).unwrap(),
-                Context::new(),
-            )
-            .into())
+            Box::pin(async move {
+                Ok(SupergraphResponse::new_from_response(
+                    http::Response::builder().status(200).body(body).unwrap(),
+                    Context::new(),
+                )
+                .into())
+            })
         });
     let (server, client) = init(expectations).await;
     let query = json!(
@@ -1616,11 +1628,13 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
                 .has_next(false)
                 .build()])
             .boxed();
-            Ok(SupergraphResponse::new_from_response(
-                http::Response::builder().status(200).body(body).unwrap(),
-                Context::new(),
-            )
-            .into())
+            Box::pin(async move {
+                Ok(SupergraphResponse::new_from_response(
+                    http::Response::builder().status(200).body(body).unwrap(),
+                    Context::new(),
+                )
+                .into())
+            })
         });
     let (server, client) = init(expectations).await;
     let query = json!(
@@ -1983,11 +1997,12 @@ async fn listening_to_unix_socket() {
         .times(2)
         .returning(move |_| {
             let example_response = example_response.clone();
-
-            Ok(
-                SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                    .into(),
-            )
+            Box::pin(async move {
+                Ok(
+                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
+                        .into(),
+                )
+            })
         });
     let server = init_unix(expectations, &temp_dir).await;
 
