@@ -19,6 +19,8 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
+use notify::RecursiveMode;
+use notify::Watcher;
 use opentelemetry::trace::SpanKind;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -356,11 +358,11 @@ mod router_plugin_mod {
 }
 
 /// Plugin which implements Rhai functionality
-#[derive(Default, Clone)]
 pub(crate) struct Rhai {
     ast: AST,
     engine: Arc<Engine>,
     scope: Arc<Mutex<Scope<'static>>>,
+    watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Configuration for the Rhai Plugin
@@ -376,6 +378,7 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let sdl = init.supergraph_sdl.clone();
         let scripts_path = match init.config.scripts {
             Some(path) => path,
             None => "./rhai".into(),
@@ -387,7 +390,29 @@ impl Plugin for Rhai {
         };
 
         let main = scripts_path.join(&main_file);
-        let sdl = init.supergraph_sdl.clone();
+
+        let watched_path = scripts_path.clone();
+
+        let watcher_handle = std::thread::spawn(move || {
+            let mut watcher =
+                notify::recommended_watcher(|res: Result<notify::Event, notify::Error>| {
+                    match res {
+                        Ok(event) => {
+                            // We want to reload our engine for all events, but sometimes we'll get
+                            // lots of duplicate events...
+                            println!("event kind: {:?}", event.kind);
+                        }
+                        Err(e) => tracing::error!("rhai watching event error: {:?}", e),
+                    }
+                })
+                .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
+            watcher
+                .watch(&watched_path, RecursiveMode::Recursive)
+                .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
+            // Park the thread until this Rhai instance is dropped (see Drop impl)
+            std::thread::park();
+        });
+
         let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
@@ -402,8 +427,15 @@ impl Plugin for Rhai {
             ast,
             engine,
             scope: Arc::new(Mutex::new(scope)),
+            watcher_handle: Some(watcher_handle),
         })
     }
+
+    /*
+    fn update_engine() {
+        println!("would update engine here");
+    }
+    */
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "supergraph_service";
@@ -457,6 +489,15 @@ impl Plugin for Rhai {
             tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
+    }
+}
+
+impl Drop for Rhai {
+    fn drop(&mut self) {
+        if let Some(wh) = self.watcher_handle.take() {
+            wh.thread().unpark();
+            wh.join().expect("rhai file watcher thread terminating");
+        }
     }
 }
 
