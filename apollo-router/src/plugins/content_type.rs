@@ -35,7 +35,7 @@ struct ContentType {}
 impl Plugin for ContentType {
     type Config = ();
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {})
     }
 
