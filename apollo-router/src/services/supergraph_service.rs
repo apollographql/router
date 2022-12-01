@@ -616,6 +616,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn errors_fromm_primary_on_deferred_responses() {
+        let schema = r#"
+        schema
+          @link(url: "https://specs.apollo.dev/link/v1.0")
+          @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+        {
+          query: Query
+        }
+        
+        directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+                
+        scalar link__Import
+        enum link__Purpose {
+          SECURITY
+          EXECUTION
+        }
+
+        type Computer
+          @join__type(graph: COMPUTERS)
+        {
+          id: ID!
+          errorField: String
+          nonNullErrorField: String!
+        }
+        
+        scalar join__FieldSet
+        
+        enum join__Graph {
+          COMPUTERS @join__graph(name: "computers", url: "http://localhost:4001/")
+        }
+
+
+        type Query
+          @join__type(graph: COMPUTERS)
+        {
+          computer(id: ID!): Computer
+        }"#;
+
+        let subgraphs = MockedSubgraphs([
+        ("computers", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{__typename id}}"}},
+                serde_json::json!{{"data": {"currentUser": { "__typename": "User", "id": "0" }}}}
+            )
+            .with_json(
+                serde_json::json!{{
+                    "query":"{computer(id:\"Computer1\"){id errorField}}",
+             
+                }},
+                serde_json::json!{{
+                    "data": {
+                        "computer": {
+                            "id": "Computer1"
+                        }
+                    },
+                    "errors": [
+                        {
+                            "message": "Error field",
+                            "locations": [
+                                {
+                                    "line": 1,
+                                    "column": 93
+                                }
+                            ],
+                            "path": ["computer","errorField"],
+                        }
+                    ]
+                    }}
+            ).build()),
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query(
+                r#"query { 
+                computer(id: "Computer1") {   
+                  id
+                  ...ComputerErrorField @defer
+                }
+              }
+              fragment ComputerErrorField on Computer {
+                errorField
+              }"#,
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
     async fn deferred_fragment_bounds_nullability() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
