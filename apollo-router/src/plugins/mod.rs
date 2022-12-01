@@ -2,6 +2,7 @@
 //!
 //! These plugins are compiled into the router and configured via YAML configuration.
 
+pub(crate) mod content_type;
 pub(crate) mod csrf;
 mod expose_query_plan;
 mod forbid_mutations;

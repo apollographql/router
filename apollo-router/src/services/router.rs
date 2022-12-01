@@ -1,11 +1,11 @@
 #![allow(missing_docs)] // FIXME
 
-use super::supergraph;
 use bytes::Bytes;
 use futures::StreamExt;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use super::supergraph;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
