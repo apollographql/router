@@ -26,7 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
+### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/issues/2135))
 
 From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
 
@@ -115,7 +115,7 @@ telemetry:
         headers: true
 ```
 
-### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/issues/1932))
 
 From the next release, our Docker images will be multi-arch.
 
@@ -260,6 +260,12 @@ to validate the data sent back to the client. Those query shapes were invalid fo
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
 
 ## 🛠 Maintenance
+
+### Verify that deferred fragment acts as a boundary for nullability rules ([Issue #2169](https://github.com/apollographql/router/issues/2169))
+
+Add a test to ensure that deferred fragments act as a boundary for nullability rules.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2183
 
 ### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
 
