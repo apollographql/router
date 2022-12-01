@@ -183,9 +183,13 @@ impl Drop for Telemetry {
         ::tracing::debug!("dropping telemetry...");
         let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
         if count < 2 {
-            std::thread::spawn(|| {
+            // We don't want telemetry to drop until the shutdown completes.
+            // Ignore the result, we log errors as warnings.
+            let _ = std::thread::spawn(|| {
                 opentelemetry::global::shutdown_tracer_provider();
-            });
+            })
+            .join()
+            .map_err(|e| ::tracing::warn!("unable to join tracer shutdown thread: {:?}", e));
         }
     }
 }
