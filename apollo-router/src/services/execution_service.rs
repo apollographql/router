@@ -24,6 +24,7 @@ use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
@@ -171,12 +172,52 @@ where
                                         .cloned()
                                         .collect::<Vec<_>>();
 
+                                        let extensions: Object = response
+                                        .extensions
+                                        .iter()
+                                        .map(|(key, value)| {
+                                            if key.as_str() == "valueCompletion" {
+                                                let value = match value.as_array() {
+                                                    None => Value::Null,
+                                                    Some(v) => Value::Array(
+                                                        v.iter()
+                                                            .filter(|ext| {
+                                                                match ext
+                                                                    .as_object()
+                                                                    .as_ref()
+                                                                    .and_then(|ext| {
+                                                                        ext.get("path")
+                                                                    })
+                                                                    .and_then(|v| {
+                                                                        let p:Option<Path> = serde_json_bytes::from_value(v.clone()).ok();
+                                                                        p
+                                                                    }) {
+                                                                    None => false,
+                                                                    Some(ext_path) => {
+                                                                        ext_path
+                                                                            .starts_with(
+                                                                                &path,
+                                                                            )
+                                                                    }
+                                                                }
+                                                            })
+                                                            .cloned()
+                                                            .collect(),
+                                                    ),
+                                                };
+
+                                                (key.clone(), value)
+                                            } else {
+                                                (key.clone(), value.clone())
+                                            }
+                                        })
+                                        .collect();
                                     // an empty response should not be sent
                                     // still, if there's an error or extension to show, we should
                                     // send it
                                     if !data.is_null()
                                         || !errors.is_empty()
-                                        || !response.extensions.is_empty()
+                                        || !extensions.is_empty()
                                     {
                                         Some(
                                             IncrementalResponse::builder()
@@ -184,7 +225,7 @@ where
                                                 .data(data)
                                                 .path(path)
                                                 .errors(errors)
-                                                .extensions(response.extensions.clone())
+                                                .extensions(extensions)
                                                 .build(),
                                         )
                                     } else {
@@ -199,6 +240,7 @@ where
                                     .incremental(incremental)
                                     .build(),
                             ))
+
                         }
                     }
                 })
