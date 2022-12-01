@@ -50,9 +50,9 @@ impl Plugin for ContentType {
                 || accepts_multipart
                 || accepts_json
             {
-                req.context.insert("accepts-wildcard", accepts_wildcard);
-                req.context.insert("accepts-multipart", accepts_multipart);
-                req.context.insert("accepts-json", accepts_json);
+                req.context.insert("accepts-wildcard", accepts_wildcard).unwrap();
+                req.context.insert("accepts-multipart", accepts_multipart).unwrap();
+                req.context.insert("accepts-json", accepts_json).unwrap();
                 
                 Ok(ControlFlow::Continue(req))
             } else {
@@ -76,8 +76,9 @@ impl Plugin for ContentType {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_first_graphql_response(|context, mut parts, res| {
-                let accepts_wildcard: bool = context.get("accepts-wildcard").unwrap_or_default();
-                let accepts_json: bool = context.get("accepts-json").unwrap_or_default();
+                let accepts_wildcard: bool = context.get("accepts-wildcard").unwrap_or_default().unwrap_or_default();
+                let accepts_json: bool = context.get("accepts-json").unwrap_or_default().unwrap_or_default();
+                let accepts_multipart: bool = context.get("accepts-multipart").unwrap_or_default().unwrap_or_default();
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
                     parts
@@ -160,3 +161,41 @@ fn accepts_multipart(headers: &HeaderMap) -> bool {
 }
 
 register_plugin!("apollo", "content-type", ContentType);
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn it_checks_accept_header() {
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
+        assert!(accepts_json(&default_headers));
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
+        default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
+        assert!(accepts_wildcard(&default_headers));
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
+        );
+        default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
+        assert!(accepts_json(&default_headers));
+
+        let mut default_headers = HeaderMap::new();
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
+        );
+        default_headers.append(
+            ACCEPT,
+            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+        );
+        assert!(accepts_multipart(&default_headers));
+    }
+}

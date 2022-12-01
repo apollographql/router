@@ -3,23 +3,9 @@ source: apollo-router/src/services/supergraph_service.rs
 expression: stream.next_response().await.unwrap()
 ---
 {
-  "data": {
-    "currentUser": {
-      "activeOrganization": {
-        "id": "0",
-        "suborga": [
-          {
-            "id": "1"
-          },
-          {
-            "id": "2"
-          },
-          {
-            "id": "3"
-          }
-        ]
-      }
+  "errors": [
+    {
+      "message": "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"
     }
-  },
-  "hasNext": true
+  ]
 }

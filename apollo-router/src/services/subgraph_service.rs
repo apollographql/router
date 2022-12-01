@@ -35,10 +35,10 @@ use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::Plugins;
-use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
-use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
+use crate::plugins::content_type::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 

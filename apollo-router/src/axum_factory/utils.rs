@@ -32,13 +32,10 @@ use tower_http::trace::MakeSpan;
 use tracing::Level;
 use tracing::Span;
 
-use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
-pub(crate) const APPLICATION_JSON_HEADER_VALUE: &str = "application/json";
-pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
 
 pub(super) fn prefers_html(headers: &HeaderMap) -> bool {
     let text_html = MediaType::new(TEXT, HTML);
@@ -246,37 +243,5 @@ mod tests {
         for value in vary {
             assert!(value == "one" || value == "two");
         }
-    }
-
-    #[test]
-    fn it_checks_accept_header() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
-        default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
-        assert!(accepts_json(&default_headers));
-
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
-        default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
-        assert!(accepts_wildcard(&default_headers));
-
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(
-            ACCEPT,
-            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
-        );
-        default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
-        assert!(accepts_json(&default_headers));
-
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(
-            ACCEPT,
-            HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
-        );
-        default_headers.append(
-            ACCEPT,
-            HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-        );
-        assert!(accepts_multipart(&default_headers));
     }
 }

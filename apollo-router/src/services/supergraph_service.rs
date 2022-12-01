@@ -24,7 +24,6 @@ use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::axum_factory::utils::accepts_multipart;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -185,7 +184,13 @@ where
         Some(QueryPlannerContent::Plan { plan }) => {
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
+
+            let accepts_multipart: bool = context
+                .get("accepts-multipart")
+                .unwrap_or_default()
+                .unwrap_or_default();
+
+            if is_deferred && !accepts_multipart {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
