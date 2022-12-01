@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/services/router_service.rs
+assertion_line: 276
+expression: response
+---
+{
+  "data": {
+    "currentUser": {
+      "activeOrganization": null
+    }
+  },
+  "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable field Organization.nonNullId",
+        "path": [
+          "currentUser",
+          "activeOrganization"
+        ]
+      }
+    ]
+  }
+}

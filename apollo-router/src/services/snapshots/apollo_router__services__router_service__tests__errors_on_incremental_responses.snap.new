@@ -1,0 +1,26 @@
+---
+source: apollo-router/src/services/router_service.rs
+assertion_line: 409
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "currentUser": {
+      "activeOrganization": {
+        "id": "0",
+        "suborga": [
+          {
+            "id": "1"
+          },
+          {
+            "id": "2"
+          },
+          {
+            "id": "3"
+          }
+        ]
+      }
+    }
+  },
+  "hasNext": true
+}
