@@ -31,6 +31,10 @@ use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateSchema;
 use crate::axum_factory::AxumHttpServerFactory;
+<<<<<<< HEAD
+=======
+use crate::axum_factory::ListenAddrAndRouter;
+>>>>>>> dev
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
@@ -56,15 +60,14 @@ async fn make_router_service<RF>(
     // let service_factory = YamlRouterFactory
     //     .create(configuration.clone(), schema, None, Some(extra_plugins))
     //     .await?;
-
-    // let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+    // let apq = APQLayer::new().await;
     // let web_endpoints = service_factory.web_endpoints();
     // let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
     // // FIXME: how should
     // let ListenAddrAndRouter(_listener, router) = routers.main;
     // Ok(router
     //     .map_response(|response| {
-    //         router::Response::from(response.map(|body| {
+    //         response.map(|body| {
     //             // Axum makes this `body` have type:
     //             // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
     //             let mut body = Box::pin(body);
@@ -78,7 +81,7 @@ async fn make_router_service<RF>(
     //             // so ignoring `poll_trailers` is fine.
     //             // If we want to use trailers, we may need remove this convertion to `hyper::Body`
     //             // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-    //         }))
+    //         })
     //     })
     //     .map_err(|error| match error {})
     //     .boxed_clone())

@@ -26,7 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
+### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/issues/2135))
 
 From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
 
@@ -115,7 +115,7 @@ telemetry:
         headers: true
 ```
 
-### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/issues/1932))
 
 From the next release, our Docker images will be multi-arch.
 
@@ -186,15 +186,17 @@ From the CLI users can run:
 
 There are situations where comments and whitespace are not preserved. This may be improved in future.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116, https://github.com/apollographql/router/pull/2162
 
-### *Experimental* subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
+### *Experimental* 🥼 subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
 
 Implements subgraph request retries, using Finagle's retry buckets algorithm:
 - it defines a minimal number of retries per second (`min_per_sec`, default is 10 retries per second), to
 bootstrap the system or for low traffic deployments
 - for each successful request, we add a "token" to the bucket, those tokens expire after `ttl` (default: 10 seconds)
 - the number of available additional retries is a part of the number of tokens, defined by `retry_percent` (default is 0.2)
+
+Request retries are disabled by default on mutations.
 
 This is activated in the `traffic_shaping` plugin, either globally or per subgraph:
 
@@ -205,15 +207,44 @@ traffic_shaping:
       min_per_sec: 10
       ttl: 10s
       retry_percent: 0.2
+      retry_mutations: false
   subgraphs:
     accounts:
       experimental_retry:
         min_per_sec: 20
 ```
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006 and https://github.com/apollographql/router/pull/2160
+
+### *Experimental* 🥼 Caching configuration ([Issue #2075](https://github.com/apollographql/router/issues/2075))
+
+Split Redis cache configuration for APQ and query planning:
+
+```yaml
+supergraph:
+  apq:
+    experimental_cache:
+      in_memory:
+        limit: 512
+      redis:
+        urls: ["redis://..."]
+  query_planning:
+    experimental_cache:
+      in_memory:
+        limit: 512
+      redis:
+        urls: ["redis://..."]
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
 
 ## 🐛 Fixes
+
+### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
+
+Adding the `-r` flag recently broke the existing functionality to build from the default repo using `-b`. This fixes that.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2163
 
 ### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
 
@@ -230,6 +261,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Verify that deferred fragment acts as a boundary for nullability rules ([Issue #2169](https://github.com/apollographql/router/issues/2169))
+
+Add a test to ensure that deferred fragments act as a boundary for nullability rules.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2183
 
 ### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
 
@@ -237,6 +273,11 @@ Remove duplicated code.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
 
+### Update apollo-rs ([PR #2177](https://github.com/apollographql/router/pull/2177))
+
+Updates to new apollo-rs APIs, and fixes some potential panics on unexpected user input.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/2177
 
 ## 📚 Documentation
 
@@ -247,7 +288,7 @@ The docs CORS regex example now displays a working and safe way to allow `HTTPS`
 By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
 
 
-### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
+### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/issues/2095))
 
 We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
 

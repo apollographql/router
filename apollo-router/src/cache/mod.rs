@@ -37,6 +37,17 @@ where
         }
     }
 
+    pub(crate) async fn from_configuration(config: &crate::configuration::Cache) -> Self {
+        Self::with_capacity(
+            config.in_memory.limit,
+            #[cfg(feature = "experimental_cache")]
+            config.redis.as_ref().map(|c| c.urls.clone()),
+            #[cfg(not(feature = "experimental_cache"))]
+            None,
+        )
+        .await
+    }
+
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
