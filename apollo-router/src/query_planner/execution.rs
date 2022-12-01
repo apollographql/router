@@ -221,7 +221,8 @@ impl PlanNode {
                             HashMap::new();
                         let mut futures = Vec::new();
 
-                        let (primary_sender, _) = tokio::sync::broadcast::channel::<Value>(1);
+                        let (primary_sender, _) =
+                        tokio::sync::broadcast::channel::<(Value, Vec<Error>)>(1);
 
                         for deferred_node in deferred {
                             let fut = deferred_node
@@ -266,11 +267,12 @@ impl PlanNode {
                             errors.extend(err.into_iter());
                             subselection = primary_subselection.clone();
 
-                            let _ = primary_sender.send(value.clone());
+                            let _ = primary_sender.send((value.clone(), errors.clone()));
                         } else {
                             subselection = primary_subselection.clone();
-                            let _ = primary_sender.send(value.clone());
+                            let _ = primary_sender.send((value.clone(), errors.clone()));
                         }
+
                     }
                     .instrument(tracing::info_span!(
                         DEFER_SPAN_NAME,
@@ -357,7 +359,7 @@ impl DeferredNode {
         parameters: &'a ExecutionParameters<'a, SF>,
         parent_value: &Value,
         sender: futures::channel::mpsc::Sender<Response>,
-        primary_sender: &Sender<Value>,
+        primary_sender: &Sender<(Value, Vec<Error>)>,
         deferred_fetches: &mut HashMap<String, Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()>
     where
@@ -406,8 +408,10 @@ impl DeferredNode {
             let mut errors = Vec::new();
 
             if is_depends_empty {
-                let primary_value = primary_receiver.recv().await.unwrap_or_default();
+                let (primary_value, primary_errors) =
+                    primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
+                errors.extend(primary_errors.into_iter())
             } else {
                 while let Some((v, _remaining)) = stream.next().await {
                     // a Err(RecvError) means either that the fetch was not performed and the
@@ -449,8 +453,10 @@ impl DeferredNode {
                     .await;
 
                 if !is_depends_empty {
-                    let primary_value = primary_receiver.recv().await.unwrap_or_default();
+                    let (primary_value, primary_errors) =
+                        primary_receiver.recv().await.unwrap_or_default();
                     v.deep_merge(primary_value);
+                    errors.extend(primary_errors.into_iter())
                 }
 
                 if let Err(e) = tx
@@ -473,8 +479,10 @@ impl DeferredNode {
                 };
                 tx.disconnect();
             } else {
-                let primary_value = primary_receiver.recv().await.unwrap_or_default();
+                let (primary_value, primary_errors) =
+                    primary_receiver.recv().await.unwrap_or_default();
                 value.deep_merge(primary_value);
+                errors.extend(primary_errors.into_iter());
 
                 if let Err(e) = tx
                     .send(
