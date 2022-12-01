@@ -123,6 +123,18 @@ impl Query {
                                 errors: Vec::new(),
                                 nullified: Vec::new(),
                             };
+                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                            // cf https://github.com/apollographql/router/issues/1677
+                            let operation_kind_if_root_typename =
+                                self.operations.get(0).and_then(|op| {
+                                    op.selection_set
+                                        .iter()
+                                        .any(|f| f.is_typename_field())
+                                        .then(|| *op.kind())
+                                });
+                            if let Some(operation_kind) = operation_kind_if_root_typename {
+                                output.insert(TYPENAME, operation_kind.as_str().into());
+                            }
                             response.data = Some(
                                 match self.apply_root_selection_set(
                                     operation,
@@ -211,9 +223,8 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        let string = query.into();
-
-        let parser = apollo_parser::Parser::new(string.as_str())
+        let query = query.into();
+        let parser = apollo_parser::Parser::new(query.as_str())
             .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let tree = parser.parse();
 
@@ -248,7 +259,7 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
-            string,
+            string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -1066,7 +1077,7 @@ impl Operation {
             && self
                 .selection_set
                 .get(0)
-                .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
+                .map(|s| s.is_typename_field())
                 .unwrap_or_default()
     }
 

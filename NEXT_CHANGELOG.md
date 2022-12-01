@@ -112,6 +112,31 @@ in a previous payload.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
 
+### Return root `__typename` when parts of a query with deferred fragment ([Issue #1677](https://github.com/apollographql/router/issues/1677))
+
+With this query:
+
+```graphql
+{
+  __typename
+  fast
+  ...deferedFragment @defer
+}
+
+fragment deferedFragment on Query {
+  slow
+}
+```
+
+You will received first response chunk:
+
+```json
+{"data":{"__typename": "Query", "fast":0},"hasNext":true}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2188
+
+
 ### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
 
 When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.

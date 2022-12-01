@@ -1,0 +1,26 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "__typename": "Query",
+    "currentUser": {
+      "activeOrganization": {
+        "id": "0",
+        "suborga": [
+          {
+            "id": "1"
+          },
+          {
+            "id": "2"
+          },
+          {
+            "id": "3"
+          }
+        ]
+      }
+    }
+  },
+  "hasNext": true
+}

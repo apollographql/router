@@ -314,6 +314,10 @@ impl Selection {
 
         Ok(selection)
     }
+
+    pub(crate) fn is_typename_field(&self) -> bool {
+        matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
+    }
 }
 
 pub(crate) fn parse_skip(directive: &ast::Directive) -> Option<Skip> {
