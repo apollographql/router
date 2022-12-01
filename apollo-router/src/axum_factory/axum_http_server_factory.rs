@@ -9,7 +9,6 @@ use axum::middleware;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
-use bytes::Bytes;
 use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;

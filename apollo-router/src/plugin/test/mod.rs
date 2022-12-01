@@ -15,7 +15,6 @@ use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
 
-pub(crate) use self::mock::canned;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::MakeSubgraphService;
 use crate::services::Plugins;

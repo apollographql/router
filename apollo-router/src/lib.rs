@@ -47,7 +47,7 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
-mod axum_factory;
+pub(crate) mod axum_factory;
 mod cache;
 mod configuration;
 mod context;
@@ -69,6 +69,7 @@ pub mod services;
 mod spaceport;
 pub(crate) mod spec;
 mod state_machine;
+#[cfg(test)]
 mod test_harness;
 pub mod tracer;
 mod uplink;
@@ -84,7 +85,9 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
+#[cfg(test)]
 pub use crate::test_harness::MockedSubgraphs;
+#[cfg(test)]
 pub use crate::test_harness::TestHarness;
 
 /// Not part of the public API

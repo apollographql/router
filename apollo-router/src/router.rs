@@ -18,10 +18,13 @@ use displaydoc::Display as DisplayDoc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
+use http_body::Body as _;
+use hyper::Body;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tower::BoxError;
+use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 
@@ -30,16 +33,17 @@ use self::Event::NoMoreSchema;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateSchema;
+use crate::axum_factory::make_axum_router;
 use crate::axum_factory::AxumHttpServerFactory;
-<<<<<<< HEAD
-=======
 use crate::axum_factory::ListenAddrAndRouter;
->>>>>>> dev
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
+use crate::router_factory::RouterFactory;
+use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router;
+use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -55,36 +59,36 @@ async fn make_router_service<RF>(
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
 ) -> Result<router::BoxCloneService, BoxError> {
-    todo!();
-    // let schema = Arc::new(Schema::parse(schema, &configuration)?);
-    // let service_factory = YamlRouterFactory
-    //     .create(configuration.clone(), schema, None, Some(extra_plugins))
-    //     .await?;
-    // let apq = APQLayer::new().await;
-    // let web_endpoints = service_factory.web_endpoints();
-    // let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
-    // // FIXME: how should
-    // let ListenAddrAndRouter(_listener, router) = routers.main;
-    // Ok(router
-    //     .map_response(|response| {
-    //         response.map(|body| {
-    //             // Axum makes this `body` have type:
-    //             // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-    //             let mut body = Box::pin(body);
-    //             // We make a stream based on its `poll_data` method
-    //             // in order to create a `hyper::Body`.
-    //             Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-    //             // … but we ignore the `poll_trailers` method:
-    //             // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-    //             // Apparently HTTP/2 trailers are like headers, except after the response body.
-    //             // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-    //             // so ignoring `poll_trailers` is fine.
-    //             // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-    //             // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-    //         })
-    //     })
-    //     .map_err(|error| match error {})
-    //     .boxed_clone())
+    let schema = Arc::new(Schema::parse(schema, &configuration)?);
+    let service_factory = YamlRouterFactory
+        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .await?;
+    let web_endpoints = service_factory.web_endpoints();
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
+    let ListenAddrAndRouter(_listener, router) = routers.main;
+
+    Ok(router
+        .map_request(|req: router::Request| req.router_request)
+        .map_err(|error| match error {})
+        .map_response(|res| {
+            res.map(|body| {
+                // Axum makes this `body` have type:
+                // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                let mut body = Box::pin(body);
+                // We make a stream based on its `poll_data` method
+                // in order to create a `hyper::Body`.
+                Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                // … but we ignore the `poll_trailers` method:
+                // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                // Apparently HTTP/2 trailers are like headers, except after the response body.
+                // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                // so ignoring `poll_trailers` is fine.
+                // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+            })
+            .into()
+        })
+        .boxed_clone())
 }
 
 /// Error types for FederatedServer.

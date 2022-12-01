@@ -6,7 +6,7 @@ use futures::StreamExt;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-use crate::{graphql, Context};
+use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
