@@ -17,6 +17,7 @@ use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::SupergraphCreator;
 use crate::Schema;
 
 #[cfg(test)]
@@ -171,7 +172,7 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    async fn build_common(self) -> Result<(Arc<Configuration>, RouterCreator), BoxError> {
+    async fn build_common(self) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -200,15 +201,15 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        let router_creator = YamlRouterFactory
-            .create(config.clone(), schema, None, Some(builder.extra_plugins))
+        let supergraph_creator = YamlRouterFactory
+            .create_supergraph(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
 
-        Ok((config, router_creator))
+        Ok((config, supergraph_creator))
     }
 
     /// Builds the GraphQL service
-    pub async fn build(self) -> Result<router::BoxCloneService, BoxError> {
+    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, router_creator) = self.build_common().await?;
 
         Ok(tower::service_fn(move |request| {

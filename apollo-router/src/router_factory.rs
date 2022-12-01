@@ -22,6 +22,7 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::SubgraphService;
+use crate::services::SupergraphCreator;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
@@ -144,6 +145,42 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let supergraph_creator = builder.build().await?;
 
         Ok(Self::RouterFactory::new(supergraph_creator))
+    }
+}
+
+impl YamlRouterFactory {
+    async fn create_supergraph<'a>(
+        &'a mut self,
+        configuration: Arc<Configuration>,
+        schema: Arc<Schema>,
+        _previous_router: Option<&'a SupergraphCreator>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<SupergraphCreator, BoxError> {
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        builder = builder.with_configuration(configuration);
+
+        for (name, _) in schema.subgraphs() {
+            let subgraph_service = match plugins
+                .iter()
+                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+                .and_then(|plugin| (&*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+            {
+                Some(shaping) => {
+                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
+                }
+                None => Either::B(SubgraphService::new(name)),
+            };
+            builder = builder.with_subgraph_service(name, subgraph_service);
+        }
+
+        for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
+        }
+
+        builder.build().await.map_err(BoxError::from)
     }
 }
 

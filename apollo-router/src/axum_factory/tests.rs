@@ -1289,9 +1289,9 @@ async fn it_checks_the_shape_of_router_request() -> Result<(), ApolloRouterError
                 graphql::Response::builder()
                     .data(json!(format!(
                         "{} + {} + {:?}",
-                        req.supergraph_request.method(),
-                        req.supergraph_request.uri(),
-                        serde_json::to_string(req.supergraph_request.body()).unwrap()
+                        req.router_request.method(),
+                        req.router_request.uri(),
+                        req.router_request.body() // TODO[igni]: is this what we actually expect?
                     )))
                     .build(),
                 Context::new(),
@@ -2087,15 +2087,12 @@ Accept: application/json\r
 async fn test_health_check() {
     let mut expectations = MockRouterService::new();
     expectations.expect_service_call().once().returning(|_| {
-        http::Response::builder()
-            .status(200)
-            .body(
-                graphql::Response::builder()
-                    .data(json!({ "__typename": "Query"}))
-                    .build(),
-            )
+        Ok(crate::supergraph::Response::builder()
+            .data(json!({ "__typename": "Query"}))
+            .context(Context::new())
+            .build()
             .unwrap()
-            .into()
+            .into())
     });
 
     let (server, client) = init(expectations).await;
