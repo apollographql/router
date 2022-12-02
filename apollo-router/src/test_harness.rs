@@ -13,6 +13,7 @@ use crate::plugin::PluginInit;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
 use crate::services::router;
+use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::SupergraphCreator;
@@ -135,6 +136,14 @@ impl<'a> TestHarness<'a> {
         self
     }
 
+    /// Adds a callback-based hook similar to [`Plugin::router_service`]
+    pub fn router_hook(
+        self,
+        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(RouterServicePlugin(callback))
+    }
+
     /// Adds a callback-based hook similar to [`Plugin::supergraph_service`]
     pub fn supergraph_hook(
         self,
@@ -208,7 +217,20 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the GraphQL service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, router_creator) = self.build_common().await?;
+        let (_config, supergraph_creator) = self.build_common().await?;
+
+        Ok(tower::service_fn(move |request| {
+            let router = supergraph_creator.make();
+
+            async move { router.oneshot(request).await }
+        })
+        .boxed_clone())
+    }
+
+    /// Builds the GraphQL service
+    pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
+        let (_config, supergraph_creator) = self.build_common().await?;
+        let router_creator = RouterCreator::new(supergraph_creator);
 
         Ok(tower::service_fn(move |request| {
             let router = router_creator.make();

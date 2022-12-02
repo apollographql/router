@@ -361,15 +361,6 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    run_graphql_request(service, http_request)
-        .await
-        .into_response()
-}
-
-async fn run_graphql_request(
-    service: router::BoxService,
-    http_request: Request<Body>,
-) -> impl IntoResponse {
     match service.oneshot(http_request.into()).await {
         Err(e) => {
             if let Some(source_err) = e.source() {

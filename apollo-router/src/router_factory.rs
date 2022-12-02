@@ -217,6 +217,8 @@ async fn create_plugins(
         "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
+        "apollo.content-type",
+        "apollo.redirect-html",
     ];
 
     let mut errors = Vec::new();

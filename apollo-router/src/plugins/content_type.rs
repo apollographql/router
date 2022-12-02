@@ -11,9 +11,11 @@ use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
+use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use schemars::JsonSchema;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -31,11 +33,15 @@ pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql
 #[derive(Debug, Clone)]
 struct ContentType {}
 
+#[derive(Deserialize, Debug, Clone, JsonSchema)]
+struct EmptyConfig {}
+
 // This plugin should be the first one to wrap the router services,
 // since it should execute at the very end of the pipeline
+// TODO: This should be a layer
 #[async_trait::async_trait]
 impl Plugin for ContentType {
-    type Config = ();
+    type Config = EmptyConfig;
 
     async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {})

@@ -114,7 +114,7 @@ impl Request {
             context.unwrap_or_default(),
             headers,
             Uri::from_static("http://default"),
-            method.unwrap_or(Method::GET),
+            method.unwrap_or(Method::POST),
         )
     }
 

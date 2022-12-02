@@ -10,6 +10,8 @@ use mediatype::names::HTML;
 use mediatype::names::TEXT;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -24,12 +26,15 @@ use crate::services::router;
 
 #[derive(Debug, Clone)]
 struct RedirectHTML {}
+#[derive(Deserialize, Debug, Clone, JsonSchema)]
+struct EmptyConfig {}
 
 // This plugin should be the last one to wrap the router services,
 // since we want to redirect before
+// TODO: This should be a layer
 #[async_trait::async_trait]
 impl Plugin for RedirectHTML {
-    type Config = ();
+    type Config = EmptyConfig;
 
     async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(Self {})

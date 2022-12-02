@@ -103,14 +103,6 @@ pub(super) async fn decompress_request_body(
     }
 }
 
-// Process the headers to make sure that `VARY` is set correctly
-pub(super) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
-    if headers.get(VARY).is_none() {
-        // We don't have a VARY header, add one with value "origin"
-        headers.insert(VARY, HeaderValue::from_static("origin"));
-    }
-}
-
 #[derive(Clone)]
 pub(super) struct PropagatingMakeSpan;
 
@@ -160,47 +152,6 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "apollo_private.duration_ns" = tracing::field::Empty,
                 "trace_id" = tracing::field::Empty
             )
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // Test Vary processing
-
-    #[test]
-    fn it_adds_default_with_value_origin_if_no_vary_header() {
-        let mut default_headers = HeaderMap::new();
-        process_vary_header(&mut default_headers);
-        let vary_opt = default_headers.get(VARY);
-        assert!(vary_opt.is_some());
-        let vary = vary_opt.expect("has a value");
-        assert_eq!(vary, "origin");
-    }
-
-    #[test]
-    fn it_leaves_vary_alone_if_set() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(VARY, HeaderValue::from_static("*"));
-        process_vary_header(&mut default_headers);
-        let vary_opt = default_headers.get(VARY);
-        assert!(vary_opt.is_some());
-        let vary = vary_opt.expect("has a value");
-        assert_eq!(vary, "*");
-    }
-
-    #[test]
-    fn it_leaves_varys_alone_if_there_are_more_than_one() {
-        let mut default_headers = HeaderMap::new();
-        default_headers.insert(VARY, HeaderValue::from_static("one"));
-        default_headers.append(VARY, HeaderValue::from_static("two"));
-        process_vary_header(&mut default_headers);
-        let vary = default_headers.get_all(VARY);
-        assert_eq!(vary.iter().count(), 2);
-        for value in vary {
-            assert!(value == "one" || value == "two");
         }
     }
 }
