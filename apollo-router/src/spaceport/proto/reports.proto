@@ -113,11 +113,11 @@ message Trace {
   // services may not be unique. See https://github.com/apollographql/federation/blob/main/query-planner-js/src/QueryPlan.ts
   // for more information and details.
   message QueryPlanNode {
-    // This represents a set of nodes to be executed sequentially by the Gateway executor
+    // This represents a set of nodes to be executed sequentially by the Router/Gateway executor
     message SequenceNode {
       repeated QueryPlanNode nodes = 1;
     }
-    // This represents a set of nodes to be executed in parallel by the Gateway executor
+    // This represents a set of nodes to be executed in parallel by the Router/Gateway executor
     message ParallelNode {
       repeated QueryPlanNode nodes = 1;
     }
@@ -131,14 +131,14 @@ message Trace {
       bool trace_parsing_failed = 2;
 
       // This Trace only contains start_time, end_time, duration_ns, and root;
-      // all timings were calculated **on the federated service**, and clock skew
+      // all timings were calculated **on the subgraph**, and clock skew
       // will be handled by the ingress server.
       Trace trace = 3;
 
-      // relative to the outer trace's start_time, in ns, measured in the gateway.
+      // relative to the outer trace's start_time, in ns, measured in the Router/Gateway.
       uint64 sent_time_offset = 4;
 
-      // Wallclock times measured in the gateway for when this operation was
+      // Wallclock times measured in the Router/Gateway for when this operation was
       // sent and received.
       google.protobuf.Timestamp sent_time = 5;
       google.protobuf.Timestamp received_time = 6;
@@ -169,7 +169,7 @@ message Trace {
     message DeferredNode {
       repeated DeferredNodeDepends depends = 1;
       string label = 2;
-      ResponsePathElement path = 3;
+      repeated ResponsePathElement path = 3;
       QueryPlanNode node = 4;
     }
     message DeferredNodeDepends {
@@ -206,7 +206,7 @@ message Trace {
 
   // If this is true, the trace is potentially missing some nodes that were
   // present on the query plan. This can happen if the trace span buffer used
-  // in the router fills up and some spans have to be dropped. In these cases
+  // in the Router fills up and some spans have to be dropped. In these cases
   // the overall trace timing will still be correct, but the trace data could
   // be missing some referenced or executed fields, and some nodes may be
   // missing. If this is true we should display a warning to the user when they
@@ -214,8 +214,8 @@ message Trace {
   bool is_incomplete = 33;
 
   // -------------------------------------------------------------------------
-  // Fields below this line are *not* included in federated traces (the traces
-  // sent from federated services to the gateway).
+  // Fields below this line are *not* included in inline traces (the traces
+  // sent from subgraphs to the Router/Gateway).
 
   // In addition to details.raw_query, we include a "signature" of the query,
   // which can be normalized: for example, you may want to discard aliases, drop
@@ -244,10 +244,10 @@ message Trace {
 
   CachePolicy cache_policy = 18;
 
-  // If this Trace was created by a gateway, this is the query plan, including
-  // sub-Traces for federated services. Note that the 'root' tree on the
+  // If this Trace was created by a Router/Gateway, this is the query plan, including
+  // sub-Traces for subgraphs. Note that the 'root' tree on the
   // top-level Trace won't contain any resolvers (though it could contain errors
-  // that occurred in the gateway itself).
+  // that occurred in the Router/Gateway itself).
   QueryPlanNode query_plan = 26;
 
   // Was this response served from a full query response cache?  (In that case
