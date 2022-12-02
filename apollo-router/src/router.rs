@@ -66,8 +66,11 @@ async fn make_transport_service<RF>(
         .await?;
 
     let apq = APQLayer::with_cache(
-        DeduplicatingCache::from_configuration(&configuration.supergraph.apq.experimental_cache)
-            .await,
+        DeduplicatingCache::from_configuration(
+            &configuration.supergraph.apq.experimental_cache,
+            "APQ",
+        )
+        .await,
     );
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;

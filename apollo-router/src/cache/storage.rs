@@ -53,12 +53,26 @@ where
     K: KeyType,
     V: ValueType,
 {
-    pub(crate) async fn new(max_capacity: usize, _redis_urls: Option<Vec<String>>) -> Self {
+    pub(crate) async fn new(
+        max_capacity: usize,
+        _redis_urls: Option<Vec<String>>,
+        _caller: &str,
+    ) -> Self {
         Self {
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             #[cfg(feature = "experimental_cache")]
             redis: if let Some(urls) = _redis_urls {
-                Some(RedisCacheStorage::new(urls).await)
+                match RedisCacheStorage::new(urls).await {
+                    Err(e) => {
+                        tracing::error!(
+                            "could not open connection to Redis for {} caching: {:?}",
+                            _caller,
+                            e
+                        );
+                        None
+                    }
+                    Ok(storage) => Some(storage),
+                }
             } else {
                 None
             },
@@ -178,7 +192,8 @@ mod redis_storage {
         where
             W: ?Sized + RedisWrite,
         {
-            let v = serde_json::to_vec(&self.0).unwrap();
+            let v = serde_json::to_vec(&self.0)
+                .expect("JSON serialization should not fail for redis values");
             out.write_arg(&v);
         }
     }
@@ -192,7 +207,6 @@ mod redis_storage {
                 redis::Value::Bulk(bulk_data) => {
                     for entry in bulk_data {
                         tracing::trace!("entry: {:?}", entry);
-                        // entry.parse::<V>().unwrap()
                     }
                     Err(redis::RedisError::from((
                         redis::ErrorKind::TypeError,
@@ -216,14 +230,14 @@ mod redis_storage {
     }
 
     impl RedisCacheStorage {
-        pub(crate) async fn new(urls: Vec<String>) -> Self {
-            let client = Client::open(urls).expect("opening ClusterClient");
-            let connection = client.get_connection().await.expect("got redis connection");
+        pub(crate) async fn new(urls: Vec<String>) -> Result<Self, redis::RedisError> {
+            let client = Client::open(urls)?;
+            let connection = client.get_connection().await?;
 
             tracing::trace!("redis connection established");
-            Self {
+            Ok(Self {
                 inner: Arc::new(Mutex::new(connection)),
-            }
+            })
         }
 
         pub(crate) async fn get<K: KeyType, V: ValueType>(
