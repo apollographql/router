@@ -26,7 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 ## ❗ BREAKING ❗
 
-### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
+### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/issues/2135))
 
 From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
 
@@ -115,7 +115,7 @@ telemetry:
         headers: true
 ```
 
-### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
+### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/issues/1932))
 
 From the next release, our Docker images will be multi-arch.
 
@@ -238,7 +238,31 @@ supergraph:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
 
+### `@defer` Apollo tracing support ([Issue #1600](https://github.com/apollographql/router/issues/1600))
+
+Added Apollo tracing support for queries that use `@defer`. You can now view traces in Apollo Studio as normal.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2190
+
 ## 🐛 Fixes
+
+### Fix panic when dev mode enabled with empty config file ([Issue #2182](https://github.com/apollographql/router/issues/2182))
+
+If you're running the Router with dev mode with an empty config file, it will no longer panic
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2165
+
+### Fix missing apollo tracing variables ([Issue #2186](https://github.com/apollographql/router/issues/2186))
+
+Send variable values had no effect. This is now fixed.
+```yaml
+telemetry:
+  apollo:
+    send_variable_values: all
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2190
+
 
 ### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
 
@@ -269,6 +293,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### Verify that deferred fragment acts as a boundary for nullability rules ([Issue #2169](https://github.com/apollographql/router/issues/2169))
+
+Add a test to ensure that deferred fragments act as a boundary for nullability rules.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2183
 
 ### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
 
@@ -276,6 +305,11 @@ Remove duplicated code.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
 
+### Update apollo-rs ([PR #2177](https://github.com/apollographql/router/pull/2177))
+
+Updates to new apollo-rs APIs, and fixes some potential panics on unexpected user input.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/2177
 
 ## 📚 Documentation
 
@@ -283,7 +317,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 The docs CORS regex example now displays a working and safe way to allow `HTTPS` subdomains of `api.example.com`.
 
-By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
 
 
 ### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/issues/2095))
@@ -292,3 +326,11 @@ We recently updated the examples directory structure. This fixes the documentati
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
 
+
+### Docs: Add a disclaimer for users who set up health-checks and prometheus endpoints in a containers environment ([Issue #2079](https://github.com/apollographql/router/issues/2079))
+
+The health check and the prometheus endpoint listen to 127.0.0.1 by default.
+While this is a safe default, it prevents other pods from performing healthchecks and scraping prometheus data.
+This behavior and customization is now documented in the [health-checks](https://www.apollographql.com/docs/router/configuration/health-checks) and the [prometheus](https://www.apollographql.com/docs/router/configuration/metrics#using-prometheus) sections.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2194

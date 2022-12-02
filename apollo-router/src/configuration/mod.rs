@@ -217,8 +217,8 @@ impl Configuration {
         // Enable experimental_response_trace_id
         self.apollo_plugins
             .plugins
-            .get_mut("telemetry")
-            .expect("telemetry plugin must be initialized at this point")
+            .entry("telemetry")
+            .or_insert_with(|| json!({}))
             .as_object_mut()
             .expect("configuration for telemetry must be an object")
             .entry("tracing")
