@@ -240,6 +240,12 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Fix panic when dev mode enabled with empty config file ([Issue #2182](https://github.com/apollographql/router/issues/2182))
+
+If you're running the Router with dev mode with an empty config file, it will no longer panic
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2165
+
 ### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
 
 Adding the `-r` flag recently broke the existing functionality to build from the default repo using `-b`. This fixes that.
