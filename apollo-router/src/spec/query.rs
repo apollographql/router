@@ -956,6 +956,10 @@ impl Query {
             None => self.operations.get(0),
         }
     }
+
+    pub(crate) fn contains_path(&self, path: &Path) -> bool {
+        todo!()
+    }
 }
 
 /// Intermediate structure for arguments passed through the entire formatting

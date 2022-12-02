@@ -129,6 +129,10 @@ where
                                 response.has_next = Some(has_next);
                             }
 
+                            response.errors = response.errors.into_iter().filter(|error| match &error.path {
+                                    None => true,
+                                    Some(error_path) =>    query.contains_path(error_path),
+                                }).collect();
                             ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the
@@ -158,6 +162,8 @@ where
                                 }
                             });
 
+                            let query = query.clone();
+
                             let incremental = sub_responses
                                 .into_iter()
                                 .filter_map(move |(path, data)| {
@@ -167,10 +173,11 @@ where
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(err_path) => err_path.starts_with(&path),
+                                            Some(error_path) =>query.contains_path(error_path) &&  error_path.starts_with(&path),
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();
+                            
 
                                         let extensions: Object = response
                                         .extensions
