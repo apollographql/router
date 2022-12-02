@@ -22,7 +22,6 @@ members = [
     "examples/supergraph-sdl/rust",
     "examples/jwt-auth/rust",
     "fuzz",
-    "xtask",
 ]
 
 # this makes build scripts and proc macros faster to compile
