@@ -1,10 +1,9 @@
 ---
 source: apollo-router/src/services/supergraph_service.rs
-expression: stream.next_response().await.unwrap()
+expression: res
 ---
 {
   "data": {
-    "__typename": "Query",
     "currentUser": {
       "activeOrganization": {
         "id": "0",
@@ -20,7 +19,8 @@ expression: stream.next_response().await.unwrap()
           }
         ]
       }
-    }
+    },
+    "__typename": "Query"
   },
   "hasNext": true
 }
