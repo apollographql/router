@@ -185,7 +185,7 @@ where
     T: Send + 'static,
 {
     let (tx, rx) = mpsc::channel();
-    let _ = std::thread::spawn(move || tx.send(f()));
+    std::thread::spawn(move || tx.send(f()));
 
     rx.recv_timeout(timeout)
 }
