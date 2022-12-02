@@ -215,6 +215,7 @@ impl<'a> TestHarness<'a> {
         let apq = APQLayer::with_cache(
             DeduplicatingCache::from_configuration(
                 &configuration.supergraph.apq.experimental_cache,
+                "APQ",
             )
             .await,
         );
@@ -237,7 +238,11 @@ impl<'a> TestHarness<'a> {
         let (config, router_creator) = self.build_common().await?;
         let web_endpoints = router_creator.web_endpoints();
         let apq = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(&config.supergraph.apq.experimental_cache).await,
+            DeduplicatingCache::from_configuration(
+                &config.supergraph.apq.experimental_cache,
+                "APQ",
+            )
+            .await,
         );
 
         let routers = make_axum_router(router_creator, &config, web_endpoints, apq)?;

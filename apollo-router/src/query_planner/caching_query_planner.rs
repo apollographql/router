@@ -38,8 +38,10 @@ where
         schema_id: Option<String>,
         config: &crate::configuration::QueryPlanning,
     ) -> CachingQueryPlanner<T> {
-        let cache =
-            Arc::new(DeduplicatingCache::from_configuration(&config.experimental_cache).await);
+        let cache = Arc::new(
+            DeduplicatingCache::from_configuration(&config.experimental_cache, "query planner")
+                .await,
+        );
         Self {
             cache,
             delegate,

@@ -166,6 +166,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
             let apq = APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(
                     &configuration.supergraph.apq.experimental_cache,
+                    "APQ",
                 )
                 .await,
             );
