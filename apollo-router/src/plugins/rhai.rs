@@ -4,6 +4,8 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -395,6 +397,7 @@ impl EngineBlock {
 /// we'll use ArcSwap to accomplish our goal.
 struct Rhai {
     block: Arc<ArcSwap<EngineBlock>>,
+    park_flag: Arc<AtomicBool>,
     watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -435,6 +438,9 @@ impl Plugin for Rhai {
         )?));
         let watched_block = block.clone();
 
+        let park_flag = Arc::new(AtomicBool::new(false));
+        let watching_flag = park_flag.clone();
+
         let watcher_handle = std::thread::spawn(move || {
             let watching_path = watched_path.clone();
             let mut watcher =
@@ -443,7 +449,6 @@ impl Plugin for Rhai {
                         Ok(event) => {
                             // We want to reload our engine for all events, but sometimes we'll get
                             // lots of duplicate events...
-                            println!("current dir: {:?}", std::env::current_dir());
                             println!("event kind: {:?}", event.kind);
                             // let mut guard = watched_block.write().unwrap();
                             match EngineBlock::try_new(
@@ -465,11 +470,17 @@ impl Plugin for Rhai {
                 .watch(&watched_path, RecursiveMode::Recursive)
                 .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
             // Park the thread until this Rhai instance is dropped (see Drop impl)
-            std::thread::park();
+            // We may actually unpark() before this code executes or exit from park() spuriously.
+            // Use the watching_flag to control a loop which waits from the flag to be updated
+            // from Drop.
+            while !watching_flag.load(Ordering::Acquire) {
+                std::thread::park();
+            }
         });
 
         Ok(Self {
             block,
+            park_flag,
             watcher_handle: Some(watcher_handle),
         })
     }
@@ -532,6 +543,7 @@ impl Plugin for Rhai {
 impl Drop for Rhai {
     fn drop(&mut self) {
         if let Some(wh) = self.watcher_handle.take() {
+            self.park_flag.store(true, Ordering::Release);
             wh.thread().unpark();
             wh.join().expect("rhai file watcher thread terminating");
         }
@@ -1777,15 +1789,17 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
         // Call our function to make sure we can access the sdl
-        let sdl: String = rhai_instance
+        let sdl: String = block
             .engine
-            .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
+            .call_fn(&mut guard, &block.ast, "get_sdl", ())
             .expect("can get sdl");
         assert_eq!(sdl.as_str(), "");
     }
@@ -1830,8 +1844,10 @@ mod tests {
             let it: &dyn std::any::Any = dyn_plugin.as_any();
             let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+            let block = rhai_instance.block.load();
+
             // Get a scope to use for our test
-            let scope = rhai_instance.scope.clone();
+            let scope = block.scope.clone();
 
             let mut guard = scope.lock().unwrap();
 
@@ -1841,9 +1857,9 @@ mod tests {
 
             // Call our rhai test function. If it return an error, the test failed.
             let result: Result<(), Box<rhai::EvalAltResult>> =
-                rhai_instance
+                block
                     .engine
-                    .call_fn(&mut guard, &rhai_instance.ast, $fn_name, (request,));
+                    .call_fn(&mut guard, &block.ast, $fn_name, (request,));
             result.expect("test failed");
         };
     }
@@ -1866,8 +1882,10 @@ mod tests {
             let it: &dyn std::any::Any = dyn_plugin.as_any();
             let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+            let block = rhai_instance.block.load();
+
             // Get a scope to use for our test
-            let scope = rhai_instance.scope.clone();
+            let scope = block.scope.clone();
 
             let mut guard = scope.lock().unwrap();
 
@@ -1877,9 +1895,9 @@ mod tests {
 
             // Call our rhai test function. If it return an error, the test failed.
             let result: Result<(), Box<rhai::EvalAltResult>> =
-                rhai_instance
+                block
                     .engine
-                    .call_fn(&mut guard, &rhai_instance.ast, $fn_name, (response,));
+                    .call_fn(&mut guard, &block.ast, $fn_name, (response,));
             result.expect("test failed");
         };
     }
@@ -1902,8 +1920,10 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
@@ -1917,9 +1937,9 @@ mod tests {
         )));
 
         // Call our rhai test function. If it return an error, the test failed.
-        let result: Result<(), Box<rhai::EvalAltResult>> = rhai_instance.engine.call_fn(
+        let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
             &mut guard,
-            &rhai_instance.ast,
+            &block.ast,
             "process_supergraph_request",
             (request,),
         );
@@ -1977,8 +1997,9 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
@@ -1987,9 +2008,9 @@ mod tests {
         let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
 
         // Call our rhai test function. If it return an error, the test failed.
-        let result: Result<(), Box<rhai::EvalAltResult>> = rhai_instance.engine.call_fn(
+        let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
             &mut guard,
-            &rhai_instance.ast,
+            &block.ast,
             "process_subgraph_response",
             (response,),
         );
@@ -2031,8 +2052,10 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
@@ -2041,9 +2064,9 @@ mod tests {
         let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
 
         // Call our rhai test function. If it doesn't return an error, the test failed.
-        rhai_instance
+        block
             .engine
-            .call_fn(&mut guard, &rhai_instance.ast, fn_name, (response,))
+            .call_fn(&mut guard, &block.ast, fn_name, (response,))
     }
 
     #[tokio::test]
