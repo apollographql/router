@@ -31,6 +31,8 @@ pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql
 #[derive(Debug, Clone)]
 struct ContentType {}
 
+// This plugin should be the first one to wrap the router services,
+// since it should execute at the very end of the pipeline
 #[async_trait::async_trait]
 impl Plugin for ContentType {
     type Config = ();

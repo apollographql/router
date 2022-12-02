@@ -37,21 +37,6 @@ use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
-pub(super) fn prefers_html(headers: &HeaderMap) -> bool {
-    let text_html = MediaType::new(TEXT, HTML);
-
-    headers.get_all(&http::header::ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| {
-                let mut list = MediaTypeList::new(accept_str);
-
-                list.any(|mime| mime.as_ref() == Ok(&text_html))
-            })
-            .unwrap_or(false)
-    })
-}
-
 pub(super) async fn decompress_request_body(
     req: Request<Body>,
     next: Next<Body>,
@@ -117,32 +102,6 @@ pub(super) async fn decompress_request_body(
         None => Ok(next.run(Request::from_parts(parts, body)).await),
     }
 }
-
-// pub(super) async fn check_accept_header(
-//     req: Request<Body>,
-//     next: Next<Body>,
-// ) -> Result<Response, Response> {
-//     let ask_for_html = req.method() == Method::GET && prefers_html(req.headers());
-
-//     if accepts_wildcard(req.headers())
-//         || ask_for_html
-//         || accepts_multipart(req.headers())
-//         || accepts_json(req.headers())
-//     {
-//         Ok(next.run(req).await)
-//     } else {
-//         Err((
-//             StatusCode::NOT_ACCEPTABLE,
-//             format!(
-//                 r#"'accept' header can't be different than \"*/*\", {:?}, {:?} or {:?}"#,
-//                 APPLICATION_JSON_HEADER_VALUE,
-//                 GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-//                 MULTIPART_DEFER_CONTENT_TYPE
-//             ),
-//         )
-//             .into_response())
-//     }
-// }
 
 // Process the headers to make sure that `VARY` is set correctly
 pub(super) fn process_vary_header(headers: &mut HeaderMap<HeaderValue>) {
