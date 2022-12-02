@@ -465,7 +465,6 @@ mod tests {
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
     use crate::TestHarness;
-    use bytes::Buf;
 
     const SCHEMA: &str = r#"schema
         @core(feature: "https://specs.apollo.dev/core/v0.1")
@@ -714,29 +713,14 @@ mod tests {
 
         let mut stream = service.oneshot(router_request).await.unwrap();
 
-        let first_response = dbg!(serde_json::from_slice::<serde_json::Value>(
-            stream
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
+        insta::assert_snapshot!(std::str::from_utf8(
+            &stream.next_response().await.unwrap().unwrap()
         )
         .unwrap());
-        insta::assert_json_snapshot!(first_response);
-
-        let second_response = serde_json::from_slice::<graphql::Response>(
-            stream
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
+        insta::assert_snapshot!(std::str::from_utf8(
+            &stream.next_response().await.unwrap().unwrap()
         )
-        .unwrap();
-        insta::assert_json_snapshot!(second_response);
+        .unwrap());
     }
 
     #[tokio::test]
@@ -802,23 +786,29 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_router()
             .await
             .unwrap();
 
-        let request = supergraph::Request::fake_builder()
+        let supergraph_request = supergraph::Request::fake_builder()
             .header("Accept", "multipart/mixed; deferSpec=20220824")
             .query(
                 "query { currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
-            )
-            .build()
+            ).build()
             .unwrap();
 
-        let mut stream = service.oneshot(request).await.unwrap();
+        let router_request = supergraph_request.try_into().unwrap();
 
-        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        let mut stream = service.oneshot(router_request).await.unwrap();
 
-        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        insta::assert_snapshot!(std::str::from_utf8(
+            &stream.next_response().await.unwrap().unwrap()
+        )
+        .unwrap());
+        insta::assert_snapshot!(std::str::from_utf8(
+            &stream.next_response().await.unwrap().unwrap()
+        )
+        .unwrap());
     }
 
     #[tokio::test]
@@ -893,11 +883,11 @@ mod tests {
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
             .schema(schema)
-            .build()
+            .build_router()
             .await
             .unwrap();
 
-        let request = supergraph::Request::fake_builder()
+        let supergraph_request = supergraph::Request::fake_builder()
             .header("Accept", "multipart/mixed; deferSpec=20220824")
             .query(
                 r#"mutation ($userId: ID!) {
@@ -914,8 +904,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let mut stream = service.oneshot(request).await.unwrap();
+        let router_request = supergraph_request.try_into().unwrap();
 
-        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        let mut stream = service.oneshot(router_request).await.unwrap();
+
+        insta::assert_snapshot!(std::str::from_utf8(
+            &stream.next_response().await.unwrap().unwrap()
+        )
+        .unwrap());
     }
 }

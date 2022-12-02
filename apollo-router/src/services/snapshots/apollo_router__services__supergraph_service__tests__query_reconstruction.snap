@@ -1,11 +1,11 @@
 ---
 source: apollo-router/src/services/supergraph_service.rs
-expression: stream.next_response().await.unwrap()
+expression: "std::str::from_utf8(&stream.next_response().await.unwrap().unwrap()).unwrap()"
 ---
-{
-  "errors": [
-    {
-      "message": "the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"
-    }
-  ]
-}
+
+--graphql
+content-type: application/json
+
+{"errors":[{"message":"invalid type for variable: 'userId'","extensions":{"type":"ValidationInvalidTypeVariable","name":"userId"}}]}
+--graphql--
+

@@ -9,7 +9,7 @@ expression: "&schema"
   "type": "object",
   "properties": {
     "content-type": {
-      "type": "null"
+      "type": "object"
     },
     "cors": {
       "description": "Cross origin request headers.",
@@ -557,7 +557,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "redirect-html": {
-      "type": "null"
+      "type": "object"
     },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",

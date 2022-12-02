@@ -11,11 +11,11 @@ use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use schemars::JsonSchema;
 
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -61,7 +61,7 @@ impl Plugin for ContentType {
                 req.context.insert("accepts-wildcard", accepts_wildcard).unwrap();
                 req.context.insert("accepts-multipart", accepts_multipart).unwrap();
                 req.context.insert("accepts-json", accepts_json).unwrap();
-                
+
                 Ok(ControlFlow::Continue(req))
             } else {
                 let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).body(
@@ -84,9 +84,18 @@ impl Plugin for ContentType {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_first_graphql_response(|context, mut parts, res| {
-                let accepts_wildcard: bool = context.get("accepts-wildcard").unwrap_or_default().unwrap_or_default();
-                let accepts_json: bool = context.get("accepts-json").unwrap_or_default().unwrap_or_default();
-                let accepts_multipart: bool = context.get("accepts-multipart").unwrap_or_default().unwrap_or_default();
+                let accepts_wildcard: bool = context
+                    .get("accepts-wildcard")
+                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let accepts_json: bool = context
+                    .get("accepts-json")
+                    .unwrap_or_default()
+                    .unwrap_or_default();
+                let accepts_multipart: bool = context
+                    .get("accepts-multipart")
+                    .unwrap_or_default()
+                    .unwrap_or_default();
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
                     parts
@@ -170,11 +179,10 @@ fn accepts_multipart(headers: &HeaderMap) -> bool {
 
 register_plugin!("apollo", "content-type", ContentType);
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn it_checks_accept_header() {
         let mut default_headers = HeaderMap::new();

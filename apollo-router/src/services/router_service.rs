@@ -97,7 +97,7 @@ impl Service<RouterRequest> for RouterService {
             let (mut parts, mut body) = response.into_parts();
             process_vary_header(&mut parts.headers);
 
-            let response = match body.next().await {
+            let response: Response<hyper::Body> = match body.next().await {
                 None => {
                     tracing::error!("router service is not available to process request",);
                     (
@@ -145,7 +145,6 @@ impl Service<RouterRequest> for RouterService {
                         } else {
                             first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
                         }
-                        dbg!(std::str::from_utf8(&first_buf));
 
                         let body = once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(|res| {
                             let mut buf = Vec::from(&b"content-type: application/json\r\n\r\n"[..]);
