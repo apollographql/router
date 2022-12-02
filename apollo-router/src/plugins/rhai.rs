@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 
 use futures::future::ready;
 use futures::stream::once;
@@ -357,11 +358,39 @@ mod router_plugin_mod {
     }
 }
 
-/// Plugin which implements Rhai functionality
-pub(crate) struct Rhai {
+struct EngineBlock {
     ast: AST,
     engine: Arc<Engine>,
     scope: Arc<Mutex<Scope<'static>>>,
+}
+
+impl EngineBlock {
+    fn try_new(
+        scripts: Option<PathBuf>,
+        main: PathBuf,
+        sdl: Arc<String>,
+    ) -> Result<Self, BoxError> {
+        let engine = Arc::new(Rhai::new_rhai_engine(scripts));
+        let ast = engine.compile_file(main)?;
+        let mut scope = Scope::new();
+        scope.push_constant("apollo_sdl", sdl.to_string());
+        scope.push_constant("apollo_start", Instant::now());
+
+        // Run the AST with our scope to put any global variables
+        // defined in scripts into scope.
+        engine.run_ast_with_scope(&mut scope, &ast)?;
+
+        Ok(EngineBlock {
+            ast,
+            engine,
+            scope: Arc::new(Mutex::new(scope)),
+        })
+    }
+}
+
+/// Plugin which implements Rhai functionality
+struct Rhai {
+    block: Arc<RwLock<EngineBlock>>,
     watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -392,15 +421,37 @@ impl Plugin for Rhai {
         let main = scripts_path.join(&main_file);
 
         let watched_path = scripts_path.clone();
+        let watched_main = main.clone();
+        let watched_sdl = sdl.clone();
+
+        let block = Arc::new(RwLock::new(EngineBlock::try_new(
+            Some(scripts_path),
+            main,
+            sdl,
+        )?));
+        let watched_block = block.clone();
 
         let watcher_handle = std::thread::spawn(move || {
+            let watching_path = watched_path.clone();
             let mut watcher =
-                notify::recommended_watcher(|res: Result<notify::Event, notify::Error>| {
+                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
                             // We want to reload our engine for all events, but sometimes we'll get
                             // lots of duplicate events...
+                            println!("current dir: {:?}", std::env::current_dir());
                             println!("event kind: {:?}", event.kind);
+                            let mut guard = watched_block.write().unwrap();
+                            match EngineBlock::try_new(
+                                Some(watching_path.clone()),
+                                watched_main.clone(),
+                                watched_sdl.clone(),
+                            ) {
+                                Ok(eb) => *guard = eb,
+                                Err(e) => {
+                                    tracing::warn!("could not update script: {}", e);
+                                }
+                            }
                         }
                         Err(e) => tracing::error!("rhai watching event error: {:?}", e),
                     }
@@ -413,29 +464,11 @@ impl Plugin for Rhai {
             std::thread::park();
         });
 
-        let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
-        let ast = engine.compile_file(main)?;
-        let mut scope = Scope::new();
-        scope.push_constant("apollo_sdl", sdl.to_string());
-        scope.push_constant("apollo_start", Instant::now());
-
-        // Run the AST with our scope to put any global variables
-        // defined in scripts into scope.
-        engine.run_ast_with_scope(&mut scope, &ast)?;
-
         Ok(Self {
-            ast,
-            engine,
-            scope: Arc::new(Mutex::new(scope)),
+            block,
             watcher_handle: Some(watcher_handle),
         })
     }
-
-    /*
-    fn update_engine() {
-        println!("would update engine here");
-    }
-    */
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         const FUNCTION_NAME_SERVICE: &str = "supergraph_service";
@@ -448,7 +481,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
-            self.scope.clone(),
+            self.block.read().unwrap().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -466,7 +499,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
-            self.scope.clone(),
+            self.block.read().unwrap().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -484,7 +517,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
-            self.scope.clone(),
+            self.block.read().unwrap().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -1112,8 +1145,8 @@ impl Rhai {
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: self.engine.clone(),
-            ast: self.ast.clone(),
+            engine: self.block.read().unwrap().engine.clone(),
+            ast: self.block.read().unwrap().ast.clone(),
         };
         let mut guard = scope.lock().unwrap();
         // Note: We don't use `process_error()` here, because this code executes in the context of
@@ -1123,18 +1156,29 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                self.engine
+                self.block
+                    .read()
+                    .unwrap()
+                    .engine
                     .call_fn(
                         &mut guard,
-                        &self.ast,
+                        &self.block.read().unwrap().ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                self.engine
-                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
+                self.block
+                    .read()
+                    .unwrap()
+                    .engine
+                    .call_fn(
+                        &mut guard,
+                        &self.block.read().unwrap().ast,
+                        function_name,
+                        (rhai_service,),
+                    )
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1514,7 +1558,12 @@ impl Rhai {
     }
 
     fn ast_has_function(&self, name: &str) -> bool {
-        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
+        self.block
+            .read()
+            .unwrap()
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == name)
     }
 }
 
