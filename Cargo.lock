@@ -168,6 +168,7 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "apollo-parser 0.4.0",
+ "arc-swap",
  "askama",
  "async-compression",
  "async-trait",
@@ -326,6 +327,12 @@ checksum = "29d47fbf90d5149a107494b15a7dc8d69b351be2db3bb9691740e88ec17fd880"
 dependencies = [
  "derive_arbitrary",
 ]
+
+[[package]]
+name = "arc-swap"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "983cd8b9d4b02a6dc6ffa557262eb5858a27a0038ffffe21a0f133eaa819a164"
 
 [[package]]
 name = "ascii"

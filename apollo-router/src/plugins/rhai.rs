@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::RwLock;
 
+use arc_swap::ArcSwap;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -389,8 +389,12 @@ impl EngineBlock {
 }
 
 /// Plugin which implements Rhai functionality
+/// Note: We use ArcSwap here in preference to a shared RwLock. Updates to
+/// the engine block will be infrequent in relation to the accesses of it.
+/// We'd love to use AtomicArc if such a thing existed, but since it doesn't
+/// we'll use ArcSwap to accomplish our goal.
 struct Rhai {
-    block: Arc<RwLock<EngineBlock>>,
+    block: Arc<ArcSwap<EngineBlock>>,
     watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -424,7 +428,7 @@ impl Plugin for Rhai {
         let watched_main = main.clone();
         let watched_sdl = sdl.clone();
 
-        let block = Arc::new(RwLock::new(EngineBlock::try_new(
+        let block = Arc::new(ArcSwap::from_pointee(EngineBlock::try_new(
             Some(scripts_path),
             main,
             sdl,
@@ -441,13 +445,13 @@ impl Plugin for Rhai {
                             // lots of duplicate events...
                             println!("current dir: {:?}", std::env::current_dir());
                             println!("event kind: {:?}", event.kind);
-                            let mut guard = watched_block.write().unwrap();
+                            // let mut guard = watched_block.write().unwrap();
                             match EngineBlock::try_new(
                                 Some(watching_path.clone()),
                                 watched_main.clone(),
                                 watched_sdl.clone(),
                             ) {
-                                Ok(eb) => *guard = eb,
+                                Ok(eb) => watched_block.store(Arc::new(eb)),
                                 Err(e) => {
                                     tracing::warn!("could not update script: {}", e);
                                 }
@@ -481,7 +485,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
-            self.block.read().unwrap().scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -499,7 +503,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
-            self.block.read().unwrap().scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -517,7 +521,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
-            self.block.read().unwrap().scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -1142,11 +1146,12 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
+        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: self.block.read().unwrap().engine.clone(),
-            ast: self.block.read().unwrap().ast.clone(),
+            engine: block.engine.clone(),
+            ast: block.ast.clone(),
         };
         let mut guard = scope.lock().unwrap();
         // Note: We don't use `process_error()` here, because this code executes in the context of
@@ -1156,29 +1161,20 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                self.block
-                    .read()
-                    .unwrap()
+                block
                     .engine
                     .call_fn(
                         &mut guard,
-                        &self.block.read().unwrap().ast,
+                        &block.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                self.block
-                    .read()
-                    .unwrap()
+                block
                     .engine
-                    .call_fn(
-                        &mut guard,
-                        &self.block.read().unwrap().ast,
-                        function_name,
-                        (rhai_service,),
-                    )
+                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1559,8 +1555,7 @@ impl Rhai {
 
     fn ast_has_function(&self, name: &str) -> bool {
         self.block
-            .read()
-            .unwrap()
+            .load()
             .ast
             .iter_fn_def()
             .any(|fn_def| fn_def.name == name)
