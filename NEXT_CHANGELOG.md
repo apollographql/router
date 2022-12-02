@@ -238,6 +238,12 @@ supergraph:
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
 
+### `@defer` Apollo tracing support ([Issue #1600](https://github.com/apollographql/router/issues/1600))
+
+Added Apollo tracing support for queries that use `@defer`. You can now view traces in Apollo Studio as normal.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2190
+
 ## 🐛 Fixes
 
 ### Fix panic when dev mode enabled with empty config file ([Issue #2182](https://github.com/apollographql/router/issues/2182))
@@ -245,6 +251,18 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 If you're running the Router with dev mode with an empty config file, it will no longer panic
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2165
+
+### Fix missing apollo tracing variables ([Issue #2186](https://github.com/apollographql/router/issues/2186))
+
+Send variable values had no effect. This is now fixed.
+```yaml
+telemetry:
+  apollo:
+    send_variable_values: all
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2190
+
 
 ### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
 
