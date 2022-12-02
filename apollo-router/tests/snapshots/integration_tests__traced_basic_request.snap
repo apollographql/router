@@ -47,7 +47,7 @@ expression: get_spans()
           ],
           [
             "apollo_private.graphql.variables",
-            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
+            "{\"reviewsForAuthorAuthorId\":\"\",\"topProductsFirst\":\"\"}"
           ],
           [
             "apollo_private.http.request_headers",
@@ -141,14 +141,6 @@ expression: get_spans()
           "record": {
             "entries": [
               [
-                "graphql.document",
-                "{ topProducts { name name2:name } }"
-              ],
-              [
-                "graphql.operation.name",
-                ""
-              ],
-              [
                 "otel.kind",
                 "internal"
               ],
@@ -164,8 +156,6 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
-                  "graphql.document",
-                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }

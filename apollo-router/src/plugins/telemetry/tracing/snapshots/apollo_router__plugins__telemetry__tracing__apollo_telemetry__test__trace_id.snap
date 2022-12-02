@@ -206,14 +206,18 @@ Traces:
                           - id: "0"
                             defer_label: ""
                         label: ""
-                        path: []
+                        path:
+                          - id:
+                              FieldName: topProducts
                         node:
                           node:
                             Sequence:
                               nodes:
                                 - node:
                                     Flatten:
-                                      response_path: []
+                                      response_path:
+                                        - id:
+                                            FieldName: topProducts
                                       node:
                                         node:
                                           Fetch:
@@ -452,7 +456,13 @@ Traces:
                                               nanos: "[nanos]"
                                 - node:
                                     Flatten:
-                                      response_path: []
+                                      response_path:
+                                        - id:
+                                            FieldName: topProducts
+                                        - id:
+                                            FieldName: reviews
+                                        - id:
+                                            FieldName: author
                                       node:
                                         node:
                                           Fetch:

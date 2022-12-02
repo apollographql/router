@@ -65,7 +65,7 @@ const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
 pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
-const PATH: Key = Key::from_static_str("apollo_private.path");
+const PATH: Key = Key::from_static_str("graphql.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 const CLIENT_NAME: Key = Key::from_static_str("client.name");
 const CLIENT_VERSION: Key = Key::from_static_str("client.version");

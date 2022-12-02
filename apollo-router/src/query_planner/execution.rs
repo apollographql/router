@@ -173,7 +173,7 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, path = %current_dir, "otel.kind" = %SpanKind::Internal))
+                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, "graphql.path" = %current_dir, "otel.kind" = %SpanKind::Internal))
                         .await;
 
                     value = v;
@@ -430,6 +430,7 @@ impl DeferredNode {
                         DEFER_DEFERRED_SPAN_NAME,
                         "graphql.label" = label,
                         "graphql.depends" = depends_json,
+                        "graphql.path" = deferred_path.to_string(),
                         "otel.kind" = %SpanKind::Internal
                     ))
                     .await;

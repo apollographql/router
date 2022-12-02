@@ -1,51 +1,51 @@
 ---
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 9580263024779914233
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 2226108203856432052
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 14003376459211054810
+  parent_span_id: 6681943477281517192
   span_kind: Internal
   name: supergraph
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 543322573
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 694878120
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 764423479
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 831374780
   attributes:
     map:
-      code.filepath:
-        String: apollo-router/src/plugins/telemetry/mod.rs
-      client.version:
-        String: ""
-      apollo_private.field_level_instrumentation_ratio:
-        F64: 1.0
-      apollo_private.graphql.variables:
-        String: "{\"if\":\"true\"}"
-      thread.name:
-        String: tokio-runtime-worker
-      graphql.operation.name:
-        String: ""
       graphql.document:
         String: "query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}"
+      client.version:
+        String: ""
+      graphql.operation.name:
+        String: ""
       apollo_private.http.request_headers:
         String: "{\"accept\":[\"\"],\"content-length\":[\"\"],\"content-type\":[\"\"],\"host\":[\"\"],\"user-agent\":[\"\"]}"
-      code.lineno:
-        I64: 673
-      idle_ns:
-        I64: 215267084
-      client.name:
-        String: ""
+      apollo_private.field_level_instrumentation_ratio:
+        F64: 1.0
+      busy_ns:
+        I64: 3579254
+      code.filepath:
+        String: apollo-router/src/plugins/telemetry/mod.rs
       apollo_private.operation_signature:
         String: "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}"
+      apollo_private.graphql.variables:
+        String: "{\"if\":\"true\"}"
+      idle_ns:
+        I64: 132902529
+      code.lineno:
+        I64: 673
+      client.name:
+        String: ""
+      thread.name:
+        String: tokio-runtime-worker
       thread.id:
         I64: 15
       code.namespace:
         String: "apollo_router::plugins::telemetry"
-      busy_ns:
-        I64: 5830818
     evict_list:
       - idle_ns
       - busy_ns
@@ -85,40 +85,40 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 7159892767440504879
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 7005602647906255377
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 9580263024779914233
+  parent_span_id: 2226108203856432052
   span_kind: Internal
   name: query_planning
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 543819079
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 695299406
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 576178062
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 695547275
   attributes:
     map:
-      graphql.document:
-        String: "query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}"
+      thread.name:
+        String: tokio-runtime-worker
       code.filepath:
         String: apollo-router/src/services/supergraph_service.rs
       code.lineno:
         I64: 247
-      thread.id:
-        I64: 15
       graphql.operation.name:
         String: ""
+      thread.id:
+        I64: 15
+      graphql.document:
+        String: "query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}"
+      busy_ns:
+        I64: 194440
       idle_ns:
-        I64: 29580883
+        I64: 70121
       code.namespace:
         String: "apollo_router::services::supergraph_service"
-      thread.name:
-        String: tokio-runtime-worker
-      busy_ns:
-        I64: 2762874
     evict_list:
       - idle_ns
       - busy_ns
@@ -152,36 +152,36 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 1558727018210574351
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 5496672787700345629
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 9580263024779914233
+  parent_span_id: 2226108203856432052
   span_kind: Internal
   name: execution
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 576559678
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 695807715
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763864255
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 830738870
   attributes:
     map:
-      thread.id:
-        I64: 15
       code.filepath:
         String: apollo-router/src/plugins/telemetry/mod.rs
-      busy_ns:
-        I64: 4299183
-      thread.name:
-        String: tokio-runtime-worker
       code.lineno:
         I64: 283
+      busy_ns:
+        I64: 2888938
       code.namespace:
         String: "apollo_router::plugins::telemetry"
+      thread.id:
+        I64: 15
+      thread.name:
+        String: tokio-runtime-worker
       idle_ns:
-        I64: 57794266
+        I64: 45262821
     evict_list:
       - idle_ns
       - busy_ns
@@ -213,36 +213,36 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 12378261562394103416
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 8052379820523592996
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 1558727018210574351
+  parent_span_id: 5496672787700345629
   span_kind: Internal
   name: condition
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 576700758
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 695918484
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763811873
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 830671333
   attributes:
     map:
-      busy_ns:
-        I64: 4032109
-      idle_ns:
-        I64: 57847205
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
-      thread.id:
-        I64: 15
       code.namespace:
         String: "apollo_router::query_planner::execution"
-      thread.name:
-        String: tokio-runtime-worker
+      idle_ns:
+        I64: 45284960
       code.lineno:
         I64: 327
+      thread.name:
+        String: tokio-runtime-worker
+      busy_ns:
+        I64: 2690658
+      thread.id:
+        I64: 15
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
       graphql.condition:
         String: if
     evict_list:
@@ -277,36 +277,36 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 617329122007741020
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 14511206469911177014
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 12378261562394103416
+  parent_span_id: 8052379820523592996
   span_kind: Internal
   name: condition_if
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 576775489
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 695977151
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763775556
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 830608824
   attributes:
     map:
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
-      thread.name:
-        String: tokio-runtime-worker
-      code.namespace:
-        String: "apollo_router::query_planner::execution"
       code.lineno:
         I64: 306
+      thread.name:
+        String: tokio-runtime-worker
+      busy_ns:
+        I64: 2606848
+      code.namespace:
+        String: "apollo_router::query_planner::execution"
       thread.id:
         I64: 15
-      busy_ns:
-        I64: 3889352
       idle_ns:
-        I64: 57908526
+        I64: 45301861
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
     evict_list:
       - idle_ns
       - busy_ns
@@ -338,34 +338,34 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 273310860917109442
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 12847835672039219100
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 617329122007741020
+  parent_span_id: 14511206469911177014
   span_kind: Internal
   name: defer
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 576863001
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 696022339
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763708298
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 830518170
   attributes:
     map:
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
-      idle_ns:
-        I64: 176012548
       thread.name:
         String: tokio-runtime-worker
+      idle_ns:
+        I64: 126457525
       busy_ns:
-        I64: 10835333
-      thread.id:
-        I64: 15
+        I64: 8029995
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
       code.lineno:
         I64: 271
+      thread.id:
+        I64: 15
       code.namespace:
         String: "apollo_router::query_planner::execution"
     evict_list:
@@ -399,36 +399,36 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 16674771176041933537
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 4412163015592220412
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 273310860917109442
+  parent_span_id: 12847835672039219100
   span_kind: Internal
   name: defer_primary
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 577260890
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 696362399
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638435988
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 743760914
   attributes:
     map:
-      thread.id:
-        I64: 15
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
       code.namespace:
         String: "apollo_router::query_planner::execution"
       code.lineno:
         I64: 259
+      thread.id:
+        I64: 15
       thread.name:
         String: tokio-runtime-worker
-      busy_ns:
-        I64: 3147703
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
       idle_ns:
-        I64: 58043599
+        I64: 45358226
+      busy_ns:
+        I64: 2046016
     evict_list:
       - idle_ns
       - busy_ns
@@ -460,41 +460,44 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 1738697536692561506
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 1343706171599318485
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 273310860917109442
+  parent_span_id: 12847835672039219100
   span_kind: Internal
   name: defer_deferred
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638680574
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 743955493
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763387864
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 830061683
   attributes:
     map:
+      graphql.depends:
+        String: "[{\"id\":\"0\",\"deferLabel\":null}]"
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
+      idle_ns:
+        I64: 79860304
+      thread.name:
+        String: tokio-runtime-worker
+      graphql.path:
+        String: /topProducts/@
       code.lineno:
         I64: 429
       code.namespace:
         String: "apollo_router::query_planner::execution"
-      idle_ns:
-        I64: 117081400
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
       thread.id:
-        I64: 16
-      thread.name:
-        String: tokio-runtime-worker
+        I64: 14
       busy_ns:
-        I64: 7653407
-      graphql.depends:
-        String: "[{\"id\":\"0\",\"deferLabel\":null}]"
+        I64: 6254826
     evict_list:
       - idle_ns
       - busy_ns
+      - graphql.path
       - graphql.depends
       - thread.name
       - thread.id
@@ -524,36 +527,36 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 11726436656991533142
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 1615094331109834215
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 1738697536692561506
+  parent_span_id: 1343706171599318485
   span_kind: Internal
   name: sequence
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638835553
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 744057462
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763323958
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 829959505
   attributes:
     map:
       code.filepath:
         String: apollo-router/src/query_planner/execution.rs
-      thread.name:
-        String: tokio-runtime-worker
-      idle_ns:
-        I64: 117225900
-      code.namespace:
-        String: "apollo_router::query_planner::execution"
-      busy_ns:
-        I64: 7267743
       code.lineno:
         I64: 133
       thread.id:
-        I64: 16
+        I64: 14
+      busy_ns:
+        I64: 5920423
+      idle_ns:
+        I64: 79979594
+      thread.name:
+        String: tokio-runtime-worker
+      code.namespace:
+        String: "apollo_router::query_planner::execution"
     evict_list:
       - idle_ns
       - busy_ns
@@ -585,42 +588,42 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 4816206757740571923
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 9487579781210749637
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 11726436656991533142
+  parent_span_id: 1615094331109834215
   span_kind: Internal
   name: flatten
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638916640
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 744129818
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 702148092
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 785840064
   attributes:
     map:
+      idle_ns:
+        I64: 39187070
+      code.namespace:
+        String: "apollo_router::query_planner::execution"
+      thread.name:
+        String: tokio-runtime-worker
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
+      code.lineno:
+        I64: 176
       thread.id:
-        I64: 16
-      path:
+        I64: 14
+      busy_ns:
+        I64: 2518567
+      graphql.path:
         String: /topProducts/@
-      busy_ns:
-        I64: 3303452
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
-      idle_ns:
-        I64: 59924508
-      code.namespace:
-        String: "apollo_router::query_planner::execution"
-      code.lineno:
-        I64: 176
-      thread.name:
-        String: tokio-runtime-worker
     evict_list:
       - idle_ns
       - busy_ns
-      - path
+      - graphql.path
       - thread.name
       - thread.id
       - code.lineno
@@ -649,42 +652,42 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 4532099598974383362
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 4988545802786443624
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 11726436656991533142
+  parent_span_id: 1615094331109834215
   span_kind: Internal
   name: flatten
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 702509453
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 786138149
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763185322
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 829728538
   attributes:
     map:
+      thread.name:
+        String: tokio-runtime-worker
+      idle_ns:
+        I64: 40783864
+      graphql.path:
+        String: /topProducts/@/reviews/@/author
+      busy_ns:
+        I64: 2806594
+      code.namespace:
+        String: "apollo_router::query_planner::execution"
+      code.lineno:
+        I64: 176
       code.filepath:
         String: apollo-router/src/query_planner/execution.rs
       thread.id:
-        I64: 13
-      code.namespace:
-        String: "apollo_router::query_planner::execution"
-      thread.name:
-        String: tokio-runtime-worker
-      path:
-        String: /topProducts/@/reviews/@/author
-      idle_ns:
-        I64: 57562321
-      busy_ns:
-        I64: 3129681
-      code.lineno:
-        I64: 176
+        I64: 10
     evict_list:
       - idle_ns
       - busy_ns
-      - path
+      - graphql.path
       - thread.name
       - thread.id
       - code.lineno
@@ -713,40 +716,40 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 15635377346288801422
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 4477074139770004131
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 4532099598974383362
+  parent_span_id: 4988545802786443624
   span_kind: Internal
   name: fetch
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 702833310
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 786225452
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 763067290
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 829575654
   attributes:
     map:
-      thread.name:
-        String: tokio-runtime-worker
-      thread.id:
-        I64: 13
-      apollo.subgraph.name:
-        String: accounts
-      idle_ns:
-        I64: 57375563
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
       apollo_private.sent_time_offset:
-        I64: 159703850
+        I64: 91499517
+      thread.id:
+        I64: 10
       code.namespace:
         String: "apollo_router::query_planner::execution"
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
+      thread.name:
+        String: tokio-runtime-worker
       code.lineno:
         I64: 188
+      apollo.subgraph.name:
+        String: accounts
       busy_ns:
-        I64: 2865611
+        I64: 2573183
+      idle_ns:
+        I64: 40767661
     evict_list:
       - idle_ns
       - busy_ns
@@ -780,119 +783,119 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 8561522998216131968
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 4307400006762176495
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 15635377346288801422
+  parent_span_id: 4477074139770004131
   span_kind: Internal
   name: subgraph
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 703389810
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 786630674
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 762816348
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 829172108
   attributes:
     map:
       code.filepath:
         String: apollo-router/src/plugins/telemetry/mod.rs
-      apollo_private.ftv1:
-        String: GgwIxJmnnAYQgKbW5AIiDAjEmaecBhCAptbkAli9ySJysQFirgEKCV9lbnRpdGllcxoKW19FbnRpdHldIUCbtxBIz5kXYiAQAGIcCgRuYW1lGgZTdHJpbmdAq6QZSO/pGWoEVXNlcmIgEAFiHAoEbmFtZRoGU3RyaW5nQM3kGkiRhxtqBFVzZXJiIBACYhwKBG5hbWUaBlN0cmluZ0DjuhtIveMbagRVc2VyYiAQA2IcCgRuYW1lGgZTdHJpbmdAk5kcSO2yHGoEVXNlcmoFUXVlcnn5AQAAAAAAAPA/
-      code.namespace:
-        String: "apollo_router::plugins::telemetry"
-      thread.name:
-        String: tokio-runtime-worker
-      apollo.subgraph.name:
-        String: accounts
+      code.lineno:
+        I64: 313
+      thread.id:
+        I64: 10
       graphql.document:
         String: "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}"
-      thread.id:
-        I64: 13
-      graphql.operation.name:
-        String: ""
       busy_ns:
-        I64: 1891667
-      code.lineno:
-        I64: 313
-      idle_ns:
-        I64: 57547164
-    evict_list:
-      - idle_ns
-      - busy_ns
-      - apollo_private.ftv1
-      - graphql.operation.name
-      - graphql.document
-      - apollo.subgraph.name
-      - thread.name
-      - thread.id
-      - code.lineno
-      - code.namespace
-      - code.filepath
-    max_len: 128
-    dropped_count: 0
-  events:
-    queue: ~
-    max_len: 128
-    dropped_count: 0
-  links:
-    queue: ~
-    max_len: 128
-    dropped_count: 0
-  status_code: Unset
-  status_message: ""
-  resource:
-    attrs:
-      foo:
-        String: bar
-      process.executable.name:
-        String: router
-      service.name:
-        String: router
-      service.version:
-        String: 1.4.0
-- span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 284769084364469237
-    trace_flags: 1
-    is_remote: false
-    trace_state: ~
-  parent_span_id: 8561522998216131968
-  span_kind: Client
-  name: subgraph_request
-  start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 703697463
-  end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 761951706
-  attributes:
-    map:
-      code.lineno:
-        I64: 173
-      http.route:
-        String: /graphql
-      net.transport:
-        String: ip_tcp
-      idle_ns:
-        I64: 57468312
-      thread.id:
-        I64: 13
-      code.namespace:
-        String: "apollo_router::services::subgraph_service"
-      code.filepath:
-        String: apollo-router/src/services/subgraph_service.rs
+        I64: 1669429
       thread.name:
         String: tokio-runtime-worker
-      net.peer.name:
-        String: accounts.demo.starstuff.dev
+      idle_ns:
+        I64: 40867534
+      code.namespace:
+        String: "apollo_router::plugins::telemetry"
+      apollo_private.ftv1:
+        String: GgwI+LWnnAYQwMHbggMiDAj4taecBhCAvZ6CA1j2sDRysQFirgEKCV9lbnRpdGllcxoKW19FbnRpdHldIUD0/xtIsqwlYiAQAGIcCgRuYW1lGgZTdHJpbmdA5JEpSOaUKmoEVXNlcmIgEAFiHAoEbmFtZRoGU3RyaW5nQITYK0iQlSxqBFVzZXJiIBACYhwKBG5hbWUaBlN0cmluZ0Ckgy1IiLYtagRVc2VyYiAQA2IcCgRuYW1lGgZTdHJpbmdAlrUuSIiDL2oEVXNlcmoFUXVlcnn5AQAAAAAAAPA/
+      graphql.operation.name:
+        String: ""
       apollo.subgraph.name:
         String: accounts
+    evict_list:
+      - idle_ns
+      - busy_ns
+      - apollo_private.ftv1
+      - graphql.operation.name
+      - graphql.document
+      - apollo.subgraph.name
+      - thread.name
+      - thread.id
+      - code.lineno
+      - code.namespace
+      - code.filepath
+    max_len: 128
+    dropped_count: 0
+  events:
+    queue: ~
+    max_len: 128
+    dropped_count: 0
+  links:
+    queue: ~
+    max_len: 128
+    dropped_count: 0
+  status_code: Unset
+  status_message: ""
+  resource:
+    attrs:
+      foo:
+        String: bar
+      process.executable.name:
+        String: router
+      service.name:
+        String: router
+      service.version:
+        String: 1.4.0
+- span_context:
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 15682297860951097268
+    trace_flags: 1
+    is_remote: false
+    trace_state: ~
+  parent_span_id: 4307400006762176495
+  span_kind: Client
+  name: subgraph_request
+  start_time:
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 786922194
+  end_time:
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 827988149
+  attributes:
+    map:
+      code.namespace:
+        String: "apollo_router::services::subgraph_service"
       net.peer.port:
         String: "80"
+      apollo.subgraph.name:
+        String: accounts
+      code.filepath:
+        String: apollo-router/src/services/subgraph_service.rs
+      thread.name:
+        String: tokio-runtime-worker
+      http.route:
+        String: /graphql
+      idle_ns:
+        I64: 40798740
+      code.lineno:
+        I64: 173
+      net.peer.name:
+        String: accounts.demo.starstuff.dev
+      net.transport:
+        String: ip_tcp
+      thread.id:
+        I64: 10
       busy_ns:
-        I64: 767632
+        I64: 244936
     evict_list:
       - idle_ns
       - busy_ns
@@ -929,40 +932,40 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 18321902082964249521
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 374273098096638287
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 4816206757740571923
+  parent_span_id: 9487579781210749637
   span_kind: Internal
   name: fetch
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638977123
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 744222848
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 701973906
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 785694374
   attributes:
     map:
-      code.namespace:
-        String: "apollo_router::query_planner::execution"
-      apollo_private.sent_time_offset:
-        I64: 95892012
-      thread.name:
-        String: tokio-runtime-worker
-      idle_ns:
-        I64: 59964738
       thread.id:
-        I64: 16
+        I64: 14
       apollo.subgraph.name:
         String: reviews
-      busy_ns:
-        I64: 3026388
-      code.lineno:
-        I64: 188
+      apollo_private.sent_time_offset:
+        I64: 49483643
       code.filepath:
         String: apollo-router/src/query_planner/execution.rs
+      idle_ns:
+        I64: 39184766
+      code.namespace:
+        String: "apollo_router::query_planner::execution"
+      code.lineno:
+        I64: 188
+      thread.name:
+        String: tokio-runtime-worker
+      busy_ns:
+        I64: 2283967
     evict_list:
       - idle_ns
       - busy_ns
@@ -996,44 +999,44 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 1409035527293687242
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 12633132268468348696
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 18321902082964249521
+  parent_span_id: 374273098096638287
   span_kind: Internal
   name: subgraph
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 639278141
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 744492507
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 701623579
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 785324771
   attributes:
     map:
-      code.namespace:
-        String: "apollo_router::plugins::telemetry"
+      code.filepath:
+        String: apollo-router/src/plugins/telemetry/mod.rs
+      apollo_private.ftv1:
+        String: GgwI+LWnnAYQgImV7wIiDAj4taecBhDA+93tAljn6poBcqgDYqUDCglfZW50aXRpZXMaCltfRW50aXR5XSFAqZQjSIKrL2KoARAAYqMBCgdyZXZpZXdzGghbUmV2aWV3XUC3/jNIzL9UYj0QAGI5CgZhdXRob3IaBFVzZXJApP1XSLPbfmIZCgJpZBoDSUQhQOflggFImIKEAWoEVXNlcmoGUmV2aWV3Yj4QAWI6CgZhdXRob3IaBFVzZXJA+eFgSNTHhAFiGQoCaWQaA0lEIUDyuYYBSNKmhwFqBFVzZXJqBlJldmlld2oHUHJvZHVjdGJoEAFiZAoHcmV2aWV3cxoIW1Jldmlld11A/IRCSIT0Z2I+EABiOgoGYXV0aG9yGgRVc2VyQJmBakjV0ocBYhkKAmlkGgNJRCFAp/eIAUiLsYkBagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiaBACYmQKB3Jldmlld3MaCFtSZXZpZXddQN6gSkjqnnJiPhAAYjoKBmF1dGhvchoEVXNlckDFsnVIt9WJAWIZCgJpZBoDSUQhQKvligFIj5yLAWoEVXNlcmoGUmV2aWV3agdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8=
       thread.id:
-        I64: 16
+        I64: 14
       thread.name:
         String: tokio-runtime-worker
       apollo.subgraph.name:
         String: reviews
+      code.lineno:
+        I64: 313
       graphql.operation.name:
         String: ""
-      apollo_private.ftv1:
-        String: GgwIxJmnnAYQgJiIyAIiDAjEmaecBhCAj47HAljh5IUBcp0DYpoDCglfZW50aXRpZXMaCltfRW50aXR5XSFA4OMfSO6YLmKjARAAYp4BCgdyZXZpZXdzGghbUmV2aWV3XUCe3DJI35VMYjsQAGI3CgZhdXRob3IaBFVzZXJAqP5OSKCUc2IXCgJpZBoDSUQhQIvcdkj33XdqBFVzZXJqBlJldmlld2I7EAFiNwoGYXV0aG9yGgRVc2VyQIb6V0jgm3hiFwoCaWQaA0lEIUCK7XlI7K16agRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiZRABYmEKB3Jldmlld3MaCFtSZXZpZXddQNX7PEj5iF5iOxAAYjcKBmF1dGhvchoEVXNlckDI0l9I7dl6YhcKAmlkGgNJRCFA79x7SMGVfGoEVXNlcmoGUmV2aWV3agdQcm9kdWN0YmUQAmJhCgdyZXZpZXdzGghbUmV2aWV3XUCsvERI9/9oYjsQAGI3CgZhdXRob3IaBFVzZXJAq6NrSOm4fGIXCgJpZBoDSUQhQOGOfUjogX5qBFVzZXJqBlJldmlld2oHUHJvZHVjdGoFUXVlcnn5AQAAAAAAAPA/
       busy_ns:
-        I64: 2212310
-      code.filepath:
-        String: apollo-router/src/plugins/telemetry/mod.rs
-      idle_ns:
-        I64: 60136202
+        I64: 1537429
+      code.namespace:
+        String: "apollo_router::plugins::telemetry"
       graphql.document:
         String: "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{author{__typename id}}}}}"
-      code.lineno:
-        I64: 313
+      idle_ns:
+        I64: 39296791
     evict_list:
       - idle_ns
       - busy_ns
@@ -1069,46 +1072,46 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 12222857992241716950
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 11564887256002176974
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 1409035527293687242
+  parent_span_id: 12633132268468348696
   span_kind: Client
   name: subgraph_request
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 639619807
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 744791989
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 700632593
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 784339792
   attributes:
     map:
-      code.filepath:
-        String: apollo-router/src/services/subgraph_service.rs
-      code.namespace:
-        String: "apollo_router::services::subgraph_service"
-      http.route:
-        String: /graphql
       apollo.subgraph.name:
         String: reviews
-      busy_ns:
-        I64: 903612
-      thread.name:
-        String: tokio-runtime-worker
       idle_ns:
-        I64: 60092970
+        I64: 39220524
       code.lineno:
         I64: 173
+      http.route:
+        String: /graphql
+      thread.name:
+        String: tokio-runtime-worker
       net.peer.name:
         String: reviews.demo.starstuff.dev
+      code.namespace:
+        String: "apollo_router::services::subgraph_service"
+      code.filepath:
+        String: apollo-router/src/services/subgraph_service.rs
       net.peer.port:
         String: "80"
       thread.id:
-        I64: 16
+        I64: 14
       net.transport:
         String: ip_tcp
+      busy_ns:
+        I64: 303323
     evict_list:
       - idle_ns
       - busy_ns
@@ -1145,40 +1148,40 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 7095431642545931331
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 13334624373206909001
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 16674771176041933537
+  parent_span_id: 4412163015592220412
   span_kind: Internal
   name: fetch
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 577422364
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 696431123
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638313905
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 743652030
   attributes:
     map:
-      code.lineno:
-        I64: 188
-      thread.name:
-        String: tokio-runtime-worker
-      busy_ns:
-        I64: 2853458
-      idle_ns:
-        I64: 58050864
-      apollo.subgraph.name:
-        String: products
       code.namespace:
         String: "apollo_router::query_planner::execution"
-      code.filepath:
-        String: apollo-router/src/query_planner/execution.rs
+      thread.name:
+        String: tokio-runtime-worker
+      code.lineno:
+        I64: 188
       thread.id:
         I64: 15
+      busy_ns:
+        I64: 1848154
+      apollo.subgraph.name:
+        String: products
+      idle_ns:
+        I64: 45372963
+      code.filepath:
+        String: apollo-router/src/query_planner/execution.rs
       apollo_private.sent_time_offset:
-        I64: 34292834
+        I64: 1705118
     evict_list:
       - idle_ns
       - busy_ns
@@ -1212,44 +1215,44 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 6010709024701094366
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 357853883512773358
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 7095431642545931331
+  parent_span_id: 13334624373206909001
   span_kind: Internal
   name: subgraph
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 577710950
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 696595810
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 638132944
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 743458778
   attributes:
     map:
+      apollo_private.ftv1:
+        String: GgwI+LWnnAYQgMyR2wIiDAj4taecBhDAvtrZAli8irwBcokCYoYCCgt0b3BQcm9kdWN0cxoJW1Byb2R1Y3RdQJWWE0jj/KQBYkgQAGIhCgRuYW1lGgZTdHJpbmdAuqerAUiEsqwBagdQcm9kdWN0YiEKA3VwYxoHU3RyaW5nIUDtkq4BSIXgrgFqB1Byb2R1Y3RiSBABYiEKBG5hbWUaBlN0cmluZ0CKoLABSMjOsAFqB1Byb2R1Y3RiIQoDdXBjGgdTdHJpbmchQKSDsQFIjfyzAWoHUHJvZHVjdGJIEAJiIQoEbmFtZRoGU3RyaW5nQPGPtQFIsOO1AWoHUHJvZHVjdGIhCgN1cGMaB1N0cmluZyFA7pm2AUjwvLYBagdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8=
+      busy_ns:
+        I64: 1359192
+      code.filepath:
+        String: apollo-router/src/plugins/telemetry/mod.rs
       idle_ns:
-        I64: 58233501
+        I64: 45508525
+      code.lineno:
+        I64: 313
+      apollo.subgraph.name:
+        String: products
       code.namespace:
         String: "apollo_router::plugins::telemetry"
       thread.id:
         I64: 15
-      graphql.document:
-        String: "{topProducts{__typename name upc}}"
-      code.lineno:
-        I64: 313
       thread.name:
         String: tokio-runtime-worker
-      busy_ns:
-        I64: 2200506
-      code.filepath:
-        String: apollo-router/src/plugins/telemetry/mod.rs
+      graphql.document:
+        String: "{topProducts{__typename name upc}}"
       graphql.operation.name:
         String: ""
-      apollo_private.ftv1:
-        String: GgwIxJmnnAYQgIHAqgIiDAjEmaecBhDA/IKqAlj/6R9y/AFi+QEKC3RvcFByb2R1Y3RzGglbUHJvZHVjdF1A2NsQSPqIFWJEEABiHwoEbmFtZRoGU3RyaW5nQLnAF0iL+RdqB1Byb2R1Y3RiHwoDdXBjGgdTdHJpbmchQMe1GEixzRhqB1Byb2R1Y3RiRBABYh8KBG5hbWUaBlN0cmluZ0CPrxlI4b8ZagdQcm9kdWN0Yh8KA3VwYxoHU3RyaW5nIUCR9hlIx4caagdQcm9kdWN0YkQQAmIfCgRuYW1lGgZTdHJpbmdAu7gaSLPcGmoHUHJvZHVjdGIfCgN1cGMaB1N0cmluZyFAp/QaSM+DG2oHUHJvZHVjdGoFUXVlcnn5AQAAAAAAAPA/
-      apollo.subgraph.name:
-        String: products
     evict_list:
       - idle_ns
       - busy_ns
@@ -1285,46 +1288,46 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 6317126890373117901
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 18275235823533906477
     trace_flags: 1
     is_remote: false
     trace_state: ~
-  parent_span_id: 6010709024701094366
+  parent_span_id: 357853883512773358
   span_kind: Client
   name: subgraph_request
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 578131329
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 696871895
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 637344081
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 742639533
   attributes:
     map:
-      code.namespace:
-        String: "apollo_router::services::subgraph_service"
-      code.lineno:
-        I64: 173
-      http.route:
-        String: /graphql
-      code.filepath:
-        String: apollo-router/src/services/subgraph_service.rs
-      thread.id:
-        I64: 15
       net.peer.name:
         String: products.demo.starstuff.dev
-      net.peer.port:
-        String: "80"
-      net.transport:
-        String: ip_tcp
-      apollo.subgraph.name:
-        String: products
+      http.route:
+        String: /graphql
+      code.lineno:
+        I64: 173
       busy_ns:
-        I64: 1034846
-      idle_ns:
-        I64: 58171341
+        I64: 304929
+      thread.id:
+        I64: 15
       thread.name:
         String: tokio-runtime-worker
+      apollo.subgraph.name:
+        String: products
+      code.namespace:
+        String: "apollo_router::services::subgraph_service"
+      net.peer.port:
+        String: "80"
+      code.filepath:
+        String: apollo-router/src/services/subgraph_service.rs
+      idle_ns:
+        I64: 45448321
+      net.transport:
+        String: ip_tcp
     evict_list:
       - idle_ns
       - busy_ns
@@ -1361,69 +1364,8 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 18087703922356442348
-    trace_flags: 1
-    is_remote: false
-    trace_state: ~
-  parent_span_id: 7159892767440504879
-  span_kind: Internal
-  name: parse_query
-  start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 544043062
-  end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 545138391
-  attributes:
-    map:
-      idle_ns:
-        I64: 995806
-      code.filepath:
-        String: apollo-router/src/query_planner/bridge_query_planner.rs
-      code.namespace:
-        String: "apollo_router::query_planner::bridge_query_planner"
-      busy_ns:
-        I64: 73543
-      code.lineno:
-        I64: 76
-      thread.id:
-        I64: 15
-      thread.name:
-        String: tokio-runtime-worker
-    evict_list:
-      - idle_ns
-      - busy_ns
-      - thread.name
-      - thread.id
-      - code.lineno
-      - code.namespace
-      - code.filepath
-    max_len: 128
-    dropped_count: 0
-  events:
-    queue: ~
-    max_len: 128
-    dropped_count: 0
-  links:
-    queue: ~
-    max_len: 128
-    dropped_count: 0
-  status_code: Unset
-  status_message: ""
-  resource:
-    attrs:
-      foo:
-        String: bar
-      process.executable.name:
-        String: router
-      service.name:
-        String: router
-      service.version:
-        String: 1.4.0
-- span_context:
-    trace_id: 182957824634287527203089738380598550153
-    span_id: 14003376459211054810
+    trace_id: 48179106241482103848812575548686436429
+    span_id: 6681943477281517192
     trace_flags: 1
     is_remote: false
     trace_state: ~
@@ -1431,37 +1373,37 @@
   span_kind: Server
   name: request
   start_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 542326698
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 694077802
   end_time:
-    secs_since_epoch: 1669975236
-    nanos_since_epoch: 764555410
+    secs_since_epoch: 1669978872
+    nanos_since_epoch: 831560350
   attributes:
     map:
-      trace_id:
-        String: 89a4653288475f901ec3f45e00f79e89
+      idle_ns:
+        I64: 131480409
       apollo_private.duration_ns:
-        I64: 97083165
-      thread.id:
-        I64: 15
-      busy_ns:
-        I64: 10290917
+        I64: 50655519
       code.namespace:
         String: "apollo_router::axum_factory::utils"
-      thread.name:
-        String: tokio-runtime-worker
-      idle_ns:
-        I64: 211796644
       code.filepath:
         String: apollo-router/src/axum_factory/utils.rs
+      thread.name:
+        String: tokio-runtime-worker
       http.method:
         String: POST
-      code.lineno:
-        I64: 259
-      http.route:
-        String: /
       http.flavor:
         String: HTTP/1.1
+      busy_ns:
+        I64: 5802181
+      trace_id:
+        String: 243ef555cc5e90c7f03a859b1c3f884d
+      thread.id:
+        I64: 15
+      http.route:
+        String: /
+      code.lineno:
+        I64: 259
     evict_list:
       - idle_ns
       - busy_ns

@@ -47,7 +47,7 @@ expression: get_spans()
           ],
           [
             "apollo_private.graphql.variables",
-            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
+            "{\"reviewsForAuthorAuthorId\":\"\",\"topProductsFirst\":\"\"}"
           ],
           [
             "apollo_private.http.request_headers",
@@ -141,14 +141,6 @@ expression: get_spans()
           "record": {
             "entries": [
               [
-                "graphql.document",
-                "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
-              ],
-              [
-                "graphql.operation.name",
-                ""
-              ],
-              [
                 "otel.kind",
                 "internal"
               ],
@@ -164,8 +156,6 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
-                  "graphql.document",
-                  "graphql.operation.name",
                   "otel.kind"
                 ]
               }
@@ -175,14 +165,21 @@ expression: get_spans()
             "apollo_router::query_planner::execution::sequence": {
               "name": "apollo_router::query_planner::execution::sequence",
               "record": {
-                "entries": [],
+                "entries": [
+                  [
+                    "otel.kind",
+                    "internal"
+                  ]
+                ],
                 "metadata": {
                   "name": "sequence",
                   "target": "apollo_router::query_planner::execution",
                   "level": "INFO",
                   "module_path": "apollo_router::query_planner::execution",
                   "fields": {
-                    "names": []
+                    "names": [
+                      "otel.kind"
+                    ]
                   }
                 }
               },
@@ -394,8 +391,12 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "path",
+                        "graphql.path",
                         "/topProducts/@"
+                      ],
+                      [
+                        "otel.kind",
+                        "internal"
                       ]
                     ],
                     "metadata": {
@@ -405,7 +406,8 @@ expression: get_spans()
                       "module_path": "apollo_router::query_planner::execution",
                       "fields": {
                         "names": [
-                          "path"
+                          "graphql.path",
+                          "otel.kind"
                         ]
                       }
                     }
@@ -618,14 +620,21 @@ expression: get_spans()
                 "apollo_router::query_planner::execution::parallel": {
                   "name": "apollo_router::query_planner::execution::parallel",
                   "record": {
-                    "entries": [],
+                    "entries": [
+                      [
+                        "otel.kind",
+                        "internal"
+                      ]
+                    ],
                     "metadata": {
                       "name": "parallel",
                       "target": "apollo_router::query_planner::execution",
                       "level": "INFO",
                       "module_path": "apollo_router::query_planner::execution",
                       "fields": {
-                        "names": []
+                        "names": [
+                          "otel.kind"
+                        ]
                       }
                     }
                   },
@@ -635,8 +644,12 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "path",
+                            "graphql.path",
                             "/topProducts/@/reviews/@/product"
+                          ],
+                          [
+                            "otel.kind",
+                            "internal"
                           ]
                         ],
                         "metadata": {
@@ -646,7 +659,8 @@ expression: get_spans()
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "path"
+                              "graphql.path",
+                              "otel.kind"
                             ]
                           }
                         }
@@ -861,8 +875,12 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "path",
+                            "graphql.path",
                             "/topProducts/@/reviews/@/author"
+                          ],
+                          [
+                            "otel.kind",
+                            "internal"
                           ]
                         ],
                         "metadata": {
@@ -872,7 +890,8 @@ expression: get_spans()
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "path"
+                              "graphql.path",
+                              "otel.kind"
                             ]
                           }
                         }
