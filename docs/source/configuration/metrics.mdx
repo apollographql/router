@@ -27,7 +27,7 @@ telemetry:
 ## Using in a containers environment
 
 The prometheus endpoint listens to 127.0.0.1 by default, which won't allow connections issued from a network.
-While this is a safe default, *other containers won't be able to access the prometheus endpoint*, which will prevent the pods from scraping the metrics.
+While this is a safe default, *other containers won't be able to access the prometheus endpoint*, which will disable metric scraping.
 
 You can change this by setting:
 ```yaml title="router.yaml"
