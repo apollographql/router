@@ -285,7 +285,7 @@ By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apol
 
 The docs CORS regex example now displays a working and safe way to allow `HTTPS` subdomains of `api.example.com`.
 
-By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
 
 
 ### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/issues/2095))
@@ -294,3 +294,11 @@ We recently updated the examples directory structure. This fixes the documentati
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
 
+
+### Docs: Add a disclaimer for users who set up health-checks and prometheus endpoints in a containers environment ([Issue #2079](https://github.com/apollographql/router/issues/2079))
+
+The health check and the prometheus endpoint listen to 127.0.0.1 by default.
+While this is a safe default, it prevents other pods from performing healthchecks and scrapping prometheus data.
+This behavior and customization is now documented in the [health-checks](https://www.apollographql.com/docs/router/configuration/health-checks) and the [prometheus](https://www.apollographql.com/docs/router/configuration/metrics#using-prometheus) sections.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2194
