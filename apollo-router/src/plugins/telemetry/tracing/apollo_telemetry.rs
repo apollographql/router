@@ -69,9 +69,10 @@ const PATH: Key = Key::from_static_str("apollo_private.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 const CLIENT_NAME: Key = Key::from_static_str("client.name");
 const CLIENT_VERSION: Key = Key::from_static_str("client.version");
-const DEPENDS: Key = Key::from_static_str("depends");
-const LABEL: Key = Key::from_static_str("label");
-const CONDITION: Key = Key::from_static_str("condition");
+const DEPENDS: Key = Key::from_static_str("graphql.depends");
+const LABEL: Key = Key::from_static_str("graphql.label");
+const CONDITION: Key = Key::from_static_str("graphql.condition");
+const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 pub(crate) const DEFAULT_TRACE_ID_HEADER_NAME: &str = "apollo-trace-id";
 
 #[derive(Error, Debug)]
@@ -113,6 +114,8 @@ enum TreeData {
         client_name: Option<String>,
         client_version: Option<String>,
         operation_signature: String,
+        operation_name: String,
+        variables_json: HashMap<String, String>,
     },
     QueryPlanNode(QueryPlanNode),
     DeferPrimary(DeferNodePrimary),
@@ -155,17 +158,6 @@ impl Exporter {
         span: &SpanData,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<crate::spaceport::Trace>, Error> {
-        let variables_json = span
-            .attributes
-            .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
-            .and_then(extract_json)
-            .unwrap_or_default();
-
-        let details = Details {
-            variables_json,
-            ..Default::default()
-        };
-
         let http = extract_http_data(span, &self.expose_trace_id_config);
 
         let mut root_trace = crate::spaceport::Trace {
@@ -178,7 +170,7 @@ impl Exporter {
                 .map(|e| e as u64)
                 .unwrap_or_default(),
             root: None,
-            details: Some(details),
+            details: None,
             http: Some(http),
             ..Default::default()
         };
@@ -193,6 +185,8 @@ impl Exporter {
                     client_name,
                     client_version,
                     operation_signature,
+                    operation_name,
+                    variables_json,
                 } => {
                     root_trace
                         .http
@@ -202,8 +196,11 @@ impl Exporter {
                     root_trace.client_name = client_name.unwrap_or_default();
                     root_trace.client_version = client_version.unwrap_or_default();
                     root_trace.field_execution_weight = self.field_execution_weight;
-                    // This will be moved out later
                     root_trace.signature = operation_signature;
+                    root_trace.details = Some(Details {
+                        variables_json,
+                        operation_name,
+                    });
                 }
                 _ => panic!("should never have had other node types"),
             }
@@ -328,6 +325,16 @@ impl Exporter {
                         .attributes
                         .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
                         .and_then(extract_string)
+                        .unwrap_or_default(),
+                    operation_name: span
+                        .attributes
+                        .get(&OPERATION_NAME)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                    variables_json: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
+                        .and_then(extract_json)
                         .unwrap_or_default(),
                 });
                 child_nodes
@@ -530,13 +537,13 @@ impl SpanExporter for Exporter {
                 // Write spans for testing
                 // You can obtain new span data by uncommenting the following code and executing a query.
                 // In general this isn't something we'll want to do often, we are just verifying that the exporter constructs a correct report.
-                // let mut c = self
-                //     .spans_by_parent_id
-                //     .iter()
-                //     .flat_map(|(_, s)| s.iter())
-                //     .collect::<Vec<_>>();
-                // c.push(&span);
-                // std::fs::write("spandata.yaml", serde_yaml::to_string(&c).unwrap()).unwrap();
+                let mut c = self
+                    .spans_by_parent_id
+                    .iter()
+                    .flat_map(|(_, s)| s.iter())
+                    .collect::<Vec<_>>();
+                c.push(&span);
+                std::fs::write("spandata.yaml", serde_yaml::to_string(&c).unwrap()).unwrap();
 
                 match self.extract_trace(span) {
                     Ok(mut trace) => {
@@ -723,7 +730,22 @@ mod test {
         panic!("cannot happen");
     }
 
-    #[cfg(unix)]
+    macro_rules! assert_report {
+        ($report: expr)=> {
+            insta::with_settings!({sort_maps => true}, {
+                    insta::assert_yaml_snapshot!($report, {
+                        ".**.seconds" => "[seconds]",
+                        ".**.nanos" => "[nanos]",
+                        ".**.duration_ns" => "[duration_ns]",
+                        ".**.child[].start_time" => "[start_time]",
+                        ".**.child[].end_time" => "[end_time]",
+                        ".**.trace_id.value[]" => "[trace_id]",
+                        ".**.sent_time_offset" => "[sent_time_offset]"
+                    });
+                });
+        }
+    }
+
     #[tokio::test]
     async fn test_condition_if() {
         // The following curl request was used to generate this span data
@@ -735,12 +757,9 @@ mod test {
         let spandata = include_str!("testdata/condition_if_spandata.yaml");
         let exporter = Exporter::test_builder().build();
         let report = report(exporter, spandata).await;
-        insta::with_settings!({sort_maps => true}, {
-            insta::assert_yaml_snapshot!(report);
-        });
+        assert_report!(report);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn test_condition_else() {
         // The following curl request was used to generate this span data
@@ -752,12 +771,9 @@ mod test {
         let spandata = include_str!("testdata/condition_else_spandata.yaml");
         let exporter = Exporter::test_builder().build();
         let report = report(exporter, spandata).await;
-        insta::with_settings!({sort_maps => true}, {
-            insta::assert_yaml_snapshot!(report);
-        });
+        assert_report!(report);
     }
 
-    #[cfg(unix)]
     #[tokio::test]
     async fn test_trace_id() {
         let spandata = include_str!("testdata/condition_if_spandata.yaml");
@@ -768,9 +784,7 @@ mod test {
             })
             .build();
         let report = report(exporter, spandata).await;
-        insta::with_settings!({sort_maps => true}, {
-            insta::assert_yaml_snapshot!(report);
-        });
+        assert_report!(report);
     }
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {

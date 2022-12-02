@@ -246,6 +246,18 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🐛 Fixes
 
+### Fix missing apollo tracing variables ([Issue #2186](https://github.com/apollographql/router/issues/2186))
+
+Send variable values had no effect. This is now fixed.
+```yaml
+telemetry:
+  apollo:
+    send_variable_values: all
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2190
+
+
 ### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
 
 Adding the `-r` flag recently broke the existing functionality to build from the default repo using `-b`. This fixes that.

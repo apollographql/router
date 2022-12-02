@@ -279,22 +279,8 @@ impl Plugin for Telemetry {
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
-            .instrument(move |req: &ExecutionRequest| {
-                let query = req
-                    .supergraph_request
-                    .body()
-                    .query
-                    .clone()
-                    .unwrap_or_default();
-                let operation_name = req
-                    .supergraph_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .unwrap_or_default();
+            .instrument(move |_req: &ExecutionRequest| {
                 info_span!("execution",
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
                 )
             })
@@ -783,7 +769,7 @@ impl Telemetry {
                 }
             })
             .fold(BTreeMap::new(), |mut acc, (name, value)| {
-                acc.entry(name).or_insert_with(Vec::new).push(value);
+                acc.insert(name, value);
                 acc
             });
 

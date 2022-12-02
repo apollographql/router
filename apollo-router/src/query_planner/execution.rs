@@ -129,7 +129,9 @@ impl PlanNode {
                             subselection = subselect;
                         }
                     }
-                    .instrument(tracing::info_span!(SEQUENCE_SPAN_NAME))
+                    .instrument(
+                        tracing::info_span!(SEQUENCE_SPAN_NAME, "otel.kind" = %SpanKind::Internal),
+                    )
                     .await
                 }
                 PlanNode::Parallel { nodes } => {
@@ -155,7 +157,9 @@ impl PlanNode {
                             errors.extend(err.into_iter());
                         }
                     }
-                    .instrument(tracing::info_span!(PARALLEL_SPAN_NAME))
+                    .instrument(
+                        tracing::info_span!(PARALLEL_SPAN_NAME, "otel.kind" = %SpanKind::Internal),
+                    )
                     .await
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
@@ -169,7 +173,7 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, path = %current_dir))
+                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, path = %current_dir, "otel.kind" = %SpanKind::Internal))
                         .await;
 
                     value = v;
@@ -252,7 +256,7 @@ impl PlanNode {
                                     &value,
                                     sender,
                                 )
-                                .instrument(tracing::info_span!(DEFER_PRIMARY_SPAN_NAME))
+                                .instrument(tracing::info_span!(DEFER_PRIMARY_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
@@ -264,7 +268,7 @@ impl PlanNode {
                             let _ = primary_sender.send(value.clone());
                         }
                     }
-                    .instrument(tracing::info_span!(DEFER_SPAN_NAME))
+                    .instrument(tracing::info_span!(DEFER_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
                     .await
                 }
                 PlanNode::Condition {
@@ -299,7 +303,7 @@ impl PlanNode {
                                         parent_value,
                                         sender.clone(),
                                     )
-                                    .instrument(tracing::info_span!(CONDITION_IF_SPAN_NAME))
+                                    .instrument(tracing::info_span!(CONDITION_IF_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
                                     .await;
                                 value.deep_merge(v);
                                 errors.extend(err.into_iter());
@@ -313,7 +317,7 @@ impl PlanNode {
                                     parent_value,
                                     sender.clone(),
                                 )
-                                .instrument(tracing::info_span!(CONDITION_ELSE_SPAN_NAME))
+                                .instrument(tracing::info_span!(CONDITION_ELSE_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
@@ -322,7 +326,8 @@ impl PlanNode {
                     }
                     .instrument(tracing::info_span!(
                         CONDITION_SPAN_NAME,
-                        "condition" = condition
+                        "graphql.condition" = condition,
+                        "otel.kind" = %SpanKind::Internal
                     ))
                     .await
                 }
@@ -423,8 +428,9 @@ impl DeferredNode {
                     )
                     .instrument(tracing::info_span!(
                         DEFER_DEFERRED_SPAN_NAME,
-                        "label" = label,
-                        "depends" = depends_json
+                        "graphql.label" = label,
+                        "graphql.depends" = depends_json,
+                        "otel.kind" = %SpanKind::Internal
                     ))
                     .await;
 
