@@ -36,33 +36,27 @@ impl Plugin for RedirectHTML {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let homepage = Homepage::display_page();
-        let sandbox = Sandbox::display_page();
+        // todo: check for enabled
+        // let homepage = Homepage::display_page();
+        // let sandbox = Sandbox::display_page();
         let homepage_enabled = true;
         let sandbox_enabled = false;
 
-        // todo: get whether homepage or sandbox is enabled
-        let maybe_response = if true {
-            Some(Html(homepage).into_response())
-        } else if false {
-            Some(Html(sandbox).into_response())
-        } else {
-            None
-        };
-
-        let router_response: Option<router::Response> = maybe_response.map(|response| {
-            response
-                .map(|body| {
-                    let mut body = Box::pin(body);
-                    Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-                })
-                .into()
-        });
-
         ServiceBuilder::new()
             .checkpoint(move |req: router::Request| {
-                if router_response.is_some() && prefers_html(req.router_request.headers()) {
-                    Ok(ControlFlow::Break(router_response.expect("checked above")))
+                if (homepage_enabled || sandbox_enabled)
+                    && prefers_html(req.router_request.headers())
+                {
+                    let res: router::Response = Html(Homepage::display_page())
+                        .into_response()
+                        .map(|body| {
+                            let mut body = Box::pin(body);
+                            Body::wrap_stream(stream::poll_fn(move |ctx| {
+                                body.as_mut().poll_data(ctx)
+                            }))
+                        })
+                        .into();
+                    Ok(ControlFlow::Break(res))
                 } else {
                     Ok(ControlFlow::Continue(req))
                 }

@@ -556,6 +556,9 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "redirect-html": {
+      "type": "null"
+    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",

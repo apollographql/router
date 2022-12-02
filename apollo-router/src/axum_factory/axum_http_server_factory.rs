@@ -23,6 +23,7 @@ use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tower::service_fn;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceExt;
 use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
@@ -31,9 +32,6 @@ use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
 use tracing::Span;
 
-use super::handlers::handle_get;
-use super::handlers::handle_get_with_static;
-use super::handlers::handle_post;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
@@ -44,18 +42,20 @@ use super::ListenAddrAndRouter;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
-use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
-use crate::configuration::Sandbox;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
+use crate::plugins::traffic_shaping::Elapsed;
+use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::tracer::TraceId;
+use crate::RouterRequest;
+use crate::RouterResponse;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -342,42 +342,51 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
-    let get_handler = if configuration.sandbox.enabled {
-        get({
-            move |Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get_with_static(
-                    Sandbox::display_page(),
-                    service.create().boxed(),
-                    http_request,
-                )
-            }
-        })
-    } else if configuration.homepage.enabled {
-        get({
-            move |Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get_with_static(
-                    Homepage::display_page(),
-                    service.create().boxed(),
-                    http_request,
-                )
-            }
-        })
-    } else {
-        get({
-            move |Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get(service.create().boxed(), http_request)
-            }
-        })
-    };
-
     Router::<hyper::Body>::new().route(
         &graphql_configuration.path,
-        get_handler.post({
-            move |request: Request<Body>, Extension(service): Extension<RF>| {
-                {
-                    handle_post(request, service.create().boxed())
-                }
+        get({
+            move |Extension(service): Extension<RF>, request: Request<Body>| {
+                handle_graphql(service.create().boxed(), request)
+            }
+        })
+        .post({
+            move |Extension(service): Extension<RF>, request: Request<Body>| {
+                handle_graphql(service.create().boxed(), request)
             }
         }),
     )
+}
+
+async fn handle_graphql(
+    service: router::BoxService,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    run_graphql_request(service, http_request)
+        .await
+        .into_response()
+}
+
+async fn run_graphql_request(
+    service: router::BoxService,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    match service.oneshot(http_request.into()).await {
+        Err(e) => {
+            if let Some(source_err) = e.source() {
+                if source_err.is::<RateLimited>() {
+                    return RateLimited::new().into_response();
+                }
+                if source_err.is::<Elapsed>() {
+                    return Elapsed::new().into_response();
+                }
+            }
+            tracing::error!("router service call failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "router service call failed",
+            )
+                .into_response()
+        }
+        Ok(response) => response.response.into_response(),
+    }
 }
