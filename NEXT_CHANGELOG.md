@@ -283,6 +283,14 @@ to validate the data sent back to the client. Those query shapes were invalid fo
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
 
+### *Experimental* 🥼 APQ and query planner Redis caching fixes ([PR #2176](https://github.com/apollographql/router/pull/2176))
+
+* use a null byte as separator in Redis keys
+* handle Redis connection errors
+* mark APQ and query plan caching as license key functionality
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2176
+
 ## 🛠 Maintenance
 
 ### Verify that deferred fragment acts as a boundary for nullability rules ([Issue #2169](https://github.com/apollographql/router/issues/2169))
