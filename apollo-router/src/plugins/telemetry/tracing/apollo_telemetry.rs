@@ -537,13 +537,13 @@ impl SpanExporter for Exporter {
                 // Write spans for testing
                 // You can obtain new span data by uncommenting the following code and executing a query.
                 // In general this isn't something we'll want to do often, we are just verifying that the exporter constructs a correct report.
-                let mut c = self
-                    .spans_by_parent_id
-                    .iter()
-                    .flat_map(|(_, s)| s.iter())
-                    .collect::<Vec<_>>();
-                c.push(&span);
-                std::fs::write("spandata.yaml", serde_yaml::to_string(&c).unwrap()).unwrap();
+                // let mut c = self
+                //     .spans_by_parent_id
+                //     .iter()
+                //     .flat_map(|(_, s)| s.iter())
+                //     .collect::<Vec<_>>();
+                // c.push(&span);
+                // std::fs::write("spandata.yaml", serde_yaml::to_string(&c).unwrap()).unwrap();
 
                 match self.extract_trace(span) {
                     Ok(mut trace) => {
