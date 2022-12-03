@@ -47,6 +47,9 @@ use crate::Schema;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 
+#[cfg(test)]
+use crate::plugin::test::MockSupergraphService;
+
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
@@ -384,6 +387,16 @@ pub(crate) struct SupergraphCreator {
     plugins: Arc<Plugins>,
 }
 
+pub(crate) trait StuffThatHasPlugins {
+    fn plugins(&self) -> Arc<Plugins>;
+}
+
+impl StuffThatHasPlugins for SupergraphCreator {
+    fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
+    }
+}
+
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
     type Service = supergraph::BoxService;
     fn create(&self) -> Self::Service {
@@ -451,13 +464,31 @@ impl SupergraphCreator {
 
     /// Create a test service.
     #[cfg(test)]
-    pub(crate) fn test_service(&self) -> supergraph::BoxCloneService {
-        use tower::buffer::Buffer;
-
-        Buffer::new(self.make(), 512).boxed_clone()
+    pub(crate) fn for_tests(supergraph_service: MockSupergraphService) -> MockSupergraphCreator {
+        MockSupergraphCreator { supergraph_service }
     }
 }
 
+#[cfg(test)]
+#[derive(Clone)]
+struct MockSupergraphCreator {
+    supergraph_service: MockSupergraphService,
+}
+
+#[cfg(test)]
+impl StuffThatHasPlugins for MockSupergraphCreator {
+    fn plugins(&self) -> Arc<Plugins> {
+        Arc::new(Default::default())
+    }
+}
+
+#[cfg(test)]
+impl ServiceFactory<supergraph::Request> for MockSupergraphCreator {
+    type Service = supergraph::BoxService;
+    fn create(&self) -> Self::Service {
+        self.supergraph_service.boxed()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;

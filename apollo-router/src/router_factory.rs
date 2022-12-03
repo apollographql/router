@@ -108,7 +108,7 @@ pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
 impl RouterSuperServiceFactory for YamlRouterFactory {
-    type RouterFactory = RouterCreator;
+    type RouterFactory = RouterCreator<SupergraphCreator>;
 
     async fn create<'a>(
         &'a mut self,
