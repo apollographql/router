@@ -216,7 +216,7 @@ impl Release {
                 }
                 if issue.assignees.is_empty() {
                     return Err(anyhow!(
-                        "https://github.com/apollographql/router/issue/{} has no assignee",
+                        "https://github.com/apollographql/router/issues/{} has no assignee",
                         number
                     ));
                 }
