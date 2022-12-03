@@ -66,7 +66,7 @@ impl Release {
                 self.update_lock()?;
                 self.check_compliance()?;
                 if !self.dry_run {
-                    self.create_release_pr(&github)?;
+                    self.create_release_pr(&github).await?;
                 }
 
                 Ok(())
