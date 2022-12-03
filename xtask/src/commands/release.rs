@@ -451,7 +451,7 @@ impl Release {
         println!("creating release PR");
         git!("add", "-u");
         git!("commit", "-m", &format!("release {}", self.version));
-        git!("push");
+        git!("push", "--set-upstream", "origin", self.version);
         github
             .pulls()
             .create(
