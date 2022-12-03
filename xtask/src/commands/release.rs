@@ -9,6 +9,7 @@ use std::ops::Index;
 use std::process::Command;
 use structopt::StructOpt;
 use tap::TapFallible;
+use walkdir::WalkDir;
 use xtask::*;
 
 #[derive(Debug, StructOpt)]
@@ -55,7 +56,7 @@ impl Release {
                             .expect("GITHUB_TOKEN env variable must be set"),
                     ),
                 )?;
-                //self.switch_to_release_branch()?;
+                self.switch_to_release_branch()?;
                 self.assign_issues_to_milestone(github).await?;
                 self.update_cargo_tomls()?;
                 self.update_install_script()?;
@@ -68,7 +69,7 @@ impl Release {
                 if !self.dry_run {
                     self.create_release_pr()?;
                 }
-                git!("checkout", "dev");
+
                 Ok(())
             })
     }
@@ -375,6 +376,20 @@ impl Release {
     /// Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
     fn docker_files(&self) -> Result<()> {
         println!("updating docker files");
+        for entry in WalkDir::new("./dockerfiles") {
+            let entry = entry?;
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("docker-compose.")
+            {
+                replace_in_file!(
+                    entry.path(),
+                    r"ghcr.io/apollographql/router:v\d+.\d+.\d+",
+                    format!("ghcr.io/apollographql/router:v{}", self.version)
+                );
+            }
+        }
         Ok(())
     }
 
@@ -384,6 +399,28 @@ impl Release {
     /// Clear `NEXT_CHANGELOG.md` leaving only the template.
     fn finalize_changelog(&self) -> Result<()> {
         println!("finalizing changelog");
+        let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
+        let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
+        let changes_regex =
+            regex::Regex::new(r"(?ms)(.*# \[x.x.x\] \(unreleased\) - ....-mm-dd\n)(.*)")?;
+        let captures = changes_regex
+            .captures(&next_changelog)
+            .expect("changelog format was unexpected");
+        let template = captures
+            .get(1)
+            .expect("changelog format was unexpected")
+            .as_str();
+        let changes = captures
+            .get(2)
+            .expect("changelog format was unexpected")
+            .as_str();
+
+        let update_regex = regex::Regex::new(
+            r"(?ms)This project adheres to \[Semantic Versioning v2.0.0\]\(https://semver.org/spec/v2.0.0.html\).\n",
+        )?;
+        let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", self.version, chrono::Utc::now().date_naive(), changes));
+        std::fs::write("./CHANGELOG.md", updated.to_string())?;
+        std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
@@ -413,6 +450,8 @@ impl Release {
     /// Create the release PR
     fn create_release_pr(&self) -> Result<()> {
         println!("creating release PR");
+        git!("add", "-u");
+        git!("commit", "-m", format!("release {}", self.version));
         Ok(())
     }
 }
