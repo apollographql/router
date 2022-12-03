@@ -13,6 +13,10 @@ use xtask::*;
 
 #[derive(Debug, StructOpt)]
 pub struct Release {
+    /// Release from the current branch rahter than creating a new one.
+    #[structopt(long)]
+    current_branch: bool,
+
     /// Dry run, don't commit the changes and create the PR.
     #[structopt(long)]
     dry_run: bool,
@@ -55,7 +59,9 @@ impl Release {
                             .expect("GITHUB_TOKEN env variable must be set"),
                     ),
                 )?;
-                self.switch_to_release_branch()?;
+                if !current_branch {
+                    self.switch_to_release_branch()?;
+                }
                 self.assign_issues_to_milestone(&github).await?;
                 self.update_cargo_tomls()?;
                 self.update_install_script()?;
