@@ -56,7 +56,7 @@ impl Release {
                     ),
                 )?;
                 self.switch_to_release_branch()?;
-                self.assign_issues_to_milestone(github).await?;
+                self.assign_issues_to_milestone(&github).await?;
                 self.update_cargo_tomls()?;
                 self.update_install_script()?;
                 self.update_docs()?;
@@ -66,7 +66,7 @@ impl Release {
                 self.update_lock()?;
                 self.check_compliance()?;
                 if !self.dry_run {
-                    self.create_release_pr(github)?;
+                    self.create_release_pr(&github)?;
                 }
 
                 Ok(())
@@ -84,7 +84,7 @@ impl Release {
 
     /// Go through NEXT_CHANGELOG.md find all issues and assign to the milestone.
     /// Any PR that doesn't have an issue assign to the milestone.
-    async fn assign_issues_to_milestone(&self, github: Client) -> Result<()> {
+    async fn assign_issues_to_milestone(&self, github: &Client) -> Result<()> {
         let change_log = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
 
         let re =
@@ -447,7 +447,7 @@ impl Release {
     }
 
     /// Create the release PR
-    async fn create_release_pr(&self, github: Client) -> Result<()> {
+    async fn create_release_pr(&self, github: &Client) -> Result<()> {
         println!("creating release PR");
         git!("add", "-u");
         git!("commit", "-m", &format!("release {}", self.version));
