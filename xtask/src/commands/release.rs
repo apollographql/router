@@ -91,12 +91,12 @@ impl Release {
     /// Go through NEXT_CHANGELOG.md find all issues and assign to the milestone.
     /// Any PR that doesn't have an issue assign to the milestone.
     async fn assign_issues_to_milestone(&self, github: &Client) -> Result<()> {
+        println!("assigning issues and PRs to milestone v{}", self.version);
         let change_log = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
 
         let re =
             regex::Regex::new(r"(?ms)https://github.com/apollographql/router/(pull|issues)/(\d+)")?;
 
-        println!("searching for milestone v{}", self.version);
         let milestone = self.get_or_create_milestone(&github).await?;
         let mut errors_encountered = false;
         for (issues_or_pull, number) in re
