@@ -1,11 +1,10 @@
 use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use octorust::types::{
-    Issue, IssuesCreateMilestoneRequest, IssuesListMilestonesSort, IssuesListState,
-    IssuesUpdateRequest, Milestone, Order, SimpleUser, State, TitleOneOf,
+    IssuesCreateMilestoneRequest, IssuesListMilestonesSort, IssuesListState, IssuesUpdateRequest,
+    Milestone, Order, State, TitleOneOf,
 };
 use octorust::Client;
-use std::ops::Index;
 use std::process::Command;
 use structopt::StructOpt;
 use tap::TapFallible;
