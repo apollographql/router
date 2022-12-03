@@ -59,7 +59,7 @@ impl Release {
                             .expect("GITHUB_TOKEN env variable must be set"),
                     ),
                 )?;
-                if !current_branch {
+                if !self.current_branch {
                     self.switch_to_release_branch()?;
                 }
                 self.assign_issues_to_milestone(&github).await?;
