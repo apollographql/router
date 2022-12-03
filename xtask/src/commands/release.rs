@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use itertools::Itertools;
 use octorust::types::{
     IssuesCreateMilestoneRequest, IssuesListMilestonesSort, IssuesListState, IssuesUpdateRequest,
-    Milestone, Order, State, TitleOneOf,
+    Milestone, Order, PullsCreateRequest, State, TitleOneOf,
 };
 use octorust::Client;
 use std::process::Command;
@@ -66,7 +66,7 @@ impl Release {
                 self.update_lock()?;
                 self.check_compliance()?;
                 if !self.dry_run {
-                    self.create_release_pr()?;
+                    self.create_release_pr(github)?;
                 }
 
                 Ok(())
@@ -447,10 +447,28 @@ impl Release {
     }
 
     /// Create the release PR
-    fn create_release_pr(&self) -> Result<()> {
+    async fn create_release_pr(&self, github: Client) -> Result<()> {
         println!("creating release PR");
         git!("add", "-u");
         git!("commit", "-m", &format!("release {}", self.version));
+        git!("push");
+        github
+            .pulls()
+            .create(
+                "apollographql",
+                "router",
+                &PullsCreateRequest {
+                    base: "main".to_string(),
+                    body: format!("Release {}", self.version),
+                    draft: None,
+                    head: self.version.clone(),
+                    issue: 0,
+                    maintainer_can_modify: None,
+                    title: format!("Release {}", self.version),
+                },
+            )
+            .await
+            .tap_err(|_| eprintln!("failed to create release PR"))?;
         Ok(())
     }
 }
