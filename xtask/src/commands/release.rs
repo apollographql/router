@@ -451,7 +451,7 @@ impl Release {
     fn create_release_pr(&self) -> Result<()> {
         println!("creating release PR");
         git!("add", "-u");
-        git!("commit", "-m", format!("release {}", self.version));
+        git!("commit", "-m", &format!("release {}", self.version));
         Ok(())
     }
 }
