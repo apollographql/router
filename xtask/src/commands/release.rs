@@ -1,18 +1,32 @@
 use anyhow::{anyhow, Result};
+use cargo_metadata::MetadataCommand;
 use itertools::Itertools;
 use octorust::types::{
     IssuesCreateMilestoneRequest, IssuesListMilestonesSort, IssuesListState, IssuesUpdateRequest,
     Milestone, Order, PullsCreateRequest, State, TitleOneOf,
 };
 use octorust::Client;
-use std::process::Command;
 use structopt::StructOpt;
 use tap::TapFallible;
 use walkdir::WalkDir;
 use xtask::*;
 
 #[derive(Debug, StructOpt)]
-pub struct Release {
+pub enum Command {
+    /// Prepare a new release
+    Prepare(Prepare),
+}
+
+impl Command {
+    pub fn run(&self) -> Result<()> {
+        match self {
+            Command::Prepare(command) => command.run(),
+        }
+    }
+}
+
+#[derive(Debug, StructOpt)]
+pub struct Prepare {
     /// Release from the current branch rather than creating a new one.
     #[structopt(long)]
     current_branch: bool,
@@ -25,15 +39,15 @@ pub struct Release {
     #[structopt(long)]
     dry_run: bool,
 
-    /// The new version that is being created.
+    /// The new version that is being created OR to bump (major|minor|patch).
     #[structopt(long)]
-    version: String,
+    version: Option<String>,
 }
 
 macro_rules! git {
     ($( $i:expr ),*) => {
         let git = which::which("git")?;
-        let result = Command::new(git).args([$( $i ),*]).status()?;
+        let result = std::process::Command::new(git).args([$( $i ),*]).status()?;
         if !result.success() {
             return Err(anyhow!("git {}", [$( $i ),*].join(",")));
         }
@@ -49,13 +63,20 @@ macro_rules! replace_in_file {
     };
 }
 
-impl Release {
+impl Prepare {
     pub fn run(&self) -> Result<()> {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .unwrap()
             .block_on(async {
+                let version = self.update_cargo_tomls(
+                    &self
+                        .version
+                        .as_ref()
+                        .cloned()
+                        .unwrap_or_else(|| "current".to_string()),
+                )?;
                 let github = octorust::Client::new(
                     "router-release".to_string(),
                     octorust::auth::Credentials::Token(
@@ -64,19 +85,18 @@ impl Release {
                     ),
                 )?;
                 if !self.current_branch {
-                    self.switch_to_release_branch()?;
+                    self.switch_to_release_branch(&version)?;
                 }
-                self.assign_issues_to_milestone(&github).await?;
-                self.update_cargo_tomls()?;
-                self.update_install_script()?;
-                self.update_docs()?;
+                self.assign_issues_to_milestone(&github, &version).await?;
+                self.update_install_script(&version)?;
+                self.update_docs(&version)?;
                 self.update_helm_charts()?;
-                self.docker_files()?;
-                self.finalize_changelog()?;
+                self.docker_files(&version)?;
+                self.finalize_changelog(&version)?;
                 self.update_lock()?;
                 self.check_compliance()?;
                 if !self.dry_run {
-                    self.create_release_pr(&github).await?;
+                    self.create_release_pr(&github, &version).await?;
                 }
 
                 Ok(())
@@ -85,23 +105,23 @@ impl Release {
 
     /// Create a new branch "#.#.#" where "#.#.#" is this release's version
     /// (release) or "#.#.#-rc.#" (release candidate)
-    fn switch_to_release_branch(&self) -> Result<()> {
+    fn switch_to_release_branch(&self, version: &str) -> Result<()> {
         println!("creating release branch");
-        git!("fetch", "origin", &format!("dev:{}", self.version));
-        git!("checkout", &self.version);
+        git!("fetch", "origin", &format!("dev:{}", version));
+        git!("checkout", &version);
         Ok(())
     }
 
     /// Go through NEXT_CHANGELOG.md find all issues and assign to the milestone.
     /// Any PR that doesn't have an issue assign to the milestone.
-    async fn assign_issues_to_milestone(&self, github: &Client) -> Result<()> {
-        println!("assigning issues and PRs to milestone v{}", self.version);
+    async fn assign_issues_to_milestone(&self, github: &Client, version: &str) -> Result<()> {
+        println!("assigning issues and PRs to milestone v{}", version);
         let change_log = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
 
         let re =
             regex::Regex::new(r"(?ms)https://github.com/apollographql/router/(pull|issues)/(\d+)")?;
 
-        let milestone = self.get_or_create_milestone(&github).await?;
+        let milestone = self.get_or_create_milestone(&github, version).await?;
         let mut errors_encountered = false;
         for (issues_or_pull, number) in re
             .captures_iter(&change_log)
@@ -128,7 +148,7 @@ impl Release {
         Ok(())
     }
 
-    async fn get_or_create_milestone(&self, github: &Client) -> Result<Milestone> {
+    async fn get_or_create_milestone(&self, github: &Client, version: &str) -> Result<Milestone> {
         Ok(
             match github
                 .issues()
@@ -143,7 +163,7 @@ impl Release {
                 )
                 .await?
                 .into_iter()
-                .find(|m| m.title == format!("v{}", self.version))
+                .find(|m| m.title == format!("v{}", version))
             {
                 Some(milestone) => milestone,
                 None => {
@@ -155,10 +175,10 @@ impl Release {
                                 "apollographql",
                                 "router",
                                 &IssuesCreateMilestoneRequest {
-                                    description: format!("Release v{}", self.version),
+                                    description: format!("Release v{}", version),
                                     due_on: None,
                                     state: Some(State::Open),
-                                    title: format!("v{}", self.version),
+                                    title: format!("v{}", version),
                                 },
                             )
                             .await
@@ -298,27 +318,57 @@ impl Release {
 
     /// Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
-    fn update_cargo_tomls(&self) -> Result<()> {
+    fn update_cargo_tomls(&self, version: &str) -> Result<String> {
         println!("updating Cargo.toml files");
-        let packages = vec![
-            "apollo-router",
-            "apollo-router-scaffold",
-            "apollo-router-benchmarks",
-        ];
+        match version {
+            "current" => {}
+            "major" => cargo!([
+                "set-version",
+                "--bump",
+                "major",
+                "--package",
+                "apollo-router"
+            ]),
+            "minor" => cargo!([
+                "set-version",
+                "--bump",
+                "minor",
+                "--package",
+                "apollo-router"
+            ]),
+            "potch" => cargo!([
+                "set-version",
+                "--bump",
+                "patch",
+                "--package",
+                "apollo-router"
+            ]),
+            version => cargo!(["set-version", version, "--package", "apollo-router"]),
+        }
+
+        let metadata = MetadataCommand::new()
+            .manifest_path("./apollo-router/Cargo.toml")
+            .exec()?;
+        let version = metadata
+            .root_package()
+            .expect("root package missing")
+            .version
+            .to_string();
+        let packages = vec!["apollo-router-scaffold", "apollo-router-benchmarks"];
 
         for package in packages {
-            cargo!(["set-version", &self.version, "--package", package])
+            cargo!(["set-version", &version, "--package", package])
         }
-        Ok(())
+        Ok(version)
     }
 
     /// Update the `PACKAGE_VERSION` value in `scripts/install.sh` (it should be prefixed with `v`!)
-    fn update_install_script(&self) -> Result<()> {
+    fn update_install_script(&self, version: &str) -> Result<()> {
         println!("updating install script");
         replace_in_file!(
             "./scripts/install.sh",
             "^PACKAGE_VERSION=.*$",
-            format!("PACKAGE_VERSION=\"v{}\"", self.version)
+            format!("PACKAGE_VERSION=\"v{}\"", version)
         );
         Ok(())
     }
@@ -329,20 +379,20 @@ impl Release {
     ///   - run
     ///   ```helm template --set router.configuration.telemetry.metrics.prometheus.enabled=true  --set managedFederation.apiKey="REDACTED" --set managedFederation.graphRef="REDACTED" --debug .```
     ///   - Paste the output in the `Kubernetes Configuration` example of the `docs/source/containerization/kubernetes.mdx` file
-    fn update_docs(&self) -> Result<()> {
+    fn update_docs(&self, version: &str) -> Result<()> {
         println!("updating docs");
         replace_in_file!(
             "./docs/source/containerization/docker.mdx",
             "with your chosen version. e.g.: `v\\d+.\\d+.\\d+`",
-            format!("with your chosen version. e.g.: `v{}`", self.version)
+            format!("with your chosen version. e.g.: `v{}`", version)
         );
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
             "router/tree/v\\d+.\\d+.\\d+",
-            format!("router/tree/v{}", self.version)
+            format!("router/tree/v{}", version)
         );
         let helm_chart = String::from_utf8(
-            Command::new(which::which("helm")?)
+            std::process::Command::new(which::which("helm")?)
                 .current_dir("./helm/chart/router")
                 .args([
                     "template",
@@ -372,7 +422,7 @@ impl Release {
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self) -> Result<()> {
         println!("updating helm chars");
-        if !Command::new(which::which("helm-docs")?)
+        if !std::process::Command::new(which::which("helm-docs")?)
             .current_dir("./helm/chart")
             .args(["helm-docs", "router"])
             .status()?
@@ -383,7 +433,7 @@ impl Release {
         Ok(())
     }
     /// Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
-    fn docker_files(&self) -> Result<()> {
+    fn docker_files(&self, version: &str) -> Result<()> {
         println!("updating docker files");
         for entry in WalkDir::new("./dockerfiles") {
             let entry = entry?;
@@ -395,7 +445,7 @@ impl Release {
                 replace_in_file!(
                     entry.path(),
                     r"ghcr.io/apollographql/router:v\d+.\d+.\d+",
-                    format!("ghcr.io/apollographql/router:v{}", self.version)
+                    format!("ghcr.io/apollographql/router:v{}", version)
                 );
             }
         }
@@ -406,7 +456,7 @@ impl Release {
     /// Put a Release date and the version number on the new `CHANGELOG.md` section
     /// Update the version in `NEXT_CHANGELOG.md`.
     /// Clear `NEXT_CHANGELOG.md` leaving only the template.
-    fn finalize_changelog(&self) -> Result<()> {
+    fn finalize_changelog(&self, version: &str) -> Result<()> {
         println!("finalizing changelog");
         let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
@@ -427,7 +477,7 @@ impl Release {
         let update_regex = regex::Regex::new(
             r"(?ms)This project adheres to \[Semantic Versioning v2.0.0\]\(https://semver.org/spec/v2.0.0.html\).\n",
         )?;
-        let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", self.version, chrono::Utc::now().date_naive(), changes));
+        let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", version, chrono::Utc::now().date_naive(), changes));
         std::fs::write("./CHANGELOG.md", updated.to_string())?;
         std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
         Ok(())
@@ -459,11 +509,11 @@ impl Release {
     }
 
     /// Create the release PR
-    async fn create_release_pr(&self, github: &Client) -> Result<()> {
+    async fn create_release_pr(&self, github: &Client, version: &str) -> Result<()> {
         println!("creating release PR");
         git!("add", "-u");
-        git!("commit", "-m", &format!("release {}", self.version));
-        git!("push", "--set-upstream", "origin", &self.version);
+        git!("commit", "-m", &format!("release {}", version));
+        git!("push", "--set-upstream", "origin", version);
         github
             .pulls()
             .create(
@@ -471,12 +521,12 @@ impl Release {
                 "router",
                 &PullsCreateRequest {
                     base: "main".to_string(),
-                    body: format!("Release {}", self.version),
+                    body: format!("Release {}", version),
                     draft: None,
-                    head: self.version.clone(),
+                    head: version.to_string(),
                     issue: 0,
                     maintainer_can_modify: None,
-                    title: format!("Release {}", self.version),
+                    title: format!("Release {}", version),
                 },
             )
             .await

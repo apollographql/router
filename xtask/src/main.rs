@@ -39,7 +39,7 @@ pub enum Command {
     Package(commands::Package),
 
     /// Prepare a release
-    Release(commands::Release),
+    Release(commands::release::Command),
 }
 
 impl Xtask {
