@@ -250,7 +250,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 If you're running the Router with dev mode with an empty config file, it will no longer panic
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2165
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2195
 
 ### Fix missing apollo tracing variables ([Issue #2186](https://github.com/apollographql/router/issues/2186))
 
