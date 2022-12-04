@@ -522,9 +522,8 @@ jobs:
     resource_class: small
     steps:
       - checkout
-      - attach_workspace:
-          at: artifacts
-      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools
       - run:
           command: >
             cargo xtask release prepare major
@@ -534,9 +533,8 @@ jobs:
     resource_class: small
     steps:
       - checkout
-      - attach_workspace:
-          at: artifacts
-      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools
       - run:
           command: >
             cargo xtask release prepare minor
@@ -546,9 +544,8 @@ jobs:
     resource_class: small
     steps:
       - checkout
-      - attach_workspace:
-          at: artifacts
-      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools
       - run:
           command: >
             cargo xtask release prepare patch
