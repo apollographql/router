@@ -523,7 +523,8 @@ jobs:
     steps:
       - checkout
       - linux_install_baseline
-      - install_extra_tools
+      - install_extra_tools:
+          os: linux_amd
       - run:
           command: >
             cargo xtask release prepare major
@@ -534,7 +535,8 @@ jobs:
     steps:
       - checkout
       - linux_install_baseline
-      - install_extra_tools
+      - install_extra_tools:
+          os: linux_amd
       - run:
           command: >
             cargo xtask release prepare minor
@@ -545,7 +547,8 @@ jobs:
     steps:
       - checkout
       - linux_install_baseline
-      - install_extra_tools
+      - install_extra_tools:
+          os: linux_amd
       - run:
           command: >
             cargo xtask release prepare patch
