@@ -517,17 +517,23 @@ jobs:
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
   prepare_major_release:
-    - run:
-        command: >
-          cargo xtask release prepare major
+    steps:
+      - checkout
+      - run:
+          command: >
+            cargo xtask release prepare major
   prepare_minor_release:
-    - run:
-        command: >
-          cargo xtask release prepare minor
+    steps:
+      - checkout
+      - run:
+          command: >
+            cargo xtask release prepare minor
   prepare_patch_release:
-    - run:
-        command: >
-          cargo xtask release prepare patch
+    steps:
+      - checkout
+      - run:
+          command: >
+            cargo xtask release prepare patch
 
 workflows:
   ci_checks:
