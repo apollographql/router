@@ -591,8 +591,8 @@ workflows:
                 - dev
       - prepare_minor_release_approval:
           type: approval
-          requires:
-            - test
+#          requires:
+#            - test
 #          filters:
 #            branches:
 #              only:
