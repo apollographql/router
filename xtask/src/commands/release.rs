@@ -13,9 +13,13 @@ use xtask::*;
 
 #[derive(Debug, StructOpt)]
 pub struct Release {
-    /// Release from the current branch rahter than creating a new one.
+    /// Release from the current branch rather than creating a new one.
     #[structopt(long)]
     current_branch: bool,
+
+    /// Skip the license check
+    #[structopt(long)]
+    skip_license_ckeck: bool,
 
     /// Dry run, don't commit the changes and create the PR.
     #[structopt(long)]
@@ -441,7 +445,9 @@ impl Release {
             "licenses.html",
             "about.hbs"
         ]);
-        cargo!(["xtask", "check-compliance"]);
+        if !self.skip_license_ckeck {
+            cargo!(["xtask", "check-compliance"]);
+        }
         Ok(())
     }
 
