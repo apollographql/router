@@ -6,6 +6,7 @@ use octorust::types::{
     Milestone, Order, PullsCreateRequest, State, TitleOneOf,
 };
 use octorust::Client;
+use std::str::FromStr;
 use structopt::StructOpt;
 use tap::TapFallible;
 use walkdir::WalkDir;
@@ -25,6 +26,30 @@ impl Command {
     }
 }
 
+#[derive(Debug, Clone, Eq, PartialEq)]
+enum Version {
+    Major,
+    Minor,
+    Patch,
+    Current,
+    Version(String),
+}
+
+type ParseError = &'static str;
+
+impl FromStr for Version {
+    type Err = ParseError;
+    fn from_str(version: &str) -> Result<Self, Self::Err> {
+        Ok(match version {
+            "major" => Version::Major,
+            "minor" => Version::Minor,
+            "patch" => Version::Patch,
+            "current" => Version::Current,
+            version => Version::Version(version.to_string()),
+        })
+    }
+}
+
 #[derive(Debug, StructOpt)]
 pub struct Prepare {
     /// Release from the current branch rather than creating a new one.
@@ -40,7 +65,7 @@ pub struct Prepare {
     dry_run: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
-    version: Option<String>,
+    version: Version,
 }
 
 macro_rules! git {
@@ -78,8 +103,7 @@ impl Prepare {
     }
 
     async fn prepare_release(&self) -> Result<(), Error> {
-        let version =
-            self.update_cargo_tomls(&self.version.as_ref().cloned().unwrap_or_default())?;
+        let version = self.update_cargo_tomls(&self.version)?;
         let github = octorust::Client::new(
             "router-release".to_string(),
             octorust::auth::Credentials::Token(
@@ -318,34 +342,34 @@ impl Prepare {
 
     /// Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
-    fn update_cargo_tomls(&self, version: &str) -> Result<String> {
+    fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
         println!("updating Cargo.toml files");
-
         match version {
-            "" => return Err(anyhow!("version must be supplied")),
-            "current" => {}
-            "major" => cargo!([
+            Version::Current => {}
+            Version::Major => cargo!([
                 "set-version",
                 "--bump",
                 "major",
                 "--package",
                 "apollo-router"
             ]),
-            "minor" => cargo!([
+            Version::Minor => cargo!([
                 "set-version",
                 "--bump",
                 "minor",
                 "--package",
                 "apollo-router"
             ]),
-            "patch" => cargo!([
+            Version::Patch => cargo!([
                 "set-version",
                 "--bump",
                 "patch",
                 "--package",
                 "apollo-router"
             ]),
-            version => cargo!(["set-version", version, "--package", "apollo-router"]),
+            Version::Version(version) => {
+                cargo!(["set-version", version, "--package", "apollo-router"])
+            }
         }
 
         let metadata = MetadataCommand::new()
