@@ -69,6 +69,30 @@ fn supergraph_service(service) {
 }
 ```
 
+If you wish to have more control over the HTTP status code returned to the client, then you can throw an error which is an objectmap with keys: status and message.
+
+The key must be a number and the message must be something which can be converted to a string.
+
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our response
+    let f = |response| {
+        // Something goes wrong during response processing...
+        throw #{
+            status: 400,
+            message: "An error occurred processing the response..."
+        };
+    };
+    // Map our response using our closure
+    service.map_response(f);
+}
+```
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+
+Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+
 ## Timing execution
 
 Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
@@ -143,7 +167,7 @@ fn supergraph_service(service) {
 
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place:
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
 
 ```
 request.context
@@ -168,7 +192,7 @@ request.subgraph.uri.host
 request.subgraph.uri.path
 ```
 
-All of these fields are read/write.
+These additional fields are shared across all subgraph invocations and are thus read-only.
 
 ### `request.context`
 
@@ -343,7 +367,7 @@ print(`${response.body.label}`); // logs the response label
 
 A response may contain data (some responses with errors do not contain data). Be careful when manipulating data (and errors) to make sure that response remain valid. `data` is exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
 
-There is a complete example of interacting with the response data in the [examples/rhai-data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-data-response-mutate).
+There is a complete example of interacting with the response data in the [examples/data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/data-response-mutate).
 
 ```rhai
 print(`${response.body.data}`); // logs the response data
@@ -361,7 +385,7 @@ Each Error must contain at least:
 
 Optionally, an error may also contain extensions, which are represented as an Object Map.
 
-There is a complete example of interacting with the response errors in the [examples/rhai-error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-error-response-mutate).
+There is a complete example of interacting with the response errors in the [examples/error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/error-response-mutate).
 
 ```rhai
 // Create an error with our message

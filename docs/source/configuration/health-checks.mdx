@@ -37,6 +37,18 @@ $ curl -v "http://127.0.0.1:8088/health"
 {"status":"UP"}
 ```
 
+## Using in a containers environment
+
+The health-check listens to 127.0.0.1 by default, which won't allow connections issued from a network.
+While this is a safe default, *other containers won't be able to perform healthchecks*, which will prevent the router pod from switching to a healthy state.
+
+You can change this by setting `health-check`:
+```yaml title="router.yaml"
+health-check:
+  listen: 0.0.0.0:8088
+  enabled: true
+```
+
 ## Using with Kubernetes
 In Kubernetes, you can configure health checks by setting `readinessProbe` and `livenessProbe` on the `containers` object of the resource definition:
 ```yaml

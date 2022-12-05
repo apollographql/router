@@ -28,24 +28,52 @@ RUN mkdir -p /dist/config && \
 # Copy configuration for docker image
 COPY dockerfiles/router.yaml /dist/config
 
-# Required so we can copy in libz.so.1
-FROM --platform=linux/amd64 gcr.io/distroless/java17-debian11 as libz-required
+# Build our final image
+FROM debian:bullseye-slim
 
-# Final image uses distroless. Feel free to change this to an image that suits your needs.
-FROM gcr.io/distroless/cc-debian11
+ARG DEBUG_IMAGE=false
 
-# Set a label for our image
-LABEL org.opencontainers.image.authors="ApolloGraphQL https://github.com/apollographql/router"
+WORKDIR /dist
 
-# Copy in the extracted/created files
-COPY --from=libz-required /lib/x86_64-linux-gnu/libz.so.1 /lib/x86_64-linux-gnu/libz.so.1
+# Install curl
+RUN \
+  apt-get update -y \
+  && apt-get install -y \
+    curl
 
 # Copy in the required files from our build image
 COPY --from=build --chown=root:root /dist /dist
 
-WORKDIR /dist
+# If debug image, install heaptrack and make a data directory
+RUN \
+  if [ "${DEBUG_IMAGE}" = "true" ]; then \
+    apt-get install -y heaptrack && \
+    mkdir data; \
+  fi
+
+# Clean up apt lists
+RUN rm -rf /var/lib/apt/lists/*
+
+# Set labels for our image
+LABEL org.opencontainers.image.authors="Apollo Graph, Inc. https://github.com/apollographql/router"
+LABEL org.opencontainers.image.source="https://github.com/apollographql/router"
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
-# Default executable is the router
-ENTRYPOINT ["/dist/router"]
+# Create a wrapper script to run the router, use exec to ensure signals are handled correctly
+RUN \
+  echo '#!/usr/bin/env bash \
+\nset -e \
+\n \
+\nif [ -f "/usr/bin/heaptrack" ]; then \
+\n    exec heaptrack -o /dist/data/router_heaptrack /dist/router "$@" \
+\nelse \
+\n    exec /dist/router "$@" \
+\nfi \
+' > /dist/router_wrapper.sh
+
+# Make sure we can run our wrapper
+RUN chmod 755 /dist/router_wrapper.sh
+
+# Default executable is the wrapper script
+ENTRYPOINT ["/dist/router_wrapper.sh"]
