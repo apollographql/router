@@ -65,7 +65,9 @@ impl<SF> Service<RouterRequest> for RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>,
+        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
+    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
+        Send,
 {
     type Response = RouterResponse;
     type Error = BoxError;
@@ -84,7 +86,6 @@ where
         let (parts, body) = router_request.into_parts();
 
         let supergraph_service = self.supergraph_creator.create();
-
         // TODO[igni]: deal with errors
         //     (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response() will help
         let fut = async move {
@@ -224,7 +225,9 @@ impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
 where
     SF: StuffThatHasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>,
+        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
+    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
+        Send,
 {
     type Service = router::BoxService;
     fn create(&self) -> Self::Service {
@@ -236,7 +239,9 @@ impl<SF> RouterFactory for RouterCreator<SF>
 where
     SF: StuffThatHasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>,
+        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
+    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
+        Send,
 {
     type RouterService = router::BoxService;
 
@@ -258,7 +263,9 @@ impl<SF> RouterCreator<SF>
 where
     SF: StuffThatHasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
-        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>,
+        Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
+    <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
+        Send,
 {
     pub(crate) fn new(supergraph_creator: SF) -> Self {
         Self { supergraph_creator }
