@@ -158,7 +158,7 @@ rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "2.1.2"
 sha2 = "0.10.6"
-serde = { version = "1.0.148", features = ["derive", "rc"] }
+serde = { version = "1.0.149", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.89", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
