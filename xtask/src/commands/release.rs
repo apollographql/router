@@ -316,45 +316,53 @@ impl Prepare {
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
     fn update_cargo_tomls(&self, version: &str) -> Result<String> {
         println!("updating Cargo.toml files");
-        match version {
-            "" => return Err(anyhow!("version must be supplied")),
-            "current" => {}
-            "major" => cargo!([
-                "set-version",
-                "--bump",
-                "major",
-                "--package",
-                "apollo-router"
-            ]),
-            "minor" => cargo!([
-                "set-version",
-                "--bump",
-                "minor",
-                "--package",
-                "apollo-router"
-            ]),
-            "potch" => cargo!([
-                "set-version",
-                "--bump",
-                "patch",
-                "--package",
-                "apollo-router"
-            ]),
-            version => cargo!(["set-version", version, "--package", "apollo-router"]),
+        if !self.dry_run {
+            match version {
+                "" => return Err(anyhow!("version must be supplied")),
+                "current" => {}
+                "major" => cargo!([
+                    "set-version",
+                    "--bump",
+                    "major",
+                    "--package",
+                    "apollo-router"
+                ]),
+                "minor" => cargo!([
+                    "set-version",
+                    "--bump",
+                    "minor",
+                    "--package",
+                    "apollo-router"
+                ]),
+                "potch" => cargo!([
+                    "set-version",
+                    "--bump",
+                    "patch",
+                    "--package",
+                    "apollo-router"
+                ]),
+                version => cargo!(["set-version", version, "--package", "apollo-router"]),
+            }
         }
 
         let metadata = MetadataCommand::new()
             .manifest_path("./apollo-router/Cargo.toml")
             .exec()?;
-        let version = metadata
+        let mut version = metadata
             .root_package()
             .expect("root package missing")
             .version
             .to_string();
         let packages = vec!["apollo-router-scaffold", "apollo-router-benchmarks"];
 
-        for package in packages {
-            cargo!(["set-version", &version, "--package", package])
+        if self.dry_run {
+            version = format!("{}-upgrade-dry-run", version)
+        }
+
+        if !self.dry_run {
+            for package in packages {
+                cargo!(["set-version", &version, "--package", package])
+            }
         }
         Ok(version)
     }
