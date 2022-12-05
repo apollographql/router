@@ -54,11 +54,11 @@ macro_rules! git {
 }
 
 macro_rules! replace_in_file {
-    ($path:expr, $regex:expr, $replacement:expr) => {
+    ($dry_run:expr, $path:expr, $regex:expr, $replacement:expr) => {
         let before = std::fs::read_to_string($path)?;
         let re = regex::Regex::new(&format!("(?m){}", $regex))?;
         let after = re.replace_all(&before, $replacement);
-        if !self.dry_run {
+        if !$dry_run {
             std::fs::write($path, &after.as_ref())?;
         }
     };
@@ -363,6 +363,7 @@ impl Prepare {
     fn update_install_script(&self, version: &str) -> Result<()> {
         println!("updating install script");
         replace_in_file!(
+            self.dry_run,
             "./scripts/install.sh",
             "^PACKAGE_VERSION=.*$",
             format!("PACKAGE_VERSION=\"v{}\"", version)
@@ -379,11 +380,13 @@ impl Prepare {
     fn update_docs(&self, version: &str) -> Result<()> {
         println!("updating docs");
         replace_in_file!(
+            self.dry_run,
             "./docs/source/containerization/docker.mdx",
             "with your chosen version. e.g.: `v\\d+.\\d+.\\d+`",
             format!("with your chosen version. e.g.: `v{}`", version)
         );
         replace_in_file!(
+            self.dry_run,
             "./docs/source/containerization/kubernetes.mdx",
             "router/tree/v\\d+.\\d+.\\d+",
             format!("router/tree/v{}", version)
@@ -407,6 +410,7 @@ impl Prepare {
         )?;
 
         replace_in_file!(
+            self.dry_run,
             "./docs/source/containerization/kubernetes.mdx",
             "^```yaml\n---\n# Source: router/templates/serviceaccount.yaml(.|\n)+?```",
             format!("```yaml\n{}\n```", helm_chart.trim())
@@ -429,6 +433,7 @@ impl Prepare {
         }
 
         replace_in_file!(
+            self.dry_run,
             "./helm/chart/router/Chart.yaml",
             "veersion: \"v\\d+.\\d+.\\d+\"",
             format!("appVersion: \"v{}\"", version)
@@ -447,6 +452,7 @@ impl Prepare {
                 .starts_with("docker-compose.")
             {
                 replace_in_file!(
+                    self.dry_run,
                     entry.path(),
                     r"ghcr.io/apollographql/router:v\d+.\d+.\d+",
                     format!("ghcr.io/apollographql/router:v{}", version)
