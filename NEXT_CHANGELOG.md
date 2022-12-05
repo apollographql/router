@@ -250,7 +250,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 If you're running the Router with dev mode with an empty config file, it will no longer panic
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2165
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2195
 
 ### Fix missing apollo tracing variables ([Issue #2186](https://github.com/apollographql/router/issues/2186))
 
@@ -310,6 +310,21 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 Updates to new apollo-rs APIs, and fixes some potential panics on unexpected user input.
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/2177
+
+### Semi-automate the release ([PR #2202](https://github.com/apollographql/router/pull/2202))
+
+Developers can now run:
+`cargo xtask release prepare minor`
+
+To raise a release PR.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2202
+
+
+### Fix webpki license check ([PR #2202](https://github.com/apollographql/router/pull/2202))
+
+There were issues with webpki license checks. This also meant that we were missing the Google Chromimum license which has als been fixed.
+By [@o0Ignition0o](https://github.com/o0Ignition0o) [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2202
 
 ## 📚 Documentation
 
