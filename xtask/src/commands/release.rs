@@ -80,7 +80,7 @@ impl Prepare {
                             .expect("GITHUB_TOKEN env variable must be set"),
                     ),
                 )?;
-                if !self.current_branch {
+                if !self.current_branch && !self.dry_run {
                     self.switch_to_release_branch(&version)?;
                 }
                 self.assign_issues_to_milestone(&github, &version).await?;
