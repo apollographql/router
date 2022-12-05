@@ -230,7 +230,7 @@ impl<'a> TestHarness<'a> {
     /// Builds the GraphQL service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (_config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(supergraph_creator);
+        let router_creator = RouterCreator::new(Arc::new(supergraph_creator));
 
         Ok(tower::service_fn(move |request| {
             let router = router_creator.make();
@@ -247,7 +247,7 @@ impl<'a> TestHarness<'a> {
         use crate::router_factory::RouterFactory;
 
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(supergraph_creator);
+        let router_creator = RouterCreator::new(Arc::new(supergraph_creator));
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(router_creator, &config, web_endpoints)?;

@@ -144,7 +144,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // We're good to go with the new service.
         let supergraph_creator = builder.build().await?;
 
-        Ok(Self::RouterFactory::new(supergraph_creator))
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator)))
     }
 }
 
@@ -207,7 +207,7 @@ caused by
     );
 }
 
-async fn create_plugins(
+pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
@@ -296,8 +296,10 @@ async fn create_plugins(
                             .await
                         {
                             Ok(plugin) => {
-                                plugin_instances
-                                    .insert(desired_position, (name.to_string(), plugin));
+                                plugin_instances.insert(
+                                    desired_position.min(plugin_instances.len()),
+                                    (name.to_string(), plugin),
+                                );
                             }
                             Err(err) => errors.push(ConfigurationError::PluginConfiguration {
                                 plugin: name.to_string(),

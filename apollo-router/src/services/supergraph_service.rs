@@ -464,8 +464,10 @@ impl SupergraphCreator {
 
     /// Create a test service.
     #[cfg(test)]
-    pub(crate) fn for_tests(supergraph_service: MockSupergraphService) -> MockSupergraphCreator {
-        MockSupergraphCreator { supergraph_service }
+    pub(crate) async fn for_tests(
+        supergraph_service: MockSupergraphService,
+    ) -> MockSupergraphCreator {
+        MockSupergraphCreator::new(supergraph_service).await
     }
 }
 
@@ -473,12 +475,37 @@ impl SupergraphCreator {
 #[derive(Clone)]
 pub(crate) struct MockSupergraphCreator {
     supergraph_service: MockSupergraphService,
+    plugins: Arc<Plugins>,
+}
+
+#[cfg(test)]
+impl MockSupergraphCreator {
+    pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
+        let canned_schema = include_str!("../../testing_schema.graphql");
+        let configuration = Configuration::builder().build().unwrap();
+
+        use crate::router_factory::create_plugins;
+        let plugins = create_plugins(
+            &configuration,
+            &Schema::parse(canned_schema, &configuration).unwrap(),
+            None,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+
+        Self {
+            supergraph_service,
+            plugins: Arc::new(plugins),
+        }
+    }
 }
 
 #[cfg(test)]
 impl StuffThatHasPlugins for MockSupergraphCreator {
     fn plugins(&self) -> Arc<Plugins> {
-        Arc::new(Default::default())
+        self.plugins.clone()
     }
 }
 

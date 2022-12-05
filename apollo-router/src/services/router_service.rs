@@ -1,5 +1,6 @@
 //! Implements the router phase of the request lifecycle.
 
+use std::sync::Arc;
 use std::task::Poll;
 
 use axum::body::StreamBody;
@@ -16,12 +17,10 @@ use http::header::VARY;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
-use http::Request;
 use http::StatusCode;
 use http_body::Body as _;
 use hyper::Body;
 use multimap::MultiMap;
-use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -31,7 +30,6 @@ use super::new_service::ServiceFactory;
 use super::router;
 use super::supergraph;
 use super::StuffThatHasPlugins;
-use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
 use crate::http_ext;
@@ -49,14 +47,14 @@ pub(crate) struct RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    supergraph_creator: SF,
+    supergraph_creator: Arc<SF>,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: SF) -> Self {
+    pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
         RouterService { supergraph_creator }
     }
 }
@@ -218,7 +216,7 @@ pub(crate) struct RouterCreator<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    supergraph_creator: SF,
+    supergraph_creator: Arc<SF>,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -267,7 +265,7 @@ where
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
         Send,
 {
-    pub(crate) fn new(supergraph_creator: SF) -> Self {
+    pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
         Self { supergraph_creator }
     }
     pub(crate) fn make(
@@ -303,7 +301,10 @@ mod tests {
     use http::Uri;
     use serde_json_bytes::json;
 
-    use crate::{plugin::test::MockSupergraphService, Context};
+    use crate::{
+        plugin::test::MockSupergraphService, plugins::content_type::APPLICATION_JSON_HEADER_VALUE,
+        services::SupergraphCreator, Context,
+    };
 
     use super::*;
 
@@ -357,33 +358,46 @@ mod tests {
 
         let mut supergraph_service = MockSupergraphService::new();
 
-        supergraph_service
-            .expect_call()
-            .times(2)
-            .returning(move |req| {
-                let example_response = example_response.clone();
+        supergraph_service.expect_clone().returning(move || {
+            let mut supergraph_service = MockSupergraphService::new();
+            let example_response = example_response.clone();
 
-                assert_eq!(
-                    req.supergraph_request.body().query.as_deref().unwrap(),
-                    expected_query
-                );
-                assert_eq!(
-                    req.supergraph_request
-                        .body()
-                        .operation_name
-                        .as_deref()
-                        .unwrap(),
-                    expected_operation_name
-                );
-                Ok(
-                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
+            supergraph_service
+                .expect_call()
+                .times(1)
+                .returning(move |req| {
+                    let example_response = example_response.clone();
+
+                    assert_eq!(
+                        req.supergraph_request.body().query.as_deref().unwrap(),
+                        expected_query
+                    );
+                    assert_eq!(
+                        req.supergraph_request
+                            .body()
+                            .operation_name
+                            .as_deref()
+                            .unwrap(),
+                        expected_operation_name
+                    );
+
+                    Ok(
+                        SupergraphResponse::new_from_graphql_response(
+                            example_response,
+                            req.context,
+                        )
                         .into(),
-                )
-            });
+                    )
+                });
+            supergraph_service
+        });
 
-        let mut router_service =
-            RouterCreator::new(SupergraphCreator::for_tests(supergraph_service)).make();
+        let mut router_service = RouterCreator::new(Arc::new(
+            SupergraphCreator::for_tests(supergraph_service).await,
+        ))
+        .make();
 
+        // get request
         let get_path = format!(
             "/?{}",
             serde_urlencoded::to_string(&[("query", query), ("operationName", operation_name)])
@@ -398,70 +412,22 @@ mod tests {
             .body(hyper::Body::empty())
             .unwrap();
 
-        let response = router_service.call(get_request.into()).await.unwrap();
+        router_service.call(get_request.into()).await.unwrap();
 
-        panic!("no");
+        // post request
+        let post_request = supergraph::Request::builder()
+            .query(query)
+            .operation_name(operation_name)
+            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .uri(Uri::from_static("/"))
+            .method(Method::POST)
+            .context(Context::new())
+            .build()
+            .unwrap();
 
-        // assert_eq!(response.response.into_body(), expected_response);
-    }
-
-    #[tokio::test]
-    async fn it_extracts_query_and_operation_name_on_post_requests() {
-        todo!();
-        // let query = "query";
-        // let expected_query = query;
-        // let operation_name = "operationName";
-        // let expected_operation_name = operation_name;
-
-        // let expected_response = graphql::Response::builder()
-        //     .data(json!({"response": "yay"}))
-        //     .build();
-        // let example_response = expected_response.clone();
-
-        // let mut expectations = MockRouterService::new();
-        // expectations
-        //     .expect_service_call()
-        //     .times(1)
-        //     .returning(move |req| {
-        //         let example_response = example_response.clone();
-        //         Box::pin(async move {
-        //             let request: graphql::Request = serde_json::from_slice(
-        //                 hyper::body::to_bytes(req.router_request.into_body())
-        //                     .await
-        //                     .unwrap()
-        //                     .to_vec()
-        //                     .as_slice(),
-        //             )
-        //             .unwrap();
-        //             assert_eq!(request.query.as_deref().unwrap(), expected_query);
-        //             assert_eq!(
-        //                 request.operation_name.as_deref().unwrap(),
-        //                 expected_operation_name
-        //             );
-        //             Ok(SupergraphResponse::new_from_graphql_response(
-        //                 example_response,
-        //                 Context::new(),
-        //             )
-        //             .into())
-        //         })
-        //     });
-        // let (server, client) = init(expectations).await;
-        // let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
-
-        // let response = client
-        //     .post(url.as_str())
-        //     .body(json!({ "query": query, "operationName": operation_name }).to_string())
-        //     .send()
-        //     .await
-        //     .unwrap()
-        //     .error_for_status()
-        //     .unwrap();
-
-        // assert_eq!(
-        //     response.json::<graphql::Response>().await.unwrap(),
-        //     expected_response,
-        // );
-
-        // server.shutdown().await
+        router_service
+            .call(post_request.try_into().unwrap())
+            .await
+            .unwrap();
     }
 }
