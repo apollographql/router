@@ -321,6 +321,11 @@ To raise a release PR.
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2202
 
 
+### Fix webpki license check ([PR #2202](https://github.com/apollographql/router/pull/2202))
+
+There were issues with webpki license checks. This also meant that we were missing the Google Chromimum license which has als been fixed.
+By [@o0Ignition0o](https://github.com/o0Ignition0o) [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2202
+
 ## 📚 Documentation
 
 ### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
