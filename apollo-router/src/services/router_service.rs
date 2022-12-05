@@ -286,14 +286,6 @@ where
                 .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
         )
     }
-
-    /// Create a test service.
-    #[cfg(test)]
-    pub(crate) fn test_service(&self) -> router::BoxCloneService {
-        use tower::buffer::Buffer;
-
-        Buffer::new(self.make(), 512).boxed_clone()
-    }
 }
 
 #[cfg(test)]
