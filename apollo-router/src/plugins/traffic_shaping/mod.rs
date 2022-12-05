@@ -377,7 +377,6 @@ mod test {
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use tower::util::BoxCloneService;
     use tower::Service;
 
     use super::*;
@@ -386,6 +385,8 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::services::router;
+    use crate::services::router_service::RouterCreator;
     use crate::Configuration;
     use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
@@ -401,13 +402,15 @@ mod test {
     async fn execute_router_test(
         query: &str,
         body: &Response,
-        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
+        mut router_service: router::BoxService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
-            .expect("expecting valid request");
+            .expect("expecting valid request")
+            .try_into()
+            .unwrap();
 
         let response = router_service
             .ready()
@@ -419,12 +422,14 @@ mod test {
             .next_response()
             .await
             .unwrap();
-        assert_eq!(response, *body);
+        todo!();
+
+        // assert_eq!(response, *body);
     }
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
+    ) -> router::BoxService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -479,7 +484,9 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        builder.build().await.expect("should build").test_service()
+        RouterCreator::new(builder.build().await.expect("should build"))
+            .make()
+            .boxed()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {

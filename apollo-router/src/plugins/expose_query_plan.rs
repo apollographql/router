@@ -141,7 +141,7 @@ mod tests {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    async fn build_mock_supergraph(plugin: Box<dyn DynPlugin>) -> supergraph::BoxCloneService {
+    async fn build_mock_supergraph(plugin: Box<dyn DynPlugin>) -> supergraph::BoxService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -185,7 +185,7 @@ mod tests {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        builder.build().await.expect("should build").test_service()
+        builder.build().await.expect("should build").make().boxed()
     }
 
     async fn get_plugin(config: &jValue) -> Box<dyn DynPlugin> {
@@ -200,7 +200,7 @@ mod tests {
     async fn execute_supergraph_test(
         query: &str,
         body: &Response,
-        mut supergraph_service: supergraph::BoxCloneService,
+        mut supergraph_service: supergraph::BoxService,
     ) {
         let request = supergraph::Request::fake_builder()
             .query(query.to_string())
@@ -226,15 +226,20 @@ mod tests {
     #[tokio::test]
     async fn it_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(true)).await;
-        let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
             &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
-            supergraph.clone(),
+            build_mock_supergraph(plugin).await,
         )
         .await;
         // let's try that again
-        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, supergraph).await;
+        let plugin = get_plugin(&serde_json::json!(true)).await;
+        execute_supergraph_test(
+            VALID_QUERY,
+            &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            build_mock_supergraph(plugin).await,
+        )
+        .await;
     }
 
     #[tokio::test]

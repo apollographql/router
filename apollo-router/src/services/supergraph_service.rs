@@ -471,7 +471,7 @@ impl SupergraphCreator {
 
 #[cfg(test)]
 #[derive(Clone)]
-struct MockSupergraphCreator {
+pub(crate) struct MockSupergraphCreator {
     supergraph_service: MockSupergraphService,
 }
 
@@ -486,7 +486,7 @@ impl StuffThatHasPlugins for MockSupergraphCreator {
 impl ServiceFactory<supergraph::Request> for MockSupergraphCreator {
     type Service = supergraph::BoxService;
     fn create(&self) -> Self::Service {
-        self.supergraph_service.boxed()
+        self.supergraph_service.clone().boxed()
     }
 }
 #[cfg(test)]

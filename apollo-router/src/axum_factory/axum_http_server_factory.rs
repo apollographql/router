@@ -23,7 +23,6 @@ use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 use tower::service_fn;
 use tower::BoxError;
-use tower::Service;
 use tower::ServiceExt;
 use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
@@ -54,8 +53,6 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::tracer::TraceId;
-use crate::RouterRequest;
-use crate::RouterResponse;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.

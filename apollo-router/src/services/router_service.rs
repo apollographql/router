@@ -355,7 +355,8 @@ mod tests {
             .build();
         let example_response = expected_response.clone();
 
-        let supergraph_service = MockSupergraphService::new();
+        let mut supergraph_service = MockSupergraphService::new();
+
         supergraph_service
             .expect_call()
             .times(2)
@@ -379,13 +380,17 @@ mod tests {
                         .into(),
                 )
             });
-        let router_service =
+
+        let mut router_service =
             RouterCreator::new(SupergraphCreator::for_tests(supergraph_service)).make();
 
-        let get_uri = Uri::builder()
-            .path_and_query(&[("query", query), ("operationName", operation_name)])
-            .build()
-            .unwrap();
+        let get_path = format!(
+            "/?{}",
+            serde_urlencoded::to_string(&[("query", query), ("operationName", operation_name)])
+                .unwrap(),
+        );
+
+        let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
 
         let get_request = http::Request::builder()
             .method(Method::GET)
@@ -395,7 +400,9 @@ mod tests {
 
         let response = router_service.call(get_request.into()).await.unwrap();
 
-        assert_eq!(response.response.into_body(), expected_response);
+        panic!("no");
+
+        // assert_eq!(response.response.into_body(), expected_response);
     }
 
     #[tokio::test]

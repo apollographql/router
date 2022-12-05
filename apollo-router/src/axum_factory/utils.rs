@@ -3,27 +3,13 @@
 use async_compression::tokio::write::BrotliDecoder;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::ZlibDecoder;
-use axum::http::header::HeaderMap;
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::*;
 use futures::prelude::*;
-use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
-use http::header::VARY;
-use http::HeaderValue;
-use http::Method;
 use http::Request;
 use hyper::Body;
-use mediatype::names::APPLICATION;
-use mediatype::names::HTML;
-use mediatype::names::JSON;
-use mediatype::names::MIXED;
-use mediatype::names::MULTIPART;
-use mediatype::names::TEXT;
-use mediatype::MediaType;
-use mediatype::MediaTypeList;
-use mediatype::ReadParams;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
@@ -31,9 +17,6 @@ use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
 use tracing::Level;
 use tracing::Span;
-
-use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
-use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
