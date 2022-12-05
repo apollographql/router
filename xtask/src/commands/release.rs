@@ -58,7 +58,9 @@ macro_rules! replace_in_file {
         let before = std::fs::read_to_string($path)?;
         let re = regex::Regex::new(&format!("(?m){}", $regex))?;
         let after = re.replace_all(&before, $replacement);
-        std::fs::write($path, &after.as_ref())?;
+        if !self.dry_run {
+            std::fs::write($path, &after.as_ref())?;
+        }
     };
 }
 
@@ -84,7 +86,7 @@ impl Prepare {
                 self.assign_issues_to_milestone(&github, &version).await?;
                 self.update_install_script(&version)?;
                 self.update_docs(&version)?;
-                self.update_helm_charts()?;
+                self.update_helm_charts(&version)?;
                 self.docker_files(&version)?;
                 self.finalize_changelog(&version)?;
                 self.update_lock()?;
@@ -415,7 +417,7 @@ impl Prepare {
 
     /// Update `helm/chart/router/README.md` by running this from the repo root: `(cd helm/chart && helm-docs router)`.
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
-    fn update_helm_charts(&self) -> Result<()> {
+    fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm chars");
         if !std::process::Command::new(which::which("helm-docs")?)
             .current_dir("./helm/chart")
@@ -425,6 +427,13 @@ impl Prepare {
         {
             return Err(anyhow!("failed to generate helm docs"));
         }
+
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "veersion: \"v\\d+.\\d+.\\d+\"",
+            format!("appVersion: \"v{}\"", version)
+        );
+
         Ok(())
     }
     /// Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
@@ -473,8 +482,10 @@ impl Prepare {
             r"(?ms)This project adheres to \[Semantic Versioning v2.0.0\]\(https://semver.org/spec/v2.0.0.html\).\n",
         )?;
         let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", version, chrono::Utc::now().date_naive(), changes));
-        std::fs::write("./CHANGELOG.md", updated.to_string())?;
-        std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
+        if !self.dry_run {
+            std::fs::write("./CHANGELOG.md", updated.to_string())?;
+            std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
+        }
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
