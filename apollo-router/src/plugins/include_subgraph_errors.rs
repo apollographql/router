@@ -88,37 +88,36 @@ mod test {
     use tower::Service;
 
     use super::*;
-    use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
-    use crate::services::supergraph;
+    use crate::Configuration;
     use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
 
-    static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null},
-        "errors":[{"message":
-        "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
-        "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
+    static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value"}}]}"#.as_bytes())
     });
 
-    static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#).unwrap()
+    static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(
+            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted"}]}"#
+                .as_bytes(),
+        )
     });
 
-    static REDACTED_ACCOUNT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        Response::from_bytes("account", Bytes::from_static(r#"{
-                "data": null,
-                "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#.as_bytes())
-    ).unwrap()
+    static REDACTED_ACCOUNT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(
+            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted"}]}"#.as_bytes(),
+        )
     });
 
-    static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
+    static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
@@ -129,7 +128,7 @@ mod test {
 
     async fn execute_router_test(
         query: &str,
-        body: &Response,
+        body: &Bytes,
         mut router_service: router::BoxService,
     ) {
         let request = SupergraphRequest::fake_builder()
@@ -149,9 +148,9 @@ mod test {
             .unwrap()
             .next_response()
             .await
+            .unwrap()
             .unwrap();
-        todo!();
-        // assert_eq!(response, *body);
+        assert_eq!(response, *body);
     }
 
     async fn build_mock_router(plugin: Box<dyn DynPlugin>) -> router::BoxService {
@@ -191,7 +190,16 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+
+        let plugins = create_plugins(&Configuration::default(), &*schema, None)
+            .await
+            .unwrap();
+
+        for (name, plugin) in plugins.into_iter() {
+            builder = builder.with_dyn_plugin(name, plugin);
+        }
+
         let builder = builder
             .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
