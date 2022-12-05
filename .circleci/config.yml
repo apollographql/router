@@ -594,12 +594,12 @@ workflows:
                 - dev
       - prepare_minor_release_approval:
           type: approval
-#          requires:
-#            - test
-#          filters:
-#            branches:
-#              only:
-#                - dev
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
       - prepare_patch_release_approval:
           type: approval
           requires:
