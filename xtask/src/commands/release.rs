@@ -338,7 +338,7 @@ impl Prepare {
                 "--package",
                 "apollo-router"
             ]),
-            "potch" => cargo!([
+            "patch" => cargo!([
                 "set-version",
                 "--bump",
                 "patch",
