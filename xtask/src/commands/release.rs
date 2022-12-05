@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use cargo_metadata::MetadataCommand;
 use itertools::Itertools;
 use octorust::types::{
@@ -54,13 +54,11 @@ macro_rules! git {
 }
 
 macro_rules! replace_in_file {
-    ($dry_run:expr, $path:expr, $regex:expr, $replacement:expr) => {
+    ($path:expr, $regex:expr, $replacement:expr) => {
         let before = std::fs::read_to_string($path)?;
         let re = regex::Regex::new(&format!("(?m){}", $regex))?;
         let after = re.replace_all(&before, $replacement);
-        if !$dry_run {
-            std::fs::write($path, &after.as_ref())?;
-        }
+        std::fs::write($path, &after.as_ref())?;
     };
 }
 
@@ -71,32 +69,38 @@ impl Prepare {
             .build()
             .unwrap()
             .block_on(async {
-                let version =
-                    self.update_cargo_tomls(&self.version.as_ref().cloned().unwrap_or_default())?;
-                let github = octorust::Client::new(
-                    "router-release".to_string(),
-                    octorust::auth::Credentials::Token(
-                        std::env::var("GITHUB_TOKEN")
-                            .expect("GITHUB_TOKEN env variable must be set"),
-                    ),
-                )?;
-                if !self.current_branch && !self.dry_run {
-                    self.switch_to_release_branch(&version)?;
+                let result = self.prepare_release().await;
+                if self.dry_run {
+                    git!("reset", "--hard");
                 }
-                self.assign_issues_to_milestone(&github, &version).await?;
-                self.update_install_script(&version)?;
-                self.update_docs(&version)?;
-                self.update_helm_charts(&version)?;
-                self.docker_files(&version)?;
-                self.finalize_changelog(&version)?;
-                self.update_lock()?;
-                self.check_compliance()?;
-                if !self.dry_run {
-                    self.create_release_pr(&github, &version).await?;
-                }
-
-                Ok(())
+                result
             })
+    }
+
+    async fn prepare_release(&self) -> Result<(), Error> {
+        let version =
+            self.update_cargo_tomls(&self.version.as_ref().cloned().unwrap_or_default())?;
+        let github = octorust::Client::new(
+            "router-release".to_string(),
+            octorust::auth::Credentials::Token(
+                std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN env variable must be set"),
+            ),
+        )?;
+        if !self.current_branch && !self.dry_run {
+            self.switch_to_release_branch(&version)?;
+        }
+        self.assign_issues_to_milestone(&github, &version).await?;
+        self.update_install_script(&version)?;
+        self.update_docs(&version)?;
+        self.update_helm_charts(&version)?;
+        self.docker_files(&version)?;
+        self.finalize_changelog(&version)?;
+        self.update_lock()?;
+        self.check_compliance()?;
+        if !self.dry_run {
+            self.create_release_pr(&github, &version).await?;
+        }
+        Ok(())
     }
 
     /// Create a new branch "#.#.#" where "#.#.#" is this release's version
@@ -316,53 +320,45 @@ impl Prepare {
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
     fn update_cargo_tomls(&self, version: &str) -> Result<String> {
         println!("updating Cargo.toml files");
-        if !self.dry_run {
-            match version {
-                "" => return Err(anyhow!("version must be supplied")),
-                "current" => {}
-                "major" => cargo!([
-                    "set-version",
-                    "--bump",
-                    "major",
-                    "--package",
-                    "apollo-router"
-                ]),
-                "minor" => cargo!([
-                    "set-version",
-                    "--bump",
-                    "minor",
-                    "--package",
-                    "apollo-router"
-                ]),
-                "potch" => cargo!([
-                    "set-version",
-                    "--bump",
-                    "patch",
-                    "--package",
-                    "apollo-router"
-                ]),
-                version => cargo!(["set-version", version, "--package", "apollo-router"]),
-            }
+
+        match version {
+            "" => return Err(anyhow!("version must be supplied")),
+            "current" => {}
+            "major" => cargo!([
+                "set-version",
+                "--bump",
+                "major",
+                "--package",
+                "apollo-router"
+            ]),
+            "minor" => cargo!([
+                "set-version",
+                "--bump",
+                "minor",
+                "--package",
+                "apollo-router"
+            ]),
+            "potch" => cargo!([
+                "set-version",
+                "--bump",
+                "patch",
+                "--package",
+                "apollo-router"
+            ]),
+            version => cargo!(["set-version", version, "--package", "apollo-router"]),
         }
 
         let metadata = MetadataCommand::new()
             .manifest_path("./apollo-router/Cargo.toml")
             .exec()?;
-        let mut version = metadata
+        let version = metadata
             .root_package()
             .expect("root package missing")
             .version
             .to_string();
         let packages = vec!["apollo-router-scaffold", "apollo-router-benchmarks"];
-
-        if self.dry_run {
-            version = format!("{}-upgrade-dry-run", version)
-        }
-
-        if !self.dry_run {
-            for package in packages {
-                cargo!(["set-version", &version, "--package", package])
-            }
+        for package in packages {
+            cargo!(["set-version", &version, "--package", package])
         }
         Ok(version)
     }
@@ -371,7 +367,6 @@ impl Prepare {
     fn update_install_script(&self, version: &str) -> Result<()> {
         println!("updating install script");
         replace_in_file!(
-            self.dry_run,
             "./scripts/install.sh",
             "^PACKAGE_VERSION=.*$",
             format!("PACKAGE_VERSION=\"v{}\"", version)
@@ -388,13 +383,11 @@ impl Prepare {
     fn update_docs(&self, version: &str) -> Result<()> {
         println!("updating docs");
         replace_in_file!(
-            self.dry_run,
             "./docs/source/containerization/docker.mdx",
             "with your chosen version. e.g.: `v\\d+.\\d+.\\d+`",
             format!("with your chosen version. e.g.: `v{}`", version)
         );
         replace_in_file!(
-            self.dry_run,
             "./docs/source/containerization/kubernetes.mdx",
             "router/tree/v\\d+.\\d+.\\d+",
             format!("router/tree/v{}", version)
@@ -418,7 +411,6 @@ impl Prepare {
         )?;
 
         replace_in_file!(
-            self.dry_run,
             "./docs/source/containerization/kubernetes.mdx",
             "^```yaml\n---\n# Source: router/templates/serviceaccount.yaml(.|\n)+?```",
             format!("```yaml\n{}\n```", helm_chart.trim())
@@ -441,7 +433,6 @@ impl Prepare {
         }
 
         replace_in_file!(
-            self.dry_run,
             "./helm/chart/router/Chart.yaml",
             "veersion: \"v\\d+.\\d+.\\d+\"",
             format!("appVersion: \"v{}\"", version)
@@ -460,7 +451,6 @@ impl Prepare {
                 .starts_with("docker-compose.")
             {
                 replace_in_file!(
-                    self.dry_run,
                     entry.path(),
                     r"ghcr.io/apollographql/router:v\d+.\d+.\d+",
                     format!("ghcr.io/apollographql/router:v{}", version)
@@ -496,10 +486,8 @@ impl Prepare {
             r"(?ms)This project adheres to \[Semantic Versioning v2.0.0\]\(https://semver.org/spec/v2.0.0.html\).\n",
         )?;
         let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", version, chrono::Utc::now().date_naive(), changes));
-        if !self.dry_run {
-            std::fs::write("./CHANGELOG.md", updated.to_string())?;
-            std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
-        }
+        std::fs::write("./CHANGELOG.md", updated.to_string())?;
+        std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
