@@ -505,10 +505,24 @@ impl Prepare {
 
     /// Create the release PR
     async fn create_release_pr(&self, github: &Client, version: &str) -> Result<()> {
+        let git = which::which("git")?;
+        let result = std::process::Command::new(git)
+            .args(["branch", "--show-current"])
+            .output()?;
+        if !result.status.success() {
+            return Err(anyhow!("failed to get git current branch"));
+        }
+        let current_branch = String::from_utf8(result.stdout)?;
+
         println!("creating release PR");
         git!("add", "-u");
         git!("commit", "-m", &format!("release {}", version));
-        git!("push", "--set-upstream", "origin", version);
+        git!(
+            "push",
+            "--set-upstream",
+            "origin",
+            &format!("{}:{}", current_branch.trim(), version)
+        );
         github
             .pulls()
             .create(
