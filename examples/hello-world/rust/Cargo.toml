@@ -9,7 +9,6 @@ anyhow = "1"
 apollo-router = { path = "../../../apollo-router" }
 async-trait = "0.1"
 futures = "0.3"
-linkme = "0.3.6"
 schemars = { version = "0.8", features = ["url"] }
 serde = "1"
 serde_json = "1"

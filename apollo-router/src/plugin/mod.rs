@@ -315,6 +315,7 @@ macro_rules! register_plugin {
             use $crate::_private::PLUGINS;
 
             #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
             static REGISTER_PLUGIN: Lazy<PluginFactory> =
                 Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
         };
