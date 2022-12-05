@@ -21,7 +21,7 @@ pub(crate) struct Introspection {
 impl Introspection {
     pub(crate) async fn with_capacity(configuration: &Configuration, capacity: usize) -> Self {
         Self {
-            cache: CacheStorage::new(capacity, None).await,
+            cache: CacheStorage::new(capacity, None, "introspection").await,
             defer_support: configuration.supergraph.preview_defer_support,
         }
     }
