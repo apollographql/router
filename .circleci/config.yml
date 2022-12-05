@@ -516,7 +516,10 @@ jobs:
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
-  prepare_major_release:
+  prepare_release:
+    parameters:
+      release_type:
+        type: string
     docker:
       - image: cimg/base:stable
     resource_class: small
@@ -528,33 +531,7 @@ jobs:
           os: linux_amd
       - run:
           command: >
-            cargo xtask release prepare major
-  prepare_minor_release:
-    docker:
-      - image: cimg/base:stable
-    resource_class: small
-    steps:
-      - checkout
-      - gh/setup
-      - linux_install_baseline
-      - install_extra_tools:
-          os: linux_amd
-      - run:
-          command: >
-            cargo xtask release prepare minor
-  prepare_patch_release:
-    docker:
-      - image: cimg/base:stable
-    resource_class: small
-    steps:
-      - checkout
-      - gh/setup
-      - linux_install_baseline
-      - install_extra_tools:
-          os: linux_amd
-      - run:
-          command: >
-            cargo xtask release prepare patch
+            cargo xtask release prepare << parameters.release_type >>
 
 workflows:
   ci_checks:
@@ -608,13 +585,16 @@ workflows:
             branches:
               only:
                 - dev
-      - prepare_major_release:
+      - prepare_release:
+          release_type: "major"
           requires:
             - prepare_major_release_approval
-      - prepare_minor_release:
+      - prepare_release:
+          release_type: "minor"
           requires:
             - prepare_minor_release_approval
-      - prepare_patch_release:
+      - prepare_release:
+          release_type: "patch"
           requires:
             - prepare_patch_release_approval
 
