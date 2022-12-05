@@ -446,7 +446,7 @@ impl Prepare {
     /// Update `helm/chart/router/README.md` by running this from the repo root: `(cd helm/chart && helm-docs router)`.
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self, version: &str) -> Result<()> {
-        println!("updating helm chars");
+        println!("updating helm charts");
         if !std::process::Command::new(which::which("helm-docs")?)
             .current_dir("./helm/chart")
             .args(["helm-docs", "router"])
@@ -458,7 +458,7 @@ impl Prepare {
 
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
-            "veersion: \"v\\d+.\\d+.\\d+\"",
+            "appVersion: \"v\\d+.\\d+.\\d+\"",
             format!("appVersion: \"v{}\"", version)
         );
 
