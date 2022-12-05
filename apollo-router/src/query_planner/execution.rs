@@ -376,7 +376,7 @@ impl DeferredNode {
         let mut stream: stream::FuturesUnordered<_> = deferred_receivers.into_iter().collect();
         //FIXME/ is there a solution without cloning the entire node? Maybe it could be moved instead?
         let deferred_inner = self.node.clone();
-        let deferred_path = self.path.clone();
+        let deferred_path = self.query_path.clone();
         let subselection = self.subselection();
         let label = self.label.clone();
         let mut tx = sender;

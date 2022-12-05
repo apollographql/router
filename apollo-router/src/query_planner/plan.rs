@@ -245,7 +245,11 @@ impl PlanNode {
                     //println!("deferred node: {:?}", current);
 
                     if let Some(subselection) = &current.subselection {
-                        let query = reconstruct_full_query(&current.path, kind, subselection);
+                        println!(
+                            "will reconstruct deferred {} at path {}: {}",
+                            kind, current.query_path, subselection
+                        );
+                        let query = reconstruct_full_query(&current.query_path, kind, subselection);
                         println!("[{}] PARSING reconstructed query {}", line!(), query);
 
                         // ----------------------- Parse ---------------------------------
@@ -254,7 +258,7 @@ impl PlanNode {
 
                         subs.insert(
                             SubSelection {
-                                path: current.path.clone(),
+                                path: current.query_path.clone(),
                                 subselection: subselection.clone(),
                             },
                             sub_selection,
@@ -263,7 +267,7 @@ impl PlanNode {
                     if let Some(current_node) = &current.node {
                         current_node.collect_subselections(
                             schema,
-                            &initial_path.join(&current.path),
+                            &initial_path.join(&current.query_path),
                             kind,
                             subs,
                         )?;
@@ -349,6 +353,11 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
+            json_ext::PathElement::Fragment(fragment) => {
+                write!(&mut query, "{{ {fragment}")
+                    .expect("writing to a String should not fail because it can reallocate");
+                len += 1;
+            }
         }
     }
 
@@ -399,7 +408,7 @@ pub(crate) struct DeferredNode {
     /// The optional defer label.
     pub(crate) label: Option<String>,
     /// Path to the @defer this correspond to. `subselection` start at that `path`.
-    pub(crate) path: Path,
+    pub(crate) query_path: Path,
     /// The part of the original query that "selects" the data to send
     /// in that deferred response (once the plan in `node` completes).
     /// Will be set _unless_ `node` is a `DeferNode` itself.

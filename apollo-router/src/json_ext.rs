@@ -242,6 +242,7 @@ impl ValueExt for Value {
                         .get_mut(k.as_str())
                         .expect("the value at that key was just inserted");
                 }
+                PathElement::Fragment(_) => {}
             }
         }
 
@@ -319,6 +320,7 @@ impl ValueExt for Value {
                         })
                     }
                 },
+                PathElement::Fragment(f) => {}
             }
         }
 
@@ -402,7 +404,16 @@ where
                     iterate_path(parent, &path[1..], value, f);
                     parent.pop();
                 }
+            } else if let Value::Array(array) = data {
+                for (i, value) in array.iter().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path(parent, &path, value, f);
+                    parent.pop();
+                }
             }
+        }
+        Some(PathElement::Fragment(_)) => {
+            iterate_path(parent, &path[1..], data, f);
         }
     }
 }
@@ -421,6 +432,10 @@ pub enum PathElement {
 
     /// An index path element.
     Index(usize),
+
+    /// A fragment application
+    #[serde(deserialize_with = "deserialize_fragment")]
+    Fragment(String),
 
     /// A key path element.
     Key(String),
@@ -462,6 +477,37 @@ where
     S: serde::Serializer,
 {
     serializer.serialize_str("@")
+}
+
+fn deserialize_fragment<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    deserializer.deserialize_str(FragmentVisitor)
+}
+
+struct FragmentVisitor;
+
+impl<'de> serde::de::Visitor<'de> for FragmentVisitor {
+    type Value = String;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        write!(formatter, "a string that begins with '... '")
+    }
+
+    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        if s.starts_with("... ") {
+            Ok(s.to_string())
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(s),
+                &self,
+            ))
+        }
+    }
 }
 
 /// A path into the result document.
@@ -587,6 +633,7 @@ impl fmt::Display for Path {
                 PathElement::Index(index) => write!(f, "{}", index)?,
                 PathElement::Key(key) => write!(f, "{}", key)?,
                 PathElement::Flatten => write!(f, "@")?,
+                PathElement::Fragment(fragment) => write!(f, "{fragment}")?,
             }
         }
         Ok(())
