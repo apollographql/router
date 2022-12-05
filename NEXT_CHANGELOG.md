@@ -311,6 +311,16 @@ Updates to new apollo-rs APIs, and fixes some potential panics on unexpected use
 
 By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/2177
 
+### Semi-automate the release ([PR #2202](https://github.com/apollographql/router/pull/2202))
+
+Developers can now run:
+`cargo xtask release prepare minor`
+
+To raise a release PR.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2202
+
+
 ## 📚 Documentation
 
 ### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
