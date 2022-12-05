@@ -167,7 +167,7 @@ dependencies = [
  "access-json",
  "ansi_term",
  "anyhow",
- "apollo-encoder 0.3.4",
+ "apollo-encoder 0.4.0",
  "apollo-parser 0.4.0",
  "askama",
  "async-compression",
@@ -4091,8 +4091,7 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.1.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74d2434deb0c39a41b7b68f968c78517c59b1032894c2e013244ba18d9fb49b4"
+source = "git+https://github.com/apollographql/federation-rs?branch=geal/test-2.2.2-rc0#8a963a7e26792792b7f162caea9651bb29091da9"
 dependencies = [
  "anyhow",
  "async-channel",
