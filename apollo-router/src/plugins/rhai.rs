@@ -22,6 +22,8 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
+use notify::event::ModifyKind;
+use notify::EventKind;
 use notify::RecursiveMode;
 use notify::Watcher;
 use opentelemetry::trace::SpanKind;
@@ -447,18 +449,35 @@ impl Plugin for Rhai {
                 notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
-                            // We want to reload our engine for all events, but sometimes we'll get
-                            // lots of duplicate events...
-                            println!("event kind: {:?}", event.kind);
-                            // let mut guard = watched_block.write().unwrap();
-                            match EngineBlock::try_new(
-                                Some(watching_path.clone()),
-                                watched_main.clone(),
-                                watched_sdl.clone(),
-                            ) {
-                                Ok(eb) => watched_block.store(Arc::new(eb)),
-                                Err(e) => {
-                                    tracing::warn!("could not update script: {}", e);
+                            // Let's limit the events we are interested in to:
+                            //  - Modified files
+                            //  - Created/Remove files
+                            //  - with suffix "rhai"
+                            if matches!(
+                                event.kind,
+                                EventKind::Modify(ModifyKind::Data(_))
+                                    | EventKind::Create(_)
+                                    | EventKind::Remove(_)
+                            ) && event.paths[0]
+                                .extension()
+                                .map_or(false, |ext| ext == "rhai")
+                            {
+                                // TODO: REMOVE THIS DEBUG DATA BEFORE MERGE
+                                println!("event: {:?}", event);
+                                println!("event kind: {:?}", event.kind);
+                                match EngineBlock::try_new(
+                                    Some(watching_path.clone()),
+                                    watched_main.clone(),
+                                    watched_sdl.clone(),
+                                ) {
+                                    Ok(eb) => {
+                                        // TODO: REMOVE THIS DEBUG DATA BEFORE MERGE
+                                        println!("ABOUT TO UPDATE EB");
+                                        watched_block.store(Arc::new(eb))
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("could not update script: {}", e);
+                                    }
                                 }
                             }
                         }
