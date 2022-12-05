@@ -39,8 +39,7 @@ pub struct Prepare {
     #[structopt(long)]
     dry_run: bool,
 
-    /// The new version that is being created OR to bump (major|minor|patch).
-    #[structopt(long)]
+    /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Option<String>,
 }
 
@@ -70,13 +69,8 @@ impl Prepare {
             .build()
             .unwrap()
             .block_on(async {
-                let version = self.update_cargo_tomls(
-                    &self
-                        .version
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_else(|| "current".to_string()),
-                )?;
+                let version =
+                    self.update_cargo_tomls(&self.version.as_ref().cloned().unwrap_or_default())?;
                 let github = octorust::Client::new(
                     "router-release".to_string(),
                     octorust::auth::Credentials::Token(
@@ -321,6 +315,7 @@ impl Prepare {
     fn update_cargo_tomls(&self, version: &str) -> Result<String> {
         println!("updating Cargo.toml files");
         match version {
+            "" => return Err(anyhow!("version must be supplied")),
             "current" => {}
             "major" => cargo!([
                 "set-version",
