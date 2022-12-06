@@ -511,10 +511,10 @@ async fn response() -> Result<(), ApolloRouterError> {
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
 
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -601,9 +601,9 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .build();
     let example_response = expected_response.clone();
 
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
 
@@ -661,9 +661,9 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
 
@@ -722,9 +722,9 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         .build();
     let example_response = expected_response.clone();
 
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
 
@@ -784,14 +784,14 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
 
 #[tokio::test]
 async fn response_failure() -> Result<(), ApolloRouterError> {
-    let mut router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = crate::error::FetchError::SubrequestHttpError {
             service: "Mock service".to_string(),
             reason: "Mock error".to_string(),
         }
         .to_response();
 
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -1283,14 +1283,14 @@ fn origin_valid(headers: &HeaderMap, origin: &str) -> bool {
 
 #[test(tokio::test)]
 async fn response_shape() -> Result<(), ApolloRouterError> {
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         Ok(SupergraphResponse::new_from_graphql_response(
             graphql::Response::builder()
                 .data(json!({
                     "test": "hello"
                 }))
                 .build(),
-            Context::new(),
+            req.context,
         )
         .into())
     })
