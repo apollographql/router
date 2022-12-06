@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/upgrade.rs
+expression: "generate_upgrade_output(\"changed: bar\\nstable: 1.0\\ndeleted: gone\",\n        \"changed: bif\\nstable: 1.0\\nadded: new\",\n        false).expect(\"expected successful migration\")"
+---
+changed: bif
+stable: 1.0
+added: new
+

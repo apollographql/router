@@ -13,6 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+## 🥼 Experimental
 
 ## Example section entry format
 
@@ -24,8 +25,3 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
-## ❗ BREAKING ❗
-## 🚀 Features
-## 🐛 Fixes
-## 🛠 Maintenance
-## 📚 Documentation

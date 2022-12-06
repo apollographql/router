@@ -167,7 +167,7 @@ fn supergraph_service(service) {
 
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place:
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
 
 ```
 request.context
@@ -192,7 +192,7 @@ request.subgraph.uri.host
 request.subgraph.uri.path
 ```
 
-All of these fields are read/write.
+These additional fields are shared across all subgraph invocations and are thus read-only.
 
 ### `request.context`
 
@@ -367,7 +367,7 @@ print(`${response.body.label}`); // logs the response label
 
 A response may contain data (some responses with errors do not contain data). Be careful when manipulating data (and errors) to make sure that response remain valid. `data` is exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
 
-There is a complete example of interacting with the response data in the [examples/rhai-data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-data-response-mutate).
+There is a complete example of interacting with the response data in the [examples/data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/data-response-mutate).
 
 ```rhai
 print(`${response.body.data}`); // logs the response data
@@ -385,7 +385,7 @@ Each Error must contain at least:
 
 Optionally, an error may also contain extensions, which are represented as an Object Map.
 
-There is a complete example of interacting with the response errors in the [examples/rhai-error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-error-response-mutate).
+There is a complete example of interacting with the response errors in the [examples/error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/error-response-mutate).
 
 ```rhai
 // Create an error with our message
