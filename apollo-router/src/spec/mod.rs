@@ -69,8 +69,8 @@ impl ErrorExtension for SpecError {
             SpecError::InvalidField(field, ty) => {
                 obj.insert("type", ty.clone().into());
                 obj.insert("field", field.clone().into());
-            },
-            _ => ()
+            }
+            _ => (),
         }
 
         (!obj.is_empty()).then(|| obj)
