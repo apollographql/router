@@ -23,7 +23,7 @@ Complex configuration changes should be discussed with the team before starting 
 2. List any concerns.
 3. Notify the team that you are looking for request for comment.
 4. Ask users what they think.
-5. Schedule a meeting to discuss. (This is important, often design considerations will fall out of conversation)
+5. If you are an Apollo Router team member then schedule a meeting to discuss. (This is important, often design considerations will fall out of conversation)
 6. If it is not completely clear what the direction should be:
 7. Wait a few days, often people will have ideas later even if they didn't in the meeting.
 8. Make your changes.
