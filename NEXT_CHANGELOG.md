@@ -26,6 +26,15 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
+
+[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
+mandate that a deferred response should not be sent if its path points to an element of the response that was nullified
+in a previous payload.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
+
+
 ## 🛠 Maintenance
 
 ### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
