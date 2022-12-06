@@ -176,16 +176,20 @@ where
 }
 
 /// Trait used to get extension type from an error
-pub(crate) trait ErrorExtensionType
+pub(crate) trait ErrorExtension
 where
     Self: Sized,
 {
     fn extension_code(&self) -> String {
         std::any::type_name::<Self>().to_shouty_snake_case()
     }
+
+    fn custom_extension_details(&self) -> Option<Object> {
+        None
+    }
 }
 
-impl ErrorExtensionType for PlanError {}
+impl ErrorExtension for PlanError {}
 
 impl From<PlanError> for Error {
     fn from(err: PlanError) -> Self {
@@ -206,7 +210,7 @@ impl From<PlanError> for Error {
     }
 }
 
-impl ErrorExtensionType for PlannerError {
+impl ErrorExtension for PlannerError {
     fn extension_code(&self) -> String {
         match self {
             PlannerError::WorkerGraphQLError(worker_graphql_error) => worker_graphql_error
@@ -232,7 +236,7 @@ impl From<PlannerError> for Error {
     }
 }
 
-impl ErrorExtensionType for WorkerError {}
+impl ErrorExtension for WorkerError {}
 
 impl From<WorkerError> for Error {
     fn from(err: WorkerError) -> Self {
@@ -252,7 +256,7 @@ impl From<WorkerError> for Error {
     }
 }
 
-impl ErrorExtensionType for WorkerGraphQLError {}
+impl ErrorExtension for WorkerGraphQLError {}
 
 impl From<WorkerGraphQLError> for Error {
     fn from(err: WorkerGraphQLError) -> Self {

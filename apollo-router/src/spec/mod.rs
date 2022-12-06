@@ -20,7 +20,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
-use crate::graphql::ErrorExtensionType;
+use crate::graphql::ErrorExtension;
+use crate::json_ext::Object;
 
 /// GraphQL parsing errors.
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
@@ -47,7 +48,7 @@ impl SpecError {
     }
 }
 
-impl ErrorExtensionType for SpecError {
+impl ErrorExtension for SpecError {
     fn extension_code(&self) -> String {
         match self {
             SpecError::RecursionLimitExceeded => "RecursionLimitExceeded",
@@ -57,5 +58,21 @@ impl ErrorExtensionType for SpecError {
             SpecError::SubscriptionNotSupported => "SubscriptionNotSupported",
         }
         .to_shouty_snake_case()
+    }
+
+    fn custom_extension_details(&self) -> Option<Object> {
+        let mut obj = Object::new();
+        match self {
+            SpecError::InvalidType(ty) => {
+                obj.insert("type", ty.clone().into());
+            }
+            SpecError::InvalidField(field, ty) => {
+                obj.insert("type", ty.clone().into());
+                obj.insert("field", field.clone().into());
+            },
+            _ => ()
+        }
+
+        (!obj.is_empty()).then(|| obj)
     }
 }

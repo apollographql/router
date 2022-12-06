@@ -19,7 +19,7 @@ use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
-use crate::graphql::ErrorExtensionType;
+use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::json_ext::Path;
@@ -36,12 +36,6 @@ use crate::spec::SpecError;
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
 pub(crate) enum FetchError {
-    /// query references unknown service '{service}'
-    ValidationUnknownServiceError {
-        /// The service that was unknown.
-        service: String,
-    },
-
     /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
         /// Name of the variable.
@@ -52,18 +46,6 @@ pub(crate) enum FetchError {
     ValidationPlanningError {
         /// The failure reason.
         reason: String,
-    },
-
-    /// response was malformed: {reason}
-    MalformedResponse {
-        /// The reason the serialization failed.
-        reason: String,
-    },
-
-    /// service '{service}' returned no response.
-    SubrequestNoResponse {
-        /// The service that returned no response.
-        service: String,
     },
 
     /// service '{service}' response was malformed: {reason}
@@ -98,6 +80,7 @@ pub(crate) enum FetchError {
         field: String,
     },
 
+    #[cfg(test)]
     /// invalid content: {reason}
     ExecutionInvalidContent { reason: String },
 
@@ -120,6 +103,28 @@ impl FetchError {
             extensions
                 .entry("code")
                 .or_insert_with(|| self.extension_code().into());
+            // Following these specs https://www.apollographql.com/docs/apollo-server/data/errors/#including-custom-error-details
+            match self {
+                FetchError::SubrequestMalformedResponse { service, .. }
+                | FetchError::SubrequestUnexpectedPatchResponse { service }
+                | FetchError::SubrequestHttpError { service, .. }
+                | FetchError::CompressionError { service, .. } => {
+                    extensions
+                        .entry("service")
+                        .or_insert_with(|| service.clone().into());
+                }
+                FetchError::ExecutionFieldNotFound { field, .. } => {
+                    extensions
+                        .entry("field")
+                        .or_insert_with(|| field.clone().into());
+                }
+                FetchError::ValidationInvalidTypeVariable { name } => {
+                    extensions
+                        .entry("name")
+                        .or_insert_with(|| name.clone().into());
+                }
+                _ => (),
+            }
         }
 
         Error {
@@ -139,23 +144,21 @@ impl FetchError {
     }
 }
 
-impl ErrorExtensionType for FetchError {
+impl ErrorExtension for FetchError {
     fn extension_code(&self) -> String {
         match self {
-            FetchError::ValidationUnknownServiceError { .. } => "ValidationUnknownServiceError",
             FetchError::ValidationInvalidTypeVariable { .. } => "ValidationInvalidTypeVariable",
             FetchError::ValidationPlanningError { .. } => "ValidationPlanningError",
-            FetchError::MalformedResponse { .. } => "MalformedResponse",
-            FetchError::SubrequestNoResponse { .. } => "SubrequestNoResponse",
             FetchError::SubrequestMalformedResponse { .. } => "SubrequestMalformedResponse",
             FetchError::SubrequestUnexpectedPatchResponse { .. } => {
                 "SubrequestUnexpectedPatchResponse"
             }
             FetchError::SubrequestHttpError { .. } => "SubrequestHttpError",
             FetchError::ExecutionFieldNotFound { .. } => "ExecutionFieldNotFound",
-            FetchError::ExecutionInvalidContent { .. } => "ExecutionInvalidContent",
             FetchError::ExecutionPathNotFound { .. } => "ExecutionPathNotFound",
             FetchError::CompressionError { .. } => "CompressionError",
+            #[cfg(test)]
+            FetchError::ExecutionInvalidContent { .. } => "ExecutionInvalidContent",
         }
         .to_shouty_snake_case()
     }
@@ -234,10 +237,21 @@ pub(crate) enum QueryPlannerError {
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            QueryPlannerError::SpecError(err) => Ok(vec![Error::builder()
-                .message(err.to_string())
-                .extension_code(err.extension_code())
-                .build()]),
+            QueryPlannerError::SpecError(err) => {
+                let gql_err = match err.custom_extension_details() {
+                    Some(extension_details) => Error::builder()
+                        .message(err.to_string())
+                        .extension_code(err.extension_code())
+                        .extensions(extension_details)
+                        .build(),
+                    None => Error::builder()
+                        .message(err.to_string())
+                        .extension_code(err.extension_code())
+                        .build(),
+                };
+
+                Ok(vec![gql_err])
+            }
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
@@ -251,7 +265,7 @@ impl IntoGraphQLErrors for QueryPlannerError {
     }
 }
 
-impl ErrorExtensionType for QueryPlannerError {
+impl ErrorExtension for QueryPlannerError {
     fn extension_code(&self) -> String {
         match self {
             QueryPlannerError::SchemaValidationErrors(_) => "SchemaValidationErrors",
