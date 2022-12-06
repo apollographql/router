@@ -26,6 +26,9 @@ spec:
       {{- end }}
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
+        {{- if .Values.supergraphFile }}
+        checksum/supergraph: {{ .Values.supergraphFile | sha256sum | trunc 63 }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
