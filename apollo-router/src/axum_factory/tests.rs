@@ -9,6 +9,7 @@ use std::sync::Arc;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
 use axum::body::BoxBody;
+use futures::future::BoxFuture;
 use futures::stream;
 use futures::stream::poll_fn;
 use futures::Future;
@@ -61,6 +62,7 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router_service;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
@@ -205,7 +207,13 @@ async fn init(mut mock: MockRouterService) -> (HttpServerHandle, Client) {
 }
 
 pub(super) async fn init_with_config(
-    mut mock: MockRouterService,
+    mut router_service: impl Service<
+            router::Request,
+            Response = router::Response,
+            Error = BoxError,
+            Future = BoxFuture<'static, router::ServiceResult>,
+        > + Send
+        + 'static,
     conf: Configuration,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
@@ -215,7 +223,7 @@ pub(super) async fn init_with_config(
     tokio::spawn(async move {
         loop {
             while let Some((request, responder)) = handle.next_request().await {
-                match mock.service_call(request).await {
+                match router_service.ready().await.unwrap().call(request).await {
                     Ok(response) => responder.send_response(response),
                     Err(err) => responder.send_error(err),
                 }
@@ -286,8 +294,6 @@ async fn init_unix(mut mock: MockRouterService, temp_dir: &tempfile::TempDir) ->
 
 #[tokio::test]
 async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
-    let expectations = MockRouterService::new();
-
     let conf = Configuration::fake_builder()
         .sandbox(Sandbox::fake_builder().enabled(true).build())
         .homepage(Homepage::fake_builder().enabled(false).build())
@@ -295,7 +301,12 @@ async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
         .build()
         .unwrap();
 
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+        panic!("this should never be called");
+    })
+    .await;
+
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
 
     // Regular studio redirect
     let response = client
@@ -320,8 +331,6 @@ async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), ApolloRouterError> {
-    let expectations = MockRouterService::new();
-
     let conf = Configuration::fake_builder()
         .sandbox(Sandbox::fake_builder().enabled(true).build())
         .homepage(Homepage::fake_builder().enabled(false).build())
@@ -334,7 +343,8 @@ async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), Apol
         .build()
         .unwrap();
 
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+    let (server, client) =
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
 
     // Regular studio redirect
     let response = client
@@ -616,19 +626,13 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let mut expectations = MockRouterService::new();
-    expectations
-        .expect_service_call()
-        .times(2)
-        .returning(move |_| {
-            let example_response = example_response.clone();
-            Box::pin(async move {
-                Ok(
-                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                        .into(),
-                )
-            })
-        });
+
+    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+        let example_response = example_response.clone();
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+    })
+    .await;
+
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
@@ -637,7 +641,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
     let url = format!(
         "{}/graphql",
         server.graphql_listen_address().as_ref().unwrap()
@@ -683,19 +687,12 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let mut expectations = MockRouterService::new();
-    expectations
-        .expect_service_call()
-        .times(2)
-        .returning(move |_| {
-            let example_response = example_response.clone();
-            Box::pin(async move {
-                Ok(
-                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                        .into(),
-                )
-            })
-        });
+    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+        let example_response = example_response.clone();
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+    })
+    .await;
+
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
@@ -704,7 +701,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
     let url = format!(
         "{}/prefix/graphql",
         server.graphql_listen_address().as_ref().unwrap()
@@ -750,19 +747,13 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         .data(json!({"response": "yay"}))
         .build();
     let example_response = expected_response.clone();
-    let mut expectations = MockRouterService::new();
-    expectations
-        .expect_service_call()
-        .times(4)
-        .returning(move |_| {
-            let example_response = example_response.clone();
-            Box::pin(async move {
-                Ok(
-                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                        .into(),
-                )
-            })
-        });
+
+    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+        let example_response = example_response.clone();
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+    })
+    .await;
+
     let conf = Configuration::fake_builder()
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
@@ -771,7 +762,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
     for url in &[
         format!(
             "{}/graphql/test",
@@ -870,7 +861,6 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn cors_preflight() -> Result<(), ApolloRouterError> {
-    let expectations = MockRouterService::new();
     let conf = Configuration::fake_builder()
         .cors(Cors::builder().build())
         .supergraph(
@@ -880,7 +870,8 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+    let (server, client) =
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
 
     let response = client
         .request(
@@ -984,7 +975,6 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
 
 #[test(tokio::test)]
 async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
-    let expectations = MockRouterService::new();
     let conf = Configuration::fake_builder()
         // sandbox is disabled by default, but homepage will take over if we dont disable it
         .homepage(
@@ -994,7 +984,9 @@ async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+
+    let (server, client) =
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
     let response = client
         .get(&format!(
             "{}/",
@@ -1021,7 +1013,9 @@ async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> 
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(expectations, conf, MultiMap::new()).await?;
+
+    let (server, client) =
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
     let response = client
         .get(&format!(
             "{}/",
@@ -1044,7 +1038,6 @@ async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> 
 
 #[test(tokio::test)]
 async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
-    let expectations = MockRouterService::new();
     let endpoint = service_fn(|req: router::Request| async move {
         Ok::<_, BoxError>(
             http::Response::builder()
@@ -1073,7 +1066,8 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
-    let (server, client) = init_with_config(expectations, conf, web_endpoints).await?;
+    let (server, client) =
+        init_with_config(router_service::empty().await, conf, web_endpoints).await?;
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
@@ -1179,7 +1173,7 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
-    let error = init_with_config(MockRouterService::new(), conf, web_endpoints)
+    let error = init_with_config(router_service::empty().await, conf, web_endpoints)
         .await
         .unwrap_err();
 
@@ -1211,7 +1205,7 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         .build()
         .unwrap();
     let (server, client) =
-        init_with_config(MockRouterService::new(), conf, MultiMap::new()).await?;
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
@@ -1233,7 +1227,7 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
         .build()
         .unwrap();
     let (server, client) =
-        init_with_config(MockRouterService::new(), conf, MultiMap::new()).await?;
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
@@ -1260,7 +1254,7 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
         .build()
         .unwrap();
     let (server, client) =
-        init_with_config(MockRouterService::new(), conf, MultiMap::new()).await?;
+        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     // regex tests
@@ -1980,7 +1974,7 @@ async fn test_health_check_custom_listener() {
     let expectations = MockRouterService::new();
 
     // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(expectations, conf, MultiMap::new())
+    let (_server, client) = init_with_config(router_service::empty().await, conf, MultiMap::new())
         .await
         .unwrap();
     let url = "http://localhost:4012/health";
@@ -2005,8 +1999,7 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
         .build()
         .unwrap();
-    let expectations = MockRouterService::new();
-    let error = init_with_config(expectations, conf, MultiMap::new())
+    let error = init_with_config(router_service::empty().await, conf, MultiMap::new())
         .await
         .unwrap_err();
 
@@ -2028,8 +2021,7 @@ async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build())
         .build()
         .unwrap();
-    let expectations = MockRouterService::new();
-    let _ = init_with_config(expectations, conf, MultiMap::new())
+    let _ = init_with_config(router_service::empty().await, conf, MultiMap::new())
         .await
         .unwrap();
 }
@@ -2050,8 +2042,7 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         )
         .build()
         .unwrap();
-    let expectations = MockRouterService::new();
-    let error = init_with_config(expectations, conf, MultiMap::new())
+    let error = init_with_config(router_service::empty().await, conf, MultiMap::new())
         .await
         .unwrap_err();
 

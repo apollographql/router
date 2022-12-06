@@ -367,18 +367,22 @@ mod tests {
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
-    use crate::axum_factory::tests::MockRouterService;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
     use crate::services::router;
+    use crate::services::router_service;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
-        init_with_config(MockRouterService::new(), configuration, MultiMap::new())
-            .await
-            .unwrap();
+        init_with_config(
+            router_service::empty().await,
+            configuration,
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -409,7 +413,7 @@ mod tests {
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(MockRouterService::new(), configuration, web_endpoints)
+        let error = init_with_config(router_service::empty().await, configuration, web_endpoints)
             .await
             .unwrap_err();
         assert_eq!(
@@ -444,7 +448,7 @@ mod tests {
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(MockRouterService::new(), configuration, mm)
+        let error = init_with_config(router_service::empty().await, configuration, mm)
             .await
             .unwrap_err();
 

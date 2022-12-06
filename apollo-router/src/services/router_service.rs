@@ -41,6 +41,11 @@ use crate::RouterResponse;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
 
+#[cfg(test)]
+use super::SupergraphCreator;
+#[cfg(test)]
+use crate::plugin::test::MockSupergraphService;
+
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
 pub(crate) struct RouterService<SF>
@@ -57,6 +62,52 @@ where
     pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
         RouterService { supergraph_creator }
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn from_supergraph_mock_callback(
+    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
+        + Send
+        + Sync
+        + 'static
+        + Clone,
+) -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send {
+    let mut supergraph_service = MockSupergraphService::new();
+
+    supergraph_service.expect_clone().returning(move || {
+        let cloned_callback = supergraph_callback.clone();
+        let mut supergraph_service = MockSupergraphService::new();
+        supergraph_service.expect_call().returning(cloned_callback);
+        supergraph_service
+    });
+
+    RouterCreator::new(Arc::new(
+        SupergraphCreator::for_tests(supergraph_service).await,
+    ))
+    .make()
+}
+
+#[cfg(test)]
+pub(crate) async fn empty() -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send {
+    let mut supergraph_service = MockSupergraphService::new();
+    supergraph_service
+        .expect_clone()
+        .returning(move || MockSupergraphService::new());
+
+    RouterCreator::new(Arc::new(
+        SupergraphCreator::for_tests(supergraph_service).await,
+    ))
+    .make()
 }
 
 impl<SF> Service<RouterRequest> for RouterService<SF>
@@ -268,6 +319,7 @@ where
     pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
         Self { supergraph_creator }
     }
+
     pub(crate) fn make(
         &self,
     ) -> impl Service<
@@ -346,48 +398,26 @@ mod tests {
         let expected_response = graphql::Response::builder()
             .data(json!({"response": "yay"}))
             .build();
-        let example_response = expected_response.clone();
 
-        let mut supergraph_service = MockSupergraphService::new();
+        let mut router_service = super::from_supergraph_mock_callback(move |req| {
+            let example_response = expected_response.clone();
 
-        supergraph_service.expect_clone().returning(move || {
-            let mut supergraph_service = MockSupergraphService::new();
-            let example_response = example_response.clone();
+            assert_eq!(
+                req.supergraph_request.body().query.as_deref().unwrap(),
+                expected_query
+            );
+            assert_eq!(
+                req.supergraph_request
+                    .body()
+                    .operation_name
+                    .as_deref()
+                    .unwrap(),
+                expected_operation_name
+            );
 
-            supergraph_service
-                .expect_call()
-                .times(1)
-                .returning(move |req| {
-                    let example_response = example_response.clone();
-
-                    assert_eq!(
-                        req.supergraph_request.body().query.as_deref().unwrap(),
-                        expected_query
-                    );
-                    assert_eq!(
-                        req.supergraph_request
-                            .body()
-                            .operation_name
-                            .as_deref()
-                            .unwrap(),
-                        expected_operation_name
-                    );
-
-                    Ok(
-                        SupergraphResponse::new_from_graphql_response(
-                            example_response,
-                            req.context,
-                        )
-                        .into(),
-                    )
-                });
-            supergraph_service
-        });
-
-        let mut router_service = RouterCreator::new(Arc::new(
-            SupergraphCreator::for_tests(supergraph_service).await,
-        ))
-        .make();
+            Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        })
+        .await;
 
         // get request
         let get_path = format!(
