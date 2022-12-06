@@ -25,7 +25,7 @@
           }
         ],
         "label": null,
-        "path": ["me"],
+        "queryPath": ["me"],
         "subselection": "{ ... on User { name username } }",
         "node": {
           "kind": "Flatten",

@@ -320,7 +320,7 @@ impl ValueExt for Value {
                         })
                     }
                 },
-                PathElement::Fragment(f) => {}
+                PathElement::Fragment(_) => {}
             }
         }
 

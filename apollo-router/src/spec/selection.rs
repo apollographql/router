@@ -97,7 +97,6 @@ impl Selection {
                     .text()
                     .to_string();
 
-                println!("trying to get type of {} in {}", field_name, current_type);
                 let field_type = if field_name.as_str() == TYPENAME {
                     FieldType::String
                 } else if field_name == "__schema" {
@@ -121,7 +120,6 @@ impl Selection {
                                 .get(name)
                                 .and_then(|ty| ty.field(&field_name))
                         })
-                        //.expect("invalid field")
                         .ok_or_else(|| {
                             SpecError::InvalidField(field_name.clone(), current_type.to_string())
                         })?
