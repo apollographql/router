@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::SinkExt;
 use futures::StreamExt;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -24,6 +25,7 @@ use super::Plugins;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::services::execution;
 use crate::ExecutionRequest;
@@ -153,34 +155,42 @@ where
                                 }
                             });
 
+                            let incremental = sub_responses
+                                .into_iter()
+                                .filter_map(move |(path, data)| {
+                                    let errors = response
+                                        .errors
+                                        .iter()
+                                        .filter(|error| match &error.path {
+                                            None => false,
+                                            Some(err_path) => err_path.starts_with(&path),
+                                        })
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+
+                                    if !data.is_null()
+                                        || !errors.is_empty()
+                                        || !response.extensions.is_empty()
+                                    {
+                                        Some(
+                                            IncrementalResponse::builder()
+                                                .and_label(response.label.clone())
+                                                .data(data)
+                                                .path(path)
+                                                .errors(errors)
+                                                .extensions(response.extensions.clone())
+                                                .build(),
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+
                             ready(Some(
                                 Response::builder()
                                     .has_next(has_next)
-                                    .incremental(
-                                        sub_responses
-                                            .into_iter()
-                                            .map(move |(path, data)| {
-                                                let errors = response
-                                                    .errors
-                                                    .iter()
-                                                    .filter(|error| match &error.path {
-                                                        None => false,
-                                                        Some(err_path) => {
-                                                            err_path.starts_with(&path)
-                                                        }
-                                                    })
-                                                    .cloned()
-                                                    .collect::<Vec<_>>();
-                                                IncrementalResponse::builder()
-                                                    .and_label(response.label.clone())
-                                                    .data(data)
-                                                    .path(path)
-                                                    .errors(errors)
-                                                    .extensions(response.extensions.clone())
-                                                    .build()
-                                            })
-                                            .collect(),
-                                    )
+                                    .incremental(incremental)
                                     .build(),
                             ))
                         }
