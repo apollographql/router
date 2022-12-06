@@ -131,7 +131,7 @@ where
 
                             response.errors = response.errors.into_iter().filter(|error| match &error.path {
                                     None => true,
-                                    Some(error_path) => query.contains_path(error_path),
+                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
                                 }).collect();
                             ready(Some(response))
                         }
@@ -163,6 +163,7 @@ where
                             });
 
                             let query = query.clone();
+                            let operation_name = operation_name.clone();
 
                             let incremental = sub_responses
                                 .into_iter()
@@ -173,7 +174,7 @@ where
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(error_path) =>query.contains_path(error_path) &&  error_path.starts_with(&path),
+                                            Some(error_path) =>query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();

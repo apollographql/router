@@ -957,8 +957,37 @@ impl Query {
         }
     }
 
-    pub(crate) fn contains_path(&self, path: &Path) -> bool {
-        todo!()
+    pub(crate) fn contains_error_path(
+        &self,
+        operation_name: Option<&str>,
+        subselection: Option<&str>,
+        response_path: Option<&Path>,
+        path: &Path,
+    ) -> bool {
+        println!(
+            "Query::contains_error_path: path = {path}, query: {}",
+            self.string,
+        );
+        let operation = if let Some(subselection) = subselection {
+            // Get subselection from hashmap
+            match self.subselections.get(&SubSelection {
+                path: response_path.cloned().unwrap_or_default(),
+                subselection: subselection.to_string(),
+            }) {
+                Some(subselection_query) => &subselection_query.operations[0],
+                None => return false,
+            }
+        } else {
+            match self.operation(operation_name) {
+                None => return false,
+                Some(op) => op,
+            }
+        };
+
+        operation
+            .selection_set
+            .iter()
+            .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
     }
 }
 
