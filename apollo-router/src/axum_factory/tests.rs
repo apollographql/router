@@ -388,10 +388,10 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
         .data(json!({"response": "yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"})) // Body must be bigger than 32 to be compressed
         .build();
     let example_response = expected_response.clone();
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
 
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -471,7 +471,7 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
         assert_eq!(req.supergraph_request.into_body().query.unwrap(), "query");
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, Context::new()).into())
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
     })
     .await;
     let (server, client) = init(router_service).await;
