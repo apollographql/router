@@ -22,11 +22,11 @@ Complex configuration changes should be discussed with the team before starting 
 1. In the github issue put the proposed config in.
 2. List any concerns.
 3. Notify the team that you are looking for request for comment.
-4. Schedule a meeting to discuss. (This is important, often design considerations will fall out of conversation)
-5. If it is not completely clear what the direction should be:
-1. Wait a few days, often people will have ideas later even if they didn't in the meeting.
-2. Ask users what they think.
-6. Make your changes.
+4. Ask users what they think.
+5. Schedule a meeting to discuss. (This is important, often design considerations will fall out of conversation)
+6. If it is not completely clear what the direction should be:
+7. Wait a few days, often people will have ideas later even if they didn't in the meeting.
+8. Make your changes.
 
 Note that these are not hard and fast rules, and if your config is really obviously correct then by all means make the change and be prepared to deal with comments at the review stage.
 
