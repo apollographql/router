@@ -232,8 +232,7 @@ pub(crate) fn validate_yaml_configuration(
     // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
     let registered_plugins = plugins();
     let apollo_plugin_names: Vec<&str> = registered_plugins
-        .keys()
-        .filter_map(|n| n.strip_prefix(APOLLO_PLUGIN_PREFIX))
+        .filter_map(|factory| factory.name.strip_prefix(APOLLO_PLUGIN_PREFIX))
         .collect();
     let unknown_fields: Vec<&String> = config
         .apollo_plugins

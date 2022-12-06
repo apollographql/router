@@ -123,7 +123,6 @@ const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
-pub(crate) const FTV1_DO_NOT_SAMPLE: &str = "apollo_telemetry::studio::ftv1_do_not_sample";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
@@ -301,31 +300,9 @@ impl Plugin for Telemetry {
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
-            .instrument(move |req: &ExecutionRequest| {
-                // disable ftv1 sampling for deferred queries
-                let do_not_sample_reason = if req.query_plan.root.contains_condition_or_defer() {
-                    req.context.insert(FTV1_DO_NOT_SAMPLE, true).unwrap();
-                    "query is deferred"
-                } else {
-                    ""
-                };
-                let query = req
-                    .supergraph_request
-                    .body()
-                    .query
-                    .clone()
-                    .unwrap_or_default();
-                let operation_name = req
-                    .supergraph_request
-                    .body()
-                    .operation_name
-                    .clone()
-                    .unwrap_or_default();
+            .instrument(move |_req: &ExecutionRequest| {
                 info_span!("execution",
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
                     "otel.kind" = %SpanKind::Internal,
-                    ftv1.do_not_sample_reason = do_not_sample_reason
                 )
             })
             .service(service)
@@ -728,7 +705,7 @@ impl Telemetry {
                 apollo_private.http.request_headers = field::Empty
             );
 
-            if is_span_sampled(&request.context) {
+            if is_span_sampled() {
                 span.record(
                     "apollo_private.graphql.variables",
                     &Self::filter_variables_values(
@@ -813,7 +790,7 @@ impl Telemetry {
                 }
             })
             .fold(BTreeMap::new(), |mut acc, (name, value)| {
-                acc.entry(name).or_insert_with(Vec::new).push(value);
+                acc.insert(name, value);
                 acc
             });
 
@@ -1206,7 +1183,7 @@ impl Telemetry {
         has_errors: bool,
         duration: Duration,
     ) {
-        if is_span_sampled(context) {
+        if is_span_sampled() {
             ::tracing::trace!("span is sampled then skip the apollo metrics");
             return;
         }
@@ -1315,12 +1292,8 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 }
 
 #[inline]
-pub(crate) fn is_span_sampled(context: &Context) -> bool {
+pub(crate) fn is_span_sampled() -> bool {
     Span::current().context().span().span_context().is_sampled()
-        && !context
-            .get(FTV1_DO_NOT_SAMPLE)
-            .unwrap_or_default()
-            .unwrap_or(false)
 }
 
 register_plugin!("apollo", "telemetry", Telemetry);
@@ -1336,7 +1309,7 @@ enum ApolloFtv1Handler {
 impl ApolloFtv1Handler {
     fn request_ftv1(&self, mut req: SubgraphRequest) -> SubgraphRequest {
         if let ApolloFtv1Handler::Enabled = self {
-            if is_span_sampled(&req.context) {
+            if is_span_sampled() {
                 req.subgraph_request.headers_mut().insert(
                     "apollo-federation-include-trace",
                     HeaderValue::from_static("ftv1"),
@@ -1461,7 +1434,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
         crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
@@ -1474,7 +1447,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
         crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &serde_json::json!({
@@ -1684,7 +1657,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(

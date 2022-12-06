@@ -80,6 +80,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | serviceAccount.name | string | `""` |  |
 | serviceMonitor.enabled | bool | `false` |  |
 | serviceentry.enabled | bool | `false` |  |
+| supergraphFile | string | `nil` |  |
 | tolerations | list | `[]` |  |
 | virtualservice.enabled | bool | `false` |  |
 
