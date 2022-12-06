@@ -579,7 +579,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_subgraph_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
