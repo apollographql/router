@@ -6,7 +6,7 @@ accepted = [
     "CC0-1.0",
     "ISC",
     "LicenseRef-ELv2",
-    "LicenseRef-ring",
+    "LicenseRef-webpki",
     "MIT",
     "MPL-2.0",
     "Unicode-DFS-2016"
@@ -16,6 +16,14 @@ accepted = [
 private = { ignore = true }
 # Ignore dependencies used in tests only, test-log for example
 ignore-dev-dependencies = true
+
+workarounds = [
+    "ring",
+    "rustls",
+]
+
+[ring]
+accepted = ["OpenSSL"]
 
 # apollographql licenses
 [xtask.clarify]
@@ -39,16 +47,18 @@ path = 'LICENSE'
 license = 'LicenseRef-ELv2'
 checksum = 'f527cb71b36ad7d828d0d1198ee0ab60db4170521a405661c0893f31b9962a6c'
 
-[ring.clarify]
-license = "LicenseRef-ring"
-[[ring.clarify.files]]
-path = "LICENSE"
-license = "LicenseRef-ring"
-checksum = '76b39f9b371688eac9d8323f96ee80b3aef5ecbc2217f25377bd4e4a615296a9'
-
 [apollo-spaceport.clarify]
 license = "LicenseRef-ELv2"
 [[apollo-spaceport.clarify.files]]
 path = 'LICENSE'
 license = 'LicenseRef-ELv2'
 checksum = '6330b076d84694d0e8905c12d7a506e4ed8e5f4a7b0ddf41a3137483ff80be50'
+
+[webpki.clarify]
+license = "ISC"
+[[webpki.clarify.files]]
+path = 'LICENSE'
+checksum = "5b698ca13897be3afdb7174256fa1574f8c6892b8bea1a66dd6469d3fe27885a"
+[[webpki.clarify.files]]
+path = "third-party/chromium/LICENSE"
+checksum = "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308"
