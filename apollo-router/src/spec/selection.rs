@@ -4,14 +4,13 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 
+use super::Fragments;
 use crate::json_ext::Object;
 use crate::json_ext::PathElement;
 use crate::spec::TYPENAME;
 use crate::FieldType;
 use crate::Schema;
 use crate::SpecError;
-
-use super::Fragments;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {
@@ -376,7 +375,7 @@ impl Selection {
                 if let Some(f) = fragments.get(name) {
                     f.selection_set
                         .iter()
-                        .any(|selection| selection.contains_error_path(&path, fragments))
+                        .any(|selection| selection.contains_error_path(path, fragments))
                 } else {
                     false
                 }

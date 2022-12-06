@@ -117,6 +117,12 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
+### Dispatch errors from the primary response to deferred responses ([Issue #1818](https://github.com/apollographql/router/issues/1818), [Issue #2185](https://github.com/apollographql/router/issues/2185))
+
+When errors are generated during the primary execution, some of them can be affected to
+deferred responses.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2192
 
 ## 🛠 Maintenance
 
