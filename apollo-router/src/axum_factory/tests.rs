@@ -307,80 +307,80 @@ async fn init_unix(
         .expect("Failed to create server factory")
 }
 
-#[tokio::test]
-async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
-    let conf = Configuration::fake_builder()
-        .sandbox(Sandbox::fake_builder().enabled(true).build())
-        .homepage(Homepage::fake_builder().enabled(false).build())
-        .supergraph(Supergraph::fake_builder().introspection(true).build())
-        .build()
-        .unwrap();
+// #[tokio::test]
+// async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
+//     let conf = Configuration::fake_builder()
+//         .sandbox(Sandbox::fake_builder().enabled(true).build())
+//         .homepage(Homepage::fake_builder().enabled(false).build())
+//         .supergraph(Supergraph::fake_builder().introspection(true).build())
+//         .build()
+//         .unwrap();
 
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
-        panic!("this should never be called");
-    })
-    .await;
+//     let router_service = router_service::from_supergraph_mock_callback(move |_| {
+//         panic!("this should never be called");
+//     })
+//     .await;
 
-    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+//     let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
 
-    // Regular studio redirect
-    let response = client
-        .get(&format!(
-            "{}/",
-            server.graphql_listen_address().as_ref().unwrap()
-        ))
-        .header(ACCEPT, "text/html")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "{}",
-        response.text().await.unwrap()
-    );
-    assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
+//     // Regular studio redirect
+//     let response = client
+//         .get(&format!(
+//             "{}/",
+//             server.graphql_listen_address().as_ref().unwrap()
+//         ))
+//         .header(ACCEPT, "text/html")
+//         .send()
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         response.status(),
+//         StatusCode::OK,
+//         "{}",
+//         response.text().await.unwrap()
+//     );
+//     assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
 
-    Ok(())
-}
+//     Ok(())
+// }
 
-#[tokio::test]
-async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), ApolloRouterError> {
-    let conf = Configuration::fake_builder()
-        .sandbox(Sandbox::fake_builder().enabled(true).build())
-        .homepage(Homepage::fake_builder().enabled(false).build())
-        .supergraph(
-            Supergraph::fake_builder()
-                .introspection(true)
-                .path("/custom")
-                .build(),
-        )
-        .build()
-        .unwrap();
+// #[tokio::test]
+// async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), ApolloRouterError> {
+//     let conf = Configuration::fake_builder()
+//         .sandbox(Sandbox::fake_builder().enabled(true).build())
+//         .homepage(Homepage::fake_builder().enabled(false).build())
+//         .supergraph(
+//             Supergraph::fake_builder()
+//                 .introspection(true)
+//                 .path("/custom")
+//                 .build(),
+//         )
+//         .build()
+//         .unwrap();
 
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+//     let (server, client) =
+//         init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
 
-    // Regular studio redirect
-    let response = client
-        .get(&format!(
-            "{}/custom",
-            server.graphql_listen_address().as_ref().unwrap()
-        ))
-        .header(ACCEPT, "text/html")
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(
-        response.status(),
-        StatusCode::OK,
-        "{}",
-        response.text().await.unwrap()
-    );
-    assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
+//     // Regular studio redirect
+//     let response = client
+//         .get(&format!(
+//             "{}/custom",
+//             server.graphql_listen_address().as_ref().unwrap()
+//         ))
+//         .header(ACCEPT, "text/html")
+//         .send()
+//         .await
+//         .unwrap();
+//     assert_eq!(
+//         response.status(),
+//         StatusCode::OK,
+//         "{}",
+//         response.text().await.unwrap()
+//     );
+//     assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
 
-    Ok(())
-}
+//     Ok(())
+// }
 
 #[tokio::test]
 async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
@@ -968,87 +968,87 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
     server.shutdown().await
 }
 
-#[test(tokio::test)]
-async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
-    let conf = Configuration::fake_builder()
-        // sandbox is disabled by default, but homepage will take over if we dont disable it
-        .homepage(
-            crate::configuration::Homepage::fake_builder()
-                .enabled(false)
-                .build(),
-        )
-        .build()
-        .unwrap();
+// #[test(tokio::test)]
+// async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
+//     let conf = Configuration::fake_builder()
+//         // sandbox is disabled by default, but homepage will take over if we dont disable it
+//         .homepage(
+//             crate::configuration::Homepage::fake_builder()
+//                 .enabled(false)
+//                 .build(),
+//         )
+//         .build()
+//         .unwrap();
 
-    let router_service = router_service::from_supergraph_mock_callback(|req| {
-        Ok(SupergraphResponse::new_from_graphql_response(
-            graphql::Response::builder()
-                .data(json!({"response": "test"}))
-                .build(),
-            req.context,
-        )
-        .into())
-    })
-    .await;
+//     let router_service = router_service::from_supergraph_mock_callback(|req| {
+//         Ok(SupergraphResponse::new_from_graphql_response(
+//             graphql::Response::builder()
+//                 .data(json!({"response": "test"}))
+//                 .build(),
+//             req.context,
+//         )
+//         .into())
+//     })
+//     .await;
 
-    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
-    let response = client
-        .get(&format!(
-            "{}/",
-            server.graphql_listen_address().as_ref().unwrap()
-        ))
-        .header(ACCEPT, "text/html")
-        .send()
-        .await
-        .unwrap();
+//     let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+//     let response = client
+//         .get(&format!(
+//             "{}/",
+//             server.graphql_listen_address().as_ref().unwrap()
+//         ))
+//         .header(ACCEPT, "text/html")
+//         .send()
+//         .await
+//         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+//     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-    server.shutdown().await
-}
+//     server.shutdown().await
+// }
 
-#[test(tokio::test)]
-async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> {
-    let conf = Configuration::fake_builder()
-        .homepage(
-            crate::configuration::Homepage::fake_builder()
-                .enabled(false)
-                .build(),
-        )
-        .build()
-        .unwrap();
+// #[test(tokio::test)]
+// async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> {
+//     let conf = Configuration::fake_builder()
+//         .homepage(
+//             crate::configuration::Homepage::fake_builder()
+//                 .enabled(false)
+//                 .build(),
+//         )
+//         .build()
+//         .unwrap();
 
-    let router_service = router_service::from_supergraph_mock_callback(|req| {
-        Ok(SupergraphResponse::new_from_graphql_response(
-            graphql::Response::builder()
-                .data(json!({"response": "test"}))
-                .build(),
-            req.context,
-        )
-        .into())
-    })
-    .await;
+//     let router_service = router_service::from_supergraph_mock_callback(|req| {
+//         Ok(SupergraphResponse::new_from_graphql_response(
+//             graphql::Response::builder()
+//                 .data(json!({"response": "test"}))
+//                 .build(),
+//             req.context,
+//         )
+//         .into())
+//     })
+//     .await;
 
-    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
-    let response = client
-        .get(&format!(
-            "{}/",
-            server.graphql_listen_address().as_ref().unwrap()
-        ))
-        .header(ACCEPT, "text/html")
-        .send()
-        .await
-        .unwrap();
+//     let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+//     let response = client
+//         .get(&format!(
+//             "{}/",
+//             server.graphql_listen_address().as_ref().unwrap()
+//         ))
+//         .header(ACCEPT, "text/html")
+//         .send()
+//         .await
+//         .unwrap();
 
-    assert_eq!(
-        response.status(),
-        StatusCode::BAD_REQUEST,
-        "{:?}",
-        response.text().await
-    );
+//     assert_eq!(
+//         response.status(),
+//         StatusCode::BAD_REQUEST,
+//         "{:?}",
+//         response.text().await
+//     );
 
-    server.shutdown().await
-}
+//     server.shutdown().await
+// }
 
 #[test(tokio::test)]
 async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
