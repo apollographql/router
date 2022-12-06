@@ -143,6 +143,8 @@ where
                         (Some(response_path), Some(response_data)) => {
                             let mut sub_responses = Vec::new();
                             response_data.select_values_and_paths(response_path, |path, value| {
+                                // if the deferred path points to an array, split it into multiple subresponses
+                                // because the root must be an object
                                 if let Value::Array(array) = value {
                                     let mut parent = path.clone();
                                     for (i, value) in array.iter().enumerate() {
@@ -158,6 +160,7 @@ where
                             let incremental = sub_responses
                                 .into_iter()
                                 .filter_map(move |(path, data)| {
+                                    // filter errors that match the path of this incremental response
                                     let errors = response
                                         .errors
                                         .iter()
@@ -168,6 +171,9 @@ where
                                         .cloned()
                                         .collect::<Vec<_>>();
 
+                                    // an empty response should not be sent
+                                    // still, if there's an error or extension to show, we should
+                                    // send it
                                     if !data.is_null()
                                         || !errors.is_empty()
                                         || !response.extensions.is_empty()
