@@ -246,6 +246,12 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🐛 Fixes
 
+### Change log level when we can't get the schema from GCP ([Issue #2004](https://github.com/apollographql/router/issues/2004))
+
+Set the log level for this specific log to `debug`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
+
 ### Fix panic when dev mode enabled with empty config file ([Issue #2182](https://github.com/apollographql/router/issues/2182))
 
 If you're running the Router with dev mode with an empty config file, it will no longer panic
