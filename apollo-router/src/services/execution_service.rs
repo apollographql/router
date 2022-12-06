@@ -131,7 +131,7 @@ where
 
                             response.errors = response.errors.into_iter().filter(|error| match &error.path {
                                     None => true,
-                                    Some(error_path) =>    query.contains_path(error_path),
+                                    Some(error_path) => query.contains_path(error_path),
                                 }).collect();
                             ready(Some(response))
                         }
@@ -177,7 +177,6 @@ where
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();
-                            
 
                                         let extensions: Object = response
                                         .extensions

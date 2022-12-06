@@ -666,7 +666,6 @@ mod tests {
             .with_json(
                 serde_json::json!{{
                     "query":"{computer(id:\"Computer1\"){id errorField}}",
-             
                 }},
                 serde_json::json!{{
                     "data": {
