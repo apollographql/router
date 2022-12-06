@@ -616,7 +616,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn errors_fromm_primary_on_deferred_responses() {
+    async fn errors_from_primary_on_deferred_responses() {
         let schema = r#"
         schema
           @link(url: "https://specs.apollo.dev/link/v1.0")
