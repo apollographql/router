@@ -37,6 +37,12 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
+### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
+
+This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
+
 ### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
 
 This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
