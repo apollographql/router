@@ -39,8 +39,9 @@ The most important goal is usability, so do break the rules if it makes sense, b
 2. [Do use `#[serde(deny_unknown_fields)]`](#do-use-serdedeny_unknown_fields).
 3. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
 4. [Use consistent terminology](#use-consistent-terminology).
-5. [Document your configuration options](#document-your-configuration-options).
-6. [Plan for the future](#plan-for-the-future).
+5. [Don't use negative options](#dont-use-negative-options).
+6. [Document your configuration options](#document-your-configuration-options).
+7. [Plan for the future](#plan-for-the-future).
 
 ### Avoid empty config
 
@@ -75,20 +76,8 @@ export:
     url: default
 ```
 
-#### BAD
-```rust
-#[serde(deny_unknown_fields)]
-struct Export {
-    url: Optional<Url> // url is optional
-}
-```
-```yaml
-export: # The user is not aware that url was defaulted.
-```
-
-#### UGLY
-In the case where you genuinely have no config then it may be acceptable to have an `enabled: bool` flag.
-The reason to avoid this is that it creates a disconnect between the user and the thing that they are trying to do
+#### GOOD
+In the case where you genuinely have no config or all sub-options have obvious defaults then use an `enabled: bool` flag.
 ```rust
 #[serde(deny_unknown_fields)]
 struct Export {
@@ -98,7 +87,18 @@ struct Export {
 ```
 ```yaml
 export: 
-  enabled: true # The user is not aware that url was defaulted.
+  enabled: true 
+```
+
+#### BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    url: Optional<Url> // url is optional
+}
+```
+```yaml
+export: # The user is not aware that url was defaulted.
 ```
 
 ### Do use `#[serde(deny_unknown_fields)]`.
@@ -204,6 +204,25 @@ headers:
 headers:
   named: foo # From where, what are we doing, when is it happening?
 ```
+
+### Don't use negative options
+
+Router config uses positive options with defaults, this way users don't have to do the negation when reading the config. 
+
+#### GOOD
+```yaml
+homepage:
+  enabled: true
+  log_headers: true
+```
+
+#### BAD
+```yaml
+my_plugin:
+  disabled: false 
+  redact_headers: false
+```
+
 
 ### Document your configuration options
 If your config is well documented in Rust then it will be well documented in the generated JSON Schema. This means that when users are modifying their config either in their IDE or in Apollo GraphOS, documentation is available.
