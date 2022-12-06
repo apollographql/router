@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/services/router_service.rs
+expression: json_response
+---
+{
+  "data": {
+    "currentUser": {
+      "activeOrganization": null
+    }
+  }
+}
