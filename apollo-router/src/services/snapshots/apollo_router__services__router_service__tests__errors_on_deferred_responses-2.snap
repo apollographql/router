@@ -1,0 +1,5 @@
+---
+source: apollo-router/src/services/router_service.rs
+expression: "std::str::from_utf8(stream.next_response().await.unwrap().unwrap().to_vec().as_slice()).unwrap()"
+---
+"content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":null},\"path\":[\"currentUser\"],\"errors\":[{\"message\":\"error user 0\",\"path\":[\"currentUser\"]}]}]}\r\n--graphql--\r\n"

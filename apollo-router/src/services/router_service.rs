@@ -624,7 +624,7 @@ mod tests {
             .unwrap();
         let mut stream = service.oneshot(request.try_into().unwrap()).await.unwrap();
 
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
@@ -635,7 +635,7 @@ mod tests {
         )
         .unwrap());
 
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
@@ -726,7 +726,7 @@ mod tests {
 
         let mut stream = service.oneshot(router_request).await.unwrap();
 
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
@@ -737,7 +737,7 @@ mod tests {
         )
         .unwrap());
 
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
@@ -826,7 +826,7 @@ mod tests {
         let router_request = supergraph_request.try_into().unwrap();
 
         let mut stream = service.oneshot(router_request).await.unwrap();
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
@@ -836,7 +836,7 @@ mod tests {
                 .as_slice()
         )
         .unwrap());
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
@@ -945,7 +945,7 @@ mod tests {
 
         let mut stream = service.oneshot(router_request).await.unwrap();
 
-        insta::assert_json_snapshot!(serde_json::from_slice::<graphql::Response>(
+        insta::assert_json_snapshot!(std::str::from_utf8(
             stream
                 .next_response()
                 .await
