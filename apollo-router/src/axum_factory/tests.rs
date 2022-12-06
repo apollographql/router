@@ -260,14 +260,23 @@ pub(super) async fn init_with_config(
 }
 
 #[cfg(unix)]
-async fn init_unix(mut mock: MockRouterService, temp_dir: &tempfile::TempDir) -> HttpServerHandle {
+async fn init_unix(
+    mut mock: impl Service<
+            router::Request,
+            Response = router::Response,
+            Error = BoxError,
+            Future = BoxFuture<'static, router::ServiceResult>,
+        > + Send
+        + 'static,
+    temp_dir: &tempfile::TempDir,
+) -> HttpServerHandle {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
 
     tokio::spawn(async move {
         loop {
             while let Some((request, responder)) = handle.next_request().await {
-                match mock.service_call(request).await {
+                match mock.ready().await.unwrap().call(request).await {
                     Ok(response) => responder.send_response(response),
                     Err(err) => responder.send_error(err),
                 }
@@ -901,7 +910,18 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
-    let (server, client) = init(router_service::empty().await).await;
+    let router_service = router_service::from_supergraph_mock_callback(|req| {
+        Ok(SupergraphResponse::new_from_graphql_response(
+            graphql::Response::builder()
+                .data(json!({"response": "hey"}))
+                .build(),
+            req.context,
+        )
+        .into())
+    })
+    .await;
+
+    let (server, client) = init(router_service).await;
     let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
     let response = client
         .post(url.as_str())
@@ -921,7 +941,18 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
-    let (server, client) = init(router_service::empty().await).await;
+    let router_service = router_service::from_supergraph_mock_callback(|req| {
+        Ok(SupergraphResponse::new_from_graphql_response(
+            graphql::Response::builder()
+                .data(json!({"response": "hey"}))
+                .build(),
+            req.context,
+        )
+        .into())
+    })
+    .await;
+
+    let (server, client) = init(router_service).await;
     let url = format!("{}", server.graphql_listen_address().as_ref().unwrap());
     let response = client
         .post(url.as_str())
@@ -932,7 +963,7 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE,);
+    assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
 
     server.shutdown().await
 }
@@ -949,8 +980,18 @@ async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
         .build()
         .unwrap();
 
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+    let router_service = router_service::from_supergraph_mock_callback(|req| {
+        Ok(SupergraphResponse::new_from_graphql_response(
+            graphql::Response::builder()
+                .data(json!({"response": "test"}))
+                .build(),
+            req.context,
+        )
+        .into())
+    })
+    .await;
+
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
     let response = client
         .get(&format!(
             "{}/",
@@ -968,7 +1009,6 @@ async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
 
 #[test(tokio::test)]
 async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> {
-    let expectations = MockRouterService::new();
     let conf = Configuration::fake_builder()
         .homepage(
             crate::configuration::Homepage::fake_builder()
@@ -978,8 +1018,18 @@ async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> 
         .build()
         .unwrap();
 
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+    let router_service = router_service::from_supergraph_mock_callback(|req| {
+        Ok(SupergraphResponse::new_from_graphql_response(
+            graphql::Response::builder()
+                .data(json!({"response": "test"}))
+                .build(),
+            req.context,
+        )
+        .into())
+    })
+    .await;
+
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
     let response = client
         .get(&format!(
             "{}/",
@@ -1774,20 +1824,12 @@ async fn listening_to_unix_socket() {
         .build();
     let example_response = expected_response.clone();
 
-    let mut expectations = MockRouterService::new();
-    expectations
-        .expect_service_call()
-        .times(2)
-        .returning(move |_| {
-            let example_response = example_response.clone();
-            Box::pin(async move {
-                Ok(
-                    SupergraphResponse::new_from_graphql_response(example_response, Context::new())
-                        .into(),
-                )
-            })
-        });
-    let server = init_unix(expectations, &temp_dir).await;
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
+        let example_response = example_response.clone();
+        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+    })
+    .await;
+    let server = init_unix(router_service, &temp_dir).await;
 
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
@@ -1918,8 +1960,6 @@ async fn test_health_check_custom_listener() {
         )
         .build()
         .unwrap();
-
-    let expectations = MockRouterService::new();
 
     // keep the server handle around otherwise it will immediately shutdown
     let (_server, client) = init_with_config(router_service::empty().await, conf, MultiMap::new())

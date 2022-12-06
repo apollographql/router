@@ -149,12 +149,15 @@ where
                     .flatten()
             };
 
-            let (response, context) = if graphql_request.is_none() {
+            if graphql_request.is_none() {
                 // BAD REQUEST
-                (
-                    (StatusCode::BAD_REQUEST, "Invalid GraphQL request").into_response(),
+                return Ok(router::Response {
+                    response: http::Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Body::from("Invalid GraphQL request"))
+                        .expect("cannot fail"),
                     context,
-                )
+                });
             } else {
                 let request = SupergraphRequest {
                     supergraph_request: http::Request::from_parts(parts, graphql_request.unwrap()),
@@ -180,95 +183,96 @@ where
                 let (mut parts, mut body) = response.into_parts();
                 process_vary_header(&mut parts.headers);
 
-                (
-                    match body.next().await {
-                        None => {
-                            tracing::error!("router service is not available to process request",);
-                            (
-                                StatusCode::SERVICE_UNAVAILABLE,
-                                "router service is not available to process request",
-                            )
-                                .into_response()
-                        }
-                        Some(response) => {
-                            if !response.has_next.unwrap_or(false)
-                                && (accepts_json || accepts_wildcard)
-                            {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static("application/json"),
-                                );
-                                tracing::trace_span!("serialize_response").in_scope(|| {
-                                    http_ext::Response::from(http::Response::from_parts(
-                                        parts, response,
-                                    ))
-                                    .into_response()
-                                })
-                            } else if accepts_multipart {
-                                parts.headers.insert(
-                                    CONTENT_TYPE,
-                                    HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
-                                );
+                match body.next().await {
+                    None => {
+                        tracing::error!("router service is not available to process request",);
+                        return Ok(router::Response {
+                            response: http::Response::builder()
+                                .status(StatusCode::SERVICE_UNAVAILABLE)
+                                .body(Body::from(
+                                    "router service is not available to process request",
+                                ))
+                                .expect("cannot fail"),
+                            context,
+                        });
+                    }
+                    Some(response) => {
+                        if !response.has_next.unwrap_or(false) && (accepts_json || accepts_wildcard)
+                        {
+                            parts
+                                .headers
+                                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                            return tracing::trace_span!("serialize_response").in_scope(|| {
+                                // TODO: writer?
+                                let body = serde_json::to_string(&response).unwrap();
+                                return Ok(router::Response {
+                                    response: http::Response::from_parts(parts, Body::from(body)),
+                                    context,
+                                });
+                            });
+                        } else if accepts_multipart {
+                            parts.headers.insert(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE),
+                            );
 
-                                // each chunk contains a response and the next delimiter, to let client parsers
-                                // know that they can process the response right away
-                                let mut first_buf = Vec::from(
-                                    &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
-                                );
-                                serde_json::to_writer(&mut first_buf, &response).unwrap();
-                                if response.has_next.unwrap_or(false) {
-                                    first_buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                } else {
-                                    first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                }
-
-                                let body = once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(
-                                    |res| {
-                                        let mut buf = Vec::from(
-                                            &b"content-type: application/json\r\n\r\n"[..],
-                                        );
-                                        serde_json::to_writer(&mut buf, &res).unwrap();
-
-                                        // the last chunk has a different end delimiter
-                                        if res.has_next.unwrap_or(false) {
-                                            buf.extend_from_slice(b"\r\n--graphql\r\n");
-                                        } else {
-                                            buf.extend_from_slice(b"\r\n--graphql--\r\n");
-                                        }
-
-                                        Ok::<_, BoxError>(buf.into())
-                                    },
-                                ));
-
-                                (parts, StreamBody::new(body)).into_response()
+                            // each chunk contains a response and the next delimiter, to let client parsers
+                            // know that they can process the response right away
+                            let mut first_buf = Vec::from(
+                                &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
+                            );
+                            serde_json::to_writer(&mut first_buf, &response).unwrap();
+                            if response.has_next.unwrap_or(false) {
+                                first_buf.extend_from_slice(b"\r\n--graphql\r\n");
                             } else {
-                                // this should be unreachable due to a previous check, but just to be sure...
-                                unreachable!()
+                                first_buf.extend_from_slice(b"\r\n--graphql--\r\n");
                             }
-                        }
-                    },
-                    context,
-                )
-            };
-            let response = response
-                .map(|body| {
-                    // Axum makes this `body` have type:
-                    // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
-                    let mut body = Box::pin(body);
-                    // We make a stream based on its `poll_data` method
-                    // in order to create a `hyper::Body`.
-                    Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
-                    // … but we ignore the `poll_trailers` method:
-                    // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
-                    // Apparently HTTP/2 trailers are like headers, except after the response body.
-                    // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
-                    // so ignoring `poll_trailers` is fine.
-                    // If we want to use trailers, we may need remove this convertion to `hyper::Body`
-                    // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                })
-                .into();
 
-            Ok(RouterResponse { response, context })
+                            let body =
+                                once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(|res| {
+                                    let mut buf =
+                                        Vec::from(&b"content-type: application/json\r\n\r\n"[..]);
+                                    serde_json::to_writer(&mut buf, &res).unwrap();
+
+                                    // the last chunk has a different end delimiter
+                                    if res.has_next.unwrap_or(false) {
+                                        buf.extend_from_slice(b"\r\n--graphql\r\n");
+                                    } else {
+                                        buf.extend_from_slice(b"\r\n--graphql--\r\n");
+                                    }
+
+                                    Ok::<_, BoxError>(buf.into())
+                                }));
+
+                            let response = (parts, StreamBody::new(body))
+                                .into_response()
+                                .map(|body| {
+                                    // Axum makes this `body` have type:
+                                    // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
+                                    let mut body = Box::pin(body);
+                                    // We make a stream based on its `poll_data` method
+                                    // in order to create a `hyper::Body`.
+                                    Body::wrap_stream(stream::poll_fn(move |ctx| {
+                                        body.as_mut().poll_data(ctx)
+                                    }))
+                                    // … but we ignore the `poll_trailers` method:
+                                    // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
+                                    // Apparently HTTP/2 trailers are like headers, except after the response body.
+                                    // I (Simon) believe nothing in the Apollo Router uses trailers as of this writing,
+                                    // so ignoring `poll_trailers` is fine.
+                                    // If we want to use trailers, we may need remove this convertion to `hyper::Body`
+                                    // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
+                                })
+                                .into();
+
+                            return Ok(RouterResponse { response, context });
+                        } else {
+                            // this should be unreachable due to a previous check, but just to be sure...
+                            unreachable!()
+                        }
+                    }
+                }
+            };
         };
         Box::pin(fut)
     }
