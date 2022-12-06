@@ -729,9 +729,11 @@ impl HealthCheck {
             enabled: enabled.unwrap_or_else(default_health_check),
         }
     }
+}
 
-    // Used in tests
-    #[allow(dead_code)]
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl HealthCheck {
     #[builder]
     pub(crate) fn fake_new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
         Self {

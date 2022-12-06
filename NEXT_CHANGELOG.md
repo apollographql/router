@@ -42,3 +42,9 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
+
+### Update to Rust 1.65 ([Issue #2220](https://github.com/apollographql/router/issues/2220))
+
+Rust MSRV incremented to 1.65.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221

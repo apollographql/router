@@ -94,7 +94,7 @@ where
                         }
 
                         if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                            match (&plan.usage_reporting).serialize(Serializer) {
+                            match (plan.usage_reporting).serialize(Serializer) {
                                 Ok(v) => {
                                     context.insert_json_value(USAGE_REPORTING, v);
                                 }
@@ -127,7 +127,7 @@ where
                 match res {
                     Ok(content) => {
                         if let QueryPlannerContent::Plan { plan, .. } = &content {
-                            match (&plan.usage_reporting).serialize(Serializer) {
+                            match (plan.usage_reporting).serialize(Serializer) {
                                 Ok(v) => {
                                     context.insert_json_value(USAGE_REPORTING, v);
                                 }
