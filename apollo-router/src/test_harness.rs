@@ -5,6 +5,7 @@ use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
 
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
@@ -210,8 +211,14 @@ impl<'a> TestHarness<'a> {
 
     /// Builds the GraphQL service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, router_creator) = self.build_common().await?;
-        let apq = APQLayer::new().await;
+        let (configuration, router_creator) = self.build_common().await?;
+        let apq = APQLayer::with_cache(
+            DeduplicatingCache::from_configuration(
+                &configuration.supergraph.apq.experimental_cache,
+                "APQ",
+            )
+            .await,
+        );
 
         Ok(tower::service_fn(move |request| {
             // APQ must be added here because it is implemented in the HTTP server
@@ -230,7 +237,13 @@ impl<'a> TestHarness<'a> {
 
         let (config, router_creator) = self.build_common().await?;
         let web_endpoints = router_creator.web_endpoints();
-        let apq = APQLayer::new().await;
+        let apq = APQLayer::with_cache(
+            DeduplicatingCache::from_configuration(
+                &config.supergraph.apq.experimental_cache,
+                "APQ",
+            )
+            .await,
+        );
 
         let routers = make_axum_router(router_creator, &config, web_endpoints, apq)?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
