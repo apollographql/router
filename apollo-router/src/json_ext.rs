@@ -407,7 +407,7 @@ where
             } else if let Value::Array(array) = data {
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
-                    iterate_path(parent, &path, value, f);
+                    iterate_path(parent, path, value, f);
                     parent.pop();
                 }
             }
