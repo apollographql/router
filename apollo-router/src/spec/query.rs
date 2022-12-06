@@ -103,7 +103,7 @@ impl Query {
         is_deferred: bool,
         variables: Object,
         schema: &Schema,
-    ) {
+    ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
             let operation = self.operation(operation_name);
@@ -121,6 +121,7 @@ impl Query {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
+                                nullified: Vec::new(),
                             };
                             response.data = Some(
                                 match self.apply_root_selection_set(
@@ -141,14 +142,14 @@ impl Query {
                                 }
                             }
 
-                            return;
+                            return parameters.nullified;
                         }
                         None => failfast_debug!("can't find subselection for {:?}", subselection),
                     }
                 // the primary query was empty, we return an empty object
                 } else {
                     response.data = Some(Value::Object(Object::default()));
-                    return;
+                    return vec![];
                 }
             } else if let Some(operation) = operation {
                 let mut output = Object::default();
@@ -171,6 +172,7 @@ impl Query {
                     variables: &all_variables,
                     schema,
                     errors: Vec::new(),
+                    nullified: Vec::new(),
                 };
 
                 response.data = Some(
@@ -191,7 +193,7 @@ impl Query {
                     }
                 }
 
-                return;
+                return parameters.nullified;
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
@@ -200,6 +202,8 @@ impl Query {
         }
 
         response.data = Some(Value::default());
+
+        vec![]
     }
 
     pub(crate) fn parse(
@@ -349,6 +353,7 @@ impl Query {
                             res
                         }) {
                         Err(InvalidValue) => {
+                            parameters.nullified.push(path.clone());
                             *output = Value::Null;
                             Ok(())
                         }
@@ -388,6 +393,7 @@ impl Query {
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
                             if !parameters.schema.object_types.contains_key(input_type) {
+                                parameters.nullified.push(path.clone());
                                 *output = Value::Null;
                                 return Ok(());
                             }
@@ -409,12 +415,14 @@ impl Query {
                             )
                             .is_err()
                         {
+                            parameters.nullified.push(path.clone());
                             *output = Value::Null;
                         }
 
                         Ok(())
                     }
                     _ => {
+                        parameters.nullified.push(path.clone());
                         *output = Value::Null;
                         Ok(())
                     }
@@ -965,6 +973,7 @@ impl Query {
 struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
+    nullified: Vec<Path>,
     schema: &'a Schema,
 }
 

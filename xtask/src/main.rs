@@ -37,6 +37,9 @@ pub enum Command {
 
     /// Package build.
     Package(commands::Package),
+
+    /// Prepare a release
+    Release(commands::release::Command),
 }
 
 impl Xtask {
@@ -48,6 +51,7 @@ impl Xtask {
             Command::Lint(command) => command.run(),
             Command::Test(command) => command.run(),
             Command::Package(command) => command.run(),
+            Command::Release(command) => command.run(),
         }?;
         eprintln!("{}", Green.bold().paint("Success!"));
         Ok(())
