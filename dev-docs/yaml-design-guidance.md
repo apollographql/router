@@ -28,7 +28,7 @@ Complex configuration changes should be discussed with the team before starting 
 2. Ask users what they think.
 6. Make your changes.
 
-Note that these are not hard and fast rules, and if your config is really obviously correct then bu all means make the change and be prepared to deal with comments at the review stage.
+Note that these are not hard and fast rules, and if your config is really obviously correct then by all means make the change and be prepared to deal with comments at the review stage.
 
 ## Design patterns
 
