@@ -605,10 +605,66 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true
+        "preview_defer_support": true,
+        "apq": {
+          "experimental_cache": {
+            "in_memory": {
+              "limit": 512
+            }
+          }
+        },
+        "query_planning": {
+          "experimental_cache": {
+            "in_memory": {
+              "limit": 512
+            }
+          }
+        }
       },
       "type": "object",
       "properties": {
+        "apq": {
+          "description": "Configures automatic persisted queries",
+          "default": {
+            "experimental_cache": {
+              "in_memory": {
+                "limit": 512
+              }
+            }
+          },
+          "type": "object",
+          "required": [
+            "experimental_cache"
+          ],
+          "properties": {
+            "experimental_cache": {
+              "type": "object",
+              "required": [
+                "in_memory"
+              ],
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "introspection": {
           "description": "Enable introspection Default: false",
           "default": false,
@@ -636,6 +692,48 @@ expression: "&schema"
         "preview_defer_support": {
           "default": true,
           "type": "boolean"
+        },
+        "query_planning": {
+          "description": "Query planning options",
+          "default": {
+            "experimental_cache": {
+              "in_memory": {
+                "limit": 512
+              }
+            }
+          },
+          "type": "object",
+          "required": [
+            "experimental_cache"
+          ],
+          "properties": {
+            "experimental_cache": {
+              "type": "object",
+              "required": [
+                "in_memory"
+              ],
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 0.0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false
@@ -782,6 +880,106 @@ expression: "&schema"
                   "additionalProperties": false
                 }
               ]
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "experimental_logging": {
+          "type": "object",
+          "properties": {
+            "display_filename": {
+              "default": true,
+              "type": "boolean"
+            },
+            "display_line_number": {
+              "default": true,
+              "type": "boolean"
+            },
+            "format": {
+              "description": "Log format",
+              "oneOf": [
+                {
+                  "description": "Pretty text format (default if you're running from a tty)",
+                  "type": "string",
+                  "enum": [
+                    "pretty"
+                  ]
+                },
+                {
+                  "description": "Json log format",
+                  "type": "string",
+                  "enum": [
+                    "json"
+                  ]
+                }
+              ]
+            },
+            "when_header": {
+              "description": "Log configuration to log request and response for subgraphs and supergraph",
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "description": "Match header value given a regex to display logs",
+                    "type": "object",
+                    "required": [
+                      "match",
+                      "name"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "match": {
+                        "description": "Regex to match the header value",
+                        "type": "string"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "description": "Match header value given a value to display logs",
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "value"
+                    ],
+                    "properties": {
+                      "body": {
+                        "description": "Display request/response body (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "headers": {
+                        "description": "Display request/response headers (default: false)",
+                        "default": false,
+                        "type": "boolean"
+                      },
+                      "name": {
+                        "description": "Header name",
+                        "type": "string"
+                      },
+                      "value": {
+                        "description": "Header value",
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                ]
+              }
             }
           },
           "additionalProperties": false,
@@ -1702,6 +1900,25 @@ expression: "&schema"
               "additionalProperties": false,
               "nullable": true
             },
+            "experimental_response_trace_id": {
+              "description": "A way to expose trace id in response headers",
+              "type": "object",
+              "required": [
+                "enabled"
+              ],
+              "properties": {
+                "enabled": {
+                  "description": "Expose the trace_id in response headers",
+                  "type": "boolean"
+                },
+                "header_name": {
+                  "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
             "jaeger": {
               "type": "object",
               "oneOf": [
@@ -1849,6 +2066,21 @@ expression: "&schema"
                 },
                 "jaeger": {
                   "type": "boolean",
+                  "nullable": true
+                },
+                "request": {
+                  "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
+                  "type": "object",
+                  "required": [
+                    "header_name"
+                  ],
+                  "properties": {
+                    "header_name": {
+                      "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false,
                   "nullable": true
                 },
                 "trace_context": {
@@ -2080,6 +2312,36 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_retry": {
+              "type": "object",
+              "properties": {
+                "min_per_sec": {
+                  "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0.0,
+                  "nullable": true
+                },
+                "retry_mutations": {
+                  "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
+                  "type": "boolean",
+                  "nullable": true
+                },
+                "retry_percent": {
+                  "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
+                  "type": "number",
+                  "format": "float",
+                  "nullable": true
+                },
+                "ttl": {
+                  "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
+                  "default": null,
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "global_rate_limit": {
               "description": "Enable global rate limiting",
               "type": "object",
@@ -2187,6 +2449,36 @@ expression: "&schema"
               "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
+                "nullable": true
+              },
+              "experimental_retry": {
+                "type": "object",
+                "properties": {
+                  "min_per_sec": {
+                    "description": "minimum rate of retries allowed to accomodate clients that have just started issuing requests, or clients that do not issue many requests per window. The default value is 10",
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0.0,
+                    "nullable": true
+                  },
+                  "retry_mutations": {
+                    "description": "allows request retries on mutations. This should only be activated if mutations are idempotent. Disabled by default",
+                    "type": "boolean",
+                    "nullable": true
+                  },
+                  "retry_percent": {
+                    "description": "percentage of calls to deposit that can be retried. This is in addition to any retries allowed for via min_per_sec. Must be between 0 and 1000, default value is 0.2",
+                    "type": "number",
+                    "format": "float",
+                    "nullable": true
+                  },
+                  "ttl": {
+                    "description": "how long a single deposit should be considered. Must be between 1 and 60 seconds, default value is 10 seconds",
+                    "default": null,
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "global_rate_limit": {

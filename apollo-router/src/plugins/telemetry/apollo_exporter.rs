@@ -1,4 +1,8 @@
 //! Configuration for apollo telemetry exporter.
+#[cfg(test)]
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 // This entire file is license key functionality
 use std::time::Duration;
 
@@ -31,19 +35,25 @@ pub(crate) const POOL_TIMEOUT: Duration = Duration::from_secs(5);
 pub(crate) enum Sender {
     Noop,
     Spaceport(mpsc::Sender<SingleReport>),
+    #[cfg(test)]
+    InMemory(Arc<Mutex<Vec<SingleReport>>>),
 }
 
 impl Sender {
-    pub(crate) fn send(&self, metrics: SingleReport) {
+    pub(crate) fn send(&self, report: SingleReport) {
         match &self {
             Sender::Noop => {}
             Sender::Spaceport(channel) => {
-                if let Err(err) = channel.to_owned().try_send(metrics) {
+                if let Err(err) = channel.to_owned().try_send(report) {
                     tracing::warn!(
                         "could not send metrics to spaceport, metric will be dropped: {}",
                         err
                     );
                 }
+            }
+            #[cfg(test)]
+            Sender::InMemory(storage) => {
+                storage.lock().expect("mutex poisoned").push(report);
             }
         }
     }

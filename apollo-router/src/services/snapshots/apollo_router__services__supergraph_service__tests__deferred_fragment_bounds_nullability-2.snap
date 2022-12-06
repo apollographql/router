@@ -1,0 +1,129 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "hasNext": false,
+  "incremental": [
+    {
+      "data": null,
+      "path": [
+        "currentUser",
+        "activeOrganization",
+        "suborga",
+        0
+      ],
+      "extensions": {
+        "valueCompletion": [
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              0
+            ]
+          },
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              1
+            ]
+          },
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "data": null,
+      "path": [
+        "currentUser",
+        "activeOrganization",
+        "suborga",
+        1
+      ],
+      "extensions": {
+        "valueCompletion": [
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              0
+            ]
+          },
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              1
+            ]
+          },
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              2
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "data": null,
+      "path": [
+        "currentUser",
+        "activeOrganization",
+        "suborga",
+        2
+      ],
+      "extensions": {
+        "valueCompletion": [
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              0
+            ]
+          },
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              1
+            ]
+          },
+          {
+            "message": "Cannot return null for non-nullable field Organization.nonNullId",
+            "path": [
+              "currentUser",
+              "activeOrganization",
+              "suborga",
+              2
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

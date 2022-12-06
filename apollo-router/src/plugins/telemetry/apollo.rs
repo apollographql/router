@@ -12,6 +12,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
+use super::config::ExposeTraceId;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
@@ -79,6 +80,11 @@ pub(crate) struct Config {
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
     pub(crate) schema_id: String,
+
+    // Skipped because only useful at runtime, it's a copy of the configuration in tracing config
+    #[schemars(skip)]
+    #[serde(skip)]
+    pub(crate) expose_trace_id: ExposeTraceId,
 }
 
 fn apollo_key() -> Option<String> {
@@ -122,6 +128,7 @@ impl Default for Config {
             field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
+            expose_trace_id: ExposeTraceId::default(),
         }
     }
 }
