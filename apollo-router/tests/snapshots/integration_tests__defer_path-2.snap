@@ -1,19 +1,9 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-assertion_line: 679
-expression: second
+expression: "std::str::from_utf8(second.to_vec().as_slice()).unwrap()"
 ---
-{
-  "hasNext": false,
-  "incremental": [
-    {
-      "label": "name",
-      "data": {
-        "name": "Ada Lovelace"
-      },
-      "path": [
-        "me"
-      ]
-    }
-  ]
-}
+content-type: application/json
+
+{"hasNext":false,"incremental":[{"label":"name","data":{"name":"Ada Lovelace"},"path":["me"]}]}
+--graphql--
+
