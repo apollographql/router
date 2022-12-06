@@ -180,7 +180,6 @@ dependencies = [
  "bytes",
  "clap 3.2.23",
  "console-subscriber",
- "ctor",
  "dashmap 5.4.0",
  "deadpool",
  "derivative",
@@ -207,6 +206,7 @@ dependencies = [
  "jsonschema",
  "lazy_static",
  "libc",
+ "linkme",
  "lru",
  "maplit",
  "mediatype",
@@ -2600,6 +2600,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0717cef1bc8b636c6e1c1bbdefc09e6322da8a9321966e8928ef80d20f7f770f"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "linkme"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c25ef733283514e2c267f019701d6c81537e5d1807d6b1d7ef17f17585db964b"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2a82efd9655156d970e99312fd3a613b4be4f169b4c35f4463b7499a40d3ed24"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

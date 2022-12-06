@@ -34,8 +34,21 @@ in a previous payload.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
 
+## 🐛 Fixes
+
+### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
+
+When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
 
 ## 🛠 Maintenance
+
+### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
+
+This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
 
 ### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
 
