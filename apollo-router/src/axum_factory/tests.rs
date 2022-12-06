@@ -1330,7 +1330,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
 
 #[test(tokio::test)]
 async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
-    let mut router_service = router_service::from_supergraph_mock_callback(|req| {
+    let router_service = router_service::from_supergraph_mock_callback(|req| {
         let body = stream::iter(vec![
             graphql::Response::builder()
                 .data(json!({
@@ -1352,7 +1352,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         .boxed();
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
-            Context::new(),
+            req.context,
         )
         .into())
     })
@@ -1403,7 +1403,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 
 #[test(tokio::test)]
 async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterError> {
-    let router_service = router_service::from_supergraph_mock_callback(move |_| {
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let body = stream::iter(vec![graphql::Response::builder()
             .data(json!({
                 "test": "hello",
@@ -1414,7 +1414,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
 
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
-            Context::new(),
+            req.context,
         )
         .into())
     })
