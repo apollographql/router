@@ -226,7 +226,6 @@ impl PlanNode {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, kind, primary_subselection);
-                    println!("[{}] PARSING reconstructed query {}", line!(), query);
 
                     // ----------------------- Parse ---------------------------------
                     let sub_selection = Query::parse(&query, schema, &Default::default())?;
@@ -242,15 +241,8 @@ impl PlanNode {
                 }
 
                 deferred.iter().try_fold(subselections, |subs, current| {
-                    //println!("deferred node: {:?}", current);
-
                     if let Some(subselection) = &current.subselection {
-                        println!(
-                            "will reconstruct deferred {} at path {}: {}",
-                            kind, current.query_path, subselection
-                        );
                         let query = reconstruct_full_query(&current.query_path, kind, subselection);
-                        println!("[{}] PARSING reconstructed query {}", line!(), query);
 
                         // ----------------------- Parse ---------------------------------
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;

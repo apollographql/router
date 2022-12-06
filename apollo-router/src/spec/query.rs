@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::iter::empty;
 
 use apollo_parser::ast;
 use apollo_parser::ast::AstNode;
@@ -236,17 +235,6 @@ impl Query {
         let document = tree.document();
         let fragments = Fragments::from_ast(&document, schema)?;
 
-        let ast_fragments = document
-            .definitions()
-            .filter_map(|def| match def {
-                ast::Definition::FragmentDefinition(f) => f
-                    .fragment_name()
-                    .and_then(|f| f.name())
-                    .map(|n| (n.text().to_string(), f)),
-                _ => None,
-            })
-            .collect::<HashMap<_, _>>();
-
         let operations: Vec<Operation> = document
             .definitions()
             .filter_map(|definition| {
@@ -256,7 +244,7 @@ impl Query {
                     None
                 }
             })
-            .map(|operation| Operation::from_ast(operation, &ast_fragments, schema))
+            .map(|operation| Operation::from_ast(operation, schema))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
@@ -997,12 +985,7 @@ impl Operation {
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
     // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(
-        operation: ast::OperationDefinition,
-        fragments: &HashMap<String, ast::FragmentDefinition>,
-        schema: &Schema,
-    ) -> Result<Self, SpecError> {
-        extract_subqueries(&operation, fragments, schema);
+    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
         let name = operation.name().map(|x| x.text().to_string());
 
         let kind = operation
@@ -1105,295 +1088,6 @@ impl Operation {
 
     pub(crate) fn kind(&self) -> &OperationKind {
         &self.kind
-    }
-}
-
-fn extract_subqueries(
-    operation: &ast::OperationDefinition,
-    fragments: &HashMap<String, ast::FragmentDefinition>,
-    schema: &Schema,
-) {
-    let mut v = Vec::new();
-
-    //let op: apollo_encoder::OperationDefinition = operation.clone().try_into().unwrap();
-    extract_operation(operation, fragments, schema, &mut v);
-    println!("subqueries: {:#?}", v);
-}
-
-fn extract_operation(
-    operation: &ast::OperationDefinition,
-    fragments: &HashMap<String, ast::FragmentDefinition>,
-    schema: &Schema,
-    _v: &mut [String],
-) {
-    let name: Option<String> = operation.name().map(|n| n.text().to_string());
-    let op_type: apollo_encoder::OperationType = operation
-        .operation_type()
-        .and_then(|op| op.try_into().ok())
-        .unwrap_or(apollo_encoder::OperationType::Query);
-
-    if let Some(selection_set) = operation.selection_set() {
-        for selection_set in extract_selection_set(&selection_set, fragments, schema) {
-            let mut document = apollo_encoder::Document::new();
-
-            let mut operation = apollo_encoder::OperationDefinition::new(
-                //apollo_encoder::OperationType is not Clone yet
-                match &op_type {
-                    apollo_encoder::OperationType::Query => apollo_encoder::OperationType::Query,
-                    apollo_encoder::OperationType::Mutation => {
-                        apollo_encoder::OperationType::Mutation
-                    }
-                    apollo_encoder::OperationType::Subscription => {
-                        apollo_encoder::OperationType::Subscription
-                    }
-                },
-                selection_set,
-            );
-            operation.name(name.clone());
-            //FIXME: variables, directives
-
-            document.operation(operation);
-
-            println!("EXTRACTED: {}", document);
-        }
-    }
-}
-
-fn extract_selection_set(
-    selection_set: &ast::SelectionSet,
-    fragments: &HashMap<String, ast::FragmentDefinition>,
-    schema: &Schema,
-) -> impl Iterator<Item = apollo_encoder::SelectionSet> {
-    let mut primary_selection_set = Vec::new();
-    let mut deferred_selection_set = Vec::new();
-
-    for selection in selection_set.selections() {
-        match selection {
-            ast::Selection::Field(f) => primary_selection_set.push(extract_selection(
-                &ast::Selection::Field(f),
-                fragments,
-                schema,
-            )),
-            ast::Selection::FragmentSpread(f) => {
-                if f.directives()
-                    .map(|d| {
-                        d.directives().any(|dir| {
-                            dir.name()
-                                .map(|n| n.text().as_str() == "defer")
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-                {
-                    deferred_selection_set.push(extract_selection(
-                        &ast::Selection::FragmentSpread(f),
-                        fragments,
-                        schema,
-                    ));
-                } else {
-                    primary_selection_set.push(extract_selection(
-                        &ast::Selection::FragmentSpread(f),
-                        fragments,
-                        schema,
-                    ));
-                }
-            }
-            ast::Selection::InlineFragment(f) => {
-                if f.directives()
-                    .map(|d| {
-                        d.directives().any(|dir| {
-                            dir.name()
-                                .map(|n| n.text().as_str() == "defer")
-                                .unwrap_or(false)
-                        })
-                    })
-                    .unwrap_or(false)
-                {
-                    deferred_selection_set.push(extract_selection(
-                        &ast::Selection::InlineFragment(f),
-                        fragments,
-                        schema,
-                    ));
-                } else {
-                    primary_selection_set.push(extract_selection(
-                        &ast::Selection::InlineFragment(f),
-                        fragments,
-                        schema,
-                    ));
-                }
-            }
-        }
-    }
-
-    let mut primary = apollo_encoder::SelectionSet::new();
-
-    for selection_it in primary_selection_set.iter_mut() {
-        if let Some(selection) = selection_it.next() {
-            primary.selection(selection);
-        }
-    }
-
-    std::iter::once(primary).chain(
-        primary_selection_set
-            .into_iter()
-            .chain(deferred_selection_set.into_iter())
-            .flatten()
-            .map(|s| {
-                let mut set = apollo_encoder::SelectionSet::new();
-                set.selection(s);
-                set
-            }),
-    )
-}
-
-fn extract_selection(
-    selection: &ast::Selection,
-    fragments: &HashMap<String, ast::FragmentDefinition>,
-    schema: &Schema,
-) -> impl Iterator<Item = apollo_encoder::Selection> {
-    match selection {
-        ast::Selection::Field(field) => {
-            let name = match field.name().map(|n| n.text().to_string()) {
-                Some(name) => name,
-                None => {
-                    return Box::new(empty()) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-                }
-            };
-
-            let mut f = apollo_encoder::Field::new(name);
-            for argument in field
-                .arguments()
-                .into_iter()
-                .flat_map(|arg| arg.arguments())
-                .filter_map(|argument| argument.try_into().ok())
-            {
-                f.argument(argument);
-            }
-            for directive in field
-                .directives()
-                .into_iter()
-                .flat_map(|dir| dir.directives())
-                .filter(|dir| {
-                    dir.name()
-                        .map(|n| n.text().as_str() != "defer")
-                        .unwrap_or(true)
-                })
-                .filter_map(|directive| directive.try_into().ok())
-            {
-                f.directive(directive);
-            }
-
-            match field.selection_set().as_ref() {
-                None => Box::new(std::iter::once(apollo_encoder::Selection::Field(f)))
-                    as Box<dyn Iterator<Item = apollo_encoder::Selection>>,
-                Some(selection_set) => {
-                    Box::new(extract_selection_set(selection_set, fragments, schema).map(
-                        move |selection_set| {
-                            let mut new_field = f.clone();
-                            new_field.selection_set(Some(selection_set));
-                            apollo_encoder::Selection::Field(new_field)
-                        },
-                    )) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-                }
-            }
-        }
-        ast::Selection::FragmentSpread(fragment) => {
-            let name = match fragment
-                .fragment_name()
-                .and_then(|f| f.name())
-                .map(|n| n.text().to_string())
-            {
-                Some(name) => name,
-                None => {
-                    return Box::new(empty()) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-                }
-            };
-
-            let named = fragments.get(&name);
-
-            let type_condition = named
-                .as_ref()
-                .and_then(|n| n.type_condition())
-                .and_then(|ty| ty.try_into().ok());
-
-            let mut directives: Vec<apollo_encoder::Directive> = fragment
-                .directives()
-                .into_iter()
-                .flat_map(|dir| dir.directives())
-                .filter(|dir| {
-                    dir.name()
-                        .map(|n| n.text().as_str() != "defer")
-                        .unwrap_or(true)
-                })
-                .filter_map(|directive| directive.try_into().ok())
-                .collect::<Vec<_>>();
-
-            directives.extend(
-                named
-                    .into_iter()
-                    .flat_map(|n| n.directives().into_iter())
-                    .flat_map(|dir| dir.directives())
-                    .filter(|dir| {
-                        dir.name()
-                            .map(|n| n.text().as_str() != "defer")
-                            .unwrap_or(true)
-                    })
-                    .filter_map(|directive| directive.try_into().ok()),
-            );
-
-            let selection_set = match named.as_ref().and_then(|n| n.selection_set()) {
-                Some(d) => d,
-                None => {
-                    return Box::new(empty()) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-                }
-            };
-            Box::new(
-                extract_selection_set(&selection_set, fragments, schema).map(
-                    move |selection_set| {
-                        let mut f = apollo_encoder::InlineFragment::new(selection_set);
-                        f.type_condition(type_condition.clone());
-                        for directive in directives.iter() {
-                            f.directive(directive.clone());
-                        }
-                        apollo_encoder::Selection::InlineFragment(f)
-                    },
-                ),
-            ) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-        }
-        ast::Selection::InlineFragment(fragment) => {
-            let type_condition = fragment.type_condition().and_then(|ty| ty.try_into().ok());
-
-            let directives = fragment
-                .directives()
-                .into_iter()
-                .flat_map(|dir| dir.directives())
-                .filter(|dir| {
-                    dir.name()
-                        .map(|n| n.text().as_str() != "defer")
-                        .unwrap_or(true)
-                })
-                .filter_map(|directive| directive.try_into().ok())
-                .collect::<Vec<apollo_encoder::Directive>>();
-
-            let selection_set = match fragment.selection_set() {
-                Some(d) => d,
-                None => {
-                    return Box::new(empty()) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-                }
-            };
-            Box::new(
-                extract_selection_set(&selection_set, fragments, schema).map(
-                    move |selection_set| {
-                        let mut f = apollo_encoder::InlineFragment::new(selection_set);
-                        f.type_condition(type_condition.clone());
-                        for directive in directives.iter() {
-                            f.directive(directive.clone());
-                        }
-                        apollo_encoder::Selection::InlineFragment(f)
-                    },
-                ),
-            ) as Box<dyn Iterator<Item = apollo_encoder::Selection>>
-        }
     }
 }
 
