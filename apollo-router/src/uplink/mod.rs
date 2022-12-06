@@ -120,7 +120,6 @@ pub(crate) fn stream_supergraph(
                     }
                 },
                 Err(err) => {
-                    tracing::error!("error fetching supergraph from Uplink: {:?}", err);
                     if let Some(urls) = &urls {
                         current_url_idx = (current_url_idx + 1) % urls.len();
                     }
@@ -154,7 +153,7 @@ pub(crate) async fn fetch_supergraph(
         None => match http_request(GCP_URL, &request_body).await {
             Ok(response) => response,
             Err(e) => {
-                tracing::error!("could not get schema from GCP, trying AWS: {:?}", e);
+                tracing::debug!("could not get schema from GCP, trying AWS: {:?}", e);
                 http_request(AWS_URL, &request_body).await?
             }
         },
