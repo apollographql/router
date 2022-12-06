@@ -80,7 +80,7 @@ as explained in the Getting started section above.
 
 ### Yaml configuration design
 
-If you are adding a new feature or modifying an existing feature the consult the [yaml design guidance](dev-docs/yaml-design-guidance.md) page.
+If you are adding a new feature or modifying an existing feature then consult the [yaml design guidance](dev-docs/yaml-design-guidance.md) page.
 
 
 ### Investigating memory usage
