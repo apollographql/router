@@ -18,6 +18,7 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
+use http::Uri;
 use insta::internals::Content;
 use insta::internals::Redaction;
 use maplit::hashmap;
@@ -166,12 +167,30 @@ async fn basic_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
-    let request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
-        .build()
-        .expect("expecting valid request");
+    // get request
+    let get_path = format!(
+        "/?{}",
+        serde_urlencoded::to_string(&[
+            (
+                "query",
+                r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+            ),
+            (
+                "variables",
+                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
+            )
+        ])
+        .unwrap(),
+    );
+
+    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
+
+    let get_request = http::Request::builder()
+        .method(Method::GET)
+        .header(CONTENT_TYPE, "application/json")
+        .uri(get_uri)
+        .body(hyper::Body::empty())
+        .unwrap();
 
     let expected_service_hits = hashmap! {
         "products".to_string()=>2,
@@ -179,8 +198,13 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
-
+    let (actual, registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            query_with_router(router, get_request.into()).await,
+            counting_registry,
+        )
+    };
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
@@ -287,31 +311,53 @@ async fn service_errors_should_be_propagated() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
-    let request = supergraph::Request::fake_builder()
-        .query(
-            r#"mutation {
-                createProduct(upc:"8", name:"Bob") {
-                  upc
-                  name
-                  reviews {
-                    body
-                  }
-                }
-                createReview(upc: "8", id:"100", body: "Bif"){
-                  id
-                  body
-                }
-              }"#,
-        )
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
-        .build()
-        .expect("expecting valid request");
+    // get request
+    let get_path = format!(
+        "/?{}",
+        serde_urlencoded::to_string(&[
+            (
+                "query",
+                r#"mutation {
+                    createProduct(upc:"8", name:"Bob") {
+                      upc
+                      name
+                      reviews {
+                        body
+                      }
+                    }
+                    createReview(upc: "8", id:"100", body: "Bif"){
+                      id
+                      body
+                    }
+                  }"#
+            ),
+            (
+                "variables",
+                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
+            )
+        ])
+        .unwrap(),
+    );
 
+    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
+
+    let get_request = http::Request::builder()
+        .method(Method::GET)
+        .header(CONTENT_TYPE, "application/json")
+        .uri(get_uri)
+        .body(hyper::Body::empty())
+        .unwrap();
     // No services should be queried
+
     let expected_service_hits = hashmap! {};
 
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            query_with_router(router, get_request.into()).await,
+            counting_registry,
+        )
+    };
 
     assert_eq!(1, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
