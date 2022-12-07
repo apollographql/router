@@ -2,6 +2,7 @@
 
 use bytes::Bytes;
 use futures::StreamExt;
+use http::Method;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -37,12 +38,41 @@ impl From<http::Request<hyper::Body>> for Request {
 impl TryFrom<supergraph::Request> for Request {
     type Error = ();
     fn try_from(request: supergraph::Request) -> Result<Self, Self::Error> {
-        // TODO: handle errors
+        let supergraph::Request {
+            context,
+            supergraph_request,
+        } = request;
+
+        let (mut parts, request) = supergraph_request.into_parts();
+
+        let router_request = if parts.method == Method::GET {
+            // get request
+            let get_path = format!(
+                "{}",
+                serde_urlencoded::to_string(&[
+                    ("query", request.query),
+                    ("operationName", request.operation_name),
+                    (
+                        "extensions",
+                        serde_json::to_string(&request.extensions).ok()
+                    ),
+                    ("variables", serde_json::to_string(&request.variables).ok())
+                ])
+                .unwrap(),
+            );
+
+            parts.uri = format!("{}?{}", parts.uri, get_path).parse().unwrap();
+
+            http::Request::from_parts(parts, hyper::Body::empty())
+        } else {
+            http::Request::from_parts(
+                parts,
+                hyper::Body::from(serde_json::to_vec(&request).unwrap()),
+            )
+        };
         Ok(Self {
-            router_request: request
-                .supergraph_request
-                .map(|req| hyper::Body::from(serde_json::to_vec(&req).unwrap())),
-            context: request.context,
+            router_request,
+            context,
         })
     }
 }

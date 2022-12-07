@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use apollo_router::Context;
 use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
@@ -168,28 +169,17 @@ async fn basic_mutation() {
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
     // get request
-    let get_path = format!(
-        "/?{}",
-        serde_urlencoded::to_string(&[
-            (
-                "query",
-                r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-            ),
-            (
-                "variables",
-                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
-            )
-        ])
-        .unwrap(),
-    );
-
-    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
-
-    let get_request = http::Request::builder()
-        .method(Method::GET)
+    let get_request = supergraph::Request::builder()
+        .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
+        .variable("topProductsFirst", 2_usize)
+        .variable("reviewsForAuthorAuthorId", 1_usize)
         .header(CONTENT_TYPE, "application/json")
-        .uri(get_uri)
-        .body(hyper::Body::empty())
+        .uri(Uri::from_static("/"))
+        .method(Method::GET)
+        .context(Context::new())
+        .build()
+        .unwrap()
+        .try_into()
         .unwrap();
 
     let expected_service_hits = hashmap! {
@@ -201,7 +191,7 @@ async fn queries_should_work_over_get() {
     let (actual, registry) = {
         let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
         (
-            query_with_router(router, get_request.into()).await,
+            query_with_router(router, get_request).await,
             counting_registry,
         )
     };
@@ -217,34 +207,27 @@ async fn simple_queries_should_not_work() {
     or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
     let expected_error = graphql::Error::builder().message(message).build();
 
-    let get_path = format!(
-        "/?{}",
-        serde_urlencoded::to_string(&[
-            (
-                "query",
-                r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
-            ),
-            (
-                "variables",
-                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
-            )
-        ])
-        .unwrap(),
-    );
-
-    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
-
-    let mut get_request = http::Request::builder()
+    let mut get_request: router::Request = supergraph::Request::builder()
+        .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
+        .variable("topProductsFirst", 2_usize)
+        .variable("reviewsForAuthorAuthorId", 1_usize)
+        .header(CONTENT_TYPE, "application/json")
+        .uri(Uri::from_static("/"))
         .method(Method::GET)
-        .uri(get_uri)
-        .body(hyper::Body::empty())
+        .context(Context::new())
+        .build()
+        .unwrap()
+        .try_into()
         .unwrap();
 
-    get_request.headers_mut().remove("content-type");
+    get_request
+        .router_request
+        .headers_mut()
+        .remove("content-type");
 
     let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
 
-    let actual = query_with_router(router, get_request.into()).await;
+    let actual = query_with_router(router, get_request).await;
 
     assert_eq!(
         1,
@@ -328,43 +311,34 @@ async fn service_errors_should_be_propagated() {
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
     // get request
-    let get_path = format!(
-        "/?{}",
-        serde_urlencoded::to_string(&[
-            (
-                "query",
-                r#"mutation {
-                    createProduct(upc:"8", name:"Bob") {
-                      upc
-                      name
-                      reviews {
-                        body
-                      }
-                    }
-                    createReview(upc: "8", id:"100", body: "Bif"){
-                      id
-                      body
-                    }
-                  }"#
-            ),
-            (
-                "variables",
-                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
-            )
-        ])
-        .unwrap(),
-    );
-
-    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
-
-    let get_request = http::Request::builder()
-        .method(Method::GET)
+    let get_request: router::Request = supergraph::Request::builder()
+        .query(
+            r#"mutation {
+            createProduct(upc:"8", name:"Bob") {
+              upc
+              name
+              reviews {
+                body
+              }
+            }
+            createReview(upc: "8", id:"100", body: "Bif"){
+              id
+              body
+            }
+          }"#,
+        )
+        .variable("topProductsFirst", 2_usize)
+        .variable("reviewsForAuthorAuthorId", 1_usize)
         .header(CONTENT_TYPE, "application/json")
-        .uri(get_uri)
-        .body(hyper::Body::empty())
+        .uri(Uri::from_static("/"))
+        .method(Method::GET)
+        .context(Context::new())
+        .build()
+        .unwrap()
+        .try_into()
         .unwrap();
-    // No services should be queried
 
+    // No services should be queried
     let expected_service_hits = hashmap! {};
 
     let (actual, registry) = {

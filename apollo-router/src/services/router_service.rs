@@ -495,21 +495,19 @@ mod tests {
         .await;
 
         // get request
-        let get_path = format!(
-            "/?{}",
-            serde_urlencoded::to_string(&[("query", query), ("operationName", operation_name)])
-                .unwrap(),
-        );
-
-        let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
-
-        let get_request = http::Request::builder()
+        let get_request = supergraph::Request::builder()
+            .query(query)
+            .operation_name(operation_name)
+            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .uri(Uri::from_static("/"))
             .method(Method::GET)
-            .uri(get_uri)
-            .body(hyper::Body::empty())
+            .context(Context::new())
+            .build()
+            .unwrap()
+            .try_into()
             .unwrap();
 
-        router_service.call(get_request.into()).await.unwrap();
+        router_service.call(get_request).await.unwrap();
 
         // post request
         let post_request = supergraph::Request::builder()
