@@ -36,12 +36,13 @@ Use the following as a rule of thumb, also look at existing config for inspirati
 The most important goal is usability, so do break the rules if it makes sense, but it's worth bringing the discussion to the team in such circumstances.  
 
 1. [Avoid empty config](#avoid-empty-config).
-2. [Do use `#[serde(deny_unknown_fields)]`](#do-use-serdedeny_unknown_fields).
-3. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
-4. [Use consistent terminology](#use-consistent-terminology).
-5. [Don't use negative options](#dont-use-negative-options).
-6. [Document your configuration options](#document-your-configuration-options).
-7. [Plan for the future](#plan-for-the-future).
+2. [Use `#[serde(default)]`](#use-serdedefault).
+3. [Do use `#[serde(deny_unknown_fields)]`](#do-use-serdedeny_unknown_fields).
+4. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
+5. [Use consistent terminology](#use-consistent-terminology).
+6. [Don't use negative options](#dont-use-negative-options).
+7. [Document your configuration options](#document-your-configuration-options).
+8. [Plan for the future](#plan-for-the-future).
 
 ### Avoid empty config
 
@@ -82,7 +83,8 @@ In the case where you genuinely have no config or all sub-options have obvious d
 #[serde(deny_unknown_fields)]
 struct Export {
     enabled: bool,
-    url: Optional<Url> // url is optional
+    #[serde(default = "default_resource")]
+    url: Url // url is optional, see also but see advice on defaults.
 }
 ```
 ```yaml
@@ -94,11 +96,33 @@ export:
 ```rust
 #[serde(deny_unknown_fields)]
 struct Export {
-    url: Optional<Url> // url is optional
+    url: Url
 }
 ```
 ```yaml
 export: # The user is not aware that url was defaulted.
+```
+
+### Use `#[serde(default)]`.
+`#[serde(default="default_value_fn")` can be used to give fields defaults, and using this means that a generated json schema will also contain those defaults. The result of a default fn shoud be static.
+
+#### GOOD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url
+}
+```
+
+#### BAD
+This could leak a password into a generated schema.
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="password_from_env_fn")
+    password: String 
+}
 ```
 
 ### Do use `#[serde(deny_unknown_fields)]`.
