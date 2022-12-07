@@ -32,7 +32,6 @@ use super::supergraph;
 use super::StuffThatHasPlugins;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
-use crate::http_ext;
 use crate::router_factory::RouterFactory;
 use crate::Endpoint;
 use crate::ListenAddr;
