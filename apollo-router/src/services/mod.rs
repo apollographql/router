@@ -24,6 +24,7 @@ pub(crate) use crate::services::supergraph_service::SupergraphCreator;
 
 pub mod execution;
 mod execution_service;
+pub(crate) mod external;
 pub(crate) mod layers;
 pub(crate) mod new_service;
 pub(crate) mod query_planner;

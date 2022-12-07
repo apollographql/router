@@ -247,6 +247,7 @@ dependencies = [
  "sha2",
  "shellexpand",
  "static_assertions",
+ "strum_macros",
  "sys-info",
  "tempfile",
  "test-log",

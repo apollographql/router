@@ -5,6 +5,7 @@
 pub(crate) mod content_type;
 pub(crate) mod csrf;
 mod expose_query_plan;
+mod external;
 mod forbid_mutations;
 mod headers;
 pub(crate) mod html_redirect;
