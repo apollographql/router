@@ -230,13 +230,11 @@ mod csrf_tests {
             .unwrap();
     }
 
-    use futures::FutureExt;
     use http::header::CONTENT_TYPE;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
     use super::*;
-    use crate::plugin::test::MockSupergraphService;
 
     #[tokio::test]
     async fn it_lets_preflighted_request_pass_through() {

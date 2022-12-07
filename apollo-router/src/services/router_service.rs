@@ -30,8 +30,14 @@ use super::new_service::ServiceFactory;
 use super::router;
 use super::supergraph;
 use super::StuffThatHasPlugins;
+#[cfg(test)]
+use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
+#[cfg(test)]
+use crate::plugin::test::MockSupergraphService;
+use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
+use crate::plugins::content_type::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::router_factory::RouterFactory;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -39,11 +45,6 @@ use crate::RouterRequest;
 use crate::RouterResponse;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
-
-#[cfg(test)]
-use super::SupergraphCreator;
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -101,7 +102,7 @@ pub(crate) async fn empty() -> impl Service<
     let mut supergraph_service = MockSupergraphService::new();
     supergraph_service
         .expect_clone()
-        .returning(move || MockSupergraphService::new());
+        .returning(MockSupergraphService::new);
 
     RouterCreator::new(Arc::new(
         SupergraphCreator::for_tests(supergraph_service).await,
@@ -148,18 +149,9 @@ where
                     .flatten()
             };
 
-            if graphql_request.is_none() {
-                // BAD REQUEST
-                return Ok(router::Response {
-                    response: http::Response::builder()
-                        .status(StatusCode::BAD_REQUEST)
-                        .body(Body::from("Invalid GraphQL request"))
-                        .expect("cannot fail"),
-                    context,
-                });
-            } else {
+            if let Some(graphql_request) = graphql_request {
                 let request = SupergraphRequest {
-                    supergraph_request: http::Request::from_parts(parts, graphql_request.unwrap()),
+                    supergraph_request: http::Request::from_parts(parts, graphql_request),
                     context,
                 };
 
@@ -185,7 +177,7 @@ where
                 match body.next().await {
                     None => {
                         tracing::error!("router service is not available to process request",);
-                        return Ok(router::Response {
+                        Ok(router::Response {
                             response: http::Response::builder()
                                 .status(StatusCode::SERVICE_UNAVAILABLE)
                                 .body(Body::from(
@@ -193,7 +185,7 @@ where
                                 ))
                                 .expect("cannot fail"),
                             context,
-                        });
+                        })
                     }
                     Some(response) => {
                         if !response.has_next.unwrap_or(false) && (accepts_json || accepts_wildcard)
@@ -201,14 +193,14 @@ where
                             parts
                                 .headers
                                 .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-                            return tracing::trace_span!("serialize_response").in_scope(|| {
+                            tracing::trace_span!("serialize_response").in_scope(|| {
                                 // TODO: writer?
                                 let body = serde_json::to_string(&response).unwrap();
-                                return Ok(router::Response {
+                                Ok(router::Response {
                                     response: http::Response::from_parts(parts, Body::from(body)),
                                     context,
-                                });
-                            });
+                                })
+                            })
                         } else if accepts_multipart {
                             parts.headers.insert(
                                 CONTENT_TYPE,
@@ -243,9 +235,8 @@ where
                                     Ok::<_, BoxError>(buf.into())
                                 }));
 
-                            let response = (parts, StreamBody::new(body))
-                                .into_response()
-                                .map(|body| {
+                            let response =
+                                (parts, StreamBody::new(body)).into_response().map(|body| {
                                     // Axum makes this `body` have type:
                                     // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
                                     let mut body = Box::pin(body);
@@ -261,17 +252,38 @@ where
                                     // so ignoring `poll_trailers` is fine.
                                     // If we want to use trailers, we may need remove this convertion to `hyper::Body`
                                     // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
-                                })
-                                .into();
+                                });
 
-                            return Ok(RouterResponse { response, context });
+                            Ok(RouterResponse { response, context })
                         } else {
                             // this should be unreachable due to a previous check, but just to be sure...
-                            unreachable!()
+                            Ok(router::Response {
+                                response: http::Response::builder()
+                                    .status(StatusCode::NOT_ACCEPTABLE)
+                                    .body(Body::from(
+                                        format!(
+                                            r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
+                                            APPLICATION_JSON_HEADER_VALUE,
+                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                            MULTIPART_DEFER_CONTENT_TYPE
+                                        )
+                                    ))
+                                    .expect("cannot fail"),
+                                context,
+                            })
                         }
                     }
                 }
-            };
+            } else {
+                // BAD REQUEST
+                Ok(router::Response {
+                    response: http::Response::builder()
+                        .status(StatusCode::BAD_REQUEST)
+                        .body(Body::from("Invalid GraphQL request"))
+                        .expect("cannot fail"),
+                    context,
+                })
+            }
         };
         Box::pin(fut)
     }
@@ -369,13 +381,13 @@ mod tests {
     use http::Uri;
     use serde_json_bytes::json;
 
+    use super::*;
     use crate::plugin::test::MockSubgraph;
+    use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
+    use crate::Context;
     use crate::TestHarness;
-    use crate::{plugins::content_type::APPLICATION_JSON_HEADER_VALUE, Context};
-
-    use super::*;
 
     // Test Vary processing
 
@@ -440,7 +452,10 @@ mod tests {
                 expected_operation_name
             );
 
-            Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+            Ok(SupergraphResponse::new_from_graphql_response(
+                example_response,
+                req.context,
+            ))
         })
         .await;
 

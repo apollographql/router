@@ -392,17 +392,6 @@ pub(crate) struct Response<T> {
     pub(crate) inner: http::Response<T>,
 }
 
-#[cfg(test)]
-pub(crate) fn from_response_to_stream(
-    http: http::response::Response<graphql::Response>,
-) -> http::Response<graphql::ResponseStream> {
-    use futures::future::ready;
-    use futures::stream::once;
-    use futures::StreamExt;
-
-    http.map(|body| once(ready(body)).boxed())
-}
-
 impl<T> Deref for Response<T> {
     type Target = http::Response<T>;
 

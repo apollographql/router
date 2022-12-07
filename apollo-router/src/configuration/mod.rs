@@ -640,12 +640,12 @@ impl Default for Sandbox {
 #[template(path = "sandbox_index.html")]
 struct SandboxTemplate {}
 
-impl Sandbox {
-    pub(crate) fn display_page() -> Bytes {
-        let template = SandboxTemplate {};
-        template.render().unwrap().into()
-    }
-}
+// impl Sandbox {
+//     pub(crate) fn display_page() -> Bytes {
+//         let template = SandboxTemplate {};
+//         template.render().unwrap().into()
+//     }
+// }
 
 /// Configuration options pertaining to the home page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

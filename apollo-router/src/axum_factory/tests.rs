@@ -51,8 +51,6 @@ pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
 use crate::configuration::cors::Cors;
 use crate::configuration::HealthCheck;
-use crate::configuration::Homepage;
-use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
@@ -392,7 +390,10 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
 
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -472,7 +473,10 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
         assert_eq!(req.supergraph_request.into_body().query.unwrap(), "query");
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -524,7 +528,10 @@ async fn response() -> Result<(), ApolloRouterError> {
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
 
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -613,7 +620,10 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
 
@@ -673,7 +683,10 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     let example_response = expected_response.clone();
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
 
@@ -734,7 +747,10 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
 
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
 
@@ -801,7 +817,10 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         }
         .to_response();
 
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -917,8 +936,7 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
                 .data(json!({"response": "hey"}))
                 .build(),
             req.context,
-        )
-        .into())
+        ))
     })
     .await;
 
@@ -948,8 +966,7 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
                 .data(json!({"response": "hey"}))
                 .build(),
             req.context,
-        )
-        .into())
+        ))
     })
     .await;
 
@@ -1342,8 +1359,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
                 }))
                 .build(),
             req.context,
-        )
-        .into())
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -1404,8 +1420,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
             req.context,
-        )
-        .into())
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -1466,8 +1481,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
         Ok(SupergraphResponse::new_from_response(
             http::Response::builder().status(200).body(body).unwrap(),
             req.context,
-        )
-        .into())
+        ))
     })
     .await;
     let (server, client) = init(router_service).await;
@@ -1827,7 +1841,10 @@ async fn listening_to_unix_socket() {
 
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(example_response, req.context).into())
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
     })
     .await;
     let server = init_unix(router_service, &temp_dir).await;
@@ -1931,8 +1948,7 @@ async fn test_health_check() {
             .data(json!({ "__typename": "Query"}))
             .context(Context::new())
             .build()
-            .unwrap()
-            .into())
+            .unwrap())
     })
     .await;
 

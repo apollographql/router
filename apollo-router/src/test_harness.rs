@@ -4,7 +4,6 @@ use std::sync::Arc;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;

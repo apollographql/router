@@ -1,4 +1,3 @@
-use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
@@ -30,8 +29,6 @@ async fn all_rhai_callbacks_are_invoked() {
     let request = supergraph::Request::fake_builder()
         .query("{ topProducts { name } }")
         .build()
-        .unwrap()
-        .try_into()
         .unwrap();
     let _response = router
         .oneshot(request)

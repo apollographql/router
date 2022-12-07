@@ -3,6 +3,7 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 {{#if type_basic}}
+use apollo_router::services::router;
 use apollo_router::services::execution;
 use apollo_router::services::subgraph;
 {{/if}}

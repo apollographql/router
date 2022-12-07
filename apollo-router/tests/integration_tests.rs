@@ -927,7 +927,7 @@ async fn query_with_router(
     request: router::Request,
 ) -> graphql::Response {
     serde_json::from_slice(
-        &router
+        router
             .oneshot(request)
             .await
             .unwrap()

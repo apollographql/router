@@ -31,6 +31,8 @@ use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
+#[cfg(test)]
+use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
@@ -48,9 +50,6 @@ use crate::QueryPlannerResponse;
 use crate::Schema;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
-
-#[cfg(test)]
-use crate::plugin::test::MockSupergraphService;
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -417,21 +416,6 @@ impl ServiceFactory<supergraph::Request> for SupergraphCreator {
 }
 
 impl SupergraphCreator {
-    pub(crate) fn new(
-        query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-        subgraph_creator: Arc<SubgraphCreator>,
-        apq_layer: APQLayer,
-        schema: Arc<Schema>,
-        plugins: Arc<Plugins>,
-    ) -> Self {
-        Self {
-            query_planner_service,
-            subgraph_creator,
-            apq_layer,
-            schema,
-            plugins,
-        }
-    }
     pub(crate) fn make(
         &self,
     ) -> impl Service<
@@ -471,10 +455,6 @@ impl SupergraphCreator {
                         e.supergraph_service(acc)
                     }),
             )
-    }
-
-    pub(crate) fn plugins(&self) -> Arc<Plugins> {
-        self.plugins.clone()
     }
 
     /// Create a test service.

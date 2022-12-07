@@ -38,8 +38,7 @@ pub async fn basic_composition_benchmark(mut router_service: router::BoxCloneSer
             .next_response()
             .await
             .unwrap()
-            .unwrap()
-            .to_vec(),
+            .unwrap(),
     )
     .unwrap();
 
