@@ -1021,8 +1021,7 @@ async fn it_displays_homepage() {
                     .data(json!({"response": "test"}))
                     .build(),
                 req.context,
-            )
-            .into())
+            ))
         },
         conf.clone(),
     )
@@ -1066,8 +1065,7 @@ async fn it_doesnt_display_disabled_homepage() {
                     .data(json!({"response": "test"}))
                     .build(),
                 req.context,
-            )
-            .into())
+            ))
         },
         conf.clone(),
     )
