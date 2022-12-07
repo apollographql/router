@@ -10,6 +10,7 @@ use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::names::MIXED;
 use mediatype::names::MULTIPART;
+use mediatype::names::_STAR;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
 use schemars::JsonSchema;
@@ -127,16 +128,6 @@ impl Plugin for ContentType {
     }
 }
 
-/// Returns true if the headers contain header `accept: */*`
-fn accepts_wildcard(headers: &HeaderMap) -> bool {
-    headers.get_all(ACCEPT).iter().any(|value| {
-        value
-            .to_str()
-            .map(|accept_str| accept_str == "*/*")
-            .unwrap_or(false)
-    })
-}
-
 /// Returns true if the headers content type is `application/json` or `application/graphql-response+json`
 fn content_type_is_json(headers: &HeaderMap) -> bool {
     headers.get_all(CONTENT_TYPE).iter().any(|value| {
@@ -185,6 +176,24 @@ fn accepts_json(headers: &HeaderMap) -> bool {
         })
 }
 
+/// Returns true if the headers contain header `accept: */*`
+fn accepts_wildcard(headers: &HeaderMap) -> bool {
+    headers.get_all(ACCEPT).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| {
+                    mime.as_ref()
+                        .map(|mime| (mime.ty == _STAR && mime.subty == _STAR))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(false)
+    })
+}
+
 /// Returns true if the headers contain accept header to enable defer
 fn accepts_multipart(headers: &HeaderMap) -> bool {
     headers.get_all(ACCEPT).iter().any(|value| {
@@ -229,6 +238,11 @@ mod tests {
         let mut default_headers = HeaderMap::new();
         default_headers.insert(ACCEPT, HeaderValue::from_static("*/*"));
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
+        assert!(accepts_wildcard(&default_headers));
+
+        let mut default_headers = HeaderMap::new();
+        // real life browser example
+        default_headers.insert(ACCEPT, HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"));
         assert!(accepts_wildcard(&default_headers));
 
         let mut default_headers = HeaderMap::new();
