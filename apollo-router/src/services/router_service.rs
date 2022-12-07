@@ -22,10 +22,12 @@ use http_body::Body as _;
 use hyper::Body;
 use multimap::MultiMap;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::layers::content_type;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
@@ -37,9 +39,9 @@ use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
-use crate::plugins::content_type::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::content_type::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::layers::content_type::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -394,7 +396,8 @@ where
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = RouterService::new(self.supergraph_creator.clone());
+        let router_service =
+            content_type::RouterLayer {}.layer(RouterService::new(self.supergraph_creator.clone()));
 
         ServiceBuilder::new()
             .layer(self.static_page.clone())
@@ -415,7 +418,7 @@ mod tests {
 
     use super::*;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
+    use crate::services::layers::content_type::APPLICATION_JSON_HEADER_VALUE;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
     use crate::Context;

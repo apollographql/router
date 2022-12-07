@@ -13,16 +13,13 @@ use mediatype::names::MULTIPART;
 use mediatype::names::_STAR;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
-use schemars::JsonSchema;
-use serde::Deserialize;
 use tower::BoxError;
-use tower::ServiceBuilder;
+use tower::Layer;
+use tower::Service;
 use tower::ServiceExt;
 
-use crate::layers::ServiceBuilderExt;
-use crate::plugin::Plugin;
-use crate::plugin::PluginInit;
-use crate::register_plugin;
+use crate::layers::sync_checkpoint::CheckpointService;
+use crate::layers::ServiceExt as _;
 use crate::services::router;
 use crate::services::supergraph;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
@@ -32,71 +29,81 @@ use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 pub(crate) const APPLICATION_JSON_HEADER_VALUE: &str = "application/json";
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
 
-#[derive(Debug, Clone)]
-struct ContentType {}
+/// [`Layer`] for Content-Type checks implementation.
+#[derive(Clone)]
+pub(crate) struct RouterLayer {}
 
-#[derive(Deserialize, Debug, Clone, JsonSchema)]
-struct EmptyConfig {}
+impl<S> Layer<S> for RouterLayer
+where
+    S: Service<router::Request, Response = router::Response, Error = BoxError> + Send + 'static,
+    <S as Service<router::Request>>::Future: Send + 'static,
+{
+    type Service = CheckpointService<S, router::Request>;
 
-// This plugin should be the first one to wrap the router services,
-// since it should execute at the very end of the pipeline
-// TODO: This should be a layer
-#[async_trait::async_trait]
-impl Plugin for ContentType {
-    type Config = EmptyConfig;
-
-    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(Self {})
-    }
-
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        ServiceBuilder::new()
-            .checkpoint(|req: router::Request| {
-                if req.router_request.method() != Method::GET && !content_type_is_json(req.router_request.headers()) {
-                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::UNSUPPORTED_MEDIA_TYPE).body(
-                        hyper::Body::from(
-                        format!(
+    fn layer(&self, service: S) -> Self::Service {
+        CheckpointService::new(
+            move |req| {
+                if req.router_request.method() != Method::GET
+                    && !content_type_is_json(req.router_request.headers())
+                {
+                    let response: http::Response<hyper::Body> = http::Response::builder()
+                        .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
+                        .body(hyper::Body::from(format!(
                             r#"'content-type' header can't be different from {:?} or {:?}"#,
-                            APPLICATION_JSON_HEADER_VALUE,
-                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                        )
-                    )).expect("cannot fail");
+                            APPLICATION_JSON_HEADER_VALUE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                        )))
+                        .expect("cannot fail");
 
-                        return Ok(ControlFlow::Break(response.into()));
+                    return Ok(ControlFlow::Break(response.into()));
                 }
                 let accepts_multipart = accepts_multipart(req.router_request.headers());
                 let accepts_json = accepts_json(req.router_request.headers());
                 let accepts_wildcard = accepts_wildcard(req.router_request.headers());
 
-                if accepts_wildcard
-                    || accepts_multipart
-                    || accepts_json
-                {
-                    req.context.insert("accepts-wildcard", accepts_wildcard).unwrap();
-                    req.context.insert("accepts-multipart", accepts_multipart).unwrap();
+                if accepts_wildcard || accepts_multipart || accepts_json {
+                    req.context
+                        .insert("accepts-wildcard", accepts_wildcard)
+                        .unwrap();
+                    req.context
+                        .insert("accepts-multipart", accepts_multipart)
+                        .unwrap();
                     req.context.insert("accepts-json", accepts_json).unwrap();
 
                     Ok(ControlFlow::Continue(req))
                 } else {
                     let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).body(
-                        hyper::Body::from(
-                        format!(
-                            r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                            APPLICATION_JSON_HEADER_VALUE,
-                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                            MULTIPART_DEFER_CONTENT_TYPE
-                        )
-                    )).expect("cannot fail");
+                            hyper::Body::from(
+                            format!(
+                                r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
+                                APPLICATION_JSON_HEADER_VALUE,
+                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                MULTIPART_DEFER_CONTENT_TYPE
+                            )
+                        )).expect("cannot fail");
 
-                        Ok(ControlFlow::Break(response.into()))
+                    Ok(ControlFlow::Break(response.into()))
                 }
-            })
-            .service(service)
-            .boxed()
+            },
+            service,
+        )
     }
+}
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
+/// [`Layer`] for Content-Type checks implementation.
+#[derive(Clone)]
+pub(crate) struct SupergraphLayer {}
+
+impl<S> Layer<S> for SupergraphLayer
+where
+    S: Service<supergraph::Request, Response = supergraph::Response, Error = BoxError>
+        + Send
+        + 'static,
+    <S as Service<supergraph::Request>>::Future: Send + 'static,
+{
+    type Service = supergraph::BoxService;
+
+    fn layer(&self, service: S) -> Self::Service {
+        service
             .map_first_graphql_response(|context, mut parts, res| {
                 let accepts_wildcard: bool = context
                     .get("accepts-wildcard")
@@ -123,7 +130,6 @@ impl Plugin for ContentType {
                 }
                 (parts, res)
             })
-            .service(service)
             .boxed()
     }
 }
@@ -221,8 +227,6 @@ fn accepts_multipart(headers: &HeaderMap) -> bool {
             .unwrap_or(false)
     })
 }
-
-register_plugin!("apollo", "content-type", ContentType);
 
 #[cfg(test)]
 mod tests {

@@ -222,7 +222,6 @@ pub(crate) async fn create_plugins(
         "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
-        "apollo.content-type",
     ];
 
     let mut errors = Vec::new();
