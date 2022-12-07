@@ -7,7 +7,6 @@ use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::metrics::UpDownCounter;
-use opentelemetry::sdk::metrics::controllers::BasicController;
 use opentelemetry::Context as OtelContext;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
@@ -23,8 +22,6 @@ use super::METRIC_PREFIX_COUNTER;
 use super::METRIC_PREFIX_HISTOGRAM;
 use super::METRIC_PREFIX_MONOTONIC_COUNTER;
 
-const CARGO_PKG_VERSION: &str = env!("CARGO_PKG_VERSION");
-const INSTRUMENTATION_LIBRARY_NAME: &str = "tracing/tracing-opentelemetry";
 const I64_MAX: u64 = i64::MAX as u64;
 
 #[derive(Default)]
@@ -236,13 +233,10 @@ pub(crate) struct MetricsLayer {
     instruments: Instruments,
 }
 
-impl MetricsLayer {
-    /// Create a new instance of MetricsLayer.
-    pub(crate) fn new(controller: BasicController) -> Self {
-        let meter =
-            controller.versioned_meter(INSTRUMENTATION_LIBRARY_NAME, Some(CARGO_PKG_VERSION), None);
-        MetricsLayer {
-            meter,
+impl Default for MetricsLayer {
+    fn default() -> Self {
+        Self {
+            meter: opentelemetry::global::meter_provider().meter("apollo/router"),
             instruments: Default::default(),
         }
     }

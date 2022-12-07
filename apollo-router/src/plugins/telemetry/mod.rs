@@ -73,6 +73,7 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStat
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
+use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -389,6 +390,8 @@ impl Telemetry {
             opentelemetry::global::set_error_handler(handle_error)
                 .expect("otel error handler lock poisoned, fatal");
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&config));
+            // Set the meter provider
+            opentelemetry::global::set_meter_provider(builder.meter_provider());
 
             #[cfg(feature = "console")]
             {
@@ -403,7 +406,8 @@ impl Telemetry {
 
             #[cfg(not(feature = "console"))]
             {
-                let otel_metrics = builder.layers();
+                // let otel_metrics = builder.layers();
+                let otel_metrics = MetricsLayer::default();
                 let log_level = GLOBAL_ENV_FILTER
                     .get()
                     .map(|s| s.as_str())
@@ -465,9 +469,6 @@ impl Telemetry {
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
-
-        // Set the meter provider
-        opentelemetry::global::set_meter_provider(builder.meter_provider());
 
         let plugin = Ok(Telemetry {
             custom_endpoints: builder.custom_endpoints(),

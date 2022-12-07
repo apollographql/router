@@ -57,8 +57,9 @@ impl SpanExporter for Exporter {
                 .unwrap_or_default()
                 .as_secs_f64() as f64;
 
-            let idle_ms: f64 = idle as f64 / 1_000_000_000_f64;
-            let busy_ms: f64 = busy as f64 / 1_000_000_000_f64;
+            // Convert it in seconds
+            let idle: f64 = idle as f64 / 1_000_000_000_f64;
+            let busy: f64 = busy as f64 / 1_000_000_000_f64;
             if span.name == SUBGRAPH_SPAN_NAME {
                 let subgraph_name = span
                     .attributes
@@ -66,12 +67,12 @@ impl SpanExporter for Exporter {
                     .map(|name| name.as_str())
                     .unwrap_or_default();
                 ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name, subgraph = %subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name, subgraph = %subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name, subgraph = %subgraph_name);
+                ::tracing::info!(histogram.apollo_router_span = idle, kind = %"idle", span = %span.name, subgraph = %subgraph_name);
+                ::tracing::info!(histogram.apollo_router_span = busy, kind = %"busy", span = %span.name, subgraph = %subgraph_name);
             } else {
                 ::tracing::info!(histogram.apollo_router_span = duration, kind = %"duration", span = %span.name);
-                ::tracing::info!(histogram.apollo_router_span = idle_ms, kind = %"idle", span = %span.name);
-                ::tracing::info!(histogram.apollo_router_span = busy_ms, kind = %"busy", span = %span.name);
+                ::tracing::info!(histogram.apollo_router_span = idle, kind = %"idle", span = %span.name);
+                ::tracing::info!(histogram.apollo_router_span = busy, kind = %"busy", span = %span.name);
             }
         }
 

@@ -54,7 +54,6 @@ impl MetricsConfigurator for super::super::otlp::Config {
                             .map(|(k, v)| KeyValue::new(k, v)),
                     ))
                     .build()?;
-                builder = builder.with_controller(exporter.clone());
                 builder = builder.with_meter_provider(exporter.clone());
                 builder = builder.with_exporter(exporter);
                 Ok(builder)
