@@ -3,9 +3,12 @@ use std::task::Context;
 use std::task::Poll;
 use std::time::SystemTime;
 
-use aws_sigv4::http_request::{
-    sign, PayloadChecksumKind, SignableBody, SignableRequest, SigningParams, SigningSettings,
-};
+use aws_sigv4::http_request::sign;
+use aws_sigv4::http_request::PayloadChecksumKind;
+use aws_sigv4::http_request::SignableBody;
+use aws_sigv4::http_request::SignableRequest;
+use aws_sigv4::http_request::SigningParams;
+use aws_sigv4::http_request::SigningSettings;
 use aws_types::Credentials;
 use schemars::JsonSchema;
 use serde::Deserialize;
