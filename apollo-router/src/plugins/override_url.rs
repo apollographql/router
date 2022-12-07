@@ -84,7 +84,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.override_subgraph_url")
+            .find(|factory| factory.name == "apollo.override_subgraph_url")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(

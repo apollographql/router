@@ -39,6 +39,7 @@ use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+#[cfg(unix)]
 use tokio::io::BufReader;
 use tokio_util::io::StreamReader;
 use tower::service_fn;

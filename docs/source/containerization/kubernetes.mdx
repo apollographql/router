@@ -13,7 +13,7 @@ import { Link } from 'gatsby';
 
 [Helm](https://helm.sh) is the package manager for kubernetes.
 
-There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.4.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
+There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.5.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
 
 In both the following examples, we are using helm to install the router:
  - into namespace "router-deploy" (create namespace if it doesn't exist)
@@ -82,7 +82,7 @@ metadata:
     app.kubernetes.io/version: "v1.4.0"
     app.kubernetes.io/managed-by: Helm
 data:
-  managedFederationApiKey: "UkVEQUNURUQ="
+  managedFederationApiKey: "IlJFREFDVEVEIg=="
 ---
 # Source: router/templates/configmap.yaml
 apiVersion: v1
@@ -148,7 +148,7 @@ metadata:
     app.kubernetes.io/instance: release-name
     app.kubernetes.io/version: "v1.4.0"
     app.kubernetes.io/managed-by: Helm
-
+  
   annotations:
     prometheus.io/path: /metrics
     prometheus.io/port: "9090"
@@ -186,7 +186,7 @@ spec:
                   key: managedFederationApiKey
                   optional: true
             - name: APOLLO_GRAPH_REF
-              value: REDACTED
+              value: "REDACTED"
           ports:
             - name: http
               containerPort: 80
