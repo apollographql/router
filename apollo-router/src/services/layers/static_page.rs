@@ -128,17 +128,6 @@ impl Sandbox {
     }
 }
 
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl Sandbox {
-    #[builder]
-    pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
-        Self {
-            enabled: enabled.unwrap_or_else(default_sandbox),
-        }
-    }
-}
-
 impl Default for Sandbox {
     fn default() -> Self {
         Self::builder().build()
