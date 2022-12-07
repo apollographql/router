@@ -1,0 +1,9 @@
+---
+source: apollo-router/src/services/router_service.rs
+expression: "std::str::from_utf8(deferred.to_vec().as_slice()).unwrap()"
+---
+content-type: application/json
+
+{"hasNext":true,"incremental":[{"data":{"activeOrganization":null},"path":["currentUser"],"extensions":{"valueCompletion":[{"message":"Cannot return null for non-nullable field Organization.nonNullId","path":["currentUser","activeOrganization","nonNullId"]}]}}]}
+--graphql
+

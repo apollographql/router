@@ -4,6 +4,7 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::Method;
 use http::StatusCode;
 use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
@@ -50,32 +51,44 @@ impl Plugin for ContentType {
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
             .checkpoint(|req: router::Request| {
-            let accepts_multipart = accepts_multipart(req.router_request.headers());
-            let accepts_json = accepts_json(req.router_request.headers());
-            let accepts_wildcard = accepts_wildcard(req.router_request.headers());
+                if req.router_request.method() != Method::GET && !content_type_is_json(req.router_request.headers()) {
+                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::UNSUPPORTED_MEDIA_TYPE).body(
+                        hyper::Body::from(
+                        format!(
+                            r#"'content-type' header can't be different from {:?} or {:?}"#,
+                            APPLICATION_JSON_HEADER_VALUE,
+                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                        )
+                    )).expect("cannot fail");
 
-            if accepts_wildcard
-                || accepts_multipart
-                || accepts_json
-            {
-                req.context.insert("accepts-wildcard", accepts_wildcard).unwrap();
-                req.context.insert("accepts-multipart", accepts_multipart).unwrap();
-                req.context.insert("accepts-json", accepts_json).unwrap();
+                        return Ok(ControlFlow::Break(response.into()));
+                }
+                let accepts_multipart = accepts_multipart(req.router_request.headers());
+                let accepts_json = accepts_json(req.router_request.headers());
+                let accepts_wildcard = accepts_wildcard(req.router_request.headers());
 
-                Ok(ControlFlow::Continue(req))
-            } else {
-                let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).body(
-                    hyper::Body::from(
-                    format!(
-                        r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                        APPLICATION_JSON_HEADER_VALUE,
-                        GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                        MULTIPART_DEFER_CONTENT_TYPE
-                    )
-                )).unwrap();
+                if accepts_wildcard
+                    || accepts_multipart
+                    || accepts_json
+                {
+                    req.context.insert("accepts-wildcard", accepts_wildcard).unwrap();
+                    req.context.insert("accepts-multipart", accepts_multipart).unwrap();
+                    req.context.insert("accepts-json", accepts_json).unwrap();
 
-                    Ok(ControlFlow::Break(response.into()))
-            }
+                    Ok(ControlFlow::Continue(req))
+                } else {
+                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).body(
+                        hyper::Body::from(
+                        format!(
+                            r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
+                            APPLICATION_JSON_HEADER_VALUE,
+                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                            MULTIPART_DEFER_CONTENT_TYPE
+                        )
+                    )).expect("cannot fail");
+
+                        Ok(ControlFlow::Break(response.into()))
+                }
             })
             .service(service)
             .boxed()
@@ -120,6 +133,29 @@ fn accepts_wildcard(headers: &HeaderMap) -> bool {
         value
             .to_str()
             .map(|accept_str| accept_str == "*/*")
+            .unwrap_or(false)
+    })
+}
+
+/// Returns true if the headers content type is `application/json` or `application/graphql-response+json`
+fn content_type_is_json(headers: &HeaderMap) -> bool {
+    headers.get_all(CONTENT_TYPE).iter().any(|value| {
+        value
+            .to_str()
+            .map(|accept_str| {
+                let mut list = MediaTypeList::new(accept_str);
+
+                list.any(|mime| {
+                    mime.as_ref()
+                        .map(|mime| {
+                            (mime.ty == APPLICATION && mime.subty == JSON)
+                                || (mime.ty == APPLICATION
+                                    && mime.subty.as_str() == "graphql-response"
+                                    && mime.suffix == Some(JSON))
+                        })
+                        .unwrap_or(false)
+                })
+            })
             .unwrap_or(false)
     })
 }

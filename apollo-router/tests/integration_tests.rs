@@ -18,6 +18,7 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
+use http::Uri;
 use insta::internals::Content;
 use insta::internals::Redaction;
 use maplit::hashmap;
@@ -166,12 +167,30 @@ async fn basic_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
-    let request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
-        .build()
-        .expect("expecting valid request");
+    // get request
+    let get_path = format!(
+        "/?{}",
+        serde_urlencoded::to_string(&[
+            (
+                "query",
+                r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+            ),
+            (
+                "variables",
+                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
+            )
+        ])
+        .unwrap(),
+    );
+
+    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
+
+    let get_request = http::Request::builder()
+        .method(Method::GET)
+        .header(CONTENT_TYPE, "application/json")
+        .uri(get_uri)
+        .body(hyper::Body::empty())
+        .unwrap();
 
     let expected_service_hits = hashmap! {
         "products".to_string()=>2,
@@ -179,8 +198,13 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
-
+    let (actual, registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            query_with_router(router, get_request.into()).await,
+            counting_registry,
+        )
+    };
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
@@ -287,31 +311,53 @@ async fn service_errors_should_be_propagated() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
-    let request = supergraph::Request::fake_builder()
-        .query(
-            r#"mutation {
-                createProduct(upc:"8", name:"Bob") {
-                  upc
-                  name
-                  reviews {
-                    body
-                  }
-                }
-                createReview(upc: "8", id:"100", body: "Bif"){
-                  id
-                  body
-                }
-              }"#,
-        )
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
-        .build()
-        .expect("expecting valid request");
+    // get request
+    let get_path = format!(
+        "/?{}",
+        serde_urlencoded::to_string(&[
+            (
+                "query",
+                r#"mutation {
+                    createProduct(upc:"8", name:"Bob") {
+                      upc
+                      name
+                      reviews {
+                        body
+                      }
+                    }
+                    createReview(upc: "8", id:"100", body: "Bif"){
+                      id
+                      body
+                    }
+                  }"#
+            ),
+            (
+                "variables",
+                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
+            )
+        ])
+        .unwrap(),
+    );
 
+    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
+
+    let get_request = http::Request::builder()
+        .method(Method::GET)
+        .header(CONTENT_TYPE, "application/json")
+        .uri(get_uri)
+        .body(hyper::Body::empty())
+        .unwrap();
     // No services should be queried
+
     let expected_service_hits = hashmap! {};
 
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            query_with_router(router, get_request.into()).await,
+            counting_registry,
+        )
+    };
 
     assert_eq!(1, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -382,7 +428,7 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let actual = query_with_router(router.clone(), apq_only_request).await;
+    let actual = query_with_router(router.clone(), apq_only_request.try_into().unwrap()).await;
 
     assert_eq!(expected_apq_miss_error, actual.errors[0]);
     assert_eq!(1, actual.errors.len());
@@ -401,7 +447,8 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let actual = query_with_router(router.clone(), apq_request_with_query).await;
+    let actual =
+        query_with_router(router.clone(), apq_request_with_query.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -417,7 +464,7 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let actual = query_with_router(router, apq_only_request).await;
+    let actual = query_with_router(router, apq_only_request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -474,7 +521,17 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let mut response = http_response.next_response().await.unwrap();
+    let mut response = serde_json::from_slice::<graphql::Response>(
+        http_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
     let mut expected = vec![
         graphql::Error::builder()
             .message("invalid type for variable: 'missingVariable'")
@@ -541,9 +598,22 @@ async fn normal_query_with_defer_accept_header() {
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .expect("expecting valid request");
-    let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
+    let (actual, _registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            router
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap(),
+            counting_registry,
+        )
+    };
 
-    assert!(actual.errors.is_empty());
+    insta::assert_snapshot!(std::str::from_utf8(actual.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -575,10 +645,10 @@ async fn defer_path_with_disabled_config() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let only = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(only);
+    let only = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(only.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -607,13 +677,13 @@ async fn defer_path() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
+    let second = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -647,17 +717,13 @@ async fn defer_path_in_array() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
-    assert_eq!(first.has_next, Some(true));
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
-    assert_eq!(second.has_next, Some(false));
-
-    assert_eq!(stream.next_response().await, None);
+    let second = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -691,10 +757,10 @@ async fn defer_query_without_accept() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -722,13 +788,13 @@ async fn defer_empty_primary_response() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
+    let second = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -756,13 +822,13 @@ async fn defer_default_variable() {
 
     let (router, _) = setup_router_and_registry(config.clone()).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
+    let second = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -773,10 +839,10 @@ async fn defer_default_variable() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 
     let second = stream.next_response().await;
     assert!(second.is_none());
@@ -796,7 +862,7 @@ async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, 
 
 async fn http_query_rust(
     request: supergraph::Request,
-) -> (supergraph::Response, CountingServiceRegistry) {
+) -> (router::Response, CountingServiceRegistry) {
     http_query_rust_with_config(request, serde_json::json!({})).await
 }
 
@@ -809,10 +875,10 @@ async fn query_rust(
 async fn http_query_rust_with_config(
     request: supergraph::Request,
     config: serde_json::Value,
-) -> (supergraph::Response, CountingServiceRegistry) {
+) -> (router::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
     (
-        http_query_with_router(router, request).await,
+        http_query_with_router(router, request.try_into().unwrap()).await,
         counting_registry,
     )
 }
@@ -822,12 +888,15 @@ async fn query_rust_with_config(
     config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
-    (query_with_router(router, request).await, counting_registry)
+    (
+        query_with_router(router, request.try_into().unwrap()).await,
+        counting_registry,
+    )
 }
 
 async fn setup_router_and_registry(
     config: serde_json::Value,
-) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
+) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
@@ -847,29 +916,35 @@ async fn setup_router_and_registry(
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
         .extra_plugin(telemetry)
-        .build()
+        .build_router()
         .await
         .unwrap();
     (router, counting_registry)
 }
 
 async fn query_with_router(
-    router: supergraph::BoxCloneService,
-    request: supergraph::Request,
+    router: router::BoxCloneService,
+    request: router::Request,
 ) -> graphql::Response {
-    router
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap()
+    serde_json::from_slice(
+        router
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap()
 }
 
 async fn http_query_with_router(
-    router: supergraph::BoxCloneService,
-    request: supergraph::Request,
-) -> supergraph::Response {
+    router: router::BoxCloneService,
+    request: router::Request,
+) -> router::Response {
     router.oneshot(request).await.unwrap()
 }
 

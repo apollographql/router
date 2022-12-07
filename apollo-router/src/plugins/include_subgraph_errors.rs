@@ -214,7 +214,7 @@ mod test {
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
-            .get("apollo.include_subgraph_errors")
+            .find(|factory| factory.name == "apollo.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await

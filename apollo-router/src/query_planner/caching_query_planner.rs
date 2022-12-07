@@ -1,3 +1,5 @@
+// This entire file is license key functionality
+
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -38,8 +40,10 @@ where
         schema_id: Option<String>,
         config: &crate::configuration::QueryPlanning,
     ) -> CachingQueryPlanner<T> {
-        let cache =
-            Arc::new(DeduplicatingCache::from_configuration(&config.experimental_cache).await);
+        let cache = Arc::new(
+            DeduplicatingCache::from_configuration(&config.experimental_cache, "query planner")
+                .await,
+        );
         Self {
             cache,
             delegate,
@@ -190,7 +194,7 @@ impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "plan|{}|{}|{}",
+            "plan\0{}\0{}\0{}",
             self.schema_id.as_deref().unwrap_or("-"),
             self.query,
             self.operation.as_deref().unwrap_or("-")
