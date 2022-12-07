@@ -599,6 +599,90 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "subgraph_auth": {
+      "type": "object",
+      "properties": {
+        "all": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "aws_sig_v4"
+              ],
+              "properties": {
+                "aws_sig_v4": {
+                  "type": "object",
+                  "required": [
+                    "access_key_id",
+                    "region",
+                    "secret_access_key",
+                    "service"
+                  ],
+                  "properties": {
+                    "access_key_id": {
+                      "type": "string"
+                    },
+                    "region": {
+                      "type": "string"
+                    },
+                    "secret_access_key": {
+                      "type": "string"
+                    },
+                    "service": {
+                      "type": "string"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "nullable": true
+        },
+        "subgraphs": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": [
+                  "aws_sig_v4"
+                ],
+                "properties": {
+                  "aws_sig_v4": {
+                    "type": "object",
+                    "required": [
+                      "access_key_id",
+                      "region",
+                      "secret_access_key",
+                      "service"
+                    ],
+                    "properties": {
+                      "access_key_id": {
+                        "type": "string"
+                      },
+                      "region": {
+                        "type": "string"
+                      },
+                      "secret_access_key": {
+                        "type": "string"
+                      },
+                      "service": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              }
+            ]
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "supergraph": {
       "description": "Configuration options pertaining to the supergraph server component.",
       "default": {

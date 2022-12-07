@@ -50,6 +50,8 @@ async-compression = { version = "0.3.15", features = [
 ] }
 async-trait = "0.1.59"
 atty = "0.2.14"
+aws-sigv4 = "0.51.0"
+aws-types = "0.51.0"
 axum = { version = "0.5.17", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
 base64 = "0.13.1"

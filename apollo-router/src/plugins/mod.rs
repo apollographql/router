@@ -9,5 +9,6 @@ mod headers;
 mod include_subgraph_errors;
 pub(crate) mod override_url;
 pub(crate) mod rhai;
+mod subgraph_auth;
 pub(crate) mod telemetry;
 pub(crate) mod traffic_shaping;
