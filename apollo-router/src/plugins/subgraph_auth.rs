@@ -173,6 +173,11 @@ where
 mod test {
     use std::sync::Arc;
 
+    use http::header::CONTENT_LENGTH;
+    use http::header::CONTENT_TYPE;
+    use http::header::HOST;
+    use regex::Regex;
+
     use super::*;
     use crate::graphql::Request;
     use crate::plugin::test::MockSubgraphService;
@@ -182,12 +187,6 @@ mod test {
     use crate::Context;
     use crate::SubgraphRequest;
     use crate::SubgraphResponse;
-
-    use http::header::CONTENT_LENGTH;
-    use http::header::CONTENT_TYPE;
-    use http::header::HOST;
-
-    use regex::Regex;
 
     #[test]
     fn test_all_aws_sig_v4_config() {
