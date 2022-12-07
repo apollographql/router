@@ -47,19 +47,16 @@ impl TryFrom<supergraph::Request> for Request {
 
         let router_request = if parts.method == Method::GET {
             // get request
-            let get_path = format!(
-                "{}",
-                serde_urlencoded::to_string(&[
-                    ("query", request.query),
-                    ("operationName", request.operation_name),
-                    (
-                        "extensions",
-                        serde_json::to_string(&request.extensions).ok()
-                    ),
-                    ("variables", serde_json::to_string(&request.variables).ok())
-                ])
-                .unwrap(),
-            );
+            let get_path = serde_urlencoded::to_string(&[
+                ("query", request.query),
+                ("operationName", request.operation_name),
+                (
+                    "extensions",
+                    serde_json::to_string(&request.extensions).ok(),
+                ),
+                ("variables", serde_json::to_string(&request.variables).ok()),
+            ])
+            .unwrap();
 
             parts.uri = format!("{}?{}", parts.uri, get_path).parse().unwrap();
 
