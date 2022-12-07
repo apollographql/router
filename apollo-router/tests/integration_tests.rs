@@ -552,9 +552,22 @@ async fn normal_query_with_defer_accept_header() {
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .expect("expecting valid request");
-    let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
+    let (actual, _registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            router
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap(),
+            counting_registry,
+        )
+    };
 
-    assert!(actual.errors.is_empty());
+    insta::assert_snapshot!(std::str::from_utf8(actual.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]

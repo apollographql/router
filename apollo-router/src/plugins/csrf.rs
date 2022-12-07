@@ -14,8 +14,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::supergraph;
-use crate::SupergraphRequest;
+use crate::services::router;
 use crate::SupergraphResponse;
 
 /// CSRF Configuration.
@@ -101,11 +100,11 @@ impl Plugin for Csrf {
         })
     }
 
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
         if !self.config.unsafe_disabled {
             let required_headers = self.config.required_headers.clone();
             ServiceBuilder::new()
-                .checkpoint(move |req: SupergraphRequest| {
+                .checkpoint(move |req: router::Request| {
                     if is_preflighted(&req, required_headers.as_slice()) {
                         tracing::trace!("request is preflighted");
                         Ok(ControlFlow::Continue(req))
@@ -123,7 +122,7 @@ impl Plugin for Csrf {
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)
                             .context(req.context)
-                            .build()?;
+                            .build()?.into();
                         Ok(ControlFlow::Break(res))
                     }
                 })
@@ -143,8 +142,8 @@ impl Plugin for Csrf {
 // - The only headers added by javascript code are part of the cors safelisted request headers (Accept,Accept-Language,Content-Language,Content-Type, and simple Range
 //
 // Given the first step is covered in our web browser, we'll take care of the two other steps below:
-fn is_preflighted(req: &SupergraphRequest, required_headers: &[String]) -> bool {
-    let headers = req.supergraph_request.headers();
+fn is_preflighted(req: &router::Request, required_headers: &[String]) -> bool {
+    let headers = req.router_request.headers();
     content_type_requires_preflight(headers)
         || recommended_header_is_provided(headers, required_headers)
 }
@@ -209,7 +208,11 @@ register_plugin!("apollo", "csrf", Csrf);
 
 #[cfg(test)]
 mod csrf_tests {
+    use crate::graphql;
     use crate::plugin::PluginInit;
+    use crate::router_service;
+    use crate::SupergraphRequest;
+
     #[tokio::test]
     async fn plugin_registered() {
         crate::plugin::plugins()
@@ -227,6 +230,7 @@ mod csrf_tests {
             .unwrap();
     }
 
+    use futures::FutureExt;
     use http::header::CONTENT_TYPE;
     use serde_json_bytes::json;
     use tower::ServiceExt;
@@ -290,25 +294,32 @@ mod csrf_tests {
     }
 
     async fn assert_accepted(config: CSRFConfig, request: SupergraphRequest) {
-        let mut mock_service = MockSupergraphService::new();
-        mock_service.expect_call().times(1).returning(move |_| {
+        let router_service = router_service::from_supergraph_mock_callback(move |req| {
             Ok(SupergraphResponse::fake_builder()
                 .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
                 .build()
                 .unwrap())
-        });
+        })
+        .await;
 
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(mock_service.boxed());
-        let res = service_stack
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
+            .router_service(router_service.boxed());
+        let res: graphql::Response = serde_json::from_slice(
+            service_stack
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(res.errors, []);
         assert_eq!(res.data.unwrap(), json!({ "test": 1234_u32 }));
@@ -318,14 +329,20 @@ mod csrf_tests {
         let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
             .await
             .unwrap()
-            .supergraph_service(MockSupergraphService::new().boxed());
-        let res = service_stack
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
+            .router_service(router_service::empty().await.boxed());
+        let res: graphql::Response = serde_json::from_slice(
+            service_stack
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
 
         assert_eq!(
             1,
