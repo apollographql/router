@@ -13,6 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+## 🥼 Experimental
 
 ## Example section entry format
 
@@ -24,130 +25,33 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
-## ❗ BREAKING ❗
-### Fix naming inconsistency of telemetry.metrics.common.attributes.router ([Issue #2076](https://github.com/apollographql/router/issues/2076))
 
-Mirroring the rest of the config `router` should be `supergraph`
+### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
 
-```yaml
-telemetry:
-  metrics:
-    common:
-      attributes:
-        router: # old
-```
-becomes
-```yaml
-telemetry:
-  metrics:
-    common:
-      attributes:
-        supergraph: # new
-```
+[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
+mandate that a deferred response should not be sent if its path points to an element of the response that was nullified
+in a previous payload.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
-
-### CLI structure changes ([Issue #2123](https://github.com/apollographql/router/issues/2123))
-
-As the Router gains functionality the limitations of the current CLI structure are becoming apparent.
-
-There is now a separate subcommand for config related operations:
-* `config`
-  * `schema` - Output the configuration schema
-  * `upgrade` - Upgrade the configuration with optional diff support.
-
-`router --schema` has been deprecated and users should move to `router config schema`.
-
-## 🚀 Features
-
-### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
-
-From the next release, our Docker images will be multi-arch.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
-
-### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
-
-Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
-
-```yaml
-extraEnvVars:
-  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
-    value: /data/supergraph-schema.graphql
-
-extraVolumeMounts:
-  - name: supergraph-schema
-    mountPath: /data
-    readOnly: true
-
-extraVolumes:
-  - name: supergraph-schema
-    configMap:
-      name: "{{ .Release.Name }}-supergraph"
-      items:
-        - key: supergraph-schema.graphql
-          path: supergraph-schema.graphql
-```
-
-With that values.yaml content, and with your supergraph schema in a file name supergraph-schema.graphql, you can execute:
-
-```
-helm upgrade --install --create-namespace --namespace router-test --set-file supergraphFile=supergraph-schema.graphql router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.9 --values values.yaml
-```
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
-
-### Configuration upgrades ([Issue #2123](https://github.com/apollographql/router/issues/2123))
-
-Occasionally we will make changes to the Router yaml configuration format.
-When starting the Router if the configuration can be upgraded it will do so automatically and display a warning:
-
-```
-2022-11-22T14:01:46.884897Z  WARN router configuration contains deprecated options: 
-
-  1. telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
-
-These will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.
-```
-
-Note: If a configuration has errors after upgrading then the configuration will not be upgraded automatically.
-
-From the CLI users can run:
-* `router config upgrade <path_to_router.yaml>` to output configuration that has been upgraded to match the latest config format.
-* `router config upgrade --diff <path_to_router.yaml>` to output a diff e.g.
-```
- telemetry:
-   apollo:
-     client_name_header: apollographql-client-name
-   metrics:
-     common:
-       attributes:
--        router:
-+        supergraph:
-           request:
-             header:
-             - named: "1" # foo
-```
-
-There are situations where comments and whitespace are not preserved. This may be improved in future.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
-
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
 
 ## 🐛 Fixes
 
-### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
+### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
 
-The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
+When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
 
-By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
 
 ## 🛠 Maintenance
-## 📚 Documentation
 
-### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/pull/2133))
+### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
 
-We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
+This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
 
+### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
+
+This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218

@@ -103,7 +103,7 @@ impl Query {
         is_deferred: bool,
         variables: Object,
         schema: &Schema,
-    ) {
+    ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
             let operation = self.operation(operation_name);
@@ -121,6 +121,7 @@ impl Query {
                                 variables: &variables,
                                 schema,
                                 errors: Vec::new(),
+                                nullified: Vec::new(),
                             };
                             response.data = Some(
                                 match self.apply_root_selection_set(
@@ -141,14 +142,14 @@ impl Query {
                                 }
                             }
 
-                            return;
+                            return parameters.nullified;
                         }
                         None => failfast_debug!("can't find subselection for {:?}", subselection),
                     }
                 // the primary query was empty, we return an empty object
                 } else {
                     response.data = Some(Value::Object(Object::default()));
-                    return;
+                    return vec![];
                 }
             } else if let Some(operation) = operation {
                 let mut output = Object::default();
@@ -171,6 +172,7 @@ impl Query {
                     variables: &all_variables,
                     schema,
                     errors: Vec::new(),
+                    nullified: Vec::new(),
                 };
 
                 response.data = Some(
@@ -191,7 +193,7 @@ impl Query {
                     }
                 }
 
-                return;
+                return parameters.nullified;
             } else {
                 failfast_debug!("can't find operation for {:?}", operation_name);
             }
@@ -200,6 +202,8 @@ impl Query {
         }
 
         response.data = Some(Value::default());
+
+        vec![]
     }
 
     pub(crate) fn parse(
@@ -209,10 +213,8 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let string = query.into();
 
-        let parser = apollo_parser::Parser::with_recursion_limit(
-            string.as_str(),
-            configuration.server.experimental_parser_recursion_limit,
-        );
+        let parser = apollo_parser::Parser::new(string.as_str())
+            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let tree = parser.parse();
 
         // Trace log recursion limit data
@@ -340,6 +342,7 @@ impl Query {
                             res
                         }) {
                         Err(InvalidValue) => {
+                            parameters.nullified.push(path.clone());
                             *output = Value::Null;
                             Ok(())
                         }
@@ -379,6 +382,7 @@ impl Query {
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
                             if !parameters.schema.object_types.contains_key(input_type) {
+                                parameters.nullified.push(path.clone());
                                 *output = Value::Null;
                                 return Ok(());
                             }
@@ -400,12 +404,14 @@ impl Query {
                             )
                             .is_err()
                         {
+                            parameters.nullified.push(path.clone());
                             *output = Value::Null;
                         }
 
                         Ok(())
                     }
                     _ => {
+                        parameters.nullified.push(path.clone());
                         *output = Value::Null;
                         Ok(())
                     }
@@ -956,6 +962,7 @@ impl Query {
 struct FormatParameters<'a> {
     variables: &'a Object,
     errors: Vec<Error>,
+    nullified: Vec<Path>,
     schema: &'a Schema,
 }
 
@@ -1112,8 +1119,8 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
 pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
-        ast::Value::StringValue(s) => Some(String::from(s).into()),
-        ast::Value::FloatValue(f) => Some(f64::from(f).into()),
+        ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
+        ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
         ast::Value::IntValue(i) => {
             let s = i.source_string();
             s.parse::<i64>()
@@ -1121,7 +1128,7 @@ pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
                 .map(Into::into)
                 .or_else(|| s.parse::<u64>().ok().map(Into::into))
         }
-        ast::Value::BooleanValue(b) => Some(bool::from(b).into()),
+        ast::Value::BooleanValue(b) => bool::try_from(b).ok().map(Into::into),
         ast::Value::NullValue(_) => Some(Value::Null),
         ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
         ast::Value::ListValue(l) => l

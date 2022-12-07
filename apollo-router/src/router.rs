@@ -65,7 +65,13 @@ async fn make_transport_service<RF>(
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
 
-    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+    let apq = APQLayer::with_cache(
+        DeduplicatingCache::from_configuration(
+            &configuration.supergraph.apq.experimental_cache,
+            "APQ",
+        )
+        .await,
+    );
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
     // FIXME: how should
@@ -743,10 +749,18 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_dev_mode_without_file() {
-        let mut stream =
-            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
-                .into_stream()
-                .boxed();
+        let telemetry_configuration = serde_json::json!({
+            "telemetry": {}
+        });
+        let mut stream = ConfigurationSource::from(
+            Configuration::builder()
+                .apollo_plugin("telemetry", telemetry_configuration)
+                .dev(true)
+                .build()
+                .unwrap(),
+        )
+        .into_stream()
+        .boxed();
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,

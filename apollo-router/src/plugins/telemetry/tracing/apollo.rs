@@ -12,11 +12,8 @@ use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 impl TracingConfigurator for Config {
-    fn apply(&self, builder: Builder, trace_config: &config::Trace) -> Result<Builder, BoxError> {
-        tracing::info!(
-            "configuring Apollo tracing: {}",
-            self.batch_processor.as_ref().cloned().unwrap_or_default()
-        );
+    fn apply(&self, builder: Builder, _trace_config: &config::Trace) -> Result<Builder, BoxError> {
+        tracing::debug!("configuring Apollo tracing");
         Ok(match self {
             Config {
                 endpoint: Some(endpoint),
@@ -25,12 +22,13 @@ impl TracingConfigurator for Config {
                 schema_id,
                 buffer_size,
                 field_level_instrumentation_sampler,
+                expose_trace_id,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
 
                 let exporter = apollo_telemetry::Exporter::builder()
-                    .trace_config(trace_config.clone())
+                    .expose_trace_id_config(expose_trace_id.clone())
                     .endpoint(endpoint.clone())
                     .apollo_key(key)
                     .apollo_graph_ref(reference)

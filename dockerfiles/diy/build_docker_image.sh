@@ -15,14 +15,18 @@
 # Note: This utility makes assumptions about the existence of files relative
 #       to the directory where it is executed. To work correctly you must
 #       execute in the "repo"/dockerfiles/diy directory.
+# Note: A debug image is an image where heaptrack is installed. The router
+#       is still a release build router, but all memory is being tracked
+#       under heaptrack. (https://github.com/KDE/heaptrack)
 ###
 
 ###
 # Terminate with a nice usage message
 ###
 usage () {
-   printf "Usage: build_docker_image.sh [-b [-r <repo>]] [<release>]\n"
+   printf "Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]\n"
    printf "\t-b build docker image from the default repo, if not present build from a released version\n"
+   printf "\t-d build debug image, router will run under control of heaptrack\n"
    printf "\t-r build docker image from a specified repo, only valid with -b flag\n"
    printf "\t<release> a valid release. If [-b] is specified, this is optional\n"
    printf "\tExample 1: Building HEAD from the repo\n"
@@ -35,6 +39,8 @@ usage () {
    printf "\t\tbuild_docker_image.sh -b 7f7d223f42af34fad35b898d976bc07d0f5440c5\n"
    printf "\tExample 5: Building tag v0.9.1 from the released version\n"
    printf "\t\tbuild_docker_image.sh v0.9.1\n"
+   printf "\tExample 6: Building a debug image with tag v0.9.1 from the released version\n"
+   printf "\t\tbuild_docker_image.sh -d v0.9.1\n"
    exit 2
 }
 
@@ -56,13 +62,14 @@ terminate () {
 # If no ROUTER_VERSION specified, we are building HEAD from a repo
 ROUTER_VERSION=
 BUILD_IMAGE=false
+DEBUG_IMAGE=false
 DEFAULT_REPO="https://github.com/apollographql/router.git"
 GIT_REPO=
 
 ###
 # Process Command Line
 ###
-if ! args=$(getopt bhr: "$@"); then
+if ! args=$(getopt bdhr: "$@"); then
     usage
 fi
 
@@ -77,6 +84,10 @@ while :; do
        case "$1" in
        -b)
                BUILD_IMAGE=true
+               shift
+               ;;
+       -d)
+               DEBUG_IMAGE=true
                shift
                ;;
        -r)
@@ -107,11 +118,11 @@ else
     if [ "${BUILD_IMAGE}" = false ]; then
         usage
     fi
-    if [ -z "${GIT_REPO}" ]; then
-        GIT_REPO="${DEFAULT_REPO}"
-    fi
 fi
 
+if [ -z "${GIT_REPO}" ]; then
+    GIT_REPO="${DEFAULT_REPO}"
+fi
 
 # We need a place to build
 if ! BUILD_DIR=$(mktemp -d -t "router-build.XXXXXXXXXX"); then
@@ -139,10 +150,11 @@ if [ "${BUILD_IMAGE}" = true ]; then
         ROUTER_VERSION=$(git rev-parse HEAD)
     fi
     # Let the user know what we are going to do
-    echo "Building image: ${ROUTER_VERSION}" from repo""
+    echo "Building image: ${ROUTER_VERSION}" from repo: ${GIT_REPO}""
     git checkout "${ROUTER_VERSION}" > /dev/null 2>&1 || terminate "Couldn't checkout ${ROUTER_VERSION}"
     # Build our docker images
     docker build -q -t "router:${ROUTER_VERSION}" \
+        --build-arg DEBUG_IMAGE="${DEBUG_IMAGE}" \
         --build-arg ROUTER_VERSION="${ROUTER_VERSION}" \
         --no-cache -f ../Dockerfile.repo . \
         || terminate "Couldn't build router image"
@@ -150,6 +162,7 @@ else
     # Let the user know what we are going to do
     echo "Building image: ${ROUTER_VERSION}" from released version""
     docker build -q -t "router:${ROUTER_VERSION}" \
+        --build-arg DEBUG_IMAGE="${DEBUG_IMAGE}" \
         --build-arg ROUTER_RELEASE="${ROUTER_VERSION}" \
         --no-cache -f Dockerfile.router . \
         || terminate "Couldn't build router image"

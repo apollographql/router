@@ -47,6 +47,14 @@ impl Context {
 }
 
 impl Context {
+    /// Returns true if the context contains a value for the specified key.
+    pub fn contains_key<K>(&self, key: K) -> bool
+    where
+        K: Into<String>,
+    {
+        self.entries.contains_key(&key.into())
+    }
+
     /// Get a value from the context using the provided key.
     ///
     /// Semantics:

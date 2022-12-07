@@ -42,7 +42,12 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
     tokio::task::spawn(subgraph());
 
     for _ in 0..10 {
-        let id = router.run_query().await;
+        let (id, result) = router.run_query().await;
+        assert!(!result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .is_empty());
         query_jaeger_for_trace(id).await?;
         router.touch_config()?;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -273,7 +278,5 @@ async fn subgraph() {
 
     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
     let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
+    server.await.unwrap();
 }
