@@ -122,11 +122,8 @@ impl<'a> TestHarness<'a> {
     /// These extra plugins are added after plugins specified in configuration.
     pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
         let type_id = std::any::TypeId::of::<P>();
-        let name = match crate::plugin::plugins()
-            .iter()
-            .find(|(_name, factory)| factory.type_id == type_id)
-        {
-            Some((name, _factory)) => name.clone(),
+        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+            Some(factory) => factory.name.clone(),
             None => format!(
                 "extra_plugins.{}.{}",
                 self.extra_plugins.len(),
