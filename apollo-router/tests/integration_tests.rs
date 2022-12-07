@@ -475,8 +475,32 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let response = http_response.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(response.to_vec().as_slice()).unwrap());
+    let mut response = serde_json::from_slice::<graphql::Response>(
+        http_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    let mut expected = vec![
+        graphql::Error::builder()
+            .message("invalid type for variable: 'missingVariable'")
+            .extension("type", "ValidationInvalidTypeVariable")
+            .extension("name", "missingVariable")
+            .build(),
+        graphql::Error::builder()
+            .message("invalid type for variable: 'yetAnotherMissingVariable'")
+            .extension("type", "ValidationInvalidTypeVariable")
+            .extension("name", "yetAnotherMissingVariable")
+            .build(),
+    ];
+    response.errors.sort_by_key(|e| e.message.clone());
+    expected.sort_by_key(|e| e.message.clone());
+    assert_eq!(response.errors, expected);
 }
 
 #[tokio::test(flavor = "multi_thread")]

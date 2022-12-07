@@ -1,5 +1,0 @@
----
-source: apollo-router/tests/integration_tests.rs
-expression: "std::str::from_utf8(response.to_vec().as_slice()).unwrap()"
----
-{"errors":[{"message":"invalid type for variable: 'yetAnotherMissingVariable'","extensions":{"type":"ValidationInvalidTypeVariable","name":"yetAnotherMissingVariable"}},{"message":"invalid type for variable: 'missingVariable'","extensions":{"type":"ValidationInvalidTypeVariable","name":"missingVariable"}}]}
