@@ -217,18 +217,34 @@ async fn simple_queries_should_not_work() {
     or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
     let expected_error = graphql::Error::builder().message(message).build();
 
-    let mut request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
-        .build()
-        .expect("expecting valid request");
-    request
-        .supergraph_request
-        .headers_mut()
-        .remove("content-type");
+    let get_path = format!(
+        "/?{}",
+        serde_urlencoded::to_string(&[
+            (
+                "query",
+                r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#
+            ),
+            (
+                "variables",
+                r#"{ "topProductsFirst": 2, "reviewsForAuthorAuthorId": 1 }"#
+            )
+        ])
+        .unwrap(),
+    );
 
-    let (actual, registry) = query_rust(request).await;
+    let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
+
+    let mut get_request = http::Request::builder()
+        .method(Method::GET)
+        .uri(get_uri)
+        .body(hyper::Body::empty())
+        .unwrap();
+
+    get_request.headers_mut().remove("content-type");
+
+    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
+
+    let actual = query_with_router(router, get_request.into()).await;
 
     assert_eq!(
         1,
@@ -926,17 +942,20 @@ async fn query_with_router(
     router: router::BoxCloneService,
     request: router::Request,
 ) -> graphql::Response {
-    serde_json::from_slice(
-        router
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap()
-            .unwrap()
-            .to_vec()
-            .as_slice(),
+    serde_json::from_str(
+        dbg!(std::str::from_utf8(
+            router
+                .oneshot(request)
+                .await
+                .unwrap()
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice()
+        ))
+        .unwrap(),
     )
     .unwrap()
 }
