@@ -26,6 +26,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::supergraph;
@@ -39,6 +40,7 @@ use crate::plugin::test::MockSupergraphService;
 use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
 use crate::plugins::content_type::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::router_factory::RouterFactory;
+use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::RouterRequest;
@@ -65,12 +67,13 @@ where
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback(
+pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
         + Send
         + Sync
         + 'static
         + Clone,
+    configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -86,10 +89,31 @@ pub(crate) async fn from_supergraph_mock_callback(
         supergraph_service
     });
 
-    RouterCreator::new(Arc::new(
-        SupergraphCreator::for_tests(supergraph_service).await,
-    ))
+    RouterCreator::new(
+        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        &configuration,
+    )
     .make()
+}
+
+#[cfg(test)]
+pub(crate) async fn from_supergraph_mock_callback(
+    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
+        + Send
+        + Sync
+        + 'static
+        + Clone,
+) -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send {
+    from_supergraph_mock_callback_and_configuration(
+        supergraph_callback,
+        Arc::new(Configuration::default()),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -104,9 +128,10 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
-    RouterCreator::new(Arc::new(
-        SupergraphCreator::for_tests(supergraph_service).await,
-    ))
+    RouterCreator::new(
+        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        &Configuration::default(),
+    )
     .make()
 }
 
@@ -304,6 +329,7 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
+    static_page: StaticPageLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -352,8 +378,12 @@ where
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
         Send,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
-        Self { supergraph_creator }
+    pub(crate) fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
+        let static_page = StaticPageLayer::new(configuration);
+        Self {
+            supergraph_creator,
+            static_page,
+        }
     }
 
     pub(crate) fn make(
@@ -366,13 +396,15 @@ where
     > + Send {
         let router_service = RouterService::new(self.supergraph_creator.clone());
 
-        ServiceBuilder::new().service(
-            self.supergraph_creator
-                .plugins()
-                .iter()
-                .rev()
-                .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-        )
+        ServiceBuilder::new()
+            .layer(self.static_page.clone())
+            .service(
+                self.supergraph_creator
+                    .plugins()
+                    .iter()
+                    .rev()
+                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+            )
     }
 }
 

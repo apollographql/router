@@ -378,7 +378,7 @@ mod tests {
 
         init_with_config(
             router_service::empty().await,
-            configuration,
+            Arc::new(configuration),
             MultiMap::new(),
         )
         .await
@@ -413,9 +413,13 @@ mod tests {
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router_service::empty().await, configuration, web_endpoints)
-            .await
-            .unwrap_err();
+        let error = init_with_config(
+            router_service::empty().await,
+            Arc::new(configuration),
+            web_endpoints,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
             error.to_string()
@@ -448,7 +452,7 @@ mod tests {
             Endpoint::new("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(router_service::empty().await, configuration, mm)
+        let error = init_with_config(router_service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 

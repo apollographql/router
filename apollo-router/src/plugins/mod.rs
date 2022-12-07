@@ -7,7 +7,6 @@ pub(crate) mod csrf;
 mod expose_query_plan;
 mod forbid_mutations;
 mod headers;
-pub(crate) mod html_redirect;
 mod include_subgraph_errors;
 pub(crate) mod override_url;
 pub(crate) mod rhai;
