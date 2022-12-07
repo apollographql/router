@@ -1,4 +1,5 @@
 #![allow(missing_docs)] // FIXME
+                        // With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -25,6 +26,8 @@ const EXTERNALIZABLE_VERSION: u8 = 1;
 #[allow(dead_code)]
 #[derive(Display)]
 pub(crate) enum PipelineStep {
+    RouterRequest,
+    RouterResponse,
     SupergraphRequest,
     SupergraphResponse,
     ExecutionRequest,
@@ -34,9 +37,31 @@ pub(crate) enum PipelineStep {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct HttpBlock {
+    pub(crate) status: u16,
+    pub(crate) message: String,
+}
+
+impl Default for HttpBlock {
+    fn default() -> Self {
+        HttpBlock {
+            status: 200,
+            message: "Ok".to_string(),
+        }
+    }
+}
+
+impl HttpBlock {
+    fn new(status: u16, message: String) -> Self {
+        HttpBlock { status, message }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
+    pub(crate) http: HttpBlock,
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
     pub(crate) body: Option<T>,
     pub(crate) context: Option<Context>,
@@ -57,6 +82,7 @@ where
         Self {
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
+            http: Default::default(),
             headers,
             body,
             context,

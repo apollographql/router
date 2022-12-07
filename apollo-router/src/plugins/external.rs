@@ -1,12 +1,15 @@
+//! Externalization plugin
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use crate::error::Error;
 use crate::external::Externalizable;
 use crate::external::PipelineStep;
-use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -17,6 +20,7 @@ use crate::Context;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::StatusCode;
 use hyper::body;
 use hyper::Body;
 use schemars::JsonSchema;
@@ -33,17 +37,26 @@ struct ExternalPlugin {
     sdl: Arc<String>,
 }
 
-#[derive(Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+struct BaseConf {
+    #[serde(default)]
+    headers: bool,
+    #[serde(default)]
+    context: bool,
+    #[serde(default)]
+    body: bool,
+    #[serde(default)]
+    sdl: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
     url: String, // The url you'd like to offload processing to
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Output {
-    context: Context,
-    sdl: Arc<String>,
-    body: graphql::Request,
+    #[serde(default)]
+    request: BaseConf,
+    #[serde(default)]
+    response: BaseConf,
 }
 
 // This is a bare bones plugin that can be duplicated when creating your own.
@@ -57,55 +70,96 @@ impl Plugin for ExternalPlugin {
             sdl: init.supergraph_sdl,
         })
     }
+
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let proto_url = self.configuration.url.clone();
         let sdl = self.sdl.clone();
+        let config = self.configuration.clone();
         ServiceBuilder::new()
             .checkpoint_async(move |mut request: router::Request| {
-                let proto_url = proto_url.clone();
+                let proto_url = config.url.clone();
                 let my_sdl = sdl.to_string();
 
                 async move {
                     // Call into our out of process processor with a body of our body
 
                     // First, convert our request into an "Externalizable" which we can pass to our
-                    // external co-processor.
+                    // external co-processor. We examine our configuration and only send those
+                    // parts which are configured.
+                    let mut headers = None;
+                    let mut context = None;
+                    // Note: We have to specify the json type or it won't deserialize correctly...
+                    let mut b_json: Option<serde_json::Value> = None;
+                    let mut sdl = None;
+                    // Inefficient to do this every request. Try to optimise later
                     let (parts, body) = request.router_request.into_parts();
                     let b_bytes = body::to_bytes(body).await?;
-                    let b_json: serde_json::Value = serde_json::from_slice(&b_bytes)?;
-                    let context = request.context.clone();
+
+                    if config.request.body || config.request.headers {
+                        if config.request.body {
+                            b_json = Some(serde_json::from_slice(&b_bytes)?);
+                        }
+                        if config.request.headers {
+                            headers = Some(&parts.headers);
+                        }
+                    }
+
+                    if config.request.context {
+                        context = Some(request.context.clone());
+                    }
+
+                    if config.request.sdl {
+                        sdl = Some(my_sdl);
+                    }
 
                     // Second, call our co-processor and get a response.
-                    let modified_output = call_external(
+                    let co_processor_output = call_external(
                         proto_url,
-                        PipelineStep::SupergraphRequest,
-                        None,
-                        Some(b_json),
-                        Some(context),
-                        Some(my_sdl),
+                        PipelineStep::RouterRequest,
+                        headers,
+                        b_json,
+                        context,
+                        sdl,
                     )
                     .await?;
 
-                    // Third, process our response and act on the contents.
-                    tracing::info!("modified output: {:?}", modified_output);
-                    // *request.router_request.body_mut() = modified_output.body.unwrap();
-                    request.context = modified_output.context.unwrap();
+                    tracing::info!("co_processor output: {:?}", co_processor_output);
 
-                    // Figure out a way to allow our external processor to interact with
-                    // headers and extensions. Probably don't want to allow other things
-                    // to be changed (version, etc...)
-                    // None of these things can be serialized just now.
-                    /*
-                    let hdrs = serde_json::to_string(&request.supergraph_request.headers())?;
-                    let extensions =
-                        serde_json::to_string(&request.supergraph_request.extensions())?;
-                    */
-                    let new_body = Body::from(serde_json::to_vec(&modified_output.body.unwrap())?);
+                    // Third, process our response and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming request with the updated bits if they
+                    // are present in our co_processor_output.
+                    //
+                    let new_body = match co_processor_output.body {
+                        Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+                        None => Body::from(b_bytes),
+                    };
+
                     request.router_request = http::Request::from_parts(parts, new_body);
-                    *request.router_request.headers_mut() =
-                        internalize_header_map(modified_output.headers.unwrap())?;
 
-                    Ok(ControlFlow::Continue(request))
+                    if let Some(context) = co_processor_output.context {
+                        request.context = context;
+                    }
+
+                    if let Some(headers) = co_processor_output.headers {
+                        *request.router_request.headers_mut() = internalize_header_map(headers)?;
+                    }
+
+                    // Finally, if we get here, we need to interpret the HTTP status codes and
+                    // decide if we should proceed or stop. TBD
+
+                    let code = StatusCode::from_u16(co_processor_output.http.status)?;
+                    if !code.is_success() {
+                        let res = router::Response::error_builder()
+                            .errors(vec![Error {
+                                message: co_processor_output.http.message,
+                                ..Default::default()
+                            }])
+                            .status_code(code)
+                            .context(request.context)
+                            .build()?;
+                        Ok(ControlFlow::Break(res))
+                    } else {
+                        Ok(ControlFlow::Continue(request))
+                    }
                 }
             })
             // .map_response()
@@ -171,7 +225,7 @@ fn internalize_header_map(
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("apollo", "external", ExternalPlugin);
+register_plugin!("experimental", "external", ExternalPlugin);
 
 #[cfg(test)]
 mod tests {
