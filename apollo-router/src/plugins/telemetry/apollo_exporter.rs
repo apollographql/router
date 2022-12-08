@@ -13,7 +13,7 @@ use flate2::write::GzEncoder;
 use flate2::Compression;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
-use http::header::CONTENT_TYPE;
+use http::header::{ACCEPT, CONTENT_ENCODING, CONTENT_TYPE, USER_AGENT};
 use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use reqwest::Client;
@@ -185,11 +185,11 @@ impl ApolloExporter {
             .post(self.endpoint.clone())
             .body(compressed_content)
             .header("X-Api-Key", self.apollo_key.clone())
-            .header("Content-Encoding", "gzip")
+            .header(CONTENT_ENCODING, "gzip")
             .header(CONTENT_TYPE, "application/protobuf")
-            .header("Accept", "application/json")
+            .header(ACCEPT, "application/json")
             .header(
-                "User-Agent",
+                USER_AGENT,
                 format!(
                     "{} / {} usage reporting",
                     std::env!("CARGO_PKG_NAME"),
