@@ -7,9 +7,27 @@ use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use bytes::Bytes;
+use http::header::HeaderName;
+use http::HeaderMap;
+use http::HeaderValue;
+use http::StatusCode;
+use hyper::body;
+use hyper::Body;
+use opentelemetry::trace::SpanKind;
+use schemars::JsonSchema;
+use serde::de::DeserializeOwned;
+use serde::Deserialize;
+use serde::Serialize;
+use tower::util::MapFutureLayer;
+use tower::BoxError;
+use tower::ServiceBuilder;
+use tower::ServiceExt;
+
 use crate::error::Error;
 use crate::external::Externalizable;
 use crate::external::PipelineStep;
+use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -17,19 +35,7 @@ use crate::register_plugin;
 use crate::services::router;
 use crate::Context;
 
-use http::header::HeaderName;
-use http::HeaderMap;
-use http::HeaderValue;
-use http::StatusCode;
-use hyper::body;
-use hyper::Body;
-use schemars::JsonSchema;
-use serde::de::DeserializeOwned;
-use serde::Deserialize;
-use serde::Serialize;
-use tower::BoxError;
-use tower::ServiceBuilder;
-use tower::ServiceExt;
+pub(crate) const EXTERNAL_SPAN_NAME: &str = "external plugin";
 
 #[derive(Debug)]
 struct ExternalPlugin {
@@ -39,6 +45,8 @@ struct ExternalPlugin {
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct BaseConf {
+    #[serde(default)]
+    stages: Vec<PipelineStep>,
     #[serde(default)]
     headers: bool,
     #[serde(default)]
@@ -59,7 +67,6 @@ struct Conf {
     response: BaseConf,
 }
 
-// This is a bare bones plugin that can be duplicated when creating your own.
 #[async_trait::async_trait]
 impl Plugin for ExternalPlugin {
     type Config = Conf;
@@ -72,104 +79,220 @@ impl Plugin for ExternalPlugin {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let sdl = self.sdl.clone();
-        let config = self.configuration.clone();
-        ServiceBuilder::new()
-            .checkpoint_async(move |mut request: router::Request| {
-                let proto_url = config.url.clone();
-                let my_sdl = sdl.to_string();
+        let request_sdl = self.sdl.clone();
+        let request_config = self.configuration.clone();
+        let future_config = self.configuration.clone();
 
+        let future_sdl = self.sdl.clone();
+        let request_url = request_config.url.clone();
+        let future_url = future_config.url.clone();
+
+        let request_layer = if request_config
+            .request
+            .stages
+            .contains(&PipelineStep::RouterRequest)
+        {
+            Some(AsyncCheckpointLayer::new(
+                move |mut request: router::Request| {
+                    let proto_url = request_url.clone();
+                    let my_sdl = request_sdl.to_string();
+                    let my_config = request_config.clone();
+                    async move {
+                        // Call into our out of process processor with a body of our body
+                        // First, extract the data we need from our request and prepare our
+                        // external call. Use our configuration to figure out which data to send.
+
+                        let (parts, body) = request.router_request.into_parts();
+                        let b_bytes = body::to_bytes(body).await?;
+
+                        let (headers, payload, context, sdl) = prepare_external_params(
+                            &my_config,
+                            &parts.headers,
+                            &b_bytes,
+                            &request.context,
+                            my_sdl,
+                        )?;
+
+                        // Second, call our co-processor and get a response.
+                        let co_processor_output = call_external(
+                            proto_url,
+                            PipelineStep::RouterRequest,
+                            headers,
+                            payload,
+                            context,
+                            sdl,
+                        )
+                        .await?;
+
+                        tracing::debug!(?co_processor_output, "co-processor returned");
+
+                        // Third, process our response and act on the contents. Our processing logic is
+                        // that we replace "bits" of our incoming request with the updated bits if they
+                        // are present in our co_processor_output.
+                        //
+
+                        let new_body = match co_processor_output.body {
+                            Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+                            None => Body::from(b_bytes),
+                        };
+
+                        request.router_request = http::Request::from_parts(parts, new_body);
+
+                        if let Some(context) = co_processor_output.context {
+                            request.context = context;
+                        }
+
+                        if let Some(headers) = co_processor_output.headers {
+                            *request.router_request.headers_mut() =
+                                internalize_header_map(headers)?;
+                        }
+
+                        // Finally, we need to interpret the HTTP status codes which may have been
+                        // updated by our co-processor and decide if we should proceed or stop.
+                        let code = StatusCode::from_u16(co_processor_output.http.status)?;
+
+                        if !code.is_success() {
+                            let res = router::Response::error_builder()
+                                .errors(vec![Error {
+                                    message: co_processor_output.http.message,
+                                    ..Default::default()
+                                }])
+                                .status_code(code)
+                                .context(request.context)
+                                .build()?;
+                            Ok(ControlFlow::Break(res))
+                        } else {
+                            Ok(ControlFlow::Continue(request))
+                        }
+                    }
+                },
+            ))
+        } else {
+            None
+        };
+
+        let response_layer = if future_config
+            .response
+            .stages
+            .contains(&PipelineStep::RouterResponse)
+        {
+            Some(MapFutureLayer::new(move |fut| {
+                let proto_url = future_url.clone();
+                let my_sdl = future_sdl.to_string();
+                let my_config = future_config.clone();
                 async move {
-                    // Call into our out of process processor with a body of our body
+                    let mut response: router::Response = fut.await?;
 
-                    // First, convert our request into an "Externalizable" which we can pass to our
-                    // external co-processor. We examine our configuration and only send those
-                    // parts which are configured.
-                    let mut headers = None;
-                    let mut context = None;
-                    // Note: We have to specify the json type or it won't deserialize correctly...
-                    let mut b_json: Option<serde_json::Value> = None;
-                    let mut sdl = None;
-                    // Inefficient to do this every request. Try to optimise later
-                    let (parts, body) = request.router_request.into_parts();
+                    // Call into our out of process processor with a body of our body
+                    // First, extract the data we need from our request and prepare our
+                    // external call. Use our configuration to figure out which data to send.
+
+                    let (parts, body) = response.response.into_parts();
                     let b_bytes = body::to_bytes(body).await?;
 
-                    if config.request.body || config.request.headers {
-                        if config.request.body {
-                            b_json = Some(serde_json::from_slice(&b_bytes)?);
-                        }
-                        if config.request.headers {
-                            headers = Some(&parts.headers);
-                        }
-                    }
-
-                    if config.request.context {
-                        context = Some(request.context.clone());
-                    }
-
-                    if config.request.sdl {
-                        sdl = Some(my_sdl);
-                    }
+                    let (headers, payload, context, sdl) = prepare_external_params(
+                        &my_config,
+                        &parts.headers,
+                        &b_bytes,
+                        &response.context,
+                        my_sdl,
+                    )?;
 
                     // Second, call our co-processor and get a response.
                     let co_processor_output = call_external(
                         proto_url,
-                        PipelineStep::RouterRequest,
+                        PipelineStep::RouterResponse,
                         headers,
-                        b_json,
+                        payload,
                         context,
                         sdl,
                     )
                     .await?;
 
-                    tracing::info!("co_processor output: {:?}", co_processor_output);
+                    tracing::debug!(?co_processor_output, "co-processor returned");
 
                     // Third, process our response and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming request with the updated bits if they
                     // are present in our co_processor_output.
-                    //
+
                     let new_body = match co_processor_output.body {
                         Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
                         None => Body::from(b_bytes),
                     };
 
-                    request.router_request = http::Request::from_parts(parts, new_body);
+                    response.response = http::Response::from_parts(parts, new_body);
 
                     if let Some(context) = co_processor_output.context {
-                        request.context = context;
+                        response.context = context;
                     }
 
                     if let Some(headers) = co_processor_output.headers {
-                        *request.router_request.headers_mut() = internalize_header_map(headers)?;
+                        *response.response.headers_mut() = internalize_header_map(headers)?;
                     }
 
-                    // Finally, if we get here, we need to interpret the HTTP status codes and
-                    // decide if we should proceed or stop. TBD
-
-                    let code = StatusCode::from_u16(co_processor_output.http.status)?;
-                    if !code.is_success() {
-                        let res = router::Response::error_builder()
-                            .errors(vec![Error {
-                                message: co_processor_output.http.message,
-                                ..Default::default()
-                            }])
-                            .status_code(code)
-                            .context(request.context)
-                            .build()?;
-                        Ok(ControlFlow::Break(res))
-                    } else {
-                        Ok(ControlFlow::Continue(request))
-                    }
+                    Ok::<router::Response, BoxError>(response)
                 }
-            })
-            // .map_response()
-            // .rate_limit()
-            // .checkpoint()
-            // .timeout()
+            }))
+        } else {
+            None
+        };
+
+        fn external_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
+            move |_request: &router::Request| {
+                tracing::info_span!(
+                    EXTERNAL_SPAN_NAME,
+                    "external service" = stringify!(router::Request),
+                    "otel.kind" = %SpanKind::Internal
+                )
+            }
+        }
+
+        ServiceBuilder::new()
+            .instrument(external_service_span())
+            .option_layer(request_layer)
+            .option_layer(response_layer)
             .buffer(20_000)
             .service(service)
             .boxed()
     }
+}
+
+type ExternalParams<'a> = (
+    Option<&'a HeaderMap<HeaderValue>>,
+    Option<serde_json::Value>,
+    Option<Context>,
+    Option<String>,
+);
+
+fn prepare_external_params<'a>(
+    config: &'a Conf,
+    headers: &'a HeaderMap<HeaderValue>,
+    bytes: &'a Bytes,
+    context: &'a Context,
+    sdl: String,
+) -> Result<ExternalParams<'a>, BoxError> {
+    let mut headers_opt = None;
+    // Note: We have to specify the json type or it won't deserialize correctly...
+    // let mut payload_opt: Option<serde_json::Value> = None;
+    let mut payload_opt: Option<serde_json::Value> = None;
+    let mut context_opt = None;
+    let mut sdl_opt = None;
+
+    if config.request.body || config.request.headers {
+        if config.request.body {
+            payload_opt = Some(serde_json::from_slice(bytes)?);
+        }
+        if config.request.headers {
+            headers_opt = Some(headers);
+        }
+    }
+    if config.request.context {
+        context_opt = Some(context.clone());
+    }
+    if config.request.sdl {
+        sdl_opt = Some(sdl);
+    }
+    Ok((headers_opt, payload_opt, context_opt, sdl_opt))
 }
 
 async fn call_external<T>(
@@ -188,7 +311,7 @@ where
         converted_headers = Some(externalize_header_map(hdrs)?);
     };
     let output = Externalizable::new(stage, converted_headers, payload, context, sdl);
-    tracing::info!("sending output: {:?}", output);
+    tracing::debug!(?output, "externalized output");
     output.call(&url).await
 }
 
@@ -235,7 +358,7 @@ mod tests {
     async fn display_message() {
         let config = serde_json::json!({
             "plugins": {
-                "apollo.external": {
+                "experimental.external": {
                     "url": "http://127.0.0.1:8081"
                 }
             }
@@ -243,7 +366,7 @@ mod tests {
         // Build a test harness. Usually we'd use this and send requests to
         // it, but in this case it's enough to build the harness to see our
         // output when our service registers.
-        let _test_harness = apollo_router::TestHarness::builder()
+        let _test_harness = crate::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
             .build()

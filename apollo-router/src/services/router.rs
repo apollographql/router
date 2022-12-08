@@ -61,6 +61,7 @@ impl TryFrom<supergraph::Request> for Request {
 
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
+#[derive(Debug)]
 pub struct Response {
     pub response: http::Response<hyper::Body>,
     pub context: Context,

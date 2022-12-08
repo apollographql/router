@@ -552,6 +552,93 @@ expression: "&schema"
       "properties": {
         "experimental.expose_query_plan": {
           "type": "boolean"
+        },
+        "experimental.external": {
+          "type": "object",
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "request": {
+              "type": "object",
+              "properties": {
+                "body": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "stages": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "RouterRequest",
+                      "RouterResponse",
+                      "SupergraphRequest",
+                      "SupergraphResponse",
+                      "ExecutionRequest",
+                      "ExecutionResponse",
+                      "SubgraphRequest",
+                      "SubgraphResponse"
+                    ]
+                  }
+                }
+              }
+            },
+            "response": {
+              "type": "object",
+              "properties": {
+                "body": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "default": false,
+                  "type": "boolean"
+                },
+                "stages": {
+                  "default": [],
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "RouterRequest",
+                      "RouterResponse",
+                      "SupergraphRequest",
+                      "SupergraphResponse",
+                      "ExecutionRequest",
+                      "ExecutionResponse",
+                      "SubgraphRequest",
+                      "SubgraphResponse"
+                    ]
+                  }
+                }
+              }
+            },
+            "url": {
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false

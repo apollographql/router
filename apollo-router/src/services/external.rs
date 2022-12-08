@@ -9,12 +9,14 @@ use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use once_cell::sync::Lazy;
 use reqwest::Client;
+use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
 
+use crate::tracer::TraceId;
 use crate::Context;
 
 static CLIENT: Lazy<Client> = Lazy::new(Client::new);
@@ -24,7 +26,7 @@ const EXTERNALIZABLE_VERSION: u8 = 1;
 
 // TODO: ALLOW DEAD CODE FOR NOW UNTIL DECIDE IF RESPONSE IS TO BE IMPLEMENTED
 #[allow(dead_code)]
-#[derive(Display)]
+#[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
     RouterRequest,
     RouterResponse,
@@ -52,6 +54,7 @@ impl Default for HttpBlock {
 }
 
 impl HttpBlock {
+    #[allow(dead_code)]
     fn new(status: u16, message: String) -> Self {
         HttpBlock { status, message }
     }
@@ -62,6 +65,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
     pub(crate) http: HttpBlock,
+    pub(crate) id: Option<String>,
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
     pub(crate) body: Option<T>,
     pub(crate) context: Option<Context>,
@@ -83,6 +87,7 @@ where
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
             http: Default::default(),
+            id: TraceId::maybe_new().map(|id| id.to_string()),
             headers,
             body,
             context,
