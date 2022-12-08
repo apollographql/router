@@ -1,8 +1,6 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
 use std::collections::HashMap;
-#[cfg(not(test))]
-use std::env::VarError;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
@@ -30,8 +28,6 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
-// Magic invalid URL. There's no good way of checking the validity of defaults obtained from env variables.
-pub(crate) const ENDPOINT_INVALID: &str = "https://invalid";
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -39,9 +35,9 @@ pub(crate) const ENDPOINT_INVALID: &str = "https://invalid";
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
-    #[schemars(with = "Option<String>", default)]
+    #[schemars(with = "String", default = "endpoint_default")]
     #[serde(default = "endpoint_default")]
-    pub(crate) endpoint: Option<Url>,
+    pub(crate) endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
@@ -120,34 +116,8 @@ fn apollo_graph_reference() -> Option<String> {
     std::env::var("APOLLO_GRAPH_REF").ok()
 }
 
-#[cfg(test)]
-fn endpoint_default() -> Option<Url> {
-    Url::parse(ENDPOINT_DEFAULT)
-        .map(Some)
-        .expect("APOLLO_USAGE_REPORTING_INGRESS_URL is not valid")
-}
-
-#[cfg(not(test))]
-fn endpoint_default() -> Option<Url> {
-    match std::env::var("APOLLO_USAGE_REPORTING_INGRESS_URL") {
-        Ok(v) => match Url::parse(&v) {
-            Ok(url) => Some(url),
-            Err(e) => {
-                tracing::error!("APOLLO_USAGE_REPORTING_INGRESS_URL is not valid: {}", e);
-                Some(Url::parse(ENDPOINT_INVALID).expect("invalid endpoint URL must be parseable"))
-            }
-        },
-        Err(VarError::NotPresent) => {
-            Some(Url::parse(ENDPOINT_DEFAULT).expect("default endpoint URL must be parseable"))
-        }
-        Err(e) => {
-            tracing::error!(
-                "APOLLO_USAGE_REPORTING_INGRESS_URL could not be read: {}",
-                e
-            );
-            None
-        }
-    }
+fn endpoint_default() -> Url {
+    Url::parse(ENDPOINT_DEFAULT).expect("must be valid url")
 }
 
 const fn client_name_header_default_str() -> &'static str {
@@ -173,9 +143,7 @@ pub(crate) const fn default_buffer_size() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            endpoint: Some(
-                Url::parse(ENDPOINT_DEFAULT).expect("default endpoint URL must be parseable"),
-            ),
+            endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint URL must be parseable"),
             apollo_key: None,
             apollo_graph_ref: None,
             client_name_header: client_name_header_default(),

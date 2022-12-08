@@ -24,7 +24,7 @@ impl MetricsConfigurator for Config {
         static ENABLED: AtomicBool = AtomicBool::new(false);
         Ok(match self {
             Config {
-                endpoint: Some(endpoint),
+                endpoint,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
@@ -74,7 +74,7 @@ mod test {
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
         let plugin = create_plugin_with_apollo_config(super::super::apollo::Config {
-            endpoint: None,
+            endpoint: Url::parse("http://example.com")?,
             apollo_key: None,
             apollo_graph_ref: None,
             client_name_header: HeaderName::from_static("name_header"),
@@ -224,9 +224,7 @@ mod test {
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
         create_plugin_with_apollo_config(apollo::Config {
-            endpoint: Some(
-                Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
-            ),
+            endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
             apollo_key: Some("key".to_string()),
             apollo_graph_ref: Some("ref".to_string()),
             client_name_header: HeaderName::from_static("name_header"),

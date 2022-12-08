@@ -16,7 +16,7 @@ impl TracingConfigurator for Config {
         tracing::debug!("configuring Apollo tracing");
         Ok(match self {
             Config {
-                endpoint: Some(endpoint),
+                endpoint,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,

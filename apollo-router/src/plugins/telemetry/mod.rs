@@ -58,7 +58,6 @@ use tracing_subscriber::registry::LookupSpan;
 #[cfg(not(feature = "console"))]
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
-use url::Url;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
@@ -72,7 +71,6 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
-use crate::plugins::telemetry::apollo::ENDPOINT_INVALID;
 use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 #[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::config::default_display_filename;
@@ -221,19 +219,6 @@ impl Plugin for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init
-            .config
-            .apollo
-            .as_ref()
-            .cloned()
-            .unwrap_or_default()
-            .endpoint
-            == Some(Url::parse(ENDPOINT_INVALID).expect("Invalid endpoint must parse"))
-        {
-            return Err(BoxError::from(
-                "APOLLO_USAGE_REPORTING_INGRESS_URL was set, but was not a valid URL",
-            ));
-        }
         Self::new_common::<Registry>(init.config, None).await
     }
 
