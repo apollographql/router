@@ -575,7 +575,7 @@ impl Telemetry {
                                         .with_span_list(true)
                                         .flatten_event(true)
                                 })
-                                .map_fmt_fields(|_f| JsonFields::new())
+                                .map_fmt_fields(|_f| JsonFields::default())
                                 .finish()
                                 .with(telemetry);
                             if let Err(e) = set_global_default(subscriber) {

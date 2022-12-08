@@ -227,6 +227,7 @@ mod csrf_tests {
     }
 
     use http::header::CONTENT_TYPE;
+    use mime::APPLICATION_JSON;
     use serde_json_bytes::json;
     use tower::ServiceExt;
 
@@ -237,7 +238,7 @@ mod csrf_tests {
     async fn it_lets_preflighted_request_pass_through() {
         let config = CSRFConfig::default();
         let with_preflight_content_type = supergraph::Request::fake_builder()
-            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .build()
             .unwrap();
         assert_accepted(config.clone(), with_preflight_content_type).await;
