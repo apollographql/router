@@ -190,7 +190,7 @@ mod tests {
 
     async fn get_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         crate::plugin::plugins()
-            .get("experimental.expose_query_plan")
+            .find(|factory| factory.name == "experimental.expose_query_plan")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await

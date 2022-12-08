@@ -78,6 +78,11 @@ The CI checks require `cargo-deny` and `cargo-about` which can both be installed
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.
 
+### Yaml configuration design
+
+If you are adding a new feature or modifying an existing feature then consult the [yaml design guidance](dev-docs/yaml-design-guidance.md) page.
+
+
 ### Investigating memory usage
 
 There are two features: `dhat-heap` and `dhat-ad-hoc` which may be enabled for investigating memory issues

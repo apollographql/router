@@ -485,7 +485,7 @@ mod test {
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a traffic shaping plugin
         crate::plugin::plugins()
-            .get(APOLLO_TRAFFIC_SHAPING)
+            .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -636,7 +636,7 @@ mod test {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_router_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
