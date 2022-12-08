@@ -37,7 +37,6 @@ use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
-use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
@@ -321,9 +320,7 @@ impl Plugin for Telemetry {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .instrument(move |_req: &ExecutionRequest| {
-                info_span!("execution",
-                    "otel.kind" = ?SpanKind::Internal,
-                )
+                info_span!("execution", "otel.kind" = "INTERNAL",)
             })
             .service(service)
             .boxed()
@@ -351,11 +348,12 @@ impl Plugin for Telemetry {
                     .clone()
                     .unwrap_or_default();
 
-                info_span!(SUBGRAPH_SPAN_NAME,
+                info_span!(
+                    SUBGRAPH_SPAN_NAME,
                     "apollo.subgraph.name" = name.as_str(),
                     graphql.document = query.as_str(),
                     graphql.operation.name = operation_name.as_str(),
-                    "otel.kind" = ?SpanKind::Internal,
+                    "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = field::Empty
                 )
             })
@@ -681,8 +679,9 @@ impl Telemetry {
                 graphql.operation.name = operation_name.as_str(),
                 client.name = client_name.to_str().unwrap_or_default(),
                 client.version = client_version.to_str().unwrap_or_default(),
-                otel.kind = ?SpanKind::Internal,
-                apollo_private.field_level_instrumentation_ratio = field_level_instrumentation_ratio,
+                otel.kind = "INTERNAL",
+                apollo_private.field_level_instrumentation_ratio =
+                    field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
                 apollo_private.graphql.variables = field::Empty,
                 apollo_private.http.request_headers = field::Empty

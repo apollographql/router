@@ -25,7 +25,6 @@ use mediatype::MediaType;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
 use opentelemetry::global;
-use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
@@ -262,7 +261,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
-                "otel.kind" = ?SpanKind::Server,
+                "otel.kind" = "SERVER",
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty,
                 "trace_id" = tracing::field::Empty
@@ -275,7 +274,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
-                "otel.kind" = ?SpanKind::Server,
+                "otel.kind" = "SERVER",
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty,
                 "trace_id" = tracing::field::Empty

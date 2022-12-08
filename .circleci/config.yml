@@ -210,6 +210,11 @@ commands:
           command: |
             set -e -o pipefail
             cargo about --version || cargo install cargo-about
+      - run:
+          name: Install cargo edit if not present
+          command: |
+            set -e -o pipefail
+            cargo edit --version || cargo install cargo-edit
       - save_cache:
           key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
           paths:
@@ -255,8 +260,7 @@ commands:
           keys:
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run:
-          command: cargo test --workspace --locked
+      - run: cargo test --workspace --locked
       - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
@@ -547,6 +551,23 @@ jobs:
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
+  prepare_release:
+    parameters:
+      release_type:
+        type: string
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - checkout
+      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools:
+          os: linux_amd
+      - run:
+          command: >
+            cargo xtask release prepare << parameters.release_type >>
+
 workflows:
   ci_checks:
     jobs:
@@ -575,6 +596,43 @@ workflows:
             parameters:
               platform:
                 [macos_test, windows_test, amd_linux_test, arm_linux_test]
+      - prepare_major_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_minor_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_patch_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_release:
+          release_type: "major"
+          requires:
+            - prepare_major_release_approval
+      - prepare_release:
+          release_type: "minor"
+          requires:
+            - prepare_minor_release_approval
+      - prepare_release:
+          release_type: "patch"
+          requires:
+            - prepare_patch_release_approval
+
   release:
     jobs:
       - build_release:
