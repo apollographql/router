@@ -344,7 +344,7 @@ async fn mutation_should_not_work_over_get() {
     let (actual, registry) = {
         let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
         (
-            query_with_router(router, get_request.into()).await,
+            query_with_router(router, get_request).await,
             counting_registry,
         )
     };
