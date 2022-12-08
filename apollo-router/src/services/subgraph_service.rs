@@ -21,10 +21,7 @@ use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
-use rhai::Variant;
 use schemars::JsonSchema;
-use serde::Serialize;
-use sha2::{Sha256,Digest};
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -42,7 +39,6 @@ use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
 use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
-use crate::graphql::Request;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 
@@ -72,31 +68,6 @@ impl Display for Compression {
 pub(crate) struct SubgraphService {
     client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-struct APQAndQueryRequest {
-    query: String,
-    extensions: Extensions,
-}
-
-
-#[derive(Serialize, Deserialize)]
-struct APQRequest {
-    extensions: Extensions,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Extensions {
-    #[serde(rename = "persistedQuery")]
-    persisted_query: PersistedQuery,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PersistedQuery {
-    version: u8,
-    #[serde(rename = "sha256Hash")]
-    sha256hash: String,
 }
 
 impl SubgraphService {
@@ -132,12 +103,12 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
 
-    fn call(&mut self, request1: crate::SubgraphRequest) -> Self::Future {
+    fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
         let crate::SubgraphRequest {
             subgraph_request,
             context,
             ..
-        } = request1.clone();
+        } = request;
 
         let clone = self.client.clone();
 
@@ -145,18 +116,10 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let service_name = (*self.service).to_owned();
 
         Box::pin(async move {
-            let (parts, request_body) = subgraph_request.into_parts();
+            let (parts, body) = subgraph_request.into_parts();
+            let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
-            // Calculating hash for query
-            let mut hasher = Sha256::new();
-            let request_query = request_body.query.clone();
-            hasher.update(request_body.query.unwrap());
-            let result1 = hex::encode(hasher.finalize()).clone();
-            let result2 = result1.clone();
-            let apq_request = APQRequest { extensions:  Extensions { persisted_query: PersistedQuery { version: 1, sha256hash: result1 } }};
-            let body_string = serde_json::to_string(&apq_request).expect("JSON serialization should not fail");
-
-            let compressed_body = compress(body_string, &parts.headers)
+            let compressed_body = compress(body, &parts.headers)
                 .instrument(tracing::debug_span!("body_compression"))
                 .await
                 .map_err(|err| {
@@ -168,7 +131,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     }
                 })?;
 
-            let mut request:http::Request<hyper::Body> = http::request::Request::from_parts(parts, compressed_body.into());
+            let mut request = http::request::Request::from_parts(parts, compressed_body.into());
             let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON_HEADER_VALUE);
             let app_graphql_json: HeaderValue =
                 HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
@@ -183,8 +146,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 );
             });
 
-            let schema_uri = request.uri().clone();
-            let host = schema_uri.host().map(String::from).unwrap_or_default().clone();
+            let schema_uri = request.uri();
+            let host = schema_uri.host().map(String::from).unwrap_or_default();
             let port = schema_uri.port_u16().unwrap_or_else(|| {
                 let scheme = schema_uri.scheme_str();
                 if scheme == Some("https") {
@@ -194,17 +157,17 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 } else {
                     0
                 }
-            }).clone();
-            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS).clone();
-            let display_body = context.contains_key(LOGGING_DISPLAY_BODY).clone();
+            });
+            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+            let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
             if display_headers {
-                tracing::info!(http.request.headers = ?request.headers().clone(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
+                tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
             }
             if display_body {
-                tracing::info!(http.request.body = ?request.body().clone(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
+                tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
             }
 
-            let path = schema_uri.path().to_string().clone();
+            let path = schema_uri.path().to_string();
             let response = client
                 .call(request)
                 .instrument(tracing::info_span!("subgraph_request",
@@ -225,25 +188,25 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     }
                 })?;
             // Keep our parts, we'll need them later
-            let (response_parts, body) = response.into_parts();
+            let (parts, body) = response.into_parts();
             if display_headers {
                 tracing::info!(
-                    http.response.headers = ?response_parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+                    http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
                 );
             }
-            if let Some(content_type) = response_parts.headers.get(header::CONTENT_TYPE) {
+            if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
                     if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
                         && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                     {
-                        return if !response_parts.status.is_success() {
+                        return if !parts.status.is_success() {
                             Err(BoxError::from(FetchError::SubrequestHttpError {
                                 service: service_name.clone(),
                                 reason: format!(
                                     "{}: {}",
-                                    response_parts.status.as_str(),
-                                    response_parts.status.canonical_reason().unwrap_or("Unknown")
+                                    parts.status.as_str(),
+                                    parts.status.canonical_reason().unwrap_or("Unknown")
                                 ),
                             }))
                         } else {
@@ -284,154 +247,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     })
                 })?;
 
-            let mut resp = http::Response::from_parts(response_parts, graphql);
+            let resp = http::Response::from_parts(parts, graphql);
 
-            if resp.body().errors.len() > 0 && resp.body().errors[0].message == "PersistedQueryNotFound" {
-                println!("----------------------------\nAPQ hash not found\n----------------------------");
-                let crate::SubgraphRequest {
-                    subgraph_request,
-                    context,
-                    ..
-                } = request1.clone();
-                let (parts, request_body) = subgraph_request.into_parts();
-
-                let apq_and_query_request = APQAndQueryRequest {
-                    query: request_query.unwrap_or_default(),
-                    extensions:  Extensions { persisted_query: PersistedQuery { version: 1, sha256hash: result2 }}
-                };
-                let body_string = serde_json::to_string(&apq_and_query_request).expect("JSON serialization should not fail");
-
-                let compressed_body = compress(body_string, &parts.headers)
-                    .instrument(tracing::debug_span!("body_compression"))
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(compress_error = format!("{:?}", err).as_str());
-
-                        FetchError::CompressionError {
-                            service: service_name.clone(),
-                            reason: err.to_string(),
-                        }
-                    })?;
-
-                let mut request = http::request::Request::from_parts(parts, compressed_body.into());
-                let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON_HEADER_VALUE);
-                let app_graphql_json: HeaderValue =
-                    HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
-                request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
-                request.headers_mut().insert(ACCEPT, app_json);
-                request.headers_mut().append(ACCEPT, app_graphql_json);
-
-                get_text_map_propagator(|propagator| {
-                    propagator.inject_context(
-                        &Span::current().context(),
-                        &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                    );
-                });
-
-                let schema_uri = request.uri();
-                let host = schema_uri.host().map(String::from).unwrap_or_default();
-                let port = schema_uri.port_u16().unwrap_or_else(|| {
-                    let scheme = schema_uri.scheme_str();
-                    if scheme == Some("https") {
-                        443
-                    } else if scheme == Some("http") {
-                        80
-                    } else {
-                        0
-                    }
-                });
-                let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
-                let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-                if display_headers {
-                    tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
-                }
-                if display_body {
-                    tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
-                }
-
-                let path = schema_uri.path().to_string();
-                let response = client
-                    .call(request)
-                    .instrument(tracing::info_span!("subgraph_request",
-                    "otel.kind" = %SpanKind::Client,
-                    "net.peer.name" = &display(host),
-                    "net.peer.port" = &display(port),
-                    "http.route" = &display(path),
-                    "net.transport" = "ip_tcp",
-                    "apollo.subgraph.name" = %service_name
-                ))
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(fetch_error = format!("{:?}", err).as_str());
-
-                        FetchError::SubrequestHttpError {
-                            service: service_name.clone(),
-                            reason: err.to_string(),
-                        }
-                    })?;
-                // Keep our parts, we'll need them later
-                let (parts, body) = response.into_parts();
-                if display_headers {
-                    tracing::info!(
-                    http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-                );
-                }
-                if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
-                    if let Ok(content_type_str) = content_type.to_str() {
-                        // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
-                        if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
-                            && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
-                        {
-                            return if !parts.status.is_success() {
-                                Err(BoxError::from(FetchError::SubrequestHttpError {
-                                    service: service_name.clone(),
-                                    reason: format!(
-                                        "{}: {}",
-                                        parts.status.as_str(),
-                                        parts.status.canonical_reason().unwrap_or("Unknown")
-                                    ),
-                                }))
-                            } else {
-                                Err(BoxError::from(FetchError::SubrequestHttpError {
-                                    service: service_name.clone(),
-                                    reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
-                                }))
-                            };
-                        }
-                    }
-                }
-
-                let body = hyper::body::to_bytes(body)
-                    .instrument(tracing::debug_span!("aggregate_response_data"))
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(fetch_error = format!("{:?}", err).as_str());
-
-                        FetchError::SubrequestHttpError {
-                            service: service_name.clone(),
-                            reason: err.to_string(),
-                        }
-                    })?;
-
-                if display_body {
-                    tracing::info!(
-                    http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-                );
-                }
-
-                let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
-                    .in_scope(|| {
-                        graphql::Response::from_bytes(&service_name, body).map_err(|error| {
-                            FetchError::SubrequestMalformedResponse {
-                                service: service_name.clone(),
-                                reason: error.to_string(),
-                            }
-                        })
-                    })?;
-
-                resp = http::Response::from_parts(parts, graphql);
-                println!("no use")
-            }
             Ok(crate::SubgraphResponse::new_from_response(resp, context))
         })
     }
