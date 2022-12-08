@@ -63,7 +63,9 @@ pub(crate) fn stream_supergraph(
         let mut current_url_idx = 0;
 
         loop {
+            let mut nb_errors = 0usize;
             match fetch_supergraph(
+                &mut nb_errors,
                 api_key.to_string(),
                 graph_ref.to_string(),
                 composition_id.clone(),
@@ -136,6 +138,7 @@ pub(crate) fn stream_supergraph(
 }
 
 pub(crate) async fn fetch_supergraph(
+    nb_errors: &mut usize,
     api_key: String,
     graph_ref: String,
     composition_id: Option<String>,
@@ -151,9 +154,20 @@ pub(crate) async fn fetch_supergraph(
     let response = match url {
         Some(url) => http_request(url.as_str(), &request_body).await?,
         None => match http_request(GCP_URL, &request_body).await {
-            Ok(response) => response,
+            Ok(response) => {
+                if *nb_errors > 0 {
+                    *nb_errors = 0;
+                    tracing::info!("successfully retrieved the schema from GCP");
+                }
+                response
+            }
             Err(e) => {
-                tracing::debug!("could not get schema from GCP, trying AWS: {:?}", e);
+                if *nb_errors == 3 {
+                    tracing::error!("could not get schema from GCP, trying AWS: {:?}", e);
+                } else {
+                    tracing::debug!("could not get schema from GCP, trying AWS: {:?}", e);
+                }
+                *nb_errors += 1;
                 http_request(AWS_URL, &request_body).await?
             }
         },

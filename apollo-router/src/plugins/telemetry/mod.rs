@@ -6,6 +6,7 @@ use std::error::Error as Errors;
 use std::fmt;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering;
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
@@ -177,14 +178,34 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
     Ok(builder)
 }
 
+fn run_with_timeout<F, T>(f: F, timeout: Duration) -> Result<T, mpsc::RecvTimeoutError>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || tx.send(f()));
+
+    rx.recv_timeout(timeout)
+}
+
+const TRACER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
 impl Drop for Telemetry {
     fn drop(&mut self) {
         ::tracing::debug!("dropping telemetry...");
         let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
         if count < 2 {
-            std::thread::spawn(|| {
-                opentelemetry::global::shutdown_tracer_provider();
-            });
+            // We don't want telemetry to drop until the shutdown completes,
+            // but we also don't want to wait forever. Let's allow 5 seconds
+            // for now.
+            // We log errors as warnings
+            if let Err(e) = run_with_timeout(
+                opentelemetry::global::shutdown_tracer_provider,
+                TRACER_SHUTDOWN_TIMEOUT,
+            ) {
+                ::tracing::warn!("tracer shutdown failed: {:?}", e);
+            }
         }
     }
 }
@@ -1413,7 +1434,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
         crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
@@ -1426,7 +1447,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn attribute_serialization() {
         crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &serde_json::json!({
@@ -1636,7 +1657,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.telemetry")
+            .find(|factory| factory.name == "apollo.telemetry")
             .expect("Plugin not found")
             .create_instance(
                 &Value::from_str(

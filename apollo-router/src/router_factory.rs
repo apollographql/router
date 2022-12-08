@@ -4,6 +4,7 @@ use std::sync::Arc;
 use axum::response::IntoResponse;
 use http::StatusCode;
 use multimap::MultiMap;
+use once_cell::sync::Lazy;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
@@ -16,6 +17,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
+use crate::plugin::PluginFactory;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::NewService;
@@ -184,7 +186,7 @@ async fn create_plugins(
     ];
 
     let mut errors = Vec::new();
-    let plugin_registry = crate::plugin::plugins();
+    let plugin_registry: Vec<&'static Lazy<PluginFactory>> = crate::plugin::plugins().collect();
     let mut plugin_instances = Vec::new();
     let extra = extra_plugins.unwrap_or_default();
 
@@ -194,7 +196,7 @@ async fn create_plugins(
             continue;
         }
 
-        match plugin_registry.get(name.as_str()) {
+        match plugin_registry.iter().find(|factory| factory.name == name) {
             Some(factory) => {
                 tracing::debug!(
                     "creating plugin: '{}' with configuration:\n{:#}",
@@ -241,7 +243,10 @@ async fn create_plugins(
             }
             None => {
                 // Didn't find it, insert
-                match plugin_registry.get(*name) {
+                match plugin_registry
+                    .iter()
+                    .find(|factory| factory.name == **name)
+                {
                     // Create an instance
                     Some(factory) => {
                         // Create default (empty) config
