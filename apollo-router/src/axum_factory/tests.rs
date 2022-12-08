@@ -21,6 +21,7 @@ use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
 use http_body::Body;
+use mime::APPLICATION_JSON;
 use mockall::mock;
 use multimap::MultiMap;
 use reqwest::header::ACCEPT;
@@ -204,8 +205,14 @@ async fn init(
         .await
         .expect("Failed to create server factory");
     let mut default_headers = HeaderMap::new();
-    default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    default_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
+    default_headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
 
     let client = reqwest::Client::builder()
         .default_headers(default_headers)
@@ -251,8 +258,14 @@ pub(super) async fn init_with_config(
         )
         .await?;
     let mut default_headers = HeaderMap::new();
-    default_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    default_headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
+    default_headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+    );
 
     let client = reqwest::Client::builder()
         .default_headers(default_headers)
@@ -453,7 +466,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
 
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE),
-        Some(&HeaderValue::from_static("application/json"))
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
     );
     assert_eq!(
         response.headers().get(&CONTENT_ENCODING),
@@ -581,7 +594,7 @@ async fn response() -> Result<(), ApolloRouterError> {
 
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE),
-        Some(&HeaderValue::from_static("application/json"))
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
     );
 
     assert_eq!(
@@ -999,7 +1012,7 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
     let response = client
         .post(url.as_str())
         .header(ACCEPT, "foo/bar")
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .body(json!({ "query": query, "operationName": operation_name }).to_string())
         .send()
         .await
@@ -1418,7 +1431,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
-        Some(&HeaderValue::from_static("application/json"))
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
     );
 
     assert_eq!(
@@ -1674,8 +1687,10 @@ async fn http_compressed_service() -> impl Service<
 
     let service = http_client::response_decompression(service)
         .map_request(|mut req: http::Request<hyper::Body>| {
-            req.headers_mut()
-                .append(ACCEPT, HeaderValue::from_static("application/json"));
+            req.headers_mut().append(
+                ACCEPT,
+                HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+            );
             req
         })
         .map_future(|future| async {

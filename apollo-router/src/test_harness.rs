@@ -212,7 +212,7 @@ impl<'a> TestHarness<'a> {
         Ok((config, supergraph_creator))
     }
 
-    /// Builds the GraphQL service
+    /// Builds the supergraph service
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, supergraph_creator) = self.build_common().await?;
 
@@ -224,7 +224,7 @@ impl<'a> TestHarness<'a> {
         .boxed_clone())
     }
 
-    /// Builds the GraphQL service
+    /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config);

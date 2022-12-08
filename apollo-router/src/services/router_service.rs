@@ -20,6 +20,7 @@ use http::Method;
 use http::StatusCode;
 use http_body::Body as _;
 use hyper::Body;
+use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
 use tower::Layer;
@@ -28,11 +29,14 @@ use tower::ServiceExt;
 use tower_service::Service;
 
 use super::layers::content_negociation;
+use super::layers::content_negociation::ACCEPTS_JSON_CONTEXT_KEY;
+use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
+use super::layers::content_negociation::ACCEPTS_WILDCARD_CONTEXT_KEY;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::supergraph;
-use super::StuffThatHasPlugins;
+use super::HasPlugins;
 #[cfg(test)]
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
@@ -40,7 +44,6 @@ use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::content_negociation::APPLICATION_JSON_HEADER_VALUE;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::Configuration;
 use crate::Endpoint;
@@ -183,18 +186,18 @@ where
                 };
 
                 let SupergraphResponse { response, context } =
-                    supergraph_service.oneshot(request).await.unwrap();
+                    supergraph_service.oneshot(request).await?;
 
                 let accepts_wildcard: bool = context
-                    .get("accepts-wildcard")
+                    .get(ACCEPTS_WILDCARD_CONTEXT_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
                 let accepts_json: bool = context
-                    .get("accepts-json")
+                    .get(ACCEPTS_JSON_CONTEXT_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
                 let accepts_multipart: bool = context
-                    .get("accepts-multipart")
+                    .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
 
@@ -217,9 +220,10 @@ where
                     Some(response) => {
                         if !response.has_next.unwrap_or(false) && (accepts_json || accepts_wildcard)
                         {
-                            parts
-                                .headers
-                                .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                            parts.headers.insert(
+                                CONTENT_TYPE,
+                                HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+                            );
                             tracing::trace_span!("serialize_response").in_scope(|| {
                                 let body = serde_json::to_string(&response)?;
                                 Ok(router::Response {
@@ -289,7 +293,7 @@ where
                                     .body(Body::from(
                                         format!(
                                             r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                            APPLICATION_JSON_HEADER_VALUE,
+                                            APPLICATION_JSON.essence_str(),
                                             GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                                             MULTIPART_DEFER_CONTENT_TYPE
                                         )
@@ -335,7 +339,7 @@ where
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
 where
-    SF: StuffThatHasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -349,7 +353,7 @@ where
 
 impl<SF> RouterFactory for RouterCreator<SF>
 where
-    SF: StuffThatHasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -373,7 +377,7 @@ where
 
 impl<SF> RouterCreator<SF>
 where
-    SF: StuffThatHasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -413,11 +417,11 @@ where
 #[cfg(test)]
 mod tests {
     use http::Uri;
+    use mime::APPLICATION_JSON;
     use serde_json_bytes::json;
 
     use super::*;
     use crate::plugin::test::MockSubgraph;
-    use crate::services::layers::content_negociation::APPLICATION_JSON_HEADER_VALUE;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
     use crate::Context;
@@ -497,7 +501,7 @@ mod tests {
         let get_request = supergraph::Request::builder()
             .query(query)
             .operation_name(operation_name)
-            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .uri(Uri::from_static("/"))
             .method(Method::GET)
             .context(Context::new())
@@ -512,7 +516,7 @@ mod tests {
         let post_request = supergraph::Request::builder()
             .query(query)
             .operation_name(operation_name)
-            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .uri(Uri::from_static("/"))
             .method(Method::POST)
             .context(Context::new())

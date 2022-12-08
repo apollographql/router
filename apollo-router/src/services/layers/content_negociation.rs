@@ -13,6 +13,7 @@ use mediatype::names::MULTIPART;
 use mediatype::names::_STAR;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
+use mime::APPLICATION_JSON;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
@@ -26,8 +27,10 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 
-pub(crate) const APPLICATION_JSON_HEADER_VALUE: &str = "application/json";
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
+pub(crate) const ACCEPTS_WILDCARD_CONTEXT_KEY: &str = "content-negociation:accepts-wildcard";
+pub(crate) const ACCEPTS_MULTIPART_CONTEXT_KEY: &str = "content-negociation:accepts-multipart";
+pub(crate) const ACCEPTS_JSON_CONTEXT_KEY: &str = "content-negociation:accepts-json";
 
 /// [`Layer`] for Content-Type checks implementation.
 #[derive(Clone)]
@@ -50,7 +53,8 @@ where
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .body(hyper::Body::from(format!(
                             r#"'content-type' header can't be different from {:?} or {:?}"#,
-                            APPLICATION_JSON_HEADER_VALUE, GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                            APPLICATION_JSON.essence_str(),
+                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                         )))
                         .expect("cannot fail");
 
@@ -62,12 +66,14 @@ where
 
                 if accepts_wildcard || accepts_multipart || accepts_json {
                     req.context
-                        .insert("accepts-wildcard", accepts_wildcard)
+                        .insert(ACCEPTS_WILDCARD_CONTEXT_KEY, accepts_wildcard)
                         .unwrap();
                     req.context
-                        .insert("accepts-multipart", accepts_multipart)
+                        .insert(ACCEPTS_MULTIPART_CONTEXT_KEY, accepts_multipart)
                         .unwrap();
-                    req.context.insert("accepts-json", accepts_json).unwrap();
+                    req.context
+                        .insert(ACCEPTS_JSON_CONTEXT_KEY, accepts_json)
+                        .unwrap();
 
                     Ok(ControlFlow::Continue(req))
                 } else {
@@ -75,7 +81,7 @@ where
                             hyper::Body::from(
                             format!(
                                 r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                APPLICATION_JSON_HEADER_VALUE,
+                                APPLICATION_JSON.essence_str(),
                                 GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                                 MULTIPART_DEFER_CONTENT_TYPE
                             )
@@ -106,22 +112,23 @@ where
         service
             .map_first_graphql_response(|context, mut parts, res| {
                 let accepts_wildcard: bool = context
-                    .get("accepts-wildcard")
+                    .get(ACCEPTS_WILDCARD_CONTEXT_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
                 let accepts_json: bool = context
-                    .get("accepts-json")
+                    .get(ACCEPTS_JSON_CONTEXT_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
                 let accepts_multipart: bool = context
-                    .get("accepts-multipart")
+                    .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
                     .unwrap_or_default()
                     .unwrap_or_default();
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
-                    parts
-                        .headers
-                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                    parts.headers.insert(
+                        CONTENT_TYPE,
+                        HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+                    );
                 } else if accepts_multipart {
                     parts.headers.insert(
                         CONTENT_TYPE,
@@ -235,7 +242,10 @@ mod tests {
     #[test]
     fn it_checks_accept_header() {
         let mut default_headers = HeaderMap::new();
-        default_headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        default_headers.insert(
+            ACCEPT,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
         default_headers.append(ACCEPT, HeaderValue::from_static("foo/bar"));
         assert!(accepts_json(&default_headers));
 

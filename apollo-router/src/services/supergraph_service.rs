@@ -19,6 +19,7 @@ use tracing_futures::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
+use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
 use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
@@ -191,7 +192,7 @@ where
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
 
             let accepts_multipart: bool = context
-                .get("accepts-multipart")
+                .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
                 .unwrap_or_default()
                 .unwrap_or_default();
 
@@ -399,11 +400,11 @@ pub(crate) struct SupergraphCreator {
     plugins: Arc<Plugins>,
 }
 
-pub(crate) trait StuffThatHasPlugins {
+pub(crate) trait HasPlugins {
     fn plugins(&self) -> Arc<Plugins>;
 }
 
-impl StuffThatHasPlugins for SupergraphCreator {
+impl HasPlugins for SupergraphCreator {
     fn plugins(&self) -> Arc<Plugins> {
         self.plugins.clone()
     }
@@ -500,7 +501,7 @@ impl MockSupergraphCreator {
 }
 
 #[cfg(test)]
-impl StuffThatHasPlugins for MockSupergraphCreator {
+impl HasPlugins for MockSupergraphCreator {
     fn plugins(&self) -> Arc<Plugins> {
         self.plugins.clone()
     }

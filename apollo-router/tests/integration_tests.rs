@@ -23,6 +23,7 @@ use http::Uri;
 use insta::internals::Content;
 use insta::internals::Redaction;
 use maplit::hashmap;
+use mime::APPLICATION_JSON;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
@@ -173,7 +174,7 @@ async fn queries_should_work_over_get() {
         .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
         .variable("topProductsFirst", 2_usize)
         .variable("reviewsForAuthorAuthorId", 1_usize)
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .uri(Uri::from_static("/"))
         .method(Method::GET)
         .context(Context::new())
@@ -211,7 +212,7 @@ async fn simple_queries_should_not_work() {
         .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
         .variable("topProductsFirst", 2_usize)
         .variable("reviewsForAuthorAuthorId", 1_usize)
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .uri(Uri::from_static("/"))
         .method(Method::GET)
         .context(Context::new())
@@ -245,7 +246,7 @@ async fn queries_should_work_with_compression() {
         .variable("topProductsFirst", 2_i32)
         .variable("reviewsForAuthorAuthorId", 1_i32)
         .method(Method::POST)
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .header("accept-encoding", "gzip")
         .build()
         .expect("expecting valid request");
@@ -329,7 +330,7 @@ async fn mutation_should_not_work_over_get() {
         )
         .variable("topProductsFirst", 2_usize)
         .variable("reviewsForAuthorAuthorId", 1_usize)
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .uri(Uri::from_static("/"))
         .method(Method::GET)
         .context(Context::new())
@@ -741,7 +742,7 @@ async fn defer_query_without_accept() {
                 }
             }"#,
         )
-        .header(ACCEPT, "application/json")
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
         .build()
         .expect("expecting valid request");
 
@@ -916,20 +917,17 @@ async fn query_with_router(
     router: router::BoxCloneService,
     request: router::Request,
 ) -> graphql::Response {
-    serde_json::from_str(
-        dbg!(std::str::from_utf8(
-            router
-                .oneshot(request)
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice()
-        ))
-        .unwrap(),
+    serde_json::from_slice(
+        router
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
     )
     .unwrap()
 }

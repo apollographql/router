@@ -8,6 +8,7 @@ use http::method::Method;
 use http::HeaderValue;
 use http::StatusCode;
 use http::Uri;
+use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
@@ -105,7 +106,7 @@ impl Request {
         // Avoid testing requests getting blocked by the CSRF-prevention plugin
         headers
             .entry(http::header::CONTENT_TYPE.into())
-            .or_insert(HeaderValue::from_static("application/json").into());
+            .or_insert(HeaderValue::from_static(APPLICATION_JSON.essence_str()).into());
         Request::new(
             query,
             operation_name,

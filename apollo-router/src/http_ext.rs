@@ -13,6 +13,7 @@ use bytes::Bytes;
 use http::header;
 use http::header::HeaderName;
 use http::HeaderValue;
+use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 
 use crate::graphql;
@@ -442,7 +443,7 @@ impl IntoResponse for Response<graphql::Response> {
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
         parts.headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
         );
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))

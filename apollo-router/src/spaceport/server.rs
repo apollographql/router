@@ -5,6 +5,7 @@ use std::net::SocketAddr;
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use mime::APPLICATION_JSON;
 use prost::Message;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::Client;
@@ -119,7 +120,7 @@ impl ReportSpaceport {
             .header("X-Api-Key", key)
             .header("Content-Encoding", "gzip")
             .header(CONTENT_TYPE, "application/protobuf")
-            .header("Accept", "application/json")
+            .header("Accept", APPLICATION_JSON.essence_str())
             .header(
                 "User-Agent",
                 format!(

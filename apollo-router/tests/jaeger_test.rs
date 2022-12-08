@@ -16,6 +16,7 @@ use hyper::server::Server;
 use hyper::service::make_service_fn;
 use hyper::service::service_fn;
 use hyper::Body;
+use mime::APPLICATION_JSON;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::Span;
 use opentelemetry::trace::Tracer;
@@ -267,7 +268,7 @@ async fn subgraph() {
             std::str::from_utf8(&body_bytes).unwrap()
         );
         Ok(Response::builder()
-            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .status(StatusCode::OK)
             .body(
                 r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#
