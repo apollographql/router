@@ -35,8 +35,21 @@ impl From<http::Request<hyper::Body>> for Request {
     }
 }
 
+use displaydoc::Display;
+use thiserror::Error;
+
+#[derive(Error, Display, Debug)]
+pub enum ParseError {
+    /// couldn't create a valid http GET uri '{0}'
+    InvalidUri(http::uri::InvalidUri),
+    /// couldn't urlencode the GraphQL request body '{0}'
+    UrlEncodeError(serde_urlencoded::ser::Error),
+    /// couldn't serialize the GraphQL request body '{0}'
+    SerializationError(serde_json::Error),
+}
+
 impl TryFrom<supergraph::Request> for Request {
-    type Error = ();
+    type Error = ParseError;
     fn try_from(request: supergraph::Request) -> Result<Self, Self::Error> {
         let supergraph::Request {
             context,
@@ -56,15 +69,19 @@ impl TryFrom<supergraph::Request> for Request {
                 ),
                 ("variables", serde_json::to_string(&request.variables).ok()),
             ])
-            .unwrap();
+            .map_err(ParseError::UrlEncodeError)?;
 
-            parts.uri = format!("{}?{}", parts.uri, get_path).parse().unwrap();
+            parts.uri = format!("{}?{}", parts.uri, get_path)
+                .parse()
+                .map_err(ParseError::InvalidUri)?;
 
             http::Request::from_parts(parts, hyper::Body::empty())
         } else {
             http::Request::from_parts(
                 parts,
-                hyper::Body::from(serde_json::to_vec(&request).unwrap()),
+                hyper::Body::from(
+                    serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
+                ),
             )
         };
         Ok(Self {
