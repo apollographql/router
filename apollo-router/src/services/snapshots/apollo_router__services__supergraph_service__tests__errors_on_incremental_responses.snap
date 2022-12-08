@@ -1,11 +1,25 @@
 ---
 source: apollo-router/src/services/supergraph_service.rs
-expression: "std::str::from_utf8(&stream.next_response().await.unwrap().unwrap()).unwrap()"
+expression: stream.next_response().await.unwrap()
 ---
-
---graphql
-content-type: application/json
-
-{"data":{"currentUser":{"activeOrganization":{"id":"0","suborga":[{"id":"1"},{"id":"2"},{"id":"3"}]}}},"hasNext":true}
---graphql
-
+{
+  "data": {
+    "currentUser": {
+      "activeOrganization": {
+        "id": "0",
+        "suborga": [
+          {
+            "id": "1"
+          },
+          {
+            "id": "2"
+          },
+          {
+            "id": "3"
+          }
+        ]
+      }
+    }
+  },
+  "hasNext": true
+}
