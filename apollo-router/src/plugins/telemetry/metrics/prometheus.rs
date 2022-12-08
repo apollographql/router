@@ -109,7 +109,7 @@ impl Service<router::Request> for PrometheusService {
             Ok(http::Response::builder()
                 .status(StatusCode::OK)
                 .body::<hyper::Body>(result.into())
-                .unwrap() // TODO: can this fail ?
+                .map_err(BoxError::from)?
                 .into())
         })
     }

@@ -221,8 +221,7 @@ where
                                 .headers
                                 .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
                             tracing::trace_span!("serialize_response").in_scope(|| {
-                                // TODO: writer?
-                                let body = serde_json::to_string(&response).unwrap();
+                                let body = serde_json::to_string(&response)?;
                                 Ok(router::Response {
                                     response: http::Response::from_parts(parts, Body::from(body)),
                                     context,
@@ -239,7 +238,7 @@ where
                             let mut first_buf = Vec::from(
                                 &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
                             );
-                            serde_json::to_writer(&mut first_buf, &response).unwrap();
+                            serde_json::to_writer(&mut first_buf, &response)?;
                             if response.has_next.unwrap_or(false) {
                                 first_buf.extend_from_slice(b"\r\n--graphql\r\n");
                             } else {
@@ -250,7 +249,7 @@ where
                                 once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(|res| {
                                     let mut buf =
                                         Vec::from(&b"content-type: application/json\r\n\r\n"[..]);
-                                    serde_json::to_writer(&mut buf, &res).unwrap();
+                                    serde_json::to_writer(&mut buf, &res)?;
 
                                     // the last chunk has a different end delimiter
                                     if res.has_next.unwrap_or(false) {
