@@ -1,12 +1,16 @@
 //! Configuration for jaeger tracing.
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::trace::{BatchSpanProcessor, TracerProvider};
+use opentelemetry::sdk::trace::{Builder, Span, SpanProcessor};
+use opentelemetry::trace::TraceResult;
+use opentelemetry::Context;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use std::fmt::Debug;
 use tower::BoxError;
 use url::Url;
 
@@ -79,7 +83,7 @@ impl TracingConfigurator for Config {
             "configuring Jaeger tracing: {}",
             self.batch_processor.as_ref().cloned().unwrap_or_default()
         );
-        let exporter = match &self.endpoint {
+        match &self.endpoint {
             Endpoint::Agent { endpoint } => {
                 let socket = match endpoint {
                     AgentEndpoint::Default(_) => None,
@@ -90,42 +94,73 @@ impl TracingConfigurator for Config {
                         Some(socket_addr)
                     }
                 };
-                opentelemetry_jaeger::new_agent_pipeline()
+                let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
                     .with(&trace_config.service_name, |b, n| b.with_service_name(n))
                     .with(&socket, |b, s| b.with_endpoint(s))
-                    .build_async_agent_exporter(opentelemetry::runtime::Tokio)?
+                    .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
+                Ok(builder.with_span_processor(
+                    BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                        .with_batch_config(
+                            self.batch_processor
+                                .as_ref()
+                                .cloned()
+                                .unwrap_or_default()
+                                .into(),
+                        )
+                        .build()
+                        .filtered(),
+                ))
             }
             Endpoint::Collector {
-                // _endpoint,
-                // _username,
-                // _password,
+                endpoint,
+                username,
+                password,
                 ..
-            } =>
-                todo!("waiting for new release of OTel https://github.com/open-telemetry/opentelemetry-rust/issues/894")
-                // opentelemetry_jaeger::new_collector_pipeline()
-                // .with_trace_config(trace_config.into())
-                // .with(&trace_config.service_name, |b, n| b.with_service_name(n))
-                // .with(username, |b, u| b.with_username(u))
-                // .with(password, |b, p| b.with_password(p))
-                // .with_endpoint(&endpoint.to_string())
-                // .with(&self.scheduled_delay, |b, p| {
-                //     b.with_batch_processor_config(BatchConfig::default().with_scheduled_delay(*p))
-                // })
-                // .build_collector_exporter(opentelemetry::runtime::Tokio)?,
-        };
+            } => {
+                // We are waiting for a release of https://github.com/open-telemetry/opentelemetry-rust/issues/894
+                // Until that time we need to wrap a tracer provider with Jeager in.
+                let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()
+                    .with_trace_config(trace_config.into())
+                    .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+                    .with(username, |b, u| b.with_username(u))
+                    .with(password, |b, p| b.with_password(p))
+                    .with_endpoint(&endpoint.to_string())
+                    .with_reqwest()
+                    .with_batch_processor_config(
+                        self.batch_processor
+                            .as_ref()
+                            .cloned()
+                            .unwrap_or_default()
+                            .into(),
+                    )
+                    .build_batch(opentelemetry::runtime::Tokio)?;
+                Ok(builder.with_span_processor(DelegateSpanProcessor { tracer_provider }))
+            }
+        }
+    }
+}
 
-        Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_batch_config(
-                    self.batch_processor
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_default()
-                        .into(),
-                )
-                .build()
-                .filtered(),
-        ))
+#[derive(Debug)]
+struct DelegateSpanProcessor {
+    tracer_provider: TracerProvider,
+}
+
+impl SpanProcessor for DelegateSpanProcessor {
+    fn on_start(&self, span: &mut Span, cx: &Context) {
+        self.tracer_provider.span_processors()[0].on_start(span, cx)
+    }
+
+    fn on_end(&self, span: SpanData) {
+        self.tracer_provider.span_processors()[0].on_end(span)
+    }
+
+    fn force_flush(&self) -> TraceResult<()> {
+        self.tracer_provider.span_processors()[0].force_flush()
+    }
+
+    fn shutdown(&mut self) -> TraceResult<()> {
+        // It's safe to not call shutdown as dropping tracer_provider will cause shutdown to happen separately.
+        Ok(())
     }
 }
