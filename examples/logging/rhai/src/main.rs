@@ -13,6 +13,7 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::services::supergraph;
     use http::StatusCode;
@@ -52,7 +53,7 @@ mod tests {
             .configuration_json(config)
             .unwrap()
             .supergraph_hook(move |_| mock_service.clone().boxed())
-            .build()
+            .build_router()
             .await
             .unwrap();
 
@@ -64,10 +65,19 @@ mod tests {
 
         // ...And call our service stack with it
         let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name)
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
             .await
             .unwrap();
-        let response = service_response.next_response().await.unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
         assert_eq!(response.errors, []);
 
         // Rhai should return a 200...

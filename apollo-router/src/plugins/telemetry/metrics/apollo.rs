@@ -187,7 +187,7 @@ mod test {
         plugin.apollo_metrics_sender = Sender::Spaceport(tx);
         TestHarness::builder()
             .extra_plugin(plugin)
-            .build()
+            .build_router()
             .await?
             .oneshot(
                 SupergraphRequest::fake_builder()
@@ -196,12 +196,15 @@ mod test {
                     .query(query)
                     .and_operation_name(operation_name)
                     .and_context(context)
-                    .build()?,
+                    .build()?
+                    .try_into()
+                    .unwrap(),
             )
             .await
             .unwrap()
             .next_response()
             .await
+            .unwrap()
             .unwrap();
 
         let default_latency = Duration::from_millis(100);

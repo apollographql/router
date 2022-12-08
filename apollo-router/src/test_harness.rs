@@ -213,16 +213,16 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the GraphQL service
-    pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, supergraph_creator) = self.build_common().await?;
+    // pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
+    //     let (_config, supergraph_creator) = self.build_common().await?;
 
-        Ok(tower::service_fn(move |request| {
-            let router = supergraph_creator.make();
+    //     Ok(tower::service_fn(move |request| {
+    //         let router = supergraph_creator.make();
 
-            async move { router.oneshot(request).await }
-        })
-        .boxed_clone())
-    }
+    //         async move { router.oneshot(request).await }
+    //     })
+    //     .boxed_clone())
+    // }
 
     /// Builds the GraphQL service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
