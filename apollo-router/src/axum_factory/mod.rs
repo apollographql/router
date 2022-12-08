@@ -1,6 +1,5 @@
 //! axum factory is useful to create an [`AxumHttpServerFactory`] which implements [`crate::http_server_factory::HttpServerFactory`]
 mod axum_http_server_factory;
-mod handlers;
 mod listeners;
 #[cfg(test)]
 pub(crate) mod tests;
