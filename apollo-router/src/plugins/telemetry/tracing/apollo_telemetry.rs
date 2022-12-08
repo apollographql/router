@@ -27,7 +27,9 @@ use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry;
-use crate::plugins::telemetry::apollo::{Report, SingleReport};
+use crate::plugins::telemetry::apollo::Report;
+use crate::plugins::telemetry::apollo::SingleReport;
+use crate::plugins::telemetry::apollo_exporter::proto;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::http::Values;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ConditionNode;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferNode;
@@ -43,7 +45,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::S
 use crate::plugins::telemetry::apollo_exporter::proto::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::{proto, ApolloExportError, ApolloExporter};
+use crate::plugins::telemetry::apollo_exporter::ApolloExportError;
+use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config::ExposeTraceId;
 use crate::plugins::telemetry::config::Sampler;

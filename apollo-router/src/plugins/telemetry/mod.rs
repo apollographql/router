@@ -10,10 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-#[cfg(not(feature = "console"))]
-use crate::plugins::telemetry::formatters::filter_metric_events;
-#[cfg(not(feature = "console"))]
-use crate::plugins::telemetry::formatters::FilteringFormatter;
 use ::tracing::field;
 use ::tracing::info_span;
 #[cfg(not(feature = "console"))]
@@ -86,8 +82,11 @@ use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 #[cfg(not(feature = "console"))]
+use crate::plugins::telemetry::formatters::filter_metric_events;
+#[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::formatters::text::TextFormatter;
-
+#[cfg(not(feature = "console"))]
+use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;

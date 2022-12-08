@@ -1,7 +1,12 @@
 //! Configuration for jaeger tracing.
+use std::fmt::Debug;
+
 use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::trace::{BatchSpanProcessor, TracerProvider};
-use opentelemetry::sdk::trace::{Builder, Span, SpanProcessor};
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::Builder;
+use opentelemetry::sdk::trace::Span;
+use opentelemetry::sdk::trace::SpanProcessor;
+use opentelemetry::sdk::trace::TracerProvider;
 use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
 use schemars::gen::SchemaGenerator;
@@ -10,7 +15,6 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use std::fmt::Debug;
 use tower::BoxError;
 use url::Url;
 
