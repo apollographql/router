@@ -26,6 +26,7 @@ use futures::StreamExt;
 use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
@@ -93,6 +94,7 @@ use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spaceport::server::ReportSpaceport;
@@ -118,6 +120,7 @@ mod tracing;
 // Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
+pub(crate) const ROUTER_SPAN_NAME: &str = "router";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
@@ -216,6 +219,49 @@ impl Plugin for Telemetry {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Self::new_common::<Registry>(init.config, None).await
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        ServiceBuilder::new()
+            .instrument(|_| {
+                let trace_id = TraceId::maybe_new()
+                    .map(|t| t.to_string())
+                    .unwrap_or_default();
+
+                ::tracing::info_span!(ROUTER_SPAN_NAME,
+                    TRACE_ID_FIELD_NAME = %trace_id,
+                    "otel.kind" = %SpanKind::Internal
+                )
+            })
+            .map_future(|fut| {
+                let span = Span::current();
+                let start = Instant::now();
+
+                async move {
+                    let result: Result<router::Response, BoxError> = fut.await;
+
+                    span.record(
+                        "apollo_private.duration_ns",
+                        &(start.elapsed().as_nanos() as i64),
+                    );
+                    if let Ok(res) = &result {
+                        if res.response.status() >= StatusCode::BAD_REQUEST {
+                            span.record(
+                                "otel.status_code",
+                                &opentelemetry::trace::StatusCode::Error.as_str(),
+                            );
+                        } else {
+                            span.record(
+                                "otel.status_code",
+                                &opentelemetry::trace::StatusCode::Ok.as_str(),
+                            );
+                        }
+                    }
+                    result
+                }
+            })
+            .service(service)
+            .boxed()
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
