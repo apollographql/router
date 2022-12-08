@@ -97,17 +97,17 @@ where
             configuration.health_check.listen.clone(),
             Endpoint::new(
                 "/health".to_string(),
-                service_fn(move |_req: router::Request| {
+                service_fn(move |req: router::Request| {
                     let health = Health {
                         status: HealthStatus::Up,
                     };
-
                     async move {
-                        Ok(http::Response::builder()
-                            .body::<hyper::Body>(
+                        Ok(router::Response {
+                            response: http::Response::builder().body::<hyper::Body>(
                                 serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?
-                            .into())
+                            )?,
+                            context: req.context,
+                        })
                     }
                 })
                 .boxed(),
