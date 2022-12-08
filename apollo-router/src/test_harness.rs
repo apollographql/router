@@ -54,9 +54,9 @@ pub(crate) mod http_client;
 ///     .unwrap();
 /// let response = TestHarness::builder()
 ///     .configuration_json(config)?
-///     .build()
+///     .build_router()
 ///     .await?
-///     .oneshot(request)
+///     .oneshot(request.try_into().unwrap())
 ///     .await?
 ///     .next_response()
 ///     .await
