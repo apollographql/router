@@ -223,13 +223,16 @@ impl Plugin for Telemetry {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         ServiceBuilder::new()
-            .instrument(|_| {
+            .instrument(|request: &router::Request| {
                 let trace_id = TraceId::maybe_new()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
-
+                let router_request = &request.router_request;
                 ::tracing::info_span!(ROUTER_SPAN_NAME,
                     TRACE_ID_FIELD_NAME = %trace_id,
+                    "http.method" = %router_request.method(),
+                    "http.route" = %router_request.uri(),
+                    "http.flavor" = ?router_request.version(),
                     "otel.kind" = %SpanKind::Internal
                 )
             })
