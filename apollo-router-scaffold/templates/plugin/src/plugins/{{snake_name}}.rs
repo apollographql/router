@@ -164,6 +164,7 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 mod tests {
     use apollo_router::TestHarness;
     use apollo_router::services::supergraph;
+    use apollo_router::graphql;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -178,16 +179,17 @@ mod tests {
                 }
             }))
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
         let request = supergraph::Request::canned_builder().build().unwrap();
-        let mut streamed_response = test_harness.oneshot(request).await?;
+        let mut streamed_response = test_harness.oneshot(request.try_into()?).await?;
 
-        let first_response = streamed_response
-            .next_response()
-            .await
-            .expect("couldn't get primary response");
+        let first_response: graphql::Response =
+            serde_json::from_slice(streamed_response
+                .next_response()
+                .await
+                .expect("couldn't get primary response")?.to_vec().as_slice()).unwrap();
 
         assert!(first_response.data.is_some());
 

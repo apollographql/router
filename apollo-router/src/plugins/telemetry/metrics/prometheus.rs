@@ -100,17 +100,19 @@ impl Service<router::Request> for PrometheusService {
         Ok(()).into()
     }
 
-    fn call(&mut self, _req: router::Request) -> Self::Future {
+    fn call(&mut self, req: router::Request) -> Self::Future {
         let metric_families = self.registry.gather();
         Box::pin(async move {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
-            Ok(http::Response::builder()
-                .status(StatusCode::OK)
-                .body::<hyper::Body>(result.into())
-                .unwrap() // TODO: can this fail ?
-                .into())
+            Ok(router::Response {
+                response: http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body::<hyper::Body>(result.into())
+                    .map_err(BoxError::from)?,
+                context: req.context,
+            })
         })
     }
 }

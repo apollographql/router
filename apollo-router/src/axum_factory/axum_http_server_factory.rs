@@ -1,7 +1,6 @@
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use axum::extract::Extension;
 use axum::http::StatusCode;
@@ -29,7 +28,6 @@ use tower_http::compression::CompressionLayer;
 use tower_http::compression::DefaultPredicate;
 use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
-use tracing::Span;
 
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
@@ -45,14 +43,12 @@ use crate::configuration::ListenAddr;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
 use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::tracer::TraceId;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -97,17 +93,17 @@ where
             configuration.health_check.listen.clone(),
             Endpoint::new(
                 "/health".to_string(),
-                service_fn(move |_req: router::Request| {
+                service_fn(move |req: router::Request| {
                     let health = Health {
                         status: HealthStatus::Up,
                     };
-
                     async move {
-                        Ok(http::Response::builder()
-                            .body::<hyper::Body>(
+                        Ok(router::Response {
+                            response: http::Response::builder().body::<hyper::Body>(
                                 serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
-                            )?
-                            .into())
+                            )?,
+                            context: req.context,
+                        })
                     }
                 })
                 .boxed(),
@@ -287,32 +283,7 @@ where
 
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(PropagatingMakeSpan::new())
-                .on_request(|_: &Request<_>, span: &Span| {
-                    let trace_id = TraceId::maybe_new()
-                        .map(|t| t.to_string())
-                        .unwrap_or_default();
-
-                    span.record(TRACE_ID_FIELD_NAME, &trace_id.as_str());
-                })
-                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
-                    // Duration here is instant based
-                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
-                    if resp.status() >= StatusCode::BAD_REQUEST {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Error.as_str(),
-                        );
-                    } else {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Ok.as_str(),
-                        );
-                    }
-                }),
-        )
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan::new()))
         .layer(Extension(service_factory))
         .layer(cors)
         // Compress the response body, except for multipart responses such as with `@defer`.

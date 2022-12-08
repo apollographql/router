@@ -8,9 +8,6 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
-    "content-type": {
-      "type": "object"
-    },
     "cors": {
       "description": "Cross origin request headers.",
       "default": {
@@ -642,9 +639,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "redirect-html": {
-      "type": "object"
     },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",

@@ -94,27 +94,41 @@ mod tests {
     #[tokio::test]
     async fn test_map_first_graphql_response() {
         assert_eq!(
-            crate::TestHarness::builder()
-                .execution_hook(|service| {
-                    service
-                        .map_first_graphql_response(|_context, http_parts, mut graphql_response| {
-                            graphql_response
-                                .errors
-                                .push(graphql::Error::builder().message("oh no!").build());
-                            (http_parts, graphql_response)
-                        })
-                        .boxed()
-                })
-                .build()
-                .await
-                .unwrap()
-                .oneshot(supergraph::Request::canned_builder().build().unwrap())
-                .await
-                .unwrap()
-                .next_response()
-                .await
-                .unwrap()
-                .errors[0]
+            serde_json::from_slice::<graphql::Response>(
+                crate::TestHarness::builder()
+                    .execution_hook(|service| {
+                        service
+                            .map_first_graphql_response(
+                                |_context, http_parts, mut graphql_response| {
+                                    graphql_response
+                                        .errors
+                                        .push(graphql::Error::builder().message("oh no!").build());
+                                    (http_parts, graphql_response)
+                                },
+                            )
+                            .boxed()
+                    })
+                    .build_router()
+                    .await
+                    .unwrap()
+                    .oneshot(
+                        supergraph::Request::canned_builder()
+                            .build()
+                            .unwrap()
+                            .try_into()
+                            .unwrap()
+                    )
+                    .await
+                    .unwrap()
+                    .next_response()
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .to_vec()
+                    .as_slice()
+            )
+            .unwrap()
+            .errors[0]
                 .message,
             "oh no!"
         );

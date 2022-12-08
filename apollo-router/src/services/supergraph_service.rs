@@ -18,6 +18,7 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::layers::apq::APQLayer;
+use super::layers::content_negociation;
 use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
@@ -446,6 +447,7 @@ impl SupergraphCreator {
 
         ServiceBuilder::new()
             .layer(self.apq_layer.clone())
+            .layer(content_negociation::SupergraphLayer {})
             .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins

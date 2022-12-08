@@ -4,6 +4,7 @@ use bytes::Bytes;
 use futures::StreamExt;
 use http::header::HeaderName;
 use http::HeaderValue;
+use http::Method;
 use http::StatusCode;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
@@ -46,15 +47,59 @@ impl From<http::Request<hyper::Body>> for Request {
     }
 }
 
+use displaydoc::Display;
+use thiserror::Error;
+
+#[derive(Error, Display, Debug)]
+pub enum ParseError {
+    /// couldn't create a valid http GET uri '{0}'
+    InvalidUri(http::uri::InvalidUri),
+    /// couldn't urlencode the GraphQL request body '{0}'
+    UrlEncodeError(serde_urlencoded::ser::Error),
+    /// couldn't serialize the GraphQL request body '{0}'
+    SerializationError(serde_json::Error),
+}
+
+/// This is handy for tests.
 impl TryFrom<supergraph::Request> for Request {
-    type Error = ();
+    type Error = ParseError;
     fn try_from(request: supergraph::Request) -> Result<Self, Self::Error> {
-        // TODO: handle errors
+        let supergraph::Request {
+            context,
+            supergraph_request,
+        } = request;
+
+        let (mut parts, request) = supergraph_request.into_parts();
+
+        let router_request = if parts.method == Method::GET {
+            // get request
+            let get_path = serde_urlencoded::to_string(&[
+                ("query", request.query),
+                ("operationName", request.operation_name),
+                (
+                    "extensions",
+                    serde_json::to_string(&request.extensions).ok(),
+                ),
+                ("variables", serde_json::to_string(&request.variables).ok()),
+            ])
+            .map_err(ParseError::UrlEncodeError)?;
+
+            parts.uri = format!("{}?{}", parts.uri, get_path)
+                .parse()
+                .map_err(ParseError::InvalidUri)?;
+
+            http::Request::from_parts(parts, hyper::Body::empty())
+        } else {
+            http::Request::from_parts(
+                parts,
+                hyper::Body::from(
+                    serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
+                ),
+            )
+        };
         Ok(Self {
-            router_request: request
-                .supergraph_request
-                .map(|req| hyper::Body::from(serde_json::to_vec(&req).unwrap())),
-            context: request.context,
+            router_request,
+            context,
         })
     }
 }

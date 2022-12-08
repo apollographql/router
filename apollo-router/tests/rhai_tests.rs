@@ -1,3 +1,4 @@
+use apollo_router::graphql;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use tower::ServiceExt;
@@ -23,20 +24,26 @@ async fn all_rhai_callbacks_are_invoked() {
         .configuration_json(config)
         .unwrap()
         .schema(include_str!("./fixtures/supergraph.graphql"))
-        .build()
+        .build_router()
         .await
         .unwrap();
     let request = supergraph::Request::fake_builder()
         .query("{ topProducts { name } }")
         .build()
         .unwrap();
-    let _response = router
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
+    let _response: graphql::Response = serde_json::from_slice(
+        router
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
     dbg!(_response);
     for expected_log in [
         "supergraph_service setup",

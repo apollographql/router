@@ -51,6 +51,8 @@ pub(crate) use super::axum_http_server_factory::make_axum_router;
 use super::*;
 use crate::configuration::cors::Cors;
 use crate::configuration::HealthCheck;
+use crate::configuration::Homepage;
+use crate::configuration::Sandbox;
 use crate::configuration::Supergraph;
 use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
@@ -58,6 +60,8 @@ use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::static_page::home_page_content;
+use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service;
@@ -219,7 +223,7 @@ pub(super) async fn init_with_config(
             Future = BoxFuture<'static, router::ServiceResult>,
         > + Send
         + 'static,
-    conf: Configuration,
+    conf: Arc<Configuration>,
     web_endpoints: MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
     let server_factory = AxumHttpServerFactory::new();
@@ -240,7 +244,7 @@ pub(super) async fn init_with_config(
             TestRouterFactory {
                 inner: service.into_inner(),
             },
-            Arc::new(conf),
+            conf,
             None,
             vec![],
             web_endpoints,
@@ -306,80 +310,93 @@ async fn init_unix(
         .expect("Failed to create server factory")
 }
 
-// #[tokio::test]
-// async fn it_displays_sandbox() -> Result<(), ApolloRouterError> {
-//     let conf = Configuration::fake_builder()
-//         .sandbox(Sandbox::fake_builder().enabled(true).build())
-//         .homepage(Homepage::fake_builder().enabled(false).build())
-//         .supergraph(Supergraph::fake_builder().introspection(true).build())
-//         .build()
-//         .unwrap();
+#[tokio::test]
+async fn it_displays_sandbox() {
+    let conf = Arc::new(
+        Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .homepage(Homepage::fake_builder().enabled(false).build())
+            .supergraph(Supergraph::fake_builder().introspection(true).build())
+            .build()
+            .unwrap(),
+    );
 
-//     let router_service = router_service::from_supergraph_mock_callback(move |_| {
-//         panic!("this should never be called");
-//     })
-//     .await;
+    let router_service = router_service::from_supergraph_mock_callback_and_configuration(
+        move |_| {
+            panic!("this should never be called");
+        },
+        conf.clone(),
+    )
+    .await;
 
-//     let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new())
+        .await
+        .unwrap();
 
-//     // Regular studio redirect
-//     let response = client
-//         .get(&format!(
-//             "{}/",
-//             server.graphql_listen_address().as_ref().unwrap()
-//         ))
-//         .header(ACCEPT, "text/html")
-//         .send()
-//         .await
-//         .unwrap();
-//     assert_eq!(
-//         response.status(),
-//         StatusCode::OK,
-//         "{}",
-//         response.text().await.unwrap()
-//     );
-//     assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
+    // Regular studio redirect
+    let response = client
+        .get(&format!(
+            "{}/",
+            server.graphql_listen_address().as_ref().unwrap()
+        ))
+        .header(ACCEPT, "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "{}",
+        response.text().await.unwrap()
+    );
+    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+}
 
-//     Ok(())
-// }
+#[tokio::test]
+async fn it_displays_sandbox_with_different_supergraph_path() {
+    let conf = Arc::new(
+        Configuration::fake_builder()
+            .sandbox(Sandbox::fake_builder().enabled(true).build())
+            .homepage(Homepage::fake_builder().enabled(false).build())
+            .supergraph(
+                Supergraph::fake_builder()
+                    .introspection(true)
+                    .path("/custom")
+                    .build(),
+            )
+            .build()
+            .unwrap(),
+    );
 
-// #[tokio::test]
-// async fn it_displays_sandbox_with_different_supergraph_path() -> Result<(), ApolloRouterError> {
-//     let conf = Configuration::fake_builder()
-//         .sandbox(Sandbox::fake_builder().enabled(true).build())
-//         .homepage(Homepage::fake_builder().enabled(false).build())
-//         .supergraph(
-//             Supergraph::fake_builder()
-//                 .introspection(true)
-//                 .path("/custom")
-//                 .build(),
-//         )
-//         .build()
-//         .unwrap();
+    let router_service = router_service::from_supergraph_mock_callback_and_configuration(
+        move |_| {
+            panic!("this should never be called");
+        },
+        conf.clone(),
+    )
+    .await;
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new())
+        .await
+        .unwrap();
 
-//     let (server, client) =
-//         init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
-
-//     // Regular studio redirect
-//     let response = client
-//         .get(&format!(
-//             "{}/custom",
-//             server.graphql_listen_address().as_ref().unwrap()
-//         ))
-//         .header(ACCEPT, "text/html")
-//         .send()
-//         .await
-//         .unwrap();
-//     assert_eq!(
-//         response.status(),
-//         StatusCode::OK,
-//         "{}",
-//         response.text().await.unwrap()
-//     );
-//     assert_eq!(response.bytes().await.unwrap(), Sandbox::display_page());
-
-//     Ok(())
-// }
+    // Regular studio redirect
+    let response = client
+        .get(&format!(
+            "{}/custom",
+            server.graphql_listen_address().as_ref().unwrap()
+        ))
+        .header(ACCEPT, "text/html")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "{}",
+        response.text().await.unwrap()
+    );
+    assert_eq!(response.text().await.unwrap(), sandbox_page_content());
+}
 
 #[tokio::test]
 async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
@@ -635,7 +652,8 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+    let (server, client) =
+        init_with_config(router_service, Arc::new(conf), MultiMap::new()).await?;
     let url = format!(
         "{}/graphql",
         server.graphql_listen_address().as_ref().unwrap()
@@ -698,7 +716,8 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+    let (server, client) =
+        init_with_config(router_service, Arc::new(conf), MultiMap::new()).await?;
     let url = format!(
         "{}/prefix/graphql",
         server.graphql_listen_address().as_ref().unwrap()
@@ -762,7 +781,8 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         )
         .build()
         .unwrap();
-    let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
+    let (server, client) =
+        init_with_config(router_service, Arc::new(conf), MultiMap::new()).await?;
     for url in &[
         format!(
             "{}/graphql/test",
@@ -866,8 +886,12 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
 
     let response = client
         .request(
@@ -986,87 +1010,90 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
     server.shutdown().await
 }
 
-// #[test(tokio::test)]
-// async fn it_doesnt_display_disabled_sandbox() -> Result<(), ApolloRouterError> {
-//     let conf = Configuration::fake_builder()
-//         // sandbox is disabled by default, but homepage will take over if we dont disable it
-//         .homepage(
-//             crate::configuration::Homepage::fake_builder()
-//                 .enabled(false)
-//                 .build(),
-//         )
-//         .build()
-//         .unwrap();
+#[test(tokio::test)]
+async fn it_displays_homepage() {
+    let conf = Arc::new(Configuration::fake_builder().build().unwrap());
 
-//     let router_service = router_service::from_supergraph_mock_callback(|req| {
-//         Ok(SupergraphResponse::new_from_graphql_response(
-//             graphql::Response::builder()
-//                 .data(json!({"response": "test"}))
-//                 .build(),
-//             req.context,
-//         )
-//         .into())
-//     })
-//     .await;
+    let router_service = router_service::from_supergraph_mock_callback_and_configuration(
+        |req| {
+            Ok(SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(json!({"response": "test"}))
+                    .build(),
+                req.context,
+            ))
+        },
+        conf.clone(),
+    )
+    .await;
 
-//     let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
-//     let response = client
-//         .get(&format!(
-//             "{}/",
-//             server.graphql_listen_address().as_ref().unwrap()
-//         ))
-//         .header(ACCEPT, "text/html")
-//         .send()
-//         .await
-//         .unwrap();
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new())
+        .await
+        .unwrap();
+    let response = client
+        .get(&format!(
+            "{}/",
+            server.graphql_listen_address().as_ref().unwrap()
+        ))
+        .header(ACCEPT, "text/html")
+        .send()
+        .await
+        .unwrap();
 
-//     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.text().await.unwrap(), home_page_content());
+    server.shutdown().await.unwrap();
+}
 
-//     server.shutdown().await
-// }
+#[test(tokio::test)]
+async fn it_doesnt_display_disabled_homepage() {
+    let conf = Arc::new(
+        Configuration::fake_builder()
+            .homepage(
+                crate::configuration::Homepage::fake_builder()
+                    .enabled(false)
+                    .build(),
+            )
+            .build()
+            .unwrap(),
+    );
 
-// #[test(tokio::test)]
-// async fn it_doesnt_display_disabled_homepage() -> Result<(), ApolloRouterError> {
-//     let conf = Configuration::fake_builder()
-//         .homepage(
-//             crate::configuration::Homepage::fake_builder()
-//                 .enabled(false)
-//                 .build(),
-//         )
-//         .build()
-//         .unwrap();
+    let router_service = router_service::from_supergraph_mock_callback_and_configuration(
+        |req| {
+            Ok(SupergraphResponse::new_from_graphql_response(
+                graphql::Response::builder()
+                    .data(json!({"response": "test"}))
+                    .build(),
+                req.context,
+            ))
+        },
+        conf.clone(),
+    )
+    .await;
 
-//     let router_service = router_service::from_supergraph_mock_callback(|req| {
-//         Ok(SupergraphResponse::new_from_graphql_response(
-//             graphql::Response::builder()
-//                 .data(json!({"response": "test"}))
-//                 .build(),
-//             req.context,
-//         )
-//         .into())
-//     })
-//     .await;
+    let (server, client) = init_with_config(router_service, conf, MultiMap::new())
+        .await
+        .unwrap();
+    let response = client
+        .get(&format!(
+            "{}/",
+            server.graphql_listen_address().as_ref().unwrap()
+        ))
+        .header(ACCEPT, "text/html")
+        .header(ACCEPT, "*/*")
+        .send()
+        .await
+        .unwrap();
 
-//     let (server, client) = init_with_config(router_service, conf, MultiMap::new()).await?;
-//     let response = client
-//         .get(&format!(
-//             "{}/",
-//             server.graphql_listen_address().as_ref().unwrap()
-//         ))
-//         .header(ACCEPT, "text/html")
-//         .send()
-//         .await
-//         .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::BAD_REQUEST,
+        "{:?}",
+        response.text().await
+    );
 
-//     assert_eq!(
-//         response.status(),
-//         StatusCode::BAD_REQUEST,
-//         "{:?}",
-//         response.text().await
-//     );
-
-//     server.shutdown().await
-// }
+    server.shutdown().await.unwrap();
+}
 
 #[test(tokio::test)]
 async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
@@ -1099,7 +1126,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
 
     let conf = Configuration::fake_builder().build().unwrap();
     let (server, client) =
-        init_with_config(router_service::empty().await, conf, web_endpoints).await?;
+        init_with_config(router_service::empty().await, Arc::new(conf), web_endpoints).await?;
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
         let response = client
@@ -1205,7 +1232,7 @@ async fn it_refuses_to_bind_two_extra_endpoints_on_the_same_path() {
     );
 
     let conf = Configuration::fake_builder().build().unwrap();
-    let error = init_with_config(router_service::empty().await, conf, web_endpoints)
+    let error = init_with_config(router_service::empty().await, Arc::new(conf), web_endpoints)
         .await
         .unwrap_err();
 
@@ -1236,8 +1263,12 @@ async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
         .cors(Cors::builder().allow_any_origin(true).build())
         .build()
         .unwrap();
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
@@ -1258,8 +1289,12 @@ async fn cors_origin_list() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     let response = request_cors_with_origin(&client, url.as_str(), valid_origin).await;
@@ -1285,8 +1320,12 @@ async fn cors_origin_regex() -> Result<(), ApolloRouterError> {
         )
         .build()
         .unwrap();
-    let (server, client) =
-        init_with_config(router_service::empty().await, conf, MultiMap::new()).await?;
+    let (server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
 
     // regex tests
@@ -1979,9 +2018,13 @@ async fn test_health_check_custom_listener() {
         .unwrap();
 
     // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(router_service::empty().await, conf, MultiMap::new())
-        .await
-        .unwrap();
+    let (_server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await
+    .unwrap();
     let url = "http://localhost:4012/health";
 
     let response = client.get(url).send().await.unwrap();
@@ -2004,9 +2047,13 @@ async fn test_sneaky_supergraph_and_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build()) // here be dragons
         .build()
         .unwrap();
-    let error = init_with_config(router_service::empty().await, conf, MultiMap::new())
-        .await
-        .unwrap_err();
+    let error = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await
+    .unwrap_err();
 
     assert_eq!(
         "tried to register two endpoints on `127.0.0.1:0/health`",
@@ -2026,9 +2073,13 @@ async fn test_sneaky_supergraph_and_disabled_health_check_configuration() {
         .supergraph(Supergraph::fake_builder().path("/health").build())
         .build()
         .unwrap();
-    let _ = init_with_config(router_service::empty().await, conf, MultiMap::new())
-        .await
-        .unwrap();
+    let _ = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -2047,9 +2098,13 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         )
         .build()
         .unwrap();
-    let error = init_with_config(router_service::empty().await, conf, MultiMap::new())
-        .await
-        .unwrap_err();
+    let error = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await
+    .unwrap_err();
 
     assert_eq!(
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",

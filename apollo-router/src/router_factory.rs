@@ -123,7 +123,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        builder = builder.with_configuration(configuration);
+        builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
             let subgraph_service = match plugins
@@ -146,7 +146,10 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // We're good to go with the new service.
         let supergraph_creator = builder.build().await?;
 
-        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator)))
+        Ok(Self::RouterFactory::new(
+            Arc::new(supergraph_creator),
+            &configuration,
+        ))
     }
 }
 
@@ -219,8 +222,6 @@ pub(crate) async fn create_plugins(
         "apollo.include_subgraph_errors",
         "apollo.csrf",
         "apollo.telemetry",
-        "apollo.content-type",
-        "apollo.redirect-html",
     ];
 
     let mut errors = Vec::new();

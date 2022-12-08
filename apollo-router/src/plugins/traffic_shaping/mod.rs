@@ -498,9 +498,12 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        RouterCreator::new(Arc::new(builder.build().await.expect("should build")))
-            .make()
-            .boxed()
+        RouterCreator::new(
+            Arc::new(builder.build().await.expect("should build")),
+            &Configuration::default(),
+        )
+        .make()
+        .boxed()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {

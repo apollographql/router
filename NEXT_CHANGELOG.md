@@ -26,6 +26,8 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## 🐛 Fixes
+
 ### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
 
 [`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
@@ -33,8 +35,6 @@ mandate that a deferred response should not be sent if its path points to an ele
 in a previous payload.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
-
-## 🐛 Fixes
 
 ### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
 
@@ -55,3 +55,10 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
+
+## 📚 Documentation
+### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
+
+Added some yaml design guidance to help us create consistent yaml config for new and existing features.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2159

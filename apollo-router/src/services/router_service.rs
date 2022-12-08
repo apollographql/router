@@ -22,10 +22,13 @@ use http_body::Body as _;
 use hyper::Body;
 use multimap::MultiMap;
 use tower::BoxError;
+use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::layers::content_negociation;
+use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::supergraph;
@@ -36,9 +39,10 @@ use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
-use crate::plugins::content_type::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::content_negociation::APPLICATION_JSON_HEADER_VALUE;
+use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
 use crate::RouterRequest;
@@ -65,12 +69,13 @@ where
 }
 
 #[cfg(test)]
-pub(crate) async fn from_supergraph_mock_callback(
+pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
         + Send
         + Sync
         + 'static
         + Clone,
+    configuration: Arc<Configuration>,
 ) -> impl Service<
     router::Request,
     Response = router::Response,
@@ -86,10 +91,31 @@ pub(crate) async fn from_supergraph_mock_callback(
         supergraph_service
     });
 
-    RouterCreator::new(Arc::new(
-        SupergraphCreator::for_tests(supergraph_service).await,
-    ))
+    RouterCreator::new(
+        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        &configuration,
+    )
     .make()
+}
+
+#[cfg(test)]
+pub(crate) async fn from_supergraph_mock_callback(
+    supergraph_callback: impl FnMut(supergraph::Request) -> supergraph::ServiceResult
+        + Send
+        + Sync
+        + 'static
+        + Clone,
+) -> impl Service<
+    router::Request,
+    Response = router::Response,
+    Error = BoxError,
+    Future = BoxFuture<'static, router::ServiceResult>,
+> + Send {
+    from_supergraph_mock_callback_and_configuration(
+        supergraph_callback,
+        Arc::new(Configuration::default()),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -104,9 +130,10 @@ pub(crate) async fn empty() -> impl Service<
         .expect_clone()
         .returning(MockSupergraphService::new);
 
-    RouterCreator::new(Arc::new(
-        SupergraphCreator::for_tests(supergraph_service).await,
-    ))
+    RouterCreator::new(
+        Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
+        &Configuration::default(),
+    )
     .make()
 }
 
@@ -194,8 +221,7 @@ where
                                 .headers
                                 .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
                             tracing::trace_span!("serialize_response").in_scope(|| {
-                                // TODO: writer?
-                                let body = serde_json::to_string(&response).unwrap();
+                                let body = serde_json::to_string(&response)?;
                                 Ok(router::Response {
                                     response: http::Response::from_parts(parts, Body::from(body)),
                                     context,
@@ -212,7 +238,7 @@ where
                             let mut first_buf = Vec::from(
                                 &b"\r\n--graphql\r\ncontent-type: application/json\r\n\r\n"[..],
                             );
-                            serde_json::to_writer(&mut first_buf, &response).unwrap();
+                            serde_json::to_writer(&mut first_buf, &response)?;
                             if response.has_next.unwrap_or(false) {
                                 first_buf.extend_from_slice(b"\r\n--graphql\r\n");
                             } else {
@@ -223,7 +249,7 @@ where
                                 once(ready(Ok(Bytes::from(first_buf)))).chain(body.map(|res| {
                                     let mut buf =
                                         Vec::from(&b"content-type: application/json\r\n\r\n"[..]);
-                                    serde_json::to_writer(&mut buf, &res).unwrap();
+                                    serde_json::to_writer(&mut buf, &res)?;
 
                                     // the last chunk has a different end delimiter
                                     if res.has_next.unwrap_or(false) {
@@ -304,6 +330,7 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
+    static_page: StaticPageLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -352,8 +379,12 @@ where
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
         Send,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
-        Self { supergraph_creator }
+    pub(crate) fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
+        let static_page = StaticPageLayer::new(configuration);
+        Self {
+            supergraph_creator,
+            static_page,
+        }
     }
 
     pub(crate) fn make(
@@ -364,15 +395,18 @@ where
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = RouterService::new(self.supergraph_creator.clone());
+        let router_service = content_negociation::RouterLayer {}
+            .layer(RouterService::new(self.supergraph_creator.clone()));
 
-        ServiceBuilder::new().service(
-            self.supergraph_creator
-                .plugins()
-                .iter()
-                .rev()
-                .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
-        )
+        ServiceBuilder::new()
+            .layer(self.static_page.clone())
+            .service(
+                self.supergraph_creator
+                    .plugins()
+                    .iter()
+                    .rev()
+                    .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
+            )
     }
 }
 
@@ -383,7 +417,7 @@ mod tests {
 
     use super::*;
     use crate::plugin::test::MockSubgraph;
-    use crate::plugins::content_type::APPLICATION_JSON_HEADER_VALUE;
+    use crate::services::layers::content_negociation::APPLICATION_JSON_HEADER_VALUE;
     use crate::services::supergraph;
     use crate::test_harness::MockedSubgraphs;
     use crate::Context;
@@ -460,21 +494,19 @@ mod tests {
         .await;
 
         // get request
-        let get_path = format!(
-            "/?{}",
-            serde_urlencoded::to_string(&[("query", query), ("operationName", operation_name)])
-                .unwrap(),
-        );
-
-        let get_uri = Uri::builder().path_and_query(get_path).build().unwrap();
-
-        let get_request = http::Request::builder()
+        let get_request = supergraph::Request::builder()
+            .query(query)
+            .operation_name(operation_name)
+            .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+            .uri(Uri::from_static("/"))
             .method(Method::GET)
-            .uri(get_uri)
-            .body(hyper::Body::empty())
+            .context(Context::new())
+            .build()
+            .unwrap()
+            .try_into()
             .unwrap();
 
-        router_service.call(get_request.into()).await.unwrap();
+        router_service.call(get_request).await.unwrap();
 
         // post request
         let post_request = supergraph::Request::builder()
