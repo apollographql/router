@@ -1044,7 +1044,14 @@ impl ValueExt for Value {
 fn redact_dynamic() -> Redaction {
     insta::dynamic_redaction(|value, _path| {
         if let Some(value_slice) = value.as_slice() {
-            if value_slice.get(0).and_then(|v| v.as_str()) == Some("request.id") {
+            if value_slice
+                .get(0)
+                .and_then(|v| {
+                    v.as_str()
+                        .map(|s| ["request.id", "response_headers", "trace_id"].contains(&s))
+                })
+                .unwrap_or_default()
+            {
                 return Content::Seq(vec![
                     value_slice.get(0).unwrap().clone(),
                     Content::String("[REDACTED]".to_string()),
@@ -1054,12 +1061,6 @@ fn redact_dynamic() -> Redaction {
                 == Some("apollo_private.sent_time_offset")
             {
                 return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
-            }
-            if value_slice.get(0).and_then(|v| v.as_str()) == Some("response_headers") {
-                return Content::Seq(vec![
-                    value_slice.get(0).unwrap().clone(),
-                    Content::String("[REDACTED]".to_string()),
-                ]);
             }
         }
         value

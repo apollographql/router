@@ -229,7 +229,7 @@ impl Plugin for Telemetry {
                     .unwrap_or_default();
 
                 ::tracing::info_span!(ROUTER_SPAN_NAME,
-                    TRACE_ID_FIELD_NAME = %trace_id,
+                    "trace_id" = %trace_id,
                     "otel.kind" = %SpanKind::Internal
                 )
             })

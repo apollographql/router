@@ -22,8 +22,8 @@ expression: get_spans()
       "record": {
         "entries": [
           [
-            "TRACE_ID_FIELD_NAME",
-            "c2e2f43a06fd1362174a0a5ebdeceb4a"
+            "trace_id",
+            "[REDACTED]"
           ],
           [
             "otel.kind",
@@ -37,7 +37,7 @@ expression: get_spans()
           "module_path": "apollo_router::plugins::telemetry",
           "fields": {
             "names": [
-              "TRACE_ID_FIELD_NAME",
+              "trace_id",
               "otel.kind"
             ]
           }
