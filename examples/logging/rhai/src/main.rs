@@ -32,9 +32,10 @@ mod tests {
             mock_service
                 .expect_call()
                 .once()
-                .returning(move |_req: supergraph::Request| {
+                .returning(move |req: supergraph::Request| {
                     Ok(supergraph::Response::fake_builder()
                         .data(expected_mock_response_data)
+                        .context(req.context)
                         .build()
                         .unwrap())
                 });

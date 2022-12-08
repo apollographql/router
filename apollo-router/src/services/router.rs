@@ -48,6 +48,7 @@ pub enum ParseError {
     SerializationError(serde_json::Error),
 }
 
+/// This is handy for tests.
 impl TryFrom<supergraph::Request> for Request {
     type Error = ParseError;
     fn try_from(request: supergraph::Request) -> Result<Self, Self::Error> {
@@ -103,21 +104,6 @@ impl From<http::Response<hyper::Body>> for Response {
         Self {
             response,
             context: Context::new(),
-        }
-    }
-}
-
-impl From<supergraph::Response> for Response {
-    fn from(supergraph_response: supergraph::Response) -> Self {
-        let context = supergraph_response.context;
-        let (parts, http_body) = supergraph_response.response.into_parts();
-
-        let body =
-            hyper::Body::wrap_stream(http_body.map(|response| serde_json::to_vec(&response)));
-
-        Self {
-            response: http::Response::from_parts(parts, body),
-            context,
         }
     }
 }

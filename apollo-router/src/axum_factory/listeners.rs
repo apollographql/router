@@ -397,13 +397,13 @@ mod tests {
             .build()
             .unwrap();
 
-        let endpoint = service_fn(|_req: router::Request| async move {
-            Ok::<_, BoxError>(
-                http::Response::builder()
+        let endpoint = service_fn(|req: router::Request| async move {
+            Ok::<_, BoxError>(router::Response {
+                response: http::Response::builder()
                     .body::<hyper::Body>("this is a test".to_string().into())
-                    .unwrap()
-                    .into(),
-            )
+                    .unwrap(),
+                context: req.context,
+            })
         })
         .boxed();
 
@@ -436,13 +436,13 @@ mod tests {
             )
             .build()
             .unwrap();
-        let endpoint = service_fn(|_req: router::Request| async move {
-            Ok::<_, BoxError>(
-                http::Response::builder()
+        let endpoint = service_fn(|req: router::Request| async move {
+            Ok::<_, BoxError>(router::Response {
+                response: http::Response::builder()
                     .body::<hyper::Body>("this is a test".to_string().into())
-                    .unwrap()
-                    .into(),
-            )
+                    .unwrap(),
+                context: req.context,
+            })
         })
         .boxed();
 
