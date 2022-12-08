@@ -58,7 +58,6 @@ parameters:
     default: "1.33.0"
   protoc_version:
     type: string
-    # update this as new versions of jaeger become available
     default: "21.8"
 
 # These are common environment variables that we want to set on on all jobs.
