@@ -22,6 +22,18 @@ expression: get_spans()
       "record": {
         "entries": [
           [
+            "http.method",
+            "POST"
+          ],
+          [
+            "http.route",
+            "http://default/"
+          ],
+          [
+            "http.flavor",
+            "HTTP/1.1"
+          ],
+          [
             "trace_id",
             "[REDACTED]"
           ],
@@ -37,6 +49,9 @@ expression: get_spans()
           "module_path": "apollo_router::plugins::telemetry",
           "fields": {
             "names": [
+              "http.method",
+              "http.route",
+              "http.flavor",
               "trace_id",
               "otel.kind"
             ]
