@@ -28,6 +28,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 
+### Protoc now required to build ([Issue #1970](https://github.com/apollographql/router/issues/1970))
+
+Protoc is now required to build Apollo Router. Upgrading to Open Telemetry 0.18 has enabled us to upgrade tonic which in turn no longer bundles protoc.
+Users must install it themselves https://grpc.io/docs/protoc-installation/.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
 ### Jaeger scheduled_delay moved to batch_processor->scheduled_delay ([Issue #2232](https://github.com/apollographql/router/issues/2232))
 
 Jager config previously allowed configuration of scheduled_delay for batch span processor. To bring it in line with all other exporters this is now set using a batch_processor section.
