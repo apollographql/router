@@ -26,6 +26,61 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## ❗ BREAKING ❗
+
+### Jaeger scheduled_delay moved to batch_processor->scheduled_delay ([Issue #2232](https://github.com/apollographql/router/issues/2232))
+
+Jager config previously allowed configuration of scheduled_delay for batch span processor. To bring it in line with all other exporters this is now set using a batch_processor section.
+
+Before:
+```yaml
+telemetry:
+  tracing:
+    jaeger:
+      scheduled_delay: 100ms
+```
+
+After:
+```yaml
+telemetry:
+  tracing:
+    jaeger:
+      batch_processor:
+        scheduled_delay: 100ms
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
+## 🚀 Features
+### Tracing batch span processor is now configurable ([Issue #2232](https://github.com/apollographql/router/issues/2232))
+
+Exporting traces often requires performance tuning based on the throughput of the router, sampling settings and ingestion capability of tracing ingress.
+
+All exporters now support configuring the batch span processor in the router yaml. 
+```yaml
+telemetry:
+  apollo:
+    batch_processor:
+      scheduled_delay: 100ms
+      max_concurrent_exports: 1000
+      max_export_batch_size: 10000
+      max_export_timeout: 100s
+      max_queue_size: 10000
+  tracing:
+    jaeger|zipkin|otlp|datadog:
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
+```
+
+See the Open Telemetry docs for more information.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
+
 ## 🐛 Fixes
 
 ### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
@@ -55,6 +110,18 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
+
+### Upgrade OpenTelemetry to 0.18 ([Issue #1970](https://github.com/apollographql/router/issues/1970))
+
+Update to OpenTelemetry 0.18.
+
+By [@bryncooke](https://github.com/bryncooke) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1970
+
+### Remove spaceport ([Issue #2233](https://github.com/apollographql/router/issues/2233))
+
+Removal significantly simplifies telemetry code and likely to increase performance and reliability.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
