@@ -556,81 +556,65 @@ expression: "&schema"
             "url"
           ],
           "properties": {
-            "request": {
+            "stages": {
+              "default": null,
               "type": "object",
               "properties": {
-                "body": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "context": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "headers": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "sdl": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "stages": {
-                  "default": [],
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "RouterRequest",
-                      "RouterResponse",
-                      "SupergraphRequest",
-                      "SupergraphResponse",
-                      "ExecutionRequest",
-                      "ExecutionResponse",
-                      "SubgraphRequest",
-                      "SubgraphResponse"
-                    ]
-                  }
+                "router": {
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "context": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "headers": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "sdl": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "nullable": true
+                    },
+                    "response": {
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "context": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "headers": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "sdl": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "nullable": true
                 }
-              }
-            },
-            "response": {
-              "type": "object",
-              "properties": {
-                "body": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "context": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "headers": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "sdl": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "stages": {
-                  "default": [],
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "enum": [
-                      "RouterRequest",
-                      "RouterResponse",
-                      "SupergraphRequest",
-                      "SupergraphResponse",
-                      "ExecutionRequest",
-                      "ExecutionResponse",
-                      "SubgraphRequest",
-                      "SubgraphResponse"
-                    ]
-                  }
-                }
-              }
+              },
+              "nullable": true
             },
             "url": {
               "type": "string"

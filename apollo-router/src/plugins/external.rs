@@ -43,10 +43,8 @@ struct ExternalPlugin {
     sdl: Arc<String>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct BaseConf {
-    #[serde(default)]
-    stages: Vec<PipelineStep>,
     #[serde(default)]
     headers: bool,
     #[serde(default)]
@@ -57,14 +55,26 @@ struct BaseConf {
     sdl: bool,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+struct RouterStage {
+    #[serde(default)]
+    request: Option<BaseConf>,
+    #[serde(default)]
+    response: Option<BaseConf>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+struct Stages {
+    #[serde(default)]
+    router: Option<RouterStage>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
     // Put your plugin configuration here. It will automatically be deserialized from JSON.
     url: String, // The url you'd like to offload processing to
     #[serde(default)]
-    request: BaseConf,
-    #[serde(default)]
-    response: BaseConf,
+    stages: Option<Stages>,
 }
 
 #[async_trait::async_trait]
@@ -84,19 +94,30 @@ impl Plugin for ExternalPlugin {
         let future_config = self.configuration.clone();
 
         let future_sdl = self.sdl.clone();
-        let request_url = request_config.url.clone();
+        let request_url = self.configuration.url.clone();
         let future_url = future_config.url.clone();
 
-        let request_layer = if request_config
-            .request
+        let request_layer = if self
+            .configuration
             .stages
-            .contains(&PipelineStep::RouterRequest)
+            .as_ref()
+            .and_then(|x| x.router.as_ref())
+            .and_then(|x| x.request.as_ref())
+            .is_some()
         {
+            // Safe to unwrap here because we just confirmed that all optional elements are present
+            let my_config = request_config
+                .stages
+                .unwrap()
+                .router
+                .unwrap()
+                .request
+                .unwrap();
             Some(AsyncCheckpointLayer::new(
                 move |mut request: router::Request| {
                     let proto_url = request_url.clone();
                     let my_sdl = request_sdl.to_string();
-                    let my_config = request_config.clone();
+                    let my_config = my_config.clone();
                     async move {
                         // Call into our out of process processor with a body of our body
                         // First, extract the data we need from our request and prepare our
@@ -171,15 +192,26 @@ impl Plugin for ExternalPlugin {
             None
         };
 
-        let response_layer = if future_config
-            .response
+        let response_layer = if self
+            .configuration
             .stages
-            .contains(&PipelineStep::RouterResponse)
+            .as_ref()
+            .and_then(|x| x.router.as_ref())
+            .and_then(|x| x.response.as_ref())
+            .is_some()
         {
+            // Safe to unwrap here because we just confirmed that all optional elements are present
+            let my_config = future_config
+                .stages
+                .unwrap()
+                .router
+                .unwrap()
+                .response
+                .unwrap();
             Some(MapFutureLayer::new(move |fut| {
                 let proto_url = future_url.clone();
                 let my_sdl = future_sdl.to_string();
-                let my_config = future_config.clone();
+                let my_config = my_config.clone();
                 async move {
                     let mut response: router::Response = fut.await?;
 
@@ -265,7 +297,7 @@ type ExternalParams<'a> = (
 );
 
 fn prepare_external_params<'a>(
-    config: &'a Conf,
+    config: &'a BaseConf,
     headers: &'a HeaderMap<HeaderValue>,
     bytes: &'a Bytes,
     context: &'a Context,
@@ -278,18 +310,18 @@ fn prepare_external_params<'a>(
     let mut context_opt = None;
     let mut sdl_opt = None;
 
-    if config.request.body || config.request.headers {
-        if config.request.body {
+    if config.body || config.headers {
+        if config.body {
             payload_opt = Some(serde_json::from_slice(bytes)?);
         }
-        if config.request.headers {
+        if config.headers {
             headers_opt = Some(headers);
         }
     }
-    if config.request.context {
+    if config.context {
         context_opt = Some(context.clone());
     }
-    if config.request.sdl {
+    if config.sdl {
         sdl_opt = Some(sdl);
     }
     Ok((headers_opt, payload_opt, context_opt, sdl_opt))
