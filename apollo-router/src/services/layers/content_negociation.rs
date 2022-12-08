@@ -33,7 +33,7 @@ pub(crate) const ACCEPTS_MULTIPART_CONTEXT_KEY: &str = "content-negociation:acce
 pub(crate) const ACCEPTS_JSON_CONTEXT_KEY: &str = "content-negociation:accepts-json";
 
 /// [`Layer`] for Content-Type checks implementation.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct RouterLayer {}
 
 impl<S> Layer<S> for RouterLayer
@@ -96,7 +96,7 @@ where
 }
 
 /// [`Layer`] for Content-Type checks implementation.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct SupergraphLayer {}
 
 impl<S> Layer<S> for SupergraphLayer

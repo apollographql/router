@@ -86,14 +86,8 @@ pub(super) async fn decompress_request_body(
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(super) struct PropagatingMakeSpan;
-
-impl PropagatingMakeSpan {
-    pub(super) fn new() -> Self {
-        Self {}
-    }
-}
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {

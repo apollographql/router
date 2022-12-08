@@ -448,7 +448,7 @@ impl SupergraphCreator {
 
         ServiceBuilder::new()
             .layer(self.apq_layer.clone())
-            .layer(content_negociation::SupergraphLayer {})
+            .layer(content_negociation::SupergraphLayer::default())
             .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins
