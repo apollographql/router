@@ -59,11 +59,11 @@ pub(crate) enum Sender {
 }
 
 impl Sender {
-    pub(crate) fn send(&self, metrics: SingleReport) {
+    pub(crate) fn send(&self, report: SingleReport) {
         match &self {
             Sender::Noop => {}
             Sender::Apollo(channel) => {
-                if let Err(err) = channel.to_owned().try_send(metrics) {
+                if let Err(err) = channel.to_owned().try_send(report) {
                     tracing::warn!(
                         "could not send metrics to spaceport, metric will be dropped: {}",
                         err

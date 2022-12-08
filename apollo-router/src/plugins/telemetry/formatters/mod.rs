@@ -4,8 +4,6 @@ pub(crate) mod text;
 
 use std::fmt;
 
-pub(crate) use json::JsonFields;
-pub(crate) use text::TextFormatter;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatEvent;

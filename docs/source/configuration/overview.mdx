@@ -368,7 +368,7 @@ See [Tracing in the Apollo Router](./tracing/).
 ### Automatic persisted queries (APQ)
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
-The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release.
+The Apollo Router automatically supports APQ via its in-memory cache. See the [caching documentation](./caching) for related options.
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 

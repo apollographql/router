@@ -8,7 +8,6 @@ use opentelemetry::Key;
 use opentelemetry::Value;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
-use crate::plugins::telemetry::tracing::apollo_telemetry::SUBGRAPH_ATTRIBUTE_NAME;
 use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
@@ -24,6 +23,7 @@ const SPAN_NAMES: &[&str] = &[
 
 const BUSY_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("busy_ns");
 const IDLE_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("idle_ns");
+const SUBGRAPH_ATTRIBUTE_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 
 #[derive(Debug, Default)]
 pub(crate) struct Exporter {}
