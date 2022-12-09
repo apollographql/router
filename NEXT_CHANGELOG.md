@@ -148,7 +148,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 Rust MSRV incremented to 1.65.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221 and https://github.com/apollographql/router/pull/2240
 
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
