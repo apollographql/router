@@ -503,7 +503,7 @@ mod test {
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+        execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
 
     #[tokio::test]

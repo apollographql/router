@@ -129,7 +129,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-                .and_then(|plugin| (&*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
                 Some(shaping) => {
                     Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))

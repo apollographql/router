@@ -26,6 +26,23 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## 🚀 Features
+
+### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+
+Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+
+Example use from rhai as:
+
+```
+  response.headers["set-cookie"] = [
+    "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+    "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  ];
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
+
 ## 🐛 Fixes
 
 ### Change log level when we can't get the schema from GCP ([Issue #2004](https://github.com/apollographql/router/issues/2004))
@@ -61,6 +78,12 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
+
+### Update to Rust 1.65 ([Issue #2220](https://github.com/apollographql/router/issues/2220))
+
+Rust MSRV incremented to 1.65.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221
 
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))

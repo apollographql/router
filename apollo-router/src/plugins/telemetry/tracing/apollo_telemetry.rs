@@ -110,7 +110,7 @@ pub(crate) struct Exporter {
 enum TreeData {
     Request(Result<Box<crate::spaceport::Trace>, Error>),
     Supergraph {
-        http: Http,
+        http: Box<Http>,
         client_name: Option<String>,
         client_version: Option<String>,
         operation_signature: String,
@@ -210,7 +210,7 @@ impl Exporter {
     }
 
     fn extract_trace(&mut self, span: SpanData) -> Result<Box<crate::spaceport::Trace>, Error> {
-        self.extract_data_from_spans(&span, &span)?
+        self.extract_data_from_spans(&span)?
             .pop()
             .and_then(|node| {
                 if let TreeData::Request(trace) = node {
@@ -222,18 +222,14 @@ impl Exporter {
             .expect("root trace must exist because it is constructed on the request span, qed")
     }
 
-    fn extract_data_from_spans(
-        &mut self,
-        root_span: &SpanData,
-        span: &SpanData,
-    ) -> Result<Vec<TreeData>, Error> {
+    fn extract_data_from_spans(&mut self, span: &SpanData) -> Result<Vec<TreeData>, Error> {
         let (mut child_nodes, errors) = self
             .spans_by_parent_id
             .pop_entry(&span.span_context.span_id())
             .map(|(_, spans)| spans)
             .unwrap_or_default()
             .into_iter()
-            .map(|span| self.extract_data_from_spans(root_span, &span))
+            .map(|span| self.extract_data_from_spans(&span))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
                 match next {
                     Ok(mut children) => oks.append(&mut children),
@@ -315,7 +311,7 @@ impl Exporter {
             SUPERGRAPH_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
-                    http: extract_http_data(span, &self.expose_trace_id_config),
+                    http: Box::new(extract_http_data(span, &self.expose_trace_id_config)),
                     client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
                     client_version: span
                         .attributes
