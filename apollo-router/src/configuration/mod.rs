@@ -7,6 +7,7 @@ mod schema;
 mod tests;
 mod upgrade;
 mod yaml;
+mod experimental;
 
 use std::fmt;
 use std::net::IpAddr;
