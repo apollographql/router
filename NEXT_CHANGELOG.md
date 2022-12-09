@@ -149,7 +149,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 Update to OpenTelemetry 0.18.
 
-By [@bryncooke](https://github.com/bryncooke) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1970
+By [@bryncooke](https://github.com/bryncooke) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1970 and https://github.com/apollographql/router/pull/2236
 
 ### Remove spaceport ([Issue #2233](https://github.com/apollographql/router/issues/2233))
 
