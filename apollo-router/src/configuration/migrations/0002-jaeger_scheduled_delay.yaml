@@ -1,0 +1,6 @@
+description: telemetry.tracing.jaeger.scheduled_delay moved to telemetry.tracing.jaeger.batch_processor.scheduled_delay
+actions:
+  - type: move
+    from: telemetry.tracing.jaeger.scheduled_delay
+    to: telemetry.tracing.jaeger.batch_processor.scheduled_delay
+

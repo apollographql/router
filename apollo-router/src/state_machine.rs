@@ -316,10 +316,7 @@ where
                 .router_configurator
                 .create(configuration.clone(), schema.clone(), None, None)
                 .await
-                .map_err(|err| {
-                    tracing::error!("cannot create the router: {}", err);
-                    Errored(ApolloRouterError::ServiceCreationError(err))
-                })?;
+                .map_err(|err| Errored(ApolloRouterError::ServiceCreationError(err)))?;
 
             let web_endpoints = router_factory.web_endpoints();
 
