@@ -409,7 +409,6 @@ impl Telemetry {
         // we use the aggregate meter provider that is created below. It enables us to support
         // sending metrics to multiple providers at once, of which hopefully Apollo Studio is one.
         let mut builder = Self::create_metrics_exporters(&config)?;
-        opentelemetry::global::set_meter_provider(builder.meter_provider());
 
         // the global tracer and subscriber initialization step must be performed only once
         TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
