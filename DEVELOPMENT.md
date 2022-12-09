@@ -18,7 +18,7 @@ The **Apollo Router** is a configurable, high-performance **graph router** for a
 
 ## Development
 
-You will need a recent version of rust (`1.63` works well as of writing). 
+You will need a recent version of rust (`1.65` works well as of writing). 
 Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
 the recommended way to do it as it will install rustup, rustfmt and other 
 goodies that are not always included by default in other rust distribution channels:

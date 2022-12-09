@@ -144,6 +144,12 @@ Removal significantly simplifies telemetry code and likely to increase performan
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
+### Update to Rust 1.65 ([Issue #2220](https://github.com/apollographql/router/issues/2220))
+
+Rust MSRV incremented to 1.65.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221
+
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
 

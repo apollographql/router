@@ -241,7 +241,7 @@ impl Plugin for Telemetry {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        &usage_reporting.stats_report_key.as_str(),
+                        usage_reporting.stats_report_key.as_str(),
                     );
                 }
                 // To expose trace_id or not
@@ -675,7 +675,7 @@ impl Telemetry {
             if is_span_sampled() {
                 span.record(
                     "apollo_private.graphql.variables",
-                    &Self::filter_variables_values(
+                    Self::filter_variables_values(
                         &request.supergraph_request.body().variables,
                         &config.send_variable_values,
                     )
@@ -683,7 +683,7 @@ impl Telemetry {
                 );
                 span.record(
                     "apollo_private.http.request_headers",
-                    &Self::filter_headers(
+                    Self::filter_headers(
                         request.supergraph_request.headers(),
                         &config.send_headers,
                     )
@@ -1313,7 +1313,7 @@ impl ApolloFtv1Handler {
                 resp.response.body().extensions.get("ftv1")
             {
                 // Record the ftv1 trace for processing later
-                Span::current().record("apollo_private.ftv1", &ftv1.as_str());
+                Span::current().record("apollo_private.ftv1", ftv1.as_str());
             }
         }
         resp

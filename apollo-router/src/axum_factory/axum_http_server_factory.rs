@@ -315,11 +315,11 @@ where
                         .map(|t| t.to_string())
                         .unwrap_or_default();
 
-                    span.record(TRACE_ID_FIELD_NAME, &trace_id.as_str());
+                    span.record(TRACE_ID_FIELD_NAME, trace_id.as_str());
                 })
                 .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
                     // Duration here is instant based
-                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
+                    span.record("apollo_private.duration_ns", duration.as_nanos() as i64);
                     // otel.status_code now has to be a string rather than enum. See opentelemetry_tracing::layer::str_to_status
                     if resp.status() >= StatusCode::BAD_REQUEST {
                         span.record("otel.status_code", "error");
