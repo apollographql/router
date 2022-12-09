@@ -248,6 +248,12 @@ The headers of a request are accessible as a read/write indexed variable. The ke
 // You can interact with request.headers as an indexed variable
 request.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-my-new-header" with value "42"
 print(`${request.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
+// You can also set an header value from an array. Useful with the "set-cookie" header,
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+request.headers["set-cookie"] = [
+  "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+];
 // Rhai also supports extended dot notation for indexed variables, so this is equivalent
 request.headers.x-my-new-header = 42.to_string();
 ```

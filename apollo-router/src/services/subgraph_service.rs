@@ -212,7 +212,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         } else {
                             Err(BoxError::from(FetchError::SubrequestHttpError {
                                 service: service_name.clone(),
-                                reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
+                                reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})", APPLICATION_JSON.essence_str()),
                             }))
                         };
                     }
@@ -549,7 +549,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: \"text/html\")"
+            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: \"text/html\")"
         );
     }
 

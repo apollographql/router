@@ -192,7 +192,7 @@ mod test {
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
 
-        let plugins = create_plugins(&Configuration::default(), &*schema, None)
+        let plugins = create_plugins(&Configuration::default(), &schema, None)
             .await
             .unwrap();
 
@@ -229,7 +229,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+        execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -237,7 +237,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -245,7 +245,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({})).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -253,7 +253,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -262,7 +262,7 @@ mod test {
         let plugin =
             get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -271,7 +271,7 @@ mod test {
         let plugin =
             get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -282,7 +282,7 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -293,7 +293,7 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -304,7 +304,7 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -315,6 +315,6 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_ACCOUNT_QUERY, &*REDACTED_ACCOUNT_RESPONSE, router).await;
+        execute_router_test(ERROR_ACCOUNT_QUERY, &REDACTED_ACCOUNT_RESPONSE, router).await;
     }
 }
