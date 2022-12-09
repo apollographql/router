@@ -19,6 +19,7 @@ use url::Url;
 
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::tracing::parse_url_for_endpoint;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -33,6 +34,8 @@ pub(crate) struct Config {
     pub(crate) timeout: Option<Duration>,
     pub(crate) grpc: Option<GrpcExporter>,
     pub(crate) http: Option<HttpExporter>,
+
+    pub(crate) batch_processor: Option<BatchProcessorConfig>,
 }
 
 impl Config {

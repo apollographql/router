@@ -4,12 +4,10 @@ use std::path::PathBuf;
 pub fn main() -> Result<(), Box<dyn Error>> {
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     let src = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("src");
-    let proto_dir = src.join("spaceport").join("proto");
-    let agents = proto_dir.join("agents.proto");
+    let proto_dir = src.join("plugins").join("telemetry").join("proto");
     let reports_src = proto_dir.join("reports.proto");
     let reports_out = out_dir.join("reports.proto");
 
-    println!("cargo:rerun-if-changed={}", agents.to_str().unwrap());
     println!("cargo:rerun-if-changed={}", reports_src.to_str().unwrap());
 
     // Process the retrieved content to:
@@ -27,31 +25,30 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     std::fs::write(&reports_out, &content)?;
 
     // Process the proto files
-    let proto_files = [agents, reports_out];
+    let proto_files = [reports_out];
     tonic_build::configure()
         .field_attribute(
             "Trace.start_time",
-            "#[serde(serialize_with = \"crate::spaceport::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"crate::plugins::telemetry::apollo_exporter::serialize_timestamp\")]",
         )
         .field_attribute(
             "Trace.end_time",
-            "#[serde(serialize_with = \"crate::spaceport::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"crate::plugins::telemetry::apollo_exporter::serialize_timestamp\")]",
         )
         .field_attribute(
             "FetchNode.sent_time",
-            "#[serde(serialize_with = \"crate::spaceport::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"crate::plugins::telemetry::apollo_exporter::serialize_timestamp\")]",
         )
         .field_attribute(
             "FetchNode.received_time",
-            "#[serde(serialize_with = \"crate::spaceport::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"crate::plugins::telemetry::apollo_exporter::serialize_timestamp\")]",
         )
         .field_attribute(
             "Report.end_time",
-            "#[serde(serialize_with = \"crate::spaceport::serialize_timestamp\")]",
+            "#[serde(serialize_with = \"crate::plugins::telemetry::apollo_exporter::serialize_timestamp\")]",
         )
         .type_attribute(".", "#[derive(serde::Serialize)]")
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
-        .build_server(true)
         .compile(&proto_files, &[&out_dir, &proto_dir])?;
 
     Ok(())
