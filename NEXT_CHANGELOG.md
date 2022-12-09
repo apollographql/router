@@ -87,6 +87,20 @@ See the Open Telemetry docs for more information.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
+### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+
+Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+
+Example use from rhai as:
+
+```
+  response.headers["set-cookie"] = [
+    "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+    "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  ];
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
 
 ## 🐛 Fixes
 

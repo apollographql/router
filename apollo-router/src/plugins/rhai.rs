@@ -1186,6 +1186,18 @@ impl Rhai {
                 );
                 Ok(())
             })
+            // Register an additional setter which allows us to set multiple values for the same
+            // key
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: rhai::Array| {
+                let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+                for v in value {
+                    x.append(
+                        h_key.clone(),
+                        HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+                    );
+                }
+                Ok(())
+            })
             // Register a Context indexer so we can get/set context
             .register_indexer_get(
                 |x: &mut Context, key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
