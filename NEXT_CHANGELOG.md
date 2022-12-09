@@ -96,7 +96,7 @@ The router will "watch" your "rhai.scripts" directory for changes and prompt an 
 
 The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
 
-The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. However not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
+The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2198
 
