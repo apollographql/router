@@ -37,7 +37,7 @@ The most important goal is usability, so do break the rules if it makes sense, b
 
 1. [Avoid empty config](#avoid-empty-config).
 2. [Use `#[serde(default)]`](#use-serdedefault).
-3. [Do use `#[serde(deny_unknown_fields)]`](#do-use-serdedeny_unknown_fields).
+3. [Do use `#[serde(deny_unknown_fields)]`](#use-serdedenyunknownfields).
 4. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
 5. [Use consistent terminology](#use-consistent-terminology).
 6. [Don't use negative options](#dont-use-negative-options).
@@ -103,8 +103,8 @@ struct Export {
 export: # The user is not aware that url was defaulted.
 ```
 
-### Use `#[serde(default)]`.
-`#[serde(default="default_value_fn")` can be used to give fields defaults, and using this means that a generated json schema will also contain those defaults. The result of a default fn shoud be static.
+### Use `#[serde(default)]`
+`#[serde(default="default_value_fn")` can be used to give fields defaults, and using this means that a generated json schema will also contain those defaults. The result of a default fn should be static.
 
 #### GOOD
 ```rust
@@ -124,8 +124,9 @@ struct Export {
     password: String 
 }
 ```
+Take a look at `env_defaults` in `expansion.rs` to see how env variables should be defaulted.
 
-### Do use `#[serde(deny_unknown_fields)]`.
+### Use `#[serde(deny_unknown_fields)]`
 Every container that takes part in config should be annotated with `#[serde(deny_unknown_fields)]`. If not the user can make mistakes on their config and they they won't get errors.
 
 #### GOOD

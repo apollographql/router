@@ -1,59 +1,77 @@
 //! Configuration for apollo telemetry exporter.
-#[cfg(test)]
-use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex;
 // This entire file is license key functionality
+use std::error::Error;
+use std::fmt::Debug;
+use std::io::Write;
+use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 
-use async_trait::async_trait;
-use deadpool::managed;
-use deadpool::managed::Pool;
-use deadpool::managed::RecycleError;
-use deadpool::Runtime;
+use bytes::BytesMut;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
+use http::header::ACCEPT;
+use http::header::CONTENT_ENCODING;
+use http::header::CONTENT_TYPE;
+use http::header::USER_AGENT;
+use opentelemetry::ExportError;
+pub(crate) use prost::*;
+use reqwest::Client;
+use serde::ser::SerializeStruct;
+use serde_json::Value;
 use sys_info::hostname;
+use tokio::task::JoinError;
+use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
 use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
-use crate::spaceport::ReportHeader;
-use crate::spaceport::Reporter;
-use crate::spaceport::ReporterError;
-// use crate::plugins::telemetry::apollo::ReportBuilder;
 
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
-const DEADPOOL_SIZE: usize = 128;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
-pub(crate) const POOL_TIMEOUT: Duration = Duration::from_secs(5);
+const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
+
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum ApolloExportError {
+    #[error("Apollo exporter server error: {0}")]
+    ServerError(String),
+
+    #[error("Apollo exporter client error: {0}")]
+    ClientError(String),
+
+    #[error("Apollo exporter unavailable error: {0}")]
+    Unavailable(String),
+}
+
+impl ExportError for ApolloExportError {
+    fn exporter_name(&self) -> &'static str {
+        "ApolloExporter"
+    }
+}
 
 #[derive(Clone)]
 pub(crate) enum Sender {
     Noop,
-    Spaceport(mpsc::Sender<SingleReport>),
-    #[cfg(test)]
-    InMemory(Arc<Mutex<Vec<SingleReport>>>),
+    Apollo(mpsc::Sender<SingleReport>),
 }
 
 impl Sender {
     pub(crate) fn send(&self, report: SingleReport) {
         match &self {
             Sender::Noop => {}
-            Sender::Spaceport(channel) => {
+            Sender::Apollo(channel) => {
                 if let Err(err) = channel.to_owned().try_send(report) {
                     tracing::warn!(
                         "could not send metrics to spaceport, metric will be dropped: {}",
                         err
                     );
                 }
-            }
-            #[cfg(test)]
-            Sender::InMemory(storage) => {
-                storage.lock().expect("mutex poisoned").push(report);
             }
         }
     }
@@ -65,8 +83,16 @@ impl Default for Sender {
     }
 }
 
+/// The Apollo exporter is responsible for attaching report header information for individual requests
+/// Retrying when sending fails.
+/// Sending periodically (in the case of metrics).
+#[derive(Clone)]
 pub(crate) struct ApolloExporter {
-    tx: mpsc::Sender<SingleReport>,
+    endpoint: Url,
+    apollo_key: String,
+    header: crate::plugins::telemetry::apollo_exporter::proto::ReportHeader,
+    client: Client,
+    strip_traces: Arc<Mutex<bool>>,
 }
 
 impl ApolloExporter {
@@ -76,15 +102,7 @@ impl ApolloExporter {
         apollo_graph_ref: &str,
         schema_id: &str,
     ) -> Result<ApolloExporter, BoxError> {
-        let apollo_key = apollo_key.to_string();
-        // Desired behavior:
-        // * Metrics are batched with a timeout.
-        // * If we cannot connect to spaceport metrics are discarded and a warning raised.
-        // * When the stream of metrics finishes we terminate the task.
-        // * If the exporter is dropped the remaining records are flushed.
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
-
-        let header = crate::spaceport::ReportHeader {
+        let header = crate::plugins::telemetry::apollo_exporter::proto::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
             hostname: hostname()?,
             agent_version: format!(
@@ -98,35 +116,19 @@ impl ApolloExporter {
             ..Default::default()
         };
 
-        // Pool Sizing: by default Deadpool will configure a maximum
-        // pool size based on the number of physical CPUs:
-        //   `cpu_count * 4` ignoring any logical CPUs (Hyper-Threading).
-        // This is going to be very low in containerised environments
-        // For example, in my k8s testing I get max_size: 16
-        //
-        // Since we know we can support large numbers of connections to the
-        // data ingestion endpoint, I'm going to manually set this to
-        // be [`DEADPOOL_SIZE`] which should be plenty. I'm not setting
-        // it to be a very high number (e.g.: 100000), because resources
-        // are consumed and conserving them is important.
+        tracing::debug!("creating apollo exporter {}", endpoint);
 
-        //
-        // Deadpool gives us connection pooling to spaceport
-        // It also significantly simplifies initialisation of the connection and gives us options in the future for configuring timeouts.
-        let pool = deadpool::managed::Pool::<ReporterManager>::builder(ReporterManager {
+        Ok(ApolloExporter {
             endpoint: endpoint.clone(),
+            apollo_key: apollo_key.to_string(),
+            client: reqwest::Client::default(),
+            header,
+            strip_traces: Default::default(),
         })
-        .max_size(DEADPOOL_SIZE)
-        .create_timeout(Some(POOL_TIMEOUT))
-        .recycle_timeout(Some(POOL_TIMEOUT))
-        .wait_timeout(Some(POOL_TIMEOUT))
-        .runtime(Runtime::Tokio1)
-        .build()
-        .unwrap();
+    }
 
-        let spaceport_endpoint = endpoint.clone();
-        tracing::info!(%spaceport_endpoint, "creating apollo exporter");
-
+    pub(crate) fn start(self) -> Sender {
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
         // This is the task that actually sends metrics
         tokio::spawn(async move {
             let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
@@ -140,80 +142,131 @@ impl ApolloExporter {
                         if let Some(r) = single_report {
                             report += r;
                         } else {
-                            tracing::info!(%spaceport_endpoint, "terminating apollo exporter");
+                            tracing::debug!("terminating apollo exporter");
                             break;
                         }
                        },
                     _ = timeout.tick() => {
-                        Self::send_report(&pool, &apollo_key, &header, std::mem::take(&mut report)).await;
+                        if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
+                            tracing::error!("failed to submit Apollo report: {}", e)
+                        }
                     }
                 };
             }
 
-            Self::send_report(&pool, &apollo_key, &header, report).await;
+            if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
+                tracing::error!("failed to submit Apollo report: {}", e)
+            }
         });
-        Ok(ApolloExporter { tx })
+        Sender::Apollo(tx)
     }
 
-    pub(crate) fn provider(&self) -> Sender {
-        Sender::Spaceport(self.tx.clone())
-    }
+    pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
+        if report.operation_count == 0 {
+            return Ok(());
+        }
+        tracing::debug!("submitting report: {:?}", report);
+        // Protobuf encode message
+        let mut content = BytesMut::new();
+        let mut report = report.into_report(self.header.clone());
+        prost::Message::encode(&report, &mut content)
+            .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
+        // Create a gzip encoder
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        // Write our content to our encoder
+        encoder
+            .write_all(&content)
+            .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
+        // Finish encoding and retrieve content
+        let compressed_content = encoder
+            .finish()
+            .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
+        let mut backoff = Duration::from_millis(0);
 
-    async fn send_report(
-        pool: &Pool<ReporterManager>,
-        apollo_key: &str,
-        header: &ReportHeader,
-        report: Report,
-    ) {
-        if report.operation_count == 0 && report.traces_per_query.is_empty() {
-            return;
+        let req = self
+            .client
+            .post(self.endpoint.clone())
+            .body(compressed_content)
+            .header("X-Api-Key", self.apollo_key.clone())
+            .header(CONTENT_ENCODING, "gzip")
+            .header(CONTENT_TYPE, "application/protobuf")
+            .header(ACCEPT, "application/json")
+            .header(
+                USER_AGENT,
+                format!(
+                    "{} / {} usage reporting",
+                    std::env!("CARGO_PKG_NAME"),
+                    std::env!("CARGO_PKG_VERSION")
+                ),
+            )
+            .build()
+            .map_err(|e| ApolloExportError::Unavailable(e.to_string()))?;
+
+        let mut msg = "default error message".to_string();
+        let mut has_traces = false;
+
+        for (_, traces_and_stats) in report.traces_per_query.iter_mut() {
+            if !traces_and_stats.trace.is_empty()
+                || !traces_and_stats
+                    .internal_traces_contributing_to_stats
+                    .is_empty()
+            {
+                has_traces = true;
+                if *self.strip_traces.lock().expect("lock poisoned") {
+                    traces_and_stats.trace.clear();
+                    traces_and_stats
+                        .internal_traces_contributing_to_stats
+                        .clear();
+                }
+            }
         }
 
-        match pool.get().await {
-            Ok(mut reporter) => {
-                let report = report.into_report(header.clone());
-                match reporter
-                    .submit(crate::spaceport::ReporterRequest {
-                        apollo_key: apollo_key.to_string(),
-                        report: Some(report),
-                    })
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::warn!("failed to submit stats to spaceport: {}", e);
+        for i in 0..5 {
+            // We know these requests can be cloned
+            let task_req = req.try_clone().expect("requests must be clone-able");
+            match self.client.execute(task_req).await {
+                Ok(v) => {
+                    let status = v.status();
+                    let data = v
+                        .text()
+                        .await
+                        .map_err(|e| ApolloExportError::ServerError(e.to_string()))?;
+                    // Handle various kinds of status:
+                    //  - if client error, terminate immediately
+                    //  - if server error, it may be transient so treat as retry-able
+                    //  - if ok, return ok
+                    if status.is_client_error() {
+                        tracing::error!("client error reported at ingress: {}", data);
+                        return Err(ApolloExportError::ClientError(data));
+                    } else if status.is_server_error() {
+                        tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
+                        msg = data;
+                    } else {
+                        tracing::debug!("ingress response text: {:?}", data);
+                        if has_traces && !*self.strip_traces.lock().expect("lock poisoned") {
+                            // If we had traces then maybe disable sending traces from this exporter based on the response.
+                            if let Ok(response) = serde_json::Value::from_str(&data) {
+                                if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
+                                    tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
+                                    *self.strip_traces.lock().expect("lock poisoned") = true;
+                                }
+                            }
+                        }
+                        return Ok(());
                     }
-                };
+                }
+                Err(e) => {
+                    // TODO: Ultimately need more sophisticated handling here. For example
+                    // a redirect should not be treated the same way as a connect or a
+                    // type builder error...
+                    tracing::warn!("attempt: {}, could not transfer: {}", i + 1, e);
+                    msg = e.to_string();
+                }
             }
-            Err(err) => {
-                tracing::warn!(
-                    "stats discarded as unable to get connection to spaceport: {}",
-                    err
-                );
-            }
-        };
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct ReporterManager {
-    endpoint: Url,
-}
-
-#[async_trait]
-impl managed::Manager for ReporterManager {
-    type Type = Reporter;
-    type Error = ReporterError;
-
-    async fn create(&self) -> Result<Reporter, Self::Error> {
-        tracing::debug!("creating reporter: {:?}", self.endpoint);
-        let url = self.endpoint.to_string();
-        Reporter::try_new(url).await
-    }
-
-    async fn recycle(&self, r: &mut Reporter) -> managed::RecycleResult<Self::Error> {
-        tracing::debug!("recycling reporter: {:?}", r);
-        r.reconnect().await.map_err(RecycleError::Backend)
+            backoff += BACKOFF_INCREMENT;
+            tokio::time::sleep(backoff).await;
+        }
+        Err(ApolloExportError::Unavailable(msg))
     }
 }
 
@@ -238,4 +291,106 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
         "{}, {}, {}, {}, {}",
         sysname, nodename, release, version, machine
     ))
+}
+
+#[allow(unreachable_pub)]
+pub(crate) mod proto {
+    #![allow(clippy::derive_partial_eq_without_eq)]
+    tonic::include_proto!("report");
+}
+
+/// Reporting Error type
+#[derive(Debug)]
+pub(crate) struct ReporterError {
+    source: Box<dyn Error + Send + Sync + 'static>,
+    msg: String,
+}
+
+impl std::error::Error for ReporterError {}
+
+impl From<InvalidUri> for ReporterError {
+    fn from(error: InvalidUri) -> Self {
+        ReporterError {
+            msg: error.to_string(),
+            source: Box::new(error),
+        }
+    }
+}
+
+impl From<tonic::transport::Error> for ReporterError {
+    fn from(error: tonic::transport::Error) -> Self {
+        ReporterError {
+            msg: error.to_string(),
+            source: Box::new(error),
+        }
+    }
+}
+
+impl From<std::io::Error> for ReporterError {
+    fn from(error: std::io::Error) -> Self {
+        ReporterError {
+            msg: error.to_string(),
+            source: Box::new(error),
+        }
+    }
+}
+
+impl From<sys_info::Error> for ReporterError {
+    fn from(error: sys_info::Error) -> Self {
+        ReporterError {
+            msg: error.to_string(),
+            source: Box::new(error),
+        }
+    }
+}
+
+impl From<JoinError> for ReporterError {
+    fn from(error: JoinError) -> Self {
+        ReporterError {
+            msg: error.to_string(),
+            source: Box::new(error),
+        }
+    }
+}
+
+impl std::fmt::Display for ReporterError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "ReporterError: source: {}, message: {}",
+            self.source, self.msg
+        )
+    }
+}
+
+pub(crate) fn serialize_timestamp<S>(
+    timestamp: &Option<prost_types::Timestamp>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    match timestamp {
+        Some(ts) => {
+            let mut ts_strukt = serializer.serialize_struct("Timestamp", 2)?;
+            ts_strukt.serialize_field("seconds", &ts.seconds)?;
+            ts_strukt.serialize_field("nanos", &ts.nanos)?;
+            ts_strukt.end()
+        }
+        None => serializer.serialize_none(),
+    }
+}
+
+#[cfg(not(windows))] // git checkout converts \n to \r\n, making == below fail
+#[test]
+fn check_reports_proto_is_up_to_date() {
+    let proto_url = "https://usage-reporting.api.apollographql.com/proto/reports.proto";
+    let response = reqwest::blocking::get(proto_url).unwrap();
+    let content = response.text().unwrap();
+    // Not using assert_eq! as printing the entire file would be too verbose
+    assert!(
+        content == include_str!("proto/reports.proto"),
+        "Protobuf file is out of date. Run this command to update it:\n\n    \
+            curl -f {proto_url} > apollo-router/src/spaceport/proto/reports.proto\n\n"
+    );
 }

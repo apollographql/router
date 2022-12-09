@@ -1,5 +1,5 @@
-mod spaceport;
+mod studio;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    spaceport::main()
+    studio::main()
 }
