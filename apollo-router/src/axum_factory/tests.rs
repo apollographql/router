@@ -37,6 +37,7 @@ use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+#[cfg(unix)]
 use tokio::io::BufReader;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -1576,19 +1577,19 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&*first).unwrap(),
+            std::str::from_utf8(&first).unwrap(),
             "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
         );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&*second).unwrap(),
+            std::str::from_utf8(&second).unwrap(),
         "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
         );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-        std::str::from_utf8(&*third).unwrap(),
+        std::str::from_utf8(&third).unwrap(),
         "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
     );
 
@@ -1639,7 +1640,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&*first).unwrap(),
+            std::str::from_utf8(&first).unwrap(),
             "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":false}\r\n--graphql--\r\n"
         );
 

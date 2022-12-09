@@ -5,7 +5,6 @@
 //! Requests received by the router make their way through a processing pipeline. Each request is
 //! processed at:
 //!  - router
-//!  - query planning
 //!  - execution
 //!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
 //!  stages.
@@ -19,9 +18,8 @@ pub mod serde;
 pub mod test;
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
@@ -51,6 +49,10 @@ type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+
+/// Global list of plugins.
+#[linkme::distributed_slice]
+pub static PLUGINS: [Lazy<PluginFactory>] = [..];
 
 /// Initialise details for a plugin
 #[non_exhaustive]
@@ -91,13 +93,45 @@ where
 
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
-pub(crate) struct PluginFactory {
+pub struct PluginFactory {
+    pub(crate) name: String,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
 }
 
+impl fmt::Debug for PluginFactory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PluginFactory")
+            .field("name", &self.name)
+            .field("type_id", &self.type_id)
+            .finish()
+    }
+}
+
 impl PluginFactory {
+    /// Create a plugin factory.
+    pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
+        let plugin_factory_name = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}.{}", group, name)
+        };
+        tracing::debug!(%plugin_factory_name, "creating plugin factory");
+        PluginFactory {
+            name: plugin_factory_name,
+            instance_factory: |configuration, schema| {
+                Box::pin(async move {
+                    let init = PluginInit::try_new(configuration.clone(), schema)?;
+                    let plugin = P::new(init).await?;
+                    Ok(Box::new(plugin) as Box<dyn DynPlugin>)
+                })
+            },
+            schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+            type_id: TypeId::of::<P>(),
+        }
+    }
+
     pub(crate) async fn create_instance(
         &self,
         configuration: &serde_json::Value,
@@ -119,33 +153,10 @@ impl PluginFactory {
     }
 }
 
-static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(|| {
-    let m = HashMap::new();
-    Mutex::new(m)
-});
-
-/// Register a plugin factory.
-pub fn register_plugin<P: Plugin>(name: String) {
-    let plugin_factory = PluginFactory {
-        instance_factory: |configuration, schema| {
-            Box::pin(async move {
-                let init = PluginInit::try_new(configuration.clone(), schema)?;
-                let plugin = P::new(init).await?;
-                Ok(Box::new(plugin) as Box<dyn DynPlugin>)
-            })
-        },
-        schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
-        type_id: TypeId::of::<P>(),
-    };
-    PLUGIN_REGISTRY
-        .lock()
-        .expect("Lock poisoned")
-        .insert(name, plugin_factory);
-}
-
+// If we wanted to create a custom subset of plugins, this is where we would do it
 /// Get a copy of the registered plugin factories.
-pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
-    PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
+pub(crate) fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
+    PLUGINS.iter()
 }
 
 /// All router plugins must implement the Plugin trait.
@@ -299,16 +310,14 @@ macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            #[$crate::_private::ctor::ctor]
-            fn register_plugin() {
-                let qualified_name = if $group == "" {
-                    $name.to_string()
-                } else {
-                    format!("{}.{}", $group, $name)
-                };
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
 
-                $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
-            }
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> =
+                Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
         };
     };
 }
