@@ -26,7 +26,6 @@ use notify::event::ModifyKind;
 use notify::EventKind;
 use notify::RecursiveMode;
 use notify::Watcher;
-use opentelemetry::trace::SpanKind;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
