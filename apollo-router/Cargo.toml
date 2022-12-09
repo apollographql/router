@@ -81,7 +81,7 @@ http-body = "0.4.5"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.23", features = ["server", "client"] }
-hyper-rustls = { version = "0.23.1", features = ["http1", "http2"] }
+hyper-rustls = { version = "0.23.2", features = ["http1", "http2"] }
 indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
 jsonpath_lib = "0.3.0"
