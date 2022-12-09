@@ -26,6 +26,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## 🚀 Features
+
+### Re-Deploy Router Pods If The SuperGraph Configmap Changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
+When setting the supergraph with th the `supergraphFile` variable a `sha256` checksum is calculated and set as an annotation for the router pods. This will spin up new pods when the supergraph is mounted via config map and the schema has changed.
+
+By [@toneill818](https://github.com/toneill818) in https://github.com/apollographql/router/pull/2223
+
 ## 🐛 Fixes
 
 ### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
