@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "LicenseRef-ELv2"
 
 # renovate-automation: rustc version
-rust-version = "1.63.0"
+rust-version = "1.65.0"
 edition = "2021"
 build = "build/main.rs"
 
