@@ -458,25 +458,31 @@ impl Plugin for Rhai {
                                 EventKind::Modify(ModifyKind::Data(_))
                                     | EventKind::Create(_)
                                     | EventKind::Remove(_)
-                            ) && event.paths[0]
-                                .extension()
-                                .map_or(false, |ext| ext == "rhai")
-                            {
-                                // TODO: REMOVE THIS DEBUG DATA BEFORE MERGE
-                                println!("event: {:?}", event);
-                                println!("event kind: {:?}", event.kind);
-                                match EngineBlock::try_new(
-                                    Some(watching_path.clone()),
-                                    watched_main.clone(),
-                                    watched_sdl.clone(),
-                                ) {
-                                    Ok(eb) => {
-                                        // TODO: REMOVE THIS DEBUG DATA BEFORE MERGE
-                                        println!("ABOUT TO UPDATE EB");
-                                        watched_block.store(Arc::new(eb))
+                            ) {
+                                let mut proceed = false;
+                                for path in event.paths {
+                                    if path.extension().map_or(false, |ext| ext == "rhai") {
+                                        proceed = true;
+                                        break;
                                     }
-                                    Err(e) => {
-                                        tracing::warn!("could not update script: {}", e);
+                                }
+
+                                if proceed {
+                                    match EngineBlock::try_new(
+                                        Some(watching_path.clone()),
+                                        watched_main.clone(),
+                                        watched_sdl.clone(),
+                                    ) {
+                                        Ok(eb) => {
+                                            tracing::info!("updating rhai execution engine");
+                                            watched_block.store(Arc::new(eb))
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "could not create new rhai execution engine: {}",
+                                                e
+                                            );
+                                        }
                                     }
                                 }
                             }
