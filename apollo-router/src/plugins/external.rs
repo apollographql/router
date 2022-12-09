@@ -90,12 +90,10 @@ impl Plugin for ExternalPlugin {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let request_sdl = self.sdl.clone();
-        let request_config = self.configuration.clone();
-        let future_config = self.configuration.clone();
+        let response_sdl = self.sdl.clone();
 
-        let future_sdl = self.sdl.clone();
-        let request_url = self.configuration.url.clone();
-        let future_url = future_config.url.clone();
+        let request_full_config = self.configuration.clone();
+        let response_full_config = self.configuration.clone();
 
         let request_layer = if self
             .configuration
@@ -106,7 +104,7 @@ impl Plugin for ExternalPlugin {
             .is_some()
         {
             // Safe to unwrap here because we just confirmed that all optional elements are present
-            let my_config = request_config
+            let request_config = request_full_config
                 .stages
                 .unwrap()
                 .router
@@ -115,9 +113,9 @@ impl Plugin for ExternalPlugin {
                 .unwrap();
             Some(AsyncCheckpointLayer::new(
                 move |mut request: router::Request| {
-                    let proto_url = request_url.clone();
                     let my_sdl = request_sdl.to_string();
-                    let my_config = my_config.clone();
+                    let proto_url = request_full_config.url.clone();
+                    let request_config = request_config.clone();
                     async move {
                         // Call into our out of process processor with a body of our body
                         // First, extract the data we need from our request and prepare our
@@ -127,14 +125,14 @@ impl Plugin for ExternalPlugin {
                         let b_bytes = body::to_bytes(body).await?;
 
                         let (headers, payload, context, sdl) = prepare_external_params(
-                            &my_config,
+                            &request_config,
                             &parts.headers,
                             &b_bytes,
                             &request.context,
                             my_sdl,
                         )?;
 
-                        // Second, call our co-processor and get a response.
+                        // Second, call our co-processor and get a reply.
                         let co_processor_output = call_external(
                             proto_url,
                             PipelineStep::RouterRequest,
@@ -147,7 +145,7 @@ impl Plugin for ExternalPlugin {
 
                         tracing::debug!(?co_processor_output, "co-processor returned");
 
-                        // Third, process our response and act on the contents. Our processing logic is
+                        // Third, process our reply and act on the contents. Our processing logic is
                         // that we replace "bits" of our incoming request with the updated bits if they
                         // are present in our co_processor_output.
                         //
@@ -170,6 +168,7 @@ impl Plugin for ExternalPlugin {
 
                         // Finally, we need to interpret the HTTP status codes which may have been
                         // updated by our co-processor and decide if we should proceed or stop.
+
                         let code = StatusCode::from_u16(co_processor_output.http.status)?;
 
                         if !code.is_success() {
@@ -201,7 +200,7 @@ impl Plugin for ExternalPlugin {
             .is_some()
         {
             // Safe to unwrap here because we just confirmed that all optional elements are present
-            let my_config = future_config
+            let response_config = response_full_config
                 .stages
                 .unwrap()
                 .router
@@ -209,28 +208,28 @@ impl Plugin for ExternalPlugin {
                 .response
                 .unwrap();
             Some(MapFutureLayer::new(move |fut| {
-                let proto_url = future_url.clone();
-                let my_sdl = future_sdl.to_string();
-                let my_config = my_config.clone();
+                let my_sdl = response_sdl.to_string();
+                let proto_url = response_full_config.url.clone();
+                let response_config = response_config.clone();
                 async move {
                     let mut response: router::Response = fut.await?;
 
                     // Call into our out of process processor with a body of our body
-                    // First, extract the data we need from our request and prepare our
+                    // First, extract the data we need from our response and prepare our
                     // external call. Use our configuration to figure out which data to send.
 
                     let (parts, body) = response.response.into_parts();
                     let b_bytes = body::to_bytes(body).await?;
 
                     let (headers, payload, context, sdl) = prepare_external_params(
-                        &my_config,
+                        &response_config,
                         &parts.headers,
                         &b_bytes,
                         &response.context,
                         my_sdl,
                     )?;
 
-                    // Second, call our co-processor and get a response.
+                    // Second, call our co-processor and get a reply.
                     let co_processor_output = call_external(
                         proto_url,
                         PipelineStep::RouterResponse,
@@ -243,8 +242,8 @@ impl Plugin for ExternalPlugin {
 
                     tracing::debug!(?co_processor_output, "co-processor returned");
 
-                    // Third, process our response and act on the contents. Our processing logic is
-                    // that we replace "bits" of our incoming request with the updated bits if they
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
                     // are present in our co_processor_output.
 
                     let new_body = match co_processor_output.body {
