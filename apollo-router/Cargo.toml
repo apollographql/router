@@ -61,7 +61,6 @@ clap = { version = "3.2.23", default-features = false, features = [
     "std",
 ] }
 console-subscriber = { version = "0.1.8", optional = true }
-ctor = "0.1.26"
 dashmap = { version = "5.4.0", features = ["serde"] }
 deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
 derivative = "2.2.0"
@@ -82,13 +81,14 @@ http-body = "0.4.5"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.23", features = ["server", "client"] }
-hyper-rustls = { version = "0.23.1", features = ["http1", "http2"] }
+hyper-rustls = { version = "0.23.2", features = ["http1", "http2"] }
 indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
 jsonpath_lib = "0.3.0"
 jsonschema = { version = "0.16.1", default-features = false }
 lazy_static = "1.4.0"
 libc = "0.2.138"
+linkme = "0.3.6"
 lru = "0.7.8"
 mediatype = "0.19.11"
 mockall = "0.11.3"

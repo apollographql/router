@@ -1523,7 +1523,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1574,7 +1574,7 @@ mod tests {
         });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1692,7 +1692,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_access_sdl_constant() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1742,7 +1742,7 @@ mod tests {
     macro_rules! gen_request_test {
         ($base: ident, $fn_name: literal) => {
             let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-                .get("apollo.rhai")
+                .find(|factory| factory.name == "apollo.rhai")
                 .expect("Plugin not found")
                 .create_instance_without_schema(
                     &Value::from_str(
@@ -1778,7 +1778,7 @@ mod tests {
     macro_rules! gen_response_test {
         ($base: ident, $fn_name: literal) => {
             let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-                .get("apollo.rhai")
+                .find(|factory| factory.name == "apollo.rhai")
                 .expect("Plugin not found")
                 .create_instance_without_schema(
                     &Value::from_str(
@@ -1814,7 +1814,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_process_supergraph_request() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(
@@ -1889,7 +1889,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_process_subgraph_response() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(
@@ -1943,7 +1943,7 @@ mod tests {
 
     async fn base_process_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult>> {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(
