@@ -19,7 +19,6 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
-use opentelemetry::trace::SpanKind;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
@@ -476,7 +475,7 @@ macro_rules! gen_map_request {
                     tracing::info_span!(
                         "rhai plugin",
                         "rhai service" = stringify!($base::Request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     )
                 }
             }
@@ -501,32 +500,26 @@ macro_rules! gen_map_request {
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
                     let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
-                        $callback
-                            .call(
-                                &$rhai_service.engine,
-                                &$rhai_service.ast,
-                                (shared_request.clone(),),
-                            )
+                        $callback.call(
+                            &$rhai_service.engine,
+                            &$rhai_service.ast,
+                            (shared_request.clone(),),
+                        )
                     } else {
                         let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service
-                            .engine
-                            .call_fn(
-                                &mut guard,
-                                &$rhai_service.ast,
-                                $callback.fn_name(),
-                                (shared_request.clone(),),
-                            )
+                        $rhai_service.engine.call_fn(
+                            &mut guard,
+                            &$rhai_service.ast,
+                            $callback.fn_name(),
+                            (shared_request.clone(),),
+                        )
                     };
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         tracing::error!("map_request callback failed: {error_details}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(
-                            request_opt.unwrap().context,
-                            error_details,
-                        );
+                        return failure_message(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -547,7 +540,7 @@ macro_rules! gen_map_deferred_request {
                     tracing::info_span!(
                         "rhai plugin",
                         "rhai service" = stringify!($request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     )
                 }
             }
@@ -577,10 +570,7 @@ macro_rules! gen_map_deferred_request {
                         let error_details = process_error(error);
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(
-                            request_opt.unwrap().context,
-                            error_details
-                        );
+                        return failure_message(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -1194,6 +1184,18 @@ impl Rhai {
                     HeaderName::from_str(key).map_err(|e| e.to_string())?,
                     HeaderValue::from_str(value).map_err(|e| e.to_string())?,
                 );
+                Ok(())
+            })
+            // Register an additional setter which allows us to set multiple values for the same
+            // key
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: rhai::Array| {
+                let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+                for v in value {
+                    x.append(
+                        h_key.clone(),
+                        HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+                    );
+                }
                 Ok(())
             })
             // Register a Context indexer so we can get/set context

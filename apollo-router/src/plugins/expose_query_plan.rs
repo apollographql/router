@@ -228,7 +228,7 @@ mod tests {
         let plugin = get_plugin(&serde_json::json!(true)).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
             build_mock_supergraph(plugin).await,
         )
         .await;
@@ -236,7 +236,7 @@ mod tests {
         let plugin = get_plugin(&serde_json::json!(true)).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
             build_mock_supergraph(plugin).await,
         )
         .await;
@@ -248,7 +248,7 @@ mod tests {
         let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
+            &EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
             supergraph,
         )
         .await;

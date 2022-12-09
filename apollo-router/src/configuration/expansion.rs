@@ -5,6 +5,8 @@ use std::env;
 use std::env::VarError;
 use std::fs;
 
+use proteus::Parser;
+use proteus::TransformBuilder;
 use serde_json::Value;
 
 use super::ConfigurationError;
@@ -87,8 +89,37 @@ pub(crate) fn expand_env_variables(
     expansion: &Expansion,
 ) -> Result<serde_json::Value, ConfigurationError> {
     let mut configuration = configuration.clone();
+    #[cfg(not(test))]
+    env_defaults(&mut configuration);
     visit(&mut configuration, expansion)?;
     Ok(configuration)
+}
+
+fn env_defaults(config: &mut Value) {
+    // Anything that needs expanding via env variable should be placed here. Don't pollute the codebase with calls to std::env.
+    let defaults = vec![(
+        "telemetry.apollo.endpoint",
+        "${env.APOLLO_USAGE_REPORTING_INGRESS_URL:-https://usage-reporting.api.apollographql.com/api/ingress/traces}",
+    )];
+    let mut transformer_builder = TransformBuilder::default();
+    transformer_builder =
+        transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
+    for (path, value) in defaults {
+        if jsonpath_lib::select(config, &format!("$.{}", path))
+            .unwrap_or_default()
+            .is_empty()
+        {
+            transformer_builder = transformer_builder.add_action(
+                Parser::parse(&format!("const(\"{}\")", value), path)
+                    .expect("migration must be valid"),
+            );
+        }
+    }
+    *config = transformer_builder
+        .build()
+        .expect("failed to build config default transformer")
+        .apply(config)
+        .expect("failed to set config defaults");
 }
 
 fn visit(value: &mut Value, expansion: &Expansion) -> Result<(), ConfigurationError> {
@@ -126,5 +157,22 @@ pub(crate) fn coerce(expanded: &str) -> Value {
         Ok(Value::Number(n)) => Value::Number(n),
         Ok(Value::Null) => Value::Null,
         _ => Value::String(expanded.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use insta::assert_yaml_snapshot;
+    use serde_json::json;
+
+    use crate::configuration::expansion::env_defaults;
+
+    #[test]
+    fn test_env_defaults() {
+        let mut value = json!({"hi": "there"});
+        env_defaults(&mut value);
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(value);
+        })
     }
 }

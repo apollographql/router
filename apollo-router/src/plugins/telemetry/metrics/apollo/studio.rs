@@ -7,8 +7,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
-use crate::spaceport::ReferencedFieldsForType;
-use crate::spaceport::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType;
+use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {
@@ -211,7 +211,9 @@ impl AddAssign<SingleFieldStat> for FieldStat {
     }
 }
 
-impl From<ContextualizedStats> for crate::spaceport::ContextualizedStats {
+impl From<ContextualizedStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::ContextualizedStats
+{
     fn from(stats: ContextualizedStats) -> Self {
         Self {
             per_type_stat: stats
@@ -225,7 +227,9 @@ impl From<ContextualizedStats> for crate::spaceport::ContextualizedStats {
     }
 }
 
-impl From<QueryLatencyStats> for crate::spaceport::QueryLatencyStats {
+impl From<QueryLatencyStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::QueryLatencyStats
+{
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
             latency_count: stats.request_latencies.buckets,
@@ -245,7 +249,7 @@ impl From<QueryLatencyStats> for crate::spaceport::QueryLatencyStats {
     }
 }
 
-impl From<PathErrorStats> for crate::spaceport::PathErrorStats {
+impl From<PathErrorStats> for crate::plugins::telemetry::apollo_exporter::proto::PathErrorStats {
     fn from(stats: PathErrorStats) -> Self {
         Self {
             children: stats
@@ -259,7 +263,7 @@ impl From<PathErrorStats> for crate::spaceport::PathErrorStats {
     }
 }
 
-impl From<TypeStat> for crate::spaceport::TypeStat {
+impl From<TypeStat> for crate::plugins::telemetry::apollo_exporter::proto::TypeStat {
     fn from(stat: TypeStat) -> Self {
         Self {
             per_field_stat: stat
@@ -271,7 +275,7 @@ impl From<TypeStat> for crate::spaceport::TypeStat {
     }
 }
 
-impl From<FieldStat> for crate::spaceport::FieldStat {
+impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::FieldStat {
     fn from(stat: FieldStat) -> Self {
         Self {
             return_type: stat.return_type,
@@ -291,7 +295,6 @@ mod test {
 
     use super::*;
     use crate::plugins::telemetry::apollo::Report;
-    use crate::spaceport::ReferencedFieldsForType;
 
     #[test]
     fn test_aggregation() {
