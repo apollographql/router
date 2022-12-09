@@ -14,7 +14,6 @@ use http::HeaderValue;
 use http::StatusCode;
 use hyper::body;
 use hyper::Body;
-use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -273,7 +272,7 @@ impl Plugin for ExternalPlugin {
                 tracing::info_span!(
                     EXTERNAL_SPAN_NAME,
                     "external service" = stringify!(router::Request),
-                    "otel.kind" = %SpanKind::Internal
+                    "otel.kind" = "INTERNAL"
                 )
             }
         }
