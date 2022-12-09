@@ -56,6 +56,9 @@ parameters:
     type: string
     # update this as new versions of jaeger become available
     default: "1.33.0"
+  protoc_version:
+    type: string
+    default: "21.8"
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -85,6 +88,12 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   linux_arm_install_baseline:
     steps:
       - linux_install_baseline
@@ -94,6 +103,12 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   macos_install_baseline:
     steps:
       - run:
@@ -103,6 +118,12 @@ commands:
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
       - install_minimal_rust
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   windows_install_baseline:
     steps:
       - run:
@@ -112,6 +133,13 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
+      - run:
+          name: Install protoc
+          shell: bash.exe
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
 
   # This job makes sure everything is ready to run integration tests
   macos_prepare_env:
@@ -145,6 +173,12 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
+      - run:
+          name: Add protoc to env
+          command: |
+            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
+            $newpath = “$oldpath;$HOME/.local/bin”
+            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
   install_minimal_rust:
     steps:
@@ -175,6 +209,11 @@ commands:
           command: |
             set -e -o pipefail
             cargo about --version || cargo install cargo-about
+      - run:
+          name: Install cargo edit if not present
+          command: |
+            set -e -o pipefail
+            cargo edit --version || cargo install cargo-edit
       - save_cache:
           key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
           paths:
@@ -511,6 +550,23 @@ jobs:
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
+  prepare_release:
+    parameters:
+      release_type:
+        type: string
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - checkout
+      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools:
+          os: linux_amd
+      - run:
+          command: >
+            cargo xtask release prepare << parameters.release_type >>
+
 workflows:
   ci_checks:
     jobs:
@@ -539,6 +595,43 @@ workflows:
             parameters:
               platform:
                 [macos_test, windows_test, amd_linux_test, arm_linux_test]
+      - prepare_major_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_minor_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_patch_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_release:
+          release_type: "major"
+          requires:
+            - prepare_major_release_approval
+      - prepare_release:
+          release_type: "minor"
+          requires:
+            - prepare_minor_release_approval
+      - prepare_release:
+          release_type: "patch"
+          requires:
+            - prepare_patch_release_approval
+
   release:
     jobs:
       - build_release:

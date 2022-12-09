@@ -88,7 +88,7 @@ telemetry:
 
 Specifying explicit propagation is generally only required if you're using an exporter that supports multiple trace ID formats (e.g., OpenTelemetry Collector, Jaeger, or OpenTracing compatible exporters).
 
-### Trace ID
+## Trace ID
 
 > This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape or adding/removing features.
 > If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/2147).
@@ -104,6 +104,46 @@ telemetry:
 ```
 
 Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
+
+## Batch Processor
+
+All trace exporters (apollo|datadog|zipkin|jaeger|otlp) have batch span processor configuration, it will be necessary to tune this if you see the following in your logs:
+
+`OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is full`
+
+* **scheduled_delay** The delay from receiving the first span to the batch being sent. 
+* **max_concurrent_exports** The maximum number of overlapping export requests. For instance if ingest is taking a long time to respond there may be several overlapping export requests. 
+* **max_export_batch_size** The number of spans to include in a batch. Your ingest may have max message size limits.
+* **max_export_timeout** The timeout for sending spans before dropping the data.
+* **max_queue_size** The maximum number of spans to be buffered before dropping span data.
+
+```yaml title="router.yaml"
+telemetry:
+  # Apollo tracing
+  apollo:
+    batch_processor:
+      scheduled_delay: 100ms
+      max_concurrent_exports: 1000
+      max_export_batch_size: 10000
+      max_export_timeout: 100s
+      max_queue_size: 10000
+      
+  tracing:
+    # Datadog
+    datadog:
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
+      endpoint: default
+    # Jaeger
+    # Otlp
+    # Zipkin
+```
+
+You will need to experiment to find the setting that are appropriate for your use case.
 
 ## Using Datadog
 

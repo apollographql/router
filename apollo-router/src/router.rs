@@ -36,6 +36,7 @@ use self::Event::UpdateSchema;
 use crate::axum_factory::make_axum_router;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::axum_factory::ListenAddrAndRouter;
+use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
@@ -64,7 +65,13 @@ async fn make_transport_service<RF>(
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
 
-    let apq = APQLayer::new().await;
+    let apq = APQLayer::with_cache(
+        DeduplicatingCache::from_configuration(
+            &configuration.supergraph.apq.experimental_cache,
+            "APQ",
+        )
+        .await,
+    );
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
     // FIXME: how should
@@ -106,7 +113,7 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not create the HTTP pipeline: {0}
+    /// could not create router: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}

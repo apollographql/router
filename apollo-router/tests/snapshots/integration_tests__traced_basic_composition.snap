@@ -39,7 +39,7 @@ expression: get_spans()
           ],
           [
             "otel.kind",
-            "internal"
+            "INTERNAL"
           ],
           [
             "apollo_private.field_level_instrumentation_ratio",
@@ -47,7 +47,7 @@ expression: get_spans()
           ],
           [
             "apollo_private.graphql.variables",
-            "{\"reviewsForAuthorAuthorId\":[\"\"],\"topProductsFirst\":[\"\"]}"
+            "{\"reviewsForAuthorAuthorId\":\"\",\"topProductsFirst\":\"\"}"
           ],
           [
             "apollo_private.http.request_headers",
@@ -93,7 +93,7 @@ expression: get_spans()
               ],
               [
                 "otel.kind",
-                "internal"
+                "INTERNAL"
               ]
             ],
             "metadata": {
@@ -117,7 +117,7 @@ expression: get_spans()
                 "entries": [
                   [
                     "otel.kind",
-                    "internal"
+                    "INTERNAL"
                   ]
                 ],
                 "metadata": {
@@ -141,20 +141,8 @@ expression: get_spans()
           "record": {
             "entries": [
               [
-                "graphql.document",
-                "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
-              ],
-              [
-                "graphql.operation.name",
-                ""
-              ],
-              [
                 "otel.kind",
-                "internal"
-              ],
-              [
-                "ftv1.do_not_sample_reason",
-                ""
+                "INTERNAL"
               ],
               [
                 "message",
@@ -168,10 +156,7 @@ expression: get_spans()
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
-                  "graphql.document",
-                  "graphql.operation.name",
-                  "otel.kind",
-                  "ftv1.do_not_sample_reason"
+                  "otel.kind"
                 ]
               }
             }
@@ -180,14 +165,21 @@ expression: get_spans()
             "apollo_router::query_planner::execution::sequence": {
               "name": "apollo_router::query_planner::execution::sequence",
               "record": {
-                "entries": [],
+                "entries": [
+                  [
+                    "otel.kind",
+                    "INTERNAL"
+                  ]
+                ],
                 "metadata": {
                   "name": "sequence",
                   "target": "apollo_router::query_planner::execution",
                   "level": "INFO",
                   "module_path": "apollo_router::query_planner::execution",
                   "fields": {
-                    "names": []
+                    "names": [
+                      "otel.kind"
+                    ]
                   }
                 }
               },
@@ -198,7 +190,7 @@ expression: get_spans()
                     "entries": [
                       [
                         "otel.kind",
-                        "internal"
+                        "INTERNAL"
                       ],
                       [
                         "apollo.subgraph.name",
@@ -258,7 +250,7 @@ expression: get_spans()
                           ],
                           [
                             "otel.kind",
-                            "internal"
+                            "INTERNAL"
                           ]
                         ],
                         "metadata": {
@@ -300,7 +292,7 @@ expression: get_spans()
                             "entries": [
                               [
                                 "otel.kind",
-                                "client"
+                                "CLIENT"
                               ],
                               [
                                 "net.peer.name",
@@ -399,8 +391,12 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "apollo_private.path",
+                        "graphql.path",
                         "/topProducts/@"
+                      ],
+                      [
+                        "otel.kind",
+                        "INTERNAL"
                       ]
                     ],
                     "metadata": {
@@ -410,7 +406,8 @@ expression: get_spans()
                       "module_path": "apollo_router::query_planner::execution",
                       "fields": {
                         "names": [
-                          "apollo_private.path"
+                          "graphql.path",
+                          "otel.kind"
                         ]
                       }
                     }
@@ -422,7 +419,7 @@ expression: get_spans()
                         "entries": [
                           [
                             "otel.kind",
-                            "internal"
+                            "INTERNAL"
                           ],
                           [
                             "apollo.subgraph.name",
@@ -482,7 +479,7 @@ expression: get_spans()
                               ],
                               [
                                 "otel.kind",
-                                "internal"
+                                "INTERNAL"
                               ]
                             ],
                             "metadata": {
@@ -524,7 +521,7 @@ expression: get_spans()
                                 "entries": [
                                   [
                                     "otel.kind",
-                                    "client"
+                                    "CLIENT"
                                   ],
                                   [
                                     "net.peer.name",
@@ -623,14 +620,21 @@ expression: get_spans()
                 "apollo_router::query_planner::execution::parallel": {
                   "name": "apollo_router::query_planner::execution::parallel",
                   "record": {
-                    "entries": [],
+                    "entries": [
+                      [
+                        "otel.kind",
+                        "INTERNAL"
+                      ]
+                    ],
                     "metadata": {
                       "name": "parallel",
                       "target": "apollo_router::query_planner::execution",
                       "level": "INFO",
                       "module_path": "apollo_router::query_planner::execution",
                       "fields": {
-                        "names": []
+                        "names": [
+                          "otel.kind"
+                        ]
                       }
                     }
                   },
@@ -640,8 +644,12 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "apollo_private.path",
+                            "graphql.path",
                             "/topProducts/@/reviews/@/product"
+                          ],
+                          [
+                            "otel.kind",
+                            "INTERNAL"
                           ]
                         ],
                         "metadata": {
@@ -651,7 +659,8 @@ expression: get_spans()
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "apollo_private.path"
+                              "graphql.path",
+                              "otel.kind"
                             ]
                           }
                         }
@@ -663,7 +672,7 @@ expression: get_spans()
                             "entries": [
                               [
                                 "otel.kind",
-                                "internal"
+                                "INTERNAL"
                               ],
                               [
                                 "apollo.subgraph.name",
@@ -723,7 +732,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "otel.kind",
-                                    "internal"
+                                    "INTERNAL"
                                   ]
                                 ],
                                 "metadata": {
@@ -765,7 +774,7 @@ expression: get_spans()
                                     "entries": [
                                       [
                                         "otel.kind",
-                                        "client"
+                                        "CLIENT"
                                       ],
                                       [
                                         "net.peer.name",
@@ -866,8 +875,12 @@ expression: get_spans()
                       "record": {
                         "entries": [
                           [
-                            "apollo_private.path",
+                            "graphql.path",
                             "/topProducts/@/reviews/@/author"
+                          ],
+                          [
+                            "otel.kind",
+                            "INTERNAL"
                           ]
                         ],
                         "metadata": {
@@ -877,7 +890,8 @@ expression: get_spans()
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "apollo_private.path"
+                              "graphql.path",
+                              "otel.kind"
                             ]
                           }
                         }
@@ -889,7 +903,7 @@ expression: get_spans()
                             "entries": [
                               [
                                 "otel.kind",
-                                "internal"
+                                "INTERNAL"
                               ],
                               [
                                 "apollo.subgraph.name",
@@ -949,7 +963,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "otel.kind",
-                                    "internal"
+                                    "INTERNAL"
                                   ]
                                 ],
                                 "metadata": {
@@ -991,7 +1005,7 @@ expression: get_spans()
                                     "entries": [
                                       [
                                         "otel.kind",
-                                        "client"
+                                        "CLIENT"
                                       ],
                                       [
                                         "net.peer.name",

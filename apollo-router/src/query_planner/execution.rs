@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use futures::prelude::*;
-use opentelemetry::trace::SpanKind;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
@@ -21,6 +20,12 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
+use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
+use crate::query_planner::CONDITION_IF_SPAN_NAME;
+use crate::query_planner::CONDITION_SPAN_NAME;
+use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
+use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
+use crate::query_planner::DEFER_SPAN_NAME;
 use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
@@ -107,45 +112,56 @@ impl PlanNode {
                 PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
                     errors = Vec::new();
-                    let span = tracing::info_span!(SEQUENCE_SPAN_NAME);
-                    for node in nodes {
-                        let (v, subselect, err) = node
-                            .execute_recursively(parameters, current_dir, &value, sender.clone())
-                            .instrument(span.clone())
-                            .in_current_span()
-                            .await;
-                        value.deep_merge(v);
-                        errors.extend(err.into_iter());
-                        subselection = subselect;
+                    async {
+                        for node in nodes {
+                            let (v, subselect, err) = node
+                                .execute_recursively(
+                                    parameters,
+                                    current_dir,
+                                    &value,
+                                    sender.clone(),
+                                )
+                                .in_current_span()
+                                .await;
+                            value.deep_merge(v);
+                            errors.extend(err.into_iter());
+                            subselection = subselect;
+                        }
                     }
+                    .instrument(tracing::info_span!(
+                        SEQUENCE_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await
                 }
                 PlanNode::Parallel { nodes } => {
                     value = Value::default();
                     errors = Vec::new();
+                    async {
+                        let mut stream: stream::FuturesUnordered<_> = nodes
+                            .iter()
+                            .map(|plan| {
+                                plan.execute_recursively(
+                                    parameters,
+                                    current_dir,
+                                    parent_value,
+                                    sender.clone(),
+                                )
+                                .in_current_span()
+                            })
+                            .collect();
 
-                    let span = tracing::info_span!(PARALLEL_SPAN_NAME);
-                    let mut stream: stream::FuturesUnordered<_> = nodes
-                        .iter()
-                        .map(|plan| {
-                            plan.execute_recursively(
-                                parameters,
-                                current_dir,
-                                parent_value,
-                                sender.clone(),
-                            )
-                            .instrument(span.clone())
-                        })
-                        .collect();
-
-                    while let Some((v, _subselect, err)) = stream
-                        .next()
-                        .instrument(span.clone())
-                        .in_current_span()
-                        .await
-                    {
-                        value.deep_merge(v);
-                        errors.extend(err.into_iter());
+                        while let Some((v, _subselect, err)) = stream.next().in_current_span().await
+                        {
+                            value.deep_merge(v);
+                            errors.extend(err.into_iter());
+                        }
                     }
+                    .instrument(tracing::info_span!(
+                        PARALLEL_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
                     // Note that the span must be `info` as we need to pick this up in apollo tracing
@@ -158,9 +174,7 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(
-                            tracing::info_span!(FLATTEN_SPAN_NAME, apollo_private.path = %current_dir),
-                        )
+                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, "graphql.path" = %current_dir, "otel.kind" = "INTERNAL"))
                         .await;
 
                     value = v;
@@ -174,7 +188,7 @@ impl PlanNode {
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             FETCH_SPAN_NAME,
-                            "otel.kind" = %SpanKind::Internal,
+                            "otel.kind" = "INTERNAL",
                             "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                             "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
@@ -200,66 +214,69 @@ impl PlanNode {
                         },
                     deferred,
                 } => {
-                    let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
-                        HashMap::new();
-                    let mut futures = Vec::new();
-
-                    let (primary_sender, _) = tokio::sync::broadcast::channel::<Value>(1);
-
-                    for deferred_node in deferred {
-                        let fut = deferred_node.execute(
-                            parameters,
-                            parent_value,
-                            sender.clone(),
-                            &primary_sender,
-                            &mut deferred_fetches,
-                        );
-
-                        futures.push(fut);
-                    }
-
-                    tokio::task::spawn(
-                        async move {
-                            join_all(futures).await;
-                        }
-                        .in_current_span(),
-                    );
-
                     value = parent_value.clone();
                     errors = Vec::new();
-                    let span = tracing::info_span!("primary");
-                    if let Some(node) = node {
-                        let (v, _subselect, err) = node
-                            .execute_recursively(
-                                &ExecutionParameters {
-                                    context: parameters.context,
-                                    service_factory: parameters.service_factory,
-                                    schema: parameters.schema,
-                                    supergraph_request: parameters.supergraph_request,
-                                    deferred_fetches: &deferred_fetches,
-                                    options: parameters.options,
-                                    query: parameters.query,
-                                },
-                                current_dir,
-                                &value,
-                                sender,
-                            )
-                            .instrument(span.clone())
-                            .in_current_span()
-                            .await;
-                        let _guard = span.enter();
-                        value.deep_merge(v);
-                        errors.extend(err.into_iter());
-                        subselection = primary_subselection.clone();
+                    async {
+                        let mut deferred_fetches: HashMap<String, Sender<(Value, Vec<Error>)>> =
+                            HashMap::new();
+                        let mut futures = Vec::new();
 
-                        let _ = primary_sender.send(value.clone());
-                    } else {
-                        let _guard = span.enter();
+                        let (primary_sender, _) = tokio::sync::broadcast::channel::<Value>(1);
 
-                        subselection = primary_subselection.clone();
+                        for deferred_node in deferred {
+                            let fut = deferred_node
+                                .execute(
+                                    parameters,
+                                    parent_value,
+                                    sender.clone(),
+                                    &primary_sender,
+                                    &mut deferred_fetches,
+                                )
+                                .in_current_span();
 
-                        let _ = primary_sender.send(value.clone());
+                            futures.push(fut);
+                        }
+
+                        tokio::task::spawn(async move {
+                            join_all(futures).await;
+                        });
+
+                        if let Some(node) = node {
+                            let (v, _subselect, err) = node
+                                .execute_recursively(
+                                    &ExecutionParameters {
+                                        context: parameters.context,
+                                        service_factory: parameters.service_factory,
+                                        schema: parameters.schema,
+                                        supergraph_request: parameters.supergraph_request,
+                                        deferred_fetches: &deferred_fetches,
+                                        options: parameters.options,
+                                        query: parameters.query,
+                                    },
+                                    current_dir,
+                                    &value,
+                                    sender,
+                                )
+                                .instrument(tracing::info_span!(
+                                    DEFER_PRIMARY_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL"
+                                ))
+                                .await;
+                            value.deep_merge(v);
+                            errors.extend(err.into_iter());
+                            subselection = primary_subselection.clone();
+
+                            let _ = primary_sender.send(value.clone());
+                        } else {
+                            subselection = primary_subselection.clone();
+                            let _ = primary_sender.send(value.clone());
+                        }
                     }
+                    .instrument(tracing::info_span!(
+                        DEFER_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await
                 }
                 PlanNode::Condition {
                     condition,
@@ -269,23 +286,40 @@ impl PlanNode {
                     value = Value::default();
                     errors = Vec::new();
 
-                    let v = parameters
-                        .query
-                        .variable_value(
-                            parameters
-                                .supergraph_request
-                                .body()
-                                .operation_name
-                                .as_deref(),
-                            condition.as_str(),
-                            &parameters.supergraph_request.body().variables,
-                        )
-                        .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
+                    async {
+                        let v = parameters
+                            .query
+                            .variable_value(
+                                parameters
+                                    .supergraph_request
+                                    .body()
+                                    .operation_name
+                                    .as_deref(),
+                                condition.as_str(),
+                                &parameters.supergraph_request.body().variables,
+                            )
+                            .unwrap_or(&Value::Bool(true)); // the defer if clause is mandatory, and defaults to true
 
-                    if let &Value::Bool(true) = v {
-                        //FIXME: should we show an error if the if_node was not present?
-                        if let Some(node) = if_clause {
-                            let span = tracing::info_span!("condition_if");
+                        if let &Value::Bool(true) = v {
+                            //FIXME: should we show an error if the if_node was not present?
+                            if let Some(node) = if_clause {
+                                let (v, subselect, err) = node
+                                    .execute_recursively(
+                                        parameters,
+                                        current_dir,
+                                        parent_value,
+                                        sender.clone(),
+                                    )
+                                    .instrument(tracing::info_span!(
+                                        CONDITION_IF_SPAN_NAME,
+                                        "otel.kind" = "INTERNAL"
+                                    ))
+                                    .await;
+                                value.deep_merge(v);
+                                errors.extend(err.into_iter());
+                                subselection = subselect;
+                            }
+                        } else if let Some(node) = else_clause {
                             let (v, subselect, err) = node
                                 .execute_recursively(
                                     parameters,
@@ -293,29 +327,22 @@ impl PlanNode {
                                     parent_value,
                                     sender.clone(),
                                 )
-                                .instrument(span.clone())
-                                .in_current_span()
+                                .instrument(tracing::info_span!(
+                                    CONDITION_ELSE_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL"
+                                ))
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
                             subselection = subselect;
                         }
-                    } else if let Some(node) = else_clause {
-                        let span = tracing::info_span!("condition_else");
-                        let (v, subselect, err) = node
-                            .execute_recursively(
-                                parameters,
-                                current_dir,
-                                parent_value,
-                                sender.clone(),
-                            )
-                            .instrument(span.clone())
-                            .in_current_span()
-                            .await;
-                        value.deep_merge(v);
-                        errors.extend(err.into_iter());
-                        subselection = subselect;
                     }
+                    .instrument(tracing::info_span!(
+                        CONDITION_SPAN_NAME,
+                        "graphql.condition" = condition,
+                        "otel.kind" = "INTERNAL"
+                    ))
+                    .await
                 }
             }
 
@@ -374,7 +401,7 @@ impl DeferredNode {
         let query = parameters.query.clone();
         let mut primary_receiver = primary_sender.subscribe();
         let mut value = parent_value.clone();
-
+        let depends_json = serde_json::to_string(&self.depends).unwrap_or_default();
         async move {
             let mut errors = Vec::new();
 
@@ -394,7 +421,6 @@ impl DeferredNode {
                 }
             }
 
-            let span = tracing::info_span!("deferred");
             let deferred_fetches = HashMap::new();
 
             if let Some(node) = deferred_inner {
@@ -413,8 +439,13 @@ impl DeferredNode {
                         &value,
                         tx.clone(),
                     )
-                    .instrument(span.clone())
-                    .in_current_span()
+                    .instrument(tracing::info_span!(
+                        DEFER_DEFERRED_SPAN_NAME,
+                        "graphql.label" = label,
+                        "graphql.depends" = depends_json,
+                        "graphql.path" = deferred_path.to_string(),
+                        "otel.kind" = "INTERNAL"
+                    ))
                     .await;
 
                 if !is_depends_empty {
