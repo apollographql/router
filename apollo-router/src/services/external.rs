@@ -7,6 +7,7 @@ use std::string::ToString;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::StatusCode;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
@@ -38,25 +39,29 @@ pub(crate) enum PipelineStep {
     SubgraphResponse,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub(crate) struct HttpBlock {
-    pub(crate) status: u16,
-    pub(crate) message: String,
+#[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+pub(crate) enum Control {
+    Continue,
+    Break(u16),
 }
 
-impl Default for HttpBlock {
+impl Default for Control {
     fn default() -> Self {
-        HttpBlock {
-            status: 200,
-            message: "Ok".to_string(),
-        }
+        Control::Continue
     }
 }
 
-impl HttpBlock {
+impl Control {
     #[allow(dead_code)]
-    fn new(status: u16, message: String) -> Self {
-        HttpBlock { status, message }
+    fn new(status: u16) -> Self {
+        Control::Break(status)
+    }
+
+    pub(crate) fn get_http_status(&self) -> Result<StatusCode, BoxError> {
+        match self {
+            Control::Continue => Ok(StatusCode::OK),
+            Control::Break(code) => StatusCode::from_u16(*code).map_err(|e| e.into()),
+        }
     }
 }
 
@@ -64,7 +69,7 @@ impl HttpBlock {
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
-    pub(crate) http: HttpBlock,
+    pub(crate) control: Control,
     pub(crate) id: Option<String>,
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
     pub(crate) body: Option<T>,
@@ -86,7 +91,7 @@ where
         Self {
             version: EXTERNALIZABLE_VERSION,
             stage: stage.to_string(),
-            http: Default::default(),
+            control: Control::default(),
             id: TraceId::maybe_new().map(|id| id.to_string()),
             headers,
             body,
@@ -98,8 +103,7 @@ where
     pub(crate) async fn call(self, url: &str) -> Result<Self, BoxError> {
         let my_client = CLIENT.clone();
 
-        tracing::debug!("forwarding headers: {:?}", self.headers);
-        tracing::debug!("forwarding body: {:?}", self.body);
+        tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
         let response = my_client
             .post(url)
             .json(&self)
@@ -110,8 +114,6 @@ where
 
         // Let's process our response
         let response: Self = response.json().await?;
-        tracing::debug!("response body: {:?}", response.body);
-        tracing::debug!("response headers: {:?}", response.headers);
 
         Ok(response)
     }

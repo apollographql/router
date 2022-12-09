@@ -11,7 +11,6 @@ use bytes::Bytes;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
-use http::StatusCode;
 use hyper::body;
 use hyper::Body;
 use schemars::JsonSchema;
@@ -31,6 +30,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::external::Control;
 use crate::services::router;
 use crate::Context;
 
@@ -144,10 +144,43 @@ impl Plugin for ExternalPlugin {
 
                         tracing::debug!(?co_processor_output, "co-processor returned");
 
-                        // Third, process our reply and act on the contents. Our processing logic is
+                        // Thirdly, we need to interpret the control flow which may have been
+                        // updated by our co-processor and decide if we should proceed or stop.
+
+                        if matches!(co_processor_output.control, Control::Break(_)) {
+                            // Ensure the code is a valid http status code
+                            let code = co_processor_output.control.get_http_status()?;
+
+                            let res = if !code.is_success() {
+                                router::Response::error_builder()
+                                    .errors(vec![Error {
+                                        message: co_processor_output
+                                            .body
+                                            .unwrap_or(serde_json::Value::Null)
+                                            .to_string(),
+                                        ..Default::default()
+                                    }])
+                                    .status_code(code)
+                                    .context(request.context)
+                                    .build()?
+                            } else {
+                                router::Response::builder()
+                                    .data(
+                                        co_processor_output
+                                            .body
+                                            .unwrap_or(serde_json::Value::Null)
+                                            .to_string(),
+                                    )
+                                    .status_code(code)
+                                    .context(request.context)
+                                    .build()?
+                            };
+                            return Ok(ControlFlow::Break(res));
+                        }
+
+                        // Finally, process our reply and act on the contents. Our processing logic is
                         // that we replace "bits" of our incoming request with the updated bits if they
                         // are present in our co_processor_output.
-                        //
 
                         let new_body = match co_processor_output.body {
                             Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
@@ -165,24 +198,7 @@ impl Plugin for ExternalPlugin {
                                 internalize_header_map(headers)?;
                         }
 
-                        // Finally, we need to interpret the HTTP status codes which may have been
-                        // updated by our co-processor and decide if we should proceed or stop.
-
-                        let code = StatusCode::from_u16(co_processor_output.http.status)?;
-
-                        if !code.is_success() {
-                            let res = router::Response::error_builder()
-                                .errors(vec![Error {
-                                    message: co_processor_output.http.message,
-                                    ..Default::default()
-                                }])
-                                .status_code(code)
-                                .context(request.context)
-                                .build()?;
-                            Ok(ControlFlow::Break(res))
-                        } else {
-                            Ok(ControlFlow::Continue(request))
-                        }
+                        Ok(ControlFlow::Continue(request))
                     }
                 },
             ))
