@@ -26,6 +26,23 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## 🚀 Features
+
+### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+
+Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+
+Example use from rhai as:
+
+```
+  response.headers["set-cookie"] = [
+    "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+    "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  ];
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
+
 ## 🐛 Fixes
 
 ### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
