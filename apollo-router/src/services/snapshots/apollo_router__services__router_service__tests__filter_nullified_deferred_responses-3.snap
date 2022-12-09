@@ -1,9 +1,0 @@
----
-source: apollo-router/src/services/router_service.rs
-expression: "std::str::from_utf8(last.to_vec().as_slice()).unwrap()"
----
-content-type: application/json
-
-{"hasNext":false}
---graphql--
-
