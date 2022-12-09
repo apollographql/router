@@ -2,9 +2,15 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_compiler::hir;
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::AstDatabase;
+use apollo_compiler::DocumentDatabase;
+use apollo_compiler::HirDatabase;
 use apollo_parser::ast;
 use http::Uri;
 use itertools::Itertools;
@@ -17,14 +23,15 @@ use crate::error::SchemaError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
+use crate::spec::query::parse_hir_value;
 use crate::spec::query::parse_value;
 use crate::*;
 
 /// A GraphQL schema.
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone, PartialEq)]
 pub(crate) struct Schema {
     string: Arc<String>,
-    subtype_map: HashMap<String, HashSet<String>>,
+    subtype_map: Arc<HashMap<String, HashSet<String>>>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
@@ -34,6 +41,52 @@ pub(crate) struct Schema {
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
     root_operations: HashMap<OperationKind, String>,
+}
+
+/// Format `HashMap` in deterministic order
+/// so that `similar_asserts::assert_eq!` diffs can be useful.
+impl fmt::Debug for Schema {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Schema")
+            .field("string", &self.string)
+            .field(
+                "subtype_map",
+                &self
+                    .subtype_map
+                    .iter()
+                    .map(|(k, v)| (k, v.iter().sorted()))
+                    .sorted_by_key(|&(k, _)| k.clone()),
+            )
+            .field(
+                "subgraphs",
+                &self.subgraphs.iter().sorted_by_key(|&(k, _)| k.clone()),
+            )
+            .field(
+                "object_types",
+                &self.object_types.iter().sorted_by_key(|&(k, _)| k.clone()),
+            )
+            .field(
+                "interfaces",
+                &self.interfaces.iter().sorted_by_key(|&(k, _)| k.clone()),
+            )
+            .field(
+                "input_types",
+                &self.input_types.iter().sorted_by_key(|&(k, _)| k.clone()),
+            )
+            .field(
+                "enums",
+                &self
+                    .enums
+                    .iter()
+                    .map(|(k, v)| (k, v.iter().sorted()))
+                    .sorted_by_key(|&(k, _)| k.clone()),
+            )
+            .field("custom_scalars", &self.custom_scalars.iter().sorted())
+            .field("api_schema", &self.api_schema)
+            .field("schema_id", &self.schema_id)
+            .field("root_operations", &self.root_operations)
+            .finish()
+    }
 }
 
 impl Schema {
@@ -55,7 +108,39 @@ impl Schema {
             parse(&api_schema, configuration)
         }
 
-        fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
+        fn parse(schema: &str, configuration: &Configuration) -> Result<Schema, SchemaError> {
+            let parser_result = parse_with_apollo_parser(schema, configuration);
+            if cfg!(debug_assertions) {
+                let compiler_result = parse_with_apollo_compiler(schema, configuration);
+                #[allow(clippy::panic)] // only with debug_assertions
+                match (&parser_result, &compiler_result) {
+                    (Ok(a), Ok(b)) => similar_asserts::assert_eq!(a, b),
+                    (Ok(_), Err(SchemaError::Validation(diagnostics))) => {
+                        panic!(
+                            "only apollo-compiler returned validation errors:\n{}",
+                            diagnostics
+                                .iter()
+                                .map(|d| d.to_string())
+                                .collect::<Vec<_>>()
+                                .join("\n")
+                        )
+                    }
+                    (Ok(_), Err(e)) => {
+                        panic!("only apollo-compiler returned an error: {e:?}")
+                    }
+                    (Err(e), Ok(_)) => {
+                        panic!("only apollo-parser returned an error: {e:?}")
+                    }
+                    (Err(_), Err(_)) => {}
+                }
+            }
+            parser_result
+        }
+
+        fn parse_with_apollo_parser(
+            schema: &str,
+            _configuration: &Configuration,
+        ) -> Result<Schema, SchemaError> {
             let schema_with_introspection = Schema::with_introspection(schema);
             let parser = apollo_parser::Parser::new(&schema_with_introspection);
             let tree = parser.parse();
@@ -454,7 +539,7 @@ impl Schema {
             let schema_id = Some(format!("{:x}", hasher.finalize()));
 
             Ok(Schema {
-                subtype_map,
+                subtype_map: Arc::new(subtype_map),
                 string: Arc::new(schema.to_owned()),
                 subgraphs,
                 object_types,
@@ -468,6 +553,230 @@ impl Schema {
             })
         }
     }
+}
+
+fn parse_with_apollo_compiler(
+    schema: &str,
+    _configuration: &Configuration,
+) -> Result<Schema, SchemaError> {
+    let schema_with_introspection = Schema::with_introspection(schema);
+
+    let compiler = ApolloCompiler::new(&schema_with_introspection);
+    let mut errors = compiler.validate();
+    // TODO: do something with warnings and advice?
+    errors.retain(|diagnostic| diagnostic.is_error());
+    if !errors.is_empty() {
+        return Err(SchemaError::Validation(errors));
+    }
+
+    // Trace log recursion limit data
+    let recursion_limit = compiler.db.ast().recursion_limit();
+    tracing::trace!(?recursion_limit, "recursion limit data");
+
+    fn as_string(value: &hir::Value) -> Option<&String> {
+        if let hir::Value::String(string) = value {
+            Some(string)
+        } else {
+            None
+        }
+    }
+
+    let mut subgraphs = HashMap::new();
+    // TODO: error if not found?
+    if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
+        for (name, url) in join_enum
+            .enum_values_definition()
+            .iter()
+            .filter_map(|value| {
+                let join_directive = value
+                    .directives()
+                    .iter()
+                    .find(|directive| directive.name() == "join__graph")?;
+                let name = as_string(join_directive.argument_by_name("name")?)?;
+                let url = as_string(join_directive.argument_by_name("url")?)?;
+                Some((name, url))
+            })
+        {
+            if url.is_empty() {
+                return Err(SchemaError::MissingSubgraphUrl(name.clone()));
+            }
+            let url = Uri::from_str(url).map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
+            if subgraphs.insert(name.clone(), url).is_some() {
+                return Err(SchemaError::Api(format!(
+                    "must not have several subgraphs with same name '{}'",
+                    name
+                )));
+            }
+        }
+    }
+
+    let object_field = |field: &hir::FieldDefinition| (field.name().to_owned(), field.ty().into());
+    let implements_interface = |imp: &hir::ImplementsInterface| imp.interface().to_owned();
+    let mut object_types: HashMap<_, _> = compiler
+        .db
+        .object_types()
+        .iter()
+        .map(|def| {
+            (
+                def.name().to_owned(),
+                ObjectType {
+                    name: def.name().to_owned(),
+                    fields: def.fields_definition().iter().map(object_field).collect(),
+                    interfaces: def
+                        .implements_interfaces()
+                        .iter()
+                        .map(implements_interface)
+                        .collect(),
+                },
+            )
+        })
+        .collect();
+    for ext in compiler.db.object_type_extensions().iter() {
+        if let Some(def) = object_types.get_mut(ext.name()) {
+            def.fields
+                .extend(ext.fields_definition().iter().map(object_field));
+            def.interfaces
+                .extend(ext.implements_interfaces().iter().map(implements_interface))
+        } else {
+            failfast_debug!(
+                "Extension exists for {:?} but ObjectTypeDefinition could not be found.",
+                ext.name(),
+            );
+        }
+    }
+
+    let mut interfaces: HashMap<_, _> = compiler
+        .db
+        .interfaces()
+        .iter()
+        .map(|def| {
+            (
+                def.name().to_owned(),
+                Interface {
+                    name: def.name().to_owned(),
+                    fields: def.fields_definition().iter().map(object_field).collect(),
+                    interfaces: def
+                        .implements_interfaces()
+                        .iter()
+                        .map(implements_interface)
+                        .collect(),
+                },
+            )
+        })
+        .collect();
+    for ext in compiler.db.interface_type_extensions().iter() {
+        if let Some(def) = interfaces.get_mut(ext.name()) {
+            def.fields
+                .extend(ext.fields_definition().iter().map(object_field));
+            def.interfaces
+                .extend(ext.implements_interfaces().iter().map(implements_interface))
+        } else {
+            failfast_debug!(
+                "Extension exists for {:?} but ObjectTypeDefinition could not be found.",
+                ext.name(),
+            );
+        }
+    }
+    let input_field = |field: &hir::InputValueDefinition| {
+        (
+            field.name().to_owned(),
+            (
+                field.ty().into(),
+                field.default_value().and_then(parse_hir_value),
+            ),
+        )
+    };
+    let mut input_types: HashMap<_, _> = compiler
+        .db
+        .input_objects()
+        .iter()
+        .map(|def| {
+            (
+                def.name().to_owned(),
+                InputObjectType {
+                    name: def.name().to_owned(),
+                    fields: def
+                        .input_fields_definition()
+                        .iter()
+                        .map(input_field)
+                        .collect(),
+                },
+            )
+        })
+        .collect();
+    for ext in compiler.db.input_object_type_extensions().iter() {
+        if let Some(def) = input_types.get_mut(ext.name()) {
+            def.fields
+                .extend(ext.input_fields_definition().iter().map(input_field))
+        } else {
+            failfast_debug!(
+                "Extension exists for {:?} but InputTypeDefinition could not be found.",
+                ext.name(),
+            );
+        }
+    }
+
+    let scalars = compiler.db.scalars();
+    let scalars = scalars
+        .iter()
+        .filter(|def| !def.is_built_in())
+        .map(|def| def.name().to_owned());
+    let scalar_extensions = compiler.db.scalar_type_extensions();
+    let scalar_extensions = scalar_extensions.iter().map(|def| def.name().to_owned());
+    let custom_scalars = scalars.chain(scalar_extensions).collect();
+
+    let enums = compiler
+        .db
+        .enums()
+        .iter()
+        .map(|def| {
+            let values = def
+                .enum_values_definition()
+                .iter()
+                .map(|value| value.enum_value().to_owned())
+                .collect();
+            (def.name().to_owned(), values)
+        })
+        .collect();
+
+    let mut hasher = Sha256::new();
+    hasher.update(schema.as_bytes());
+    let schema_id = Some(format!("{:x}", hasher.finalize()));
+
+    let root_operations = compiler
+        .db
+        .schema()
+        .root_operation_type_definition()
+        .iter()
+        .filter(|def| def.ast_ptr().is_some()) // exclude implict operations
+        .map(|def| {
+            (
+                def.operation_type().into(),
+                if let hir::Type::Named { name, .. } = def.named_type() {
+                    name.clone()
+                } else {
+                    // FIXME: hir::RootOperationTypeDefinition should contain
+                    // the name directly, not a `Type` enum value which happens to always
+                    // be the `Named` variant.
+                    unreachable!()
+                },
+            )
+        })
+        .collect();
+
+    Ok(Schema {
+        subtype_map: compiler.db.subtype_map(),
+        string: Arc::new(schema.to_owned()),
+        subgraphs,
+        object_types,
+        input_types,
+        interfaces,
+        custom_scalars,
+        enums,
+        api_schema: None,
+        schema_id,
+        root_operations,
+    })
 }
 
 impl Schema {
@@ -516,11 +825,23 @@ pub(crate) struct InvalidObject;
 
 macro_rules! implement_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
-        #[derive(Debug, Clone)]
+        #[derive(Clone, PartialEq)]
         $visibility struct $name {
             pub(crate) name: String,
             fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
+        }
+
+        /// Format `HashMap` in deterministic order
+        /// so that `similar_asserts::assert_eq!` diffs can be useful.
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct(stringify!($name))
+                    .field("name", &self.name)
+                    .field("fields", &self.fields.iter().sorted_by_key(|&(k, _)| k.clone()))
+                    .field("interfaces", &self.interfaces)
+                    .finish()
+            }
         }
 
         impl $name {
@@ -614,7 +935,7 @@ implement_object_type_or_interface!(
 
 macro_rules! implement_input_object_type_or_interface {
     ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
-        #[derive(Debug, Clone)]
+        #[derive(Clone, PartialEq)]
         $visibility struct $name {
             name: String,
             fields: HashMap<String, (FieldType, Option<Value>)>,
@@ -637,6 +958,17 @@ macro_rules! implement_input_object_type_or_interface {
                         ty.validate_input_value(value, schema)
                     })
                     .map_err(|_| InvalidObject)
+            }
+        }
+
+        /// Format `HashMap` in deterministic order
+        /// so that `similar_asserts::assert_eq!` diffs can be useful.
+        impl fmt::Debug for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.debug_struct(stringify!($name))
+                    .field("name", &self.name)
+                    .field("fields", &self.fields.iter().sorted_by_key(|&(k, _)| k.clone()))
+                    .finish()
             }
         }
 

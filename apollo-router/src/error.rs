@@ -398,6 +398,8 @@ pub(crate) enum SchemaError {
     MissingSubgraphUrl(String),
     /// Parsing error(s).
     Parse(ParseErrors),
+    /// Validation error(s) from apollo-compiler.
+    Validation(Vec<apollo_compiler::ApolloDiagnostic>),
     /// Api error(s): {0}
     Api(String),
 }

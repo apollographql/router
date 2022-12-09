@@ -41,6 +41,7 @@ features = ["docs_rs"]
 access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
+apollo-compiler = "0.4.1"
 apollo-parser = "0.4.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
@@ -163,6 +164,7 @@ serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.91", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
+similar-asserts = "1.4.2" # Only cfg(debug_assertions), but not a dev-dependency so it runs in other crates’s tests
 static_assertions = "1.1.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"
