@@ -229,12 +229,12 @@ mod tests {
         let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
             supergraph.clone(),
         )
         .await;
         // let's try that again
-        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, supergraph).await;
+        execute_supergraph_test(VALID_QUERY, &EXPECTED_RESPONSE_WITH_QUERY_PLAN, supergraph).await;
     }
 
     #[tokio::test]
@@ -243,7 +243,7 @@ mod tests {
         let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
+            &EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
             supergraph,
         )
         .await;
