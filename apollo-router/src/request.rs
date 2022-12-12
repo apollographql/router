@@ -135,7 +135,8 @@ impl Request {
     /// cannot be turned into a valid GraphQL `Request`.
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
         let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(url_encoded_query.as_bytes()).map_err(serde_json::Error::custom)?;
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
 
         let operation_name = if let Some(serde_json::Value::String(operation_name)) =
             urldecoded.get("operationName")
