@@ -132,6 +132,11 @@ This test was failing frequently due to it being a timing test being run in a si
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
 
+### update reports.proto protobuf definition ([PR #2247](https://github.com/apollographql/router/pull/2247))
+
+Update the reports.proto file, and change the prompt to update the file with the correct new location.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2247
 ### Upgrade OpenTelemetry to 0.18 ([Issue #1970](https://github.com/apollographql/router/issues/1970))
 
 Update to OpenTelemetry 0.18.
