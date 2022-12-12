@@ -113,7 +113,7 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not create the HTTP pipeline: {0}
+    /// could not create router: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}

@@ -422,12 +422,11 @@ impl JsonSchema for ApolloPlugins {
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
-            .iter()
-            .sorted_by_key(|(name, _)| *name)
-            .filter(|(name, _)| name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|(name, factory)| {
+            .sorted_by_key(|factory| factory.name.clone())
+            .filter(|factory| factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .map(|factory| {
                 (
-                    name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
+                    factory.name[APOLLO_PLUGIN_PREFIX.len()..].to_string(),
                     factory.create_schema(gen),
                 )
             })
@@ -456,10 +455,9 @@ impl JsonSchema for UserPlugins {
         // compile time to be picked up.
 
         let plugins = crate::plugin::plugins()
-            .iter()
-            .sorted_by_key(|(name, _)| *name)
-            .filter(|(name, _)| !name.starts_with(APOLLO_PLUGIN_PREFIX))
-            .map(|(name, factory)| (name.to_string(), factory.create_schema(gen)))
+            .sorted_by_key(|factory| factory.name.clone())
+            .filter(|factory| !factory.name.starts_with(APOLLO_PLUGIN_PREFIX))
+            .map(|factory| (factory.name.to_string(), factory.create_schema(gen)))
             .collect::<schemars::Map<String, Schema>>();
         gen_schema(plugins)
     }
@@ -729,9 +727,11 @@ impl HealthCheck {
             enabled: enabled.unwrap_or_else(default_health_check),
         }
     }
+}
 
-    // Used in tests
-    #[allow(dead_code)]
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl HealthCheck {
     #[builder]
     pub(crate) fn fake_new(listen: Option<ListenAddr>, enabled: Option<bool>) -> Self {
         Self {

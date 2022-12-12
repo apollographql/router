@@ -2,9 +2,9 @@
 source: apollo-router/src/plugins/telemetry/tracing/apollo_telemetry.rs
 expression: report
 ---
-Traces:
-  traces:
-    - - "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}"
+traces_per_query:
+  "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}":
+    traces:
       - start_time:
           seconds: "[seconds]"
           nanos: "[nanos]"
@@ -606,4 +606,7 @@ Traces:
         registered_operation: false
         forbidden_operation: false
         field_execution_weight: 1
+    stats_with_context: []
+    referenced_fields_by_type: {}
+operation_count: 1
 

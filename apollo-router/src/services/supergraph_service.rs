@@ -9,7 +9,6 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
-use opentelemetry::trace::SpanKind;
 use tower::util::BoxService;
 use tower::util::Either;
 use tower::BoxError;
@@ -48,6 +47,8 @@ use crate::QueryPlannerResponse;
 use crate::Schema;
 use crate::SupergraphRequest;
 use crate::SupergraphResponse;
+
+pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
 /// An [`IndexMap`] of available plugins.
 pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
@@ -244,10 +245,15 @@ async fn plan_query(
                 .context(context)
                 .build(),
         )
-        .instrument(tracing::info_span!("query_planning",
-            graphql.document = body.query.clone().expect("the query presence was already checked by a plugin").as_str(),
+        .instrument(tracing::info_span!(
+            QUERY_PLANNING_SPAN_NAME,
+            graphql.document = body
+                .query
+                .clone()
+                .expect("the query presence was already checked by a plugin")
+                .as_str(),
             graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
-            "otel.kind" = %SpanKind::Internal
+            "otel.kind" = "INTERNAL"
         ))
         .await
 }
@@ -869,5 +875,132 @@ mod tests {
         let mut stream = service.oneshot(request).await.unwrap();
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    // if a deferred response falls under a path that was nullified in the primary response,
+    // the deferred response must not be sent
+    #[tokio::test]
+    async fn filter_nullified_deferred_responses() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder()
+        .with_json(
+            serde_json::json!{{"query":"{currentUser{__typename name id}}"}},
+            serde_json::json!{{"data": {"currentUser": { "__typename": "User", "name": "Ada", "id": "1" }}}}
+        )
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{activeOrganization{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "User", "id":"1"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                        {
+                            "activeOrganization": {
+                                "__typename": "Organization", "id": "2"
+                            }
+                        }
+                    ]
+                }
+                }})
+                .with_json(
+                    serde_json::json!{{
+                        "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}",
+                        "variables": {
+                            "representations":[{"__typename": "User", "id":"3"}]
+                        }
+                    }},
+                    serde_json::json!{{
+                        "data": {
+                            "_entities": [
+                                {
+                                    "name": "A"
+                                }
+                            ]
+                        }
+                        }})
+       .build()),
+        ("orga", MockSubgraph::builder()
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "Organization", "id":"2"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                        {
+                            "creatorUser": {
+                                "__typename": "User", "id": "3"
+                            }
+                        }
+                    ]
+                }
+                }})
+                .with_json(
+                    serde_json::json!{{
+                        "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{nonNullId}}}",
+                        "variables": {
+                            "representations":[{"__typename": "Organization", "id":"2"}]
+                        }
+                    }},
+                    serde_json::json!{{
+                        "data": {
+                            "_entities": [
+                                {
+                                    "nonNullId": null
+                                }
+                            ]
+                        }
+                        }}).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(
+                r#"query {
+                currentUser {
+                    name
+                    ... @defer {
+                        activeOrganization {
+                            id
+                            nonNullId
+                            ... @defer {
+                                creatorUser {
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+            }"#,
+            )
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .build()
+            .unwrap();
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let primary = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(primary);
+
+        let deferred = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(deferred);
+
+        // the last deferred response was replace with an empty response,
+        // to still have one containing has_next = false
+        let last = response.next_response().await.unwrap();
+        insta::assert_json_snapshot!(last);
     }
 }
