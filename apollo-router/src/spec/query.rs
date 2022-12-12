@@ -836,6 +836,17 @@ impl Query {
                 }
             }
         }
+        // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+        // cf https://github.com/apollographql/router/issues/1677
+        let operation_kind_if_root_typename = self.operations.get(0).and_then(|op| {
+            op.selection_set
+                .iter()
+                .any(|f| f.is_typename_field())
+                .then(|| *op.kind())
+        });
+        if let Some(operation_kind) = operation_kind_if_root_typename {
+            output.insert(TYPENAME, operation_kind.as_str().into());
+        }
 
         Ok(())
     }
