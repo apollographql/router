@@ -175,6 +175,7 @@ where
                                         .filter(|error| match &error.path {
                                             None => false,
                                             Some(error_path) =>query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();
@@ -219,12 +220,14 @@ where
                                             }
                                         })
                                         .collect();
+
                                     // an empty response should not be sent
                                     // still, if there's an error or extension to show, we should
                                     // send it
                                     if !data.is_null()
                                         || !errors.is_empty()
                                         || !extensions.is_empty()
+
                                     {
                                         Some(
                                             IncrementalResponse::builder()
@@ -233,6 +236,7 @@ where
                                                 .path(path)
                                                 .errors(errors)
                                                 .extensions(extensions)
+
                                                 .build(),
                                         )
                                     } else {
