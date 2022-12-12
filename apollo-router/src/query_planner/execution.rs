@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::vec::Vec;
 
 use futures::future::join_all;
 use futures::prelude::*;
 use opentelemetry::trace::SpanKind;
+use sha2::{Sha256, Digest};
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
@@ -19,6 +21,7 @@ use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
@@ -335,6 +338,131 @@ impl PlanNode {
 
             (value, subselection, errors)
         })
+    }
+
+    // TODO handle all unwraps of this function
+    pub(crate) fn calculate_hash_recursively(&self) -> Result<PlanNode, Error> {
+        // tracing::trace!("calculating hash for plan:\n{:#?}", self);
+        match self {
+            PlanNode::Sequence {nodes} => {
+                println!("------- entered Sequence");
+                let mut nodes_new = Vec::new();
+                for node in nodes {
+                    nodes_new.push(node.calculate_hash_recursively().unwrap());
+                }
+                Ok(PlanNode::Sequence { nodes: nodes_new})
+            }
+            PlanNode::Parallel { nodes } => {
+                println!("------- entered Parallel");
+                let mut nodes_new = Vec::new();
+                for node in nodes {
+                    nodes_new.push(node.calculate_hash_recursively().unwrap());
+                }
+                Ok(PlanNode::Parallel { nodes: nodes_new})
+            }
+            PlanNode::Flatten(FlattenNode { node, path}) => {
+                println!("------- entered Flatten");
+                let node_new = Box::new(node.calculate_hash_recursively().unwrap());
+                Ok(PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_new}))
+            }
+            PlanNode::Fetch(fetch_node) => {
+                println!("------- entered Fetch");
+                println!("-----------------------\n before node : {:?}",self);
+                match fetch_node {
+                    FetchNode{ service_name, requires, variable_usages, operation,
+                              operation_name, operation_kind, id, .. } => {
+                        let mut hasher = Sha256::new();
+                        hasher.update(operation.clone());
+                        let hash_string = hex::encode(hasher.finalize());
+
+                        let plan_node = PlanNode::Fetch(FetchNode{
+                            service_name: service_name.clone(),
+                            requires: requires.clone(),
+                            variable_usages: variable_usages.clone(),
+                            operation: operation.clone(),
+                            operation_hash: hash_string.to_string(),
+                            operation_name: operation_name.clone(),
+                            operation_kind: operation_kind.clone(),
+                            id: id.clone(),
+                        });
+                        println!("-----------------------\n after node : {:?}",plan_node);
+                        Ok(plan_node)
+                    }
+                }
+            }
+            PlanNode::Defer {
+                primary: Primary {
+                    path,
+                    subselection,
+                    node,
+                },
+                deferred,
+            } => {
+                println!("------- entered Defer");
+                let new_inner_node;
+                if let Some(inner_node) = node {
+                    new_inner_node = Some(Box::new(inner_node.calculate_hash_recursively().unwrap()));
+                } else {
+                    new_inner_node = None;
+                }
+                let mut deferred_new = Vec::new();
+                for deferred_node in deferred {
+                    match deferred_node {
+                        DeferredNode{depends, label, path, subselection,node} => {
+                            match node {
+                                Some(node) => {
+                                    deferred_new.push(DeferredNode{
+                                        depends: depends.clone(),
+                                        label: label.clone(),
+                                        path: path.clone(),
+                                        subselection: subselection.clone(),
+                                        node: Some(Arc::new(node.calculate_hash_recursively().unwrap())),
+                                    })
+                                }
+                                None => {
+                                    deferred_new.push(DeferredNode{
+                                        depends: depends.clone(),
+                                        label: label.clone(),
+                                        path: path.clone(),
+                                        subselection: subselection.clone(),
+                                        node: None,
+                                    })
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(PlanNode::Defer { primary: Primary {
+                    path: path.clone(),
+                    subselection: subselection.clone(),
+                    node: new_inner_node,
+                }, deferred: deferred_new })
+            }
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                condition,
+            } => {
+                println!("------- entered Condition");
+                let new_if_node;
+                if let Some(node) = if_clause {
+                    new_if_node = Some(Box::new(node.calculate_hash_recursively().unwrap()));
+                } else {
+                    new_if_node = None;
+                }
+                let new_else_node;
+                if let Some(node) = else_clause {
+                    new_else_node = Some(Box::new(node.calculate_hash_recursively().unwrap()));
+                } else {
+                    new_else_node = None;
+                }
+                Ok(PlanNode::Condition {
+                    condition: condition.clone(),
+                    if_clause: new_if_node,
+                    else_clause: new_else_node,
+                })
+            }
+        }
     }
 }
 
