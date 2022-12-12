@@ -227,7 +227,6 @@ where
                                     if !data.is_null()
                                         || !errors.is_empty()
                                         || !extensions.is_empty()
-
                                     {
                                         Some(
                                             IncrementalResponse::builder()
@@ -236,7 +235,6 @@ where
                                                 .path(path)
                                                 .errors(errors)
                                                 .extensions(extensions)
-
                                                 .build(),
                                         )
                                     } else {
