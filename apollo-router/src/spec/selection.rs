@@ -318,7 +318,7 @@ impl Selection {
     }
 
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
-        let res = match (path.get(0), self) {
+        match (path.get(0), self) {
             (None, _) => true,
             (
                 Some(PathElement::Key(key)),
@@ -389,9 +389,7 @@ impl Selection {
                     .any(|selection| selection.contains_error_path(&path[1..], fragments))
             }
             (Some(PathElement::Fragment(_)), Selection::Field { .. }) => false,
-        };
-        println!("contains_error_path({path:?}, {self:?}: {res}");
-        res
+        }
     }
 }
 
