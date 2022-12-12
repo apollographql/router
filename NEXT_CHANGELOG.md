@@ -59,6 +59,14 @@ telemetry:
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
 ## 🚀 Features
+
+### Re-Deploy Router Pods If The SuperGraph Configmap Changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
+When setting the supergraph with th the `supergraphFile` variable a `sha256` checksum is calculated and set as an annotation for the router pods. This will spin up new pods when the supergraph is mounted via config map and the schema has changed.
+
+Note: It is preferable to not have `--hot-reload` enabled with this feature since re-configuring the router during a pod restart is duplicating the work and may cause confusion in log messaging.
+
+By [@toneill818](https://github.com/toneill818) in https://github.com/apollographql/router/pull/2223
+
 ### Tracing batch span processor is now configurable ([Issue #2232](https://github.com/apollographql/router/issues/2232))
 
 Exporting traces often requires performance tuning based on the throughput of the router, sampling settings and ingestion capability of tracing ingress.
@@ -131,6 +139,12 @@ When we drop Telemetry we spawn a thread to perform the global opentelemetry tra
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
 
+### Reconstruct deferred queries with knowledge about fragments ([Issue #2105](https://github.com/apollographql/router/issues/2105))
+
+When we are using `@defer`, response formatting must apply on a subset of the query (primary or deferred), that is reconstructed from information provided by the query planner: a path into the response and a subselection. Previously, that path did not include information on fragment application, which resulted in query reconstruction issues if `@defer` was used under a fragment application on an interface.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2109
+
 ## 🛠 Maintenance
 
 ### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
@@ -145,6 +159,11 @@ This test was failing frequently due to it being a timing test being run in a si
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
 
+### update reports.proto protobuf definition ([PR #2247](https://github.com/apollographql/router/pull/2247))
+
+Update the reports.proto file, and change the prompt to update the file with the correct new location.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2247
 ### Upgrade OpenTelemetry to 0.18 ([Issue #1970](https://github.com/apollographql/router/issues/1970))
 
 Update to OpenTelemetry 0.18.
@@ -161,7 +180,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 Rust MSRV incremented to 1.65.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221 and https://github.com/apollographql/router/pull/2240
 
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
