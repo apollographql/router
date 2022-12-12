@@ -1,6 +1,6 @@
 ---
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 14287822546131581520
     trace_flags: 1
     is_remote: false
@@ -85,7 +85,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 15237674702119070751
     trace_flags: 1
     is_remote: false
@@ -152,7 +152,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 13865784024556574003
     trace_flags: 1
     is_remote: false
@@ -213,7 +213,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 6782401025275156233
     trace_flags: 1
     is_remote: false
@@ -277,7 +277,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 8824695332656836540
     trace_flags: 1
     is_remote: false
@@ -338,7 +338,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 16743763821444799861
     trace_flags: 1
     is_remote: false
@@ -399,7 +399,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 17407667985756513925
     trace_flags: 1
     is_remote: false
@@ -466,7 +466,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 7936167443054682587
     trace_flags: 1
     is_remote: false
@@ -530,7 +530,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 16253144712595734830
     trace_flags: 1
     is_remote: false
@@ -594,7 +594,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 15278772753518055685
     trace_flags: 1
     is_remote: false
@@ -661,7 +661,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 11170049527526553842
     trace_flags: 1
     is_remote: false
@@ -734,7 +734,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 12193731640433132388
     trace_flags: 1
     is_remote: false
@@ -810,7 +810,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 17716600377366594972
     trace_flags: 1
     is_remote: false
@@ -877,7 +877,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 12581790234036960487
     trace_flags: 1
     is_remote: false
@@ -950,7 +950,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 13059514760148115210
     trace_flags: 1
     is_remote: false
@@ -1026,7 +1026,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 12520246751970884479
     trace_flags: 1
     is_remote: false
@@ -1099,7 +1099,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 3398738514204614748
     trace_flags: 1
     is_remote: false
@@ -1175,7 +1175,7 @@
       service.version:
         String: 1.4.0
 - span_context:
-    trace_id: 122960190946202642409915189222685399094
+    trace_id: "122960190946202642409915189222685399094"
     span_id: 17691584597033290046
     trace_flags: 1
     is_remote: false

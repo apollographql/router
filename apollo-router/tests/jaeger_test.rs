@@ -29,7 +29,7 @@ use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jaeger_tracing() -> Result<(), BoxError> {
-    let tracer = opentelemetry_jaeger::new_pipeline()
+    let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("my_app")
         .install_simple()?;
 
@@ -232,7 +232,7 @@ fn parent_span<'a>(trace: &'a Value, span: &'a Value) -> Option<&'a Value> {
 async fn subgraph() {
     async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
         // create the opentelemetry-jaeger tracing infrastructure
-        let tracer_provider = opentelemetry_jaeger::new_pipeline()
+        let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
             .with_service_name("products")
             .build_simple()
             .unwrap();

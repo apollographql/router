@@ -39,7 +39,7 @@ expression: get_spans()
           ],
           [
             "otel.kind",
-            "internal"
+            "INTERNAL"
           ],
           [
             "apollo_private.field_level_instrumentation_ratio",
@@ -93,7 +93,7 @@ expression: get_spans()
               ],
               [
                 "otel.kind",
-                "internal"
+                "INTERNAL"
               ]
             ],
             "metadata": {
@@ -117,7 +117,7 @@ expression: get_spans()
                 "entries": [
                   [
                     "otel.kind",
-                    "internal"
+                    "INTERNAL"
                   ]
                 ],
                 "metadata": {
@@ -142,7 +142,7 @@ expression: get_spans()
             "entries": [
               [
                 "otel.kind",
-                "internal"
+                "INTERNAL"
               ],
               [
                 "message",
@@ -168,7 +168,7 @@ expression: get_spans()
                 "entries": [
                   [
                     "otel.kind",
-                    "internal"
+                    "INTERNAL"
                   ],
                   [
                     "apollo.subgraph.name",
@@ -228,7 +228,7 @@ expression: get_spans()
                       ],
                       [
                         "otel.kind",
-                        "internal"
+                        "INTERNAL"
                       ]
                     ],
                     "metadata": {
@@ -270,7 +270,7 @@ expression: get_spans()
                         "entries": [
                           [
                             "otel.kind",
-                            "client"
+                            "CLIENT"
                           ],
                           [
                             "net.peer.name",

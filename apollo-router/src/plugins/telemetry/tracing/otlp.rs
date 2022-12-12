@@ -12,12 +12,22 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 impl TracingConfigurator for super::super::otlp::Config {
     fn apply(&self, builder: Builder, _trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::debug!("configuring Otlp tracing");
+        tracing::info!(
+            "configuring Otlp tracing: {}",
+            self.batch_processor.as_ref().cloned().unwrap_or_default()
+        );
         let exporter: SpanExporterBuilder = self.exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(
                 exporter.build_span_exporter()?,
                 opentelemetry::runtime::Tokio,
+            )
+            .with_batch_config(
+                self.batch_processor
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default()
+                    .into(),
             )
             .build()
             .filtered(),

@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use futures::future::join_all;
 use futures::prelude::*;
-use opentelemetry::trace::SpanKind;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
 use tracing::Instrument;
@@ -129,9 +128,10 @@ impl PlanNode {
                             subselection = subselect;
                         }
                     }
-                    .instrument(
-                        tracing::info_span!(SEQUENCE_SPAN_NAME, "otel.kind" = %SpanKind::Internal),
-                    )
+                    .instrument(tracing::info_span!(
+                        SEQUENCE_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
                     .await
                 }
                 PlanNode::Parallel { nodes } => {
@@ -157,9 +157,10 @@ impl PlanNode {
                             errors.extend(err.into_iter());
                         }
                     }
-                    .instrument(
-                        tracing::info_span!(PARALLEL_SPAN_NAME, "otel.kind" = %SpanKind::Internal),
-                    )
+                    .instrument(tracing::info_span!(
+                        PARALLEL_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
                     .await
                 }
                 PlanNode::Flatten(FlattenNode { path, node }) => {
@@ -173,7 +174,7 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, "graphql.path" = %current_dir, "otel.kind" = %SpanKind::Internal))
+                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, "graphql.path" = %current_dir, "otel.kind" = "INTERNAL"))
                         .await;
 
                     value = v;
@@ -187,7 +188,7 @@ impl PlanNode {
                         .fetch_node(parameters, parent_value, current_dir)
                         .instrument(tracing::info_span!(
                             FETCH_SPAN_NAME,
-                            "otel.kind" = %SpanKind::Internal,
+                            "otel.kind" = "INTERNAL",
                             "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                             "apollo_private.sent_time_offset" = fetch_time_offset
                         ))
@@ -256,7 +257,10 @@ impl PlanNode {
                                     &value,
                                     sender,
                                 )
-                                .instrument(tracing::info_span!(DEFER_PRIMARY_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
+                                .instrument(tracing::info_span!(
+                                    DEFER_PRIMARY_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL"
+                                ))
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
@@ -268,7 +272,10 @@ impl PlanNode {
                             let _ = primary_sender.send(value.clone());
                         }
                     }
-                    .instrument(tracing::info_span!(DEFER_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
+                    .instrument(tracing::info_span!(
+                        DEFER_SPAN_NAME,
+                        "otel.kind" = "INTERNAL"
+                    ))
                     .await
                 }
                 PlanNode::Condition {
@@ -303,7 +310,10 @@ impl PlanNode {
                                         parent_value,
                                         sender.clone(),
                                     )
-                                    .instrument(tracing::info_span!(CONDITION_IF_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
+                                    .instrument(tracing::info_span!(
+                                        CONDITION_IF_SPAN_NAME,
+                                        "otel.kind" = "INTERNAL"
+                                    ))
                                     .await;
                                 value.deep_merge(v);
                                 errors.extend(err.into_iter());
@@ -317,7 +327,10 @@ impl PlanNode {
                                     parent_value,
                                     sender.clone(),
                                 )
-                                .instrument(tracing::info_span!(CONDITION_ELSE_SPAN_NAME, "otel.kind" = %SpanKind::Internal))
+                                .instrument(tracing::info_span!(
+                                    CONDITION_ELSE_SPAN_NAME,
+                                    "otel.kind" = "INTERNAL"
+                                ))
                                 .await;
                             value.deep_merge(v);
                             errors.extend(err.into_iter());
@@ -327,7 +340,7 @@ impl PlanNode {
                     .instrument(tracing::info_span!(
                         CONDITION_SPAN_NAME,
                         "graphql.condition" = condition,
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     ))
                     .await
                 }
@@ -431,7 +444,7 @@ impl DeferredNode {
                         "graphql.label" = label,
                         "graphql.depends" = depends_json,
                         "graphql.path" = deferred_path.to_string(),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     ))
                     .await;
 
