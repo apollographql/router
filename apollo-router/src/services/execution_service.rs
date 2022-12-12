@@ -129,10 +129,10 @@ where
                                 response.has_next = Some(has_next);
                             }
 
-                            response.errors = response.errors.into_iter().filter(|error| match &error.path {
+                            response.errors.retain(|error| match &error.path {
                                     None => true,
                                     Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
-                                }).collect();
+                                });
                             ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the

@@ -222,7 +222,7 @@ impl PlanNode {
                         let mut futures = Vec::new();
 
                         let (primary_sender, _) =
-                        tokio::sync::broadcast::channel::<(Value, Vec<Error>)>(1);
+                            tokio::sync::broadcast::channel::<(Value, Vec<Error>)>(1);
 
                         for deferred_node in deferred {
                             let fut = deferred_node
@@ -272,7 +272,6 @@ impl PlanNode {
                             subselection = primary_subselection.clone();
                             let _ = primary_sender.send((value.clone(), errors.clone()));
                         }
-
                     }
                     .instrument(tracing::info_span!(
                         DEFER_SPAN_NAME,
