@@ -25,6 +25,7 @@ use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
 
+use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
@@ -127,6 +128,8 @@ enum ConfigSubcommand {
         #[clap(parse(from_flag), long)]
         diff: bool,
     },
+    /// List all the available experimental configurations with related GitHub discussion
+    Experimental,
 }
 
 /// Options for the router
@@ -375,6 +378,12 @@ impl Executable {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
                 println!("{}", output);
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Experimental,
+            })) => {
+                configuration::print_all_experimental_conf();
                 Ok(())
             }
             None => {

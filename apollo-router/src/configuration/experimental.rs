@@ -2,7 +2,33 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
-pub(crate) fn log_experimental_conf(conf: &Value) {
+pub(crate) fn print_all_experimental_conf() {
+    let available_exp_confs = serde_json::from_str::<HashMap<String, String>>(include_str!(
+        "../../experimental_features.json"
+    ));
+    match available_exp_confs {
+        Ok(available_exp_confs) => {
+            let available_exp_confs_str: Vec<String> = available_exp_confs
+                .into_iter()
+                .map(|(used_exp_conf, discussion_link)| {
+                    format!("\t- {used_exp_conf}: {discussion_link}")
+                })
+                .collect();
+            println!(
+                "List of all experimental configurations with related GitHub discussions:\n\n{}",
+                available_exp_confs_str.join("\n")
+            );
+        }
+        Err(err) => {
+            eprintln!(
+                "cannot access to the list of available experimental configurations: {}",
+                err
+            );
+        }
+    }
+}
+
+pub(crate) fn log_used_experimental_conf(conf: &Value) {
     let available_discussions = serde_json::from_str::<HashMap<String, String>>(include_str!(
         "../../experimental_features.json"
     ));

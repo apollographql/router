@@ -23,6 +23,7 @@ use expansion::*;
 use itertools::Itertools;
 pub(crate) use schema::generate_config_schema;
 pub(crate) use schema::generate_upgrade;
+pub(crate) use experimental::print_all_experimental_conf;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;

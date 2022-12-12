@@ -13,7 +13,7 @@ use schemars::schema::RootSchema;
 use super::expansion::coerce;
 use super::expansion::expand_env_variables;
 use super::expansion::Expansion;
-use super::experimental::log_experimental_conf;
+use super::experimental::log_used_experimental_conf;
 use super::plugins;
 use super::yaml;
 use super::Configuration;
@@ -103,7 +103,7 @@ pub(crate) fn validate_yaml_configuration(
             tracing::warn!("configuration could not be upgraded automatically as it had errors")
         }
     }
-    log_experimental_conf(&yaml);
+    log_used_experimental_conf(&yaml);
     let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
 
     if let Err(errors) = schema.validate(&expanded_yaml) {
