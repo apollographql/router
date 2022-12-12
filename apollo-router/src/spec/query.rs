@@ -106,7 +106,7 @@ impl Query {
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
-            let operation = self.operation(operation_name);
+            let original_operation = self.operation(operation_name);
             if is_deferred {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
@@ -123,6 +123,19 @@ impl Query {
                                 errors: Vec::new(),
                                 nullified: Vec::new(),
                             };
+                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                            // cf https://github.com/apollographql/router/issues/1677
+                            let operation_kind_if_root_typename =
+                                original_operation.and_then(|op| {
+                                    op.selection_set
+                                        .iter()
+                                        .any(|f| f.is_typename_field())
+                                        .then(|| *op.kind())
+                                });
+                            if let Some(operation_kind) = operation_kind_if_root_typename {
+                                output.insert(TYPENAME, operation_kind.as_str().into());
+                            }
+
                             response.data = Some(
                                 match self.apply_root_selection_set(
                                     operation,
@@ -151,7 +164,7 @@ impl Query {
                     response.data = Some(Value::Object(Object::default()));
                     return vec![];
                 }
-            } else if let Some(operation) = operation {
+            } else if let Some(operation) = original_operation {
                 let mut output = Object::default();
 
                 let all_variables = if operation.variables.is_empty() {
@@ -835,17 +848,6 @@ impl Query {
                     }
                 }
             }
-        }
-        // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
-        // cf https://github.com/apollographql/router/issues/1677
-        let operation_kind_if_root_typename = self.operations.get(0).and_then(|op| {
-            op.selection_set
-                .iter()
-                .any(|f| f.is_typename_field())
-                .then(|| *op.kind())
-        });
-        if let Some(operation_kind) = operation_kind_if_root_typename {
-            output.insert(TYPENAME, operation_kind.as_str().into());
         }
 
         Ok(())

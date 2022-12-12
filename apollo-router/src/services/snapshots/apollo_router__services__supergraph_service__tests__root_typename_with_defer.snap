@@ -4,6 +4,7 @@ expression: res
 ---
 {
   "data": {
+    "__typename": "Query",
     "currentUser": {
       "activeOrganization": {
         "id": "0",
@@ -19,8 +20,7 @@ expression: res
           }
         ]
       }
-    },
-    "__typename": "Query"
+    }
   },
   "hasNext": true
 }
