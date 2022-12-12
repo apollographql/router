@@ -847,6 +847,8 @@ mod tests {
   }
   "#;
 
+        // this test does not need to generate a valid response, it is only here to check
+        // that the router does not panic when reconstructing the query for the deferred part
         let service = TestHarness::builder()
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
@@ -1002,5 +1004,149 @@ mod tests {
         // to still have one containing has_next = false
         let last = response.next_response().await.unwrap();
         insta::assert_json_snapshot!(last);
+    }
+
+    #[tokio::test]
+    async fn reconstruct_deferred_query_under_interface() {
+        let schema = r#"schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+            @link(url: "https://specs.apollo.dev/tag/v0.2")
+            @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
+            {
+                query: Query
+            }
+        
+            directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+            directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+            directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+        
+            scalar join__FieldSet
+            enum join__Graph {
+                USER @join__graph(name: "user", url: "http://localhost:4000/graphql")
+            }
+            scalar link__Import
+            enum link__Purpose {
+                SECURITY
+                EXECUTION
+            }
+            type Query
+            @join__type(graph: USER)
+            {
+            me: Identity @join__field(graph: USER)
+            }
+            interface Identity
+            @join__type(graph: USER)
+            {
+            id: ID!
+            name: String!
+            }
+        
+            type User implements Identity
+                @join__implements(graph: USER, interface: "Identity")
+                @join__type(graph: USER, key: "id")
+            {
+                fullName: String! @join__field(graph: USER)
+                id: ID!
+                memberships: [UserMembership!]!  @join__field(graph: USER)
+                name: String! @join__field(graph: USER)
+            }
+            type UserMembership
+                @join__type(graph: USER)
+                @tag(name: "platform-api")
+            {
+                """The organization that the user belongs to."""
+                account: Account!
+                """The user's permission level within the organization."""
+                permission: UserPermission!
+            }
+            enum UserPermission
+            @join__type(graph: USER)
+            {
+                USER
+                ADMIN
+            }
+            type Account
+            @join__type(graph: USER, key: "id")
+            {
+                id: ID! @join__field(graph: USER)
+                name: String!  @join__field(graph: USER)
+            }"#;
+
+        let subgraphs = MockedSubgraphs([
+            ("user", MockSubgraph::builder().with_json(
+            serde_json::json!{{"query":"{me{__typename ...on User{id fullName memberships{permission account{__typename id}}}}}"}},
+            serde_json::json!{{"data": {"me": {
+                "__typename": "User",
+                "id": 0,
+                "fullName": "A",
+                "memberships": [
+                    {
+                        "permission": "USER",
+                        "account": {
+                            "__typename": "Account",
+                            "id": 1
+                        }
+                    }
+                ]
+            }}}}
+        ) .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Account{name}}}",
+                "variables": {
+                    "representations":[
+                        {"__typename": "Account", "id": 1}
+                    ]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                        { "__typename": "Account", "id": 1, "name": "B"}
+                    ]
+                }
+            }}).build()),
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query(
+                r#"query {
+                    me {
+                      ... on User {
+                        id
+                        fullName
+                        memberships {
+                          permission
+                          account {
+                            ... on Account @defer {
+                              name
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }"#,
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
 }

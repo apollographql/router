@@ -126,6 +126,12 @@ When we drop Telemetry we spawn a thread to perform the global opentelemetry tra
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
 
+### Reconstruct deferred queries with knowledge about fragments ([Issue #2105](https://github.com/apollographql/router/issues/2105))
+
+When we are using `@defer`, response formatting must apply on a subset of the query (primary or deferred), that is reconstructed from information provided by the query planner: a path into the response and a subselection. Previously, that path did not include information on fragment application, which resulted in query reconstruction issues if `@defer` was used under a fragment application on an interface.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2109
+
 ## 🛠 Maintenance
 
 ### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))

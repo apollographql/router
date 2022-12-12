@@ -150,7 +150,7 @@ reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.11"
+router-bridge = "0.1.12"
 rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "2.1.2"
@@ -190,6 +190,7 @@ urlencoding = "2.1.2"
 uuid = { version = "1.2.2", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 askama = "0.11.1"
+apollo-encoder = "0.4.0"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
