@@ -44,7 +44,7 @@ pub(crate) fn log_used_experimental_conf(conf: &Value) {
             .collect();
         if !needed_discussions.is_empty() {
             tracing::info!(
-                r#"You're using some "experimental" features (configuration prefixed by "experimental_"), it means we can break the configuration shape/behavior in a future release.
+                r#"You're using some "experimental" features (configuration prefixed by "experimental_"), we may make breaking changes in future releases.
 To help us design the stable version we need your feedback, here is a list of links where you can give your opinion:
 
 {}
