@@ -72,6 +72,12 @@ pub(crate) struct FetchNode {
     /// The GraphQL subquery that is used for the fetch.
     pub(crate) operation: String,
 
+    /// The sha256hash of the GraphQL subgraph query that is used for the fetch.
+    /// This is used to for supporting Automatic persisted queries.
+    /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
+    #[serde(skip)]
+    pub(crate) operation_hash: String,
+
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<String>,
 
