@@ -282,4 +282,29 @@ mod tests {
 
         assert_eq!(expected_result, req);
     }
+
+    #[test]
+    fn from_urlencoded_query_with_variables_works() {
+        let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&variables=%7B%22date%22%3A%222022-01-01T00%3A00%3A00%2B00%3A00%22%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
+
+        let expected_result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "variables": {"date": "2022-01-01T00:00:00+00:00"},
+              "extensions": {
+                  "persistedQuery": {
+                      "version": 1,
+                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+                  }
+                }
+            })
+            .to_string()
+            .as_str(),
+        ).unwrap();
+
+        let req = Request::from_urlencoded_query(query_string).unwrap();
+
+        assert_eq!(expected_result, req);
+    }
 }
