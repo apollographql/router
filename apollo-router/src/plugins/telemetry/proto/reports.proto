@@ -436,6 +436,13 @@ message Report {
 
   // Total number of operations processed during this period.
   uint64 operation_count = 6;
+
+  // If this is set to true, the stats in TracesWithStats.stats_with_context
+  // represent all of the operations described from this report, and the
+  // traces in TracesWithStats.trace are a sampling of some of the same
+  // operations. If this is false, each operation is described in precisely
+  // one of those two fields.
+  bool traces_pre_aggregated = 7;
 }
 
 message ContextualizedStats {
@@ -447,8 +454,11 @@ message ContextualizedStats {
 
 }
 
-// A sequence of traces and stats. An individual operation should either be described as a trace
-// or as part of stats, but not both.
+// A sequence of traces and stats. If Report.traces_pre_aggregated (at the top
+// level of the report) is false, an individual operation should either be
+// described as a trace or as part of stats, but not both. If that flag
+// is true, then all operations are described as stats and some are also
+// described as traces.
 message TracesAndStats {
   repeated Trace trace = 1 [(js_preEncoded)=true];
   repeated ContextualizedStats stats_with_context = 2 [(js_use_toArray)=true];
