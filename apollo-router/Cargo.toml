@@ -153,7 +153,7 @@ reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = { git = "https://github.com/apollographql/federation-rs", branch = "geal/test-2.2.2-rc0" }
+router-bridge = "0.1.12"
 rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "2.1.2"
