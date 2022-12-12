@@ -183,6 +183,7 @@ impl PlanNode {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
+
         let operation_kind = if self.contains_mutations() {
             OperationKind::Mutation
         } else {
@@ -225,6 +226,7 @@ impl PlanNode {
                 let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, kind, primary_subselection);
+
                     // ----------------------- Parse ---------------------------------
                     let sub_selection = Query::parse(&query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
@@ -240,14 +242,15 @@ impl PlanNode {
 
                 deferred.iter().try_fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
-                        let query = reconstruct_full_query(&current.path, kind, subselection);
+                        let query = reconstruct_full_query(&current.query_path, kind, subselection);
+
                         // ----------------------- Parse ---------------------------------
                         let sub_selection = Query::parse(&query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
                             SubSelection {
-                                path: current.path.clone(),
+                                path: current.query_path.clone(),
                                 subselection: subselection.clone(),
                             },
                             sub_selection,
@@ -256,7 +259,7 @@ impl PlanNode {
                     if let Some(current_node) = &current.node {
                         current_node.collect_subselections(
                             schema,
-                            &initial_path.join(&current.path),
+                            &initial_path.join(&current.query_path),
                             kind,
                             subs,
                         )?;
@@ -342,6 +345,11 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
+            json_ext::PathElement::Fragment(fragment) => {
+                write!(&mut query, "{{ {fragment}")
+                    .expect("writing to a String should not fail because it can reallocate");
+                len += 1;
+            }
         }
     }
 
@@ -392,7 +400,7 @@ pub(crate) struct DeferredNode {
     /// The optional defer label.
     pub(crate) label: Option<String>,
     /// Path to the @defer this correspond to. `subselection` start at that `path`.
-    pub(crate) path: Path,
+    pub(crate) query_path: Path,
     /// The part of the original query that "selects" the data to send
     /// in that deferred response (once the plan in `node` completes).
     /// Will be set _unless_ `node` is a `DeferNode` itself.
