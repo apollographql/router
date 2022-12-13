@@ -155,7 +155,7 @@ rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "2.1.2"
 sha2 = "0.10.6"
-serde = { version = "1.0.149", features = ["derive", "rc"] }
+serde = { version = "1.0.150", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.89", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
@@ -199,7 +199,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.22.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.23.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.1.0"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
