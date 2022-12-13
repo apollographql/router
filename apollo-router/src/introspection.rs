@@ -11,7 +11,8 @@ use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
 use crate::Configuration;
 
-const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(5) };
+const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(5) };
 
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
