@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::axum_factory::utils::PropagatingMakeSpan;
-use tower::BoxError;
 use tower::ServiceExt;
+use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::MakeSpan;
-use tracing::Instrument;
 
 use crate::configuration::Configuration;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
@@ -233,11 +233,13 @@ impl<'a> TestHarness<'a> {
         let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config);
 
         Ok(tower::service_fn(move |request: router::Request| {
-            let router = router_creator.make();
-            async move {
-                let span = PropagatingMakeSpan::default().make_span(&request.router_request);
-                router.oneshot(request).instrument(span).await
-            }
+            let router = ServiceBuilder::new()
+                .instrument(|req: &router::Request| {
+                    PropagatingMakeSpan::default().make_span(&req.router_request)
+                })
+                .service(router_creator.make())
+                .boxed();
+            async move { router.oneshot(request).await }
         })
         .boxed_clone())
     }

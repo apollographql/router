@@ -128,7 +128,7 @@ async fn test_condition_if() {
         }
     }
 
-    tokio::time::sleep(Duration::from_millis(10000)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     println!("{}", reports.lock().unwrap().len());
     assert_report!(reports.lock().unwrap().get(0).unwrap());
 }
