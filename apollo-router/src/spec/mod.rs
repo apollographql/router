@@ -72,6 +72,6 @@ impl ErrorExtension for SpecError {
             _ => (),
         }
 
-        (!obj.is_empty()).then(|| obj)
+        (!obj.is_empty()).then_some(obj)
     }
 }
