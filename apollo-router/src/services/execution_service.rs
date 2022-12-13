@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::SinkExt;
 use futures::StreamExt;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -23,7 +24,9 @@ use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::services::execution;
 use crate::ExecutionRequest;
@@ -126,6 +129,10 @@ where
                                 response.has_next = Some(has_next);
                             }
 
+                            response.errors.retain(|error| match &error.path {
+                                    None => true,
+                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
+                                });
                             ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the
@@ -141,39 +148,108 @@ where
                         (Some(response_path), Some(response_data)) => {
                             let mut sub_responses = Vec::new();
                             response_data.select_values_and_paths(response_path, |path, value| {
-                                sub_responses.push((path.clone(), value.clone()));
+                                // if the deferred path points to an array, split it into multiple subresponses
+                                // because the root must be an object
+                                if let Value::Array(array) = value {
+                                    let mut parent = path.clone();
+                                    for (i, value) in array.iter().enumerate() {
+                                        parent.push(PathElement::Index(i));
+                                        sub_responses.push((parent.clone(), value.clone()));
+                                        parent.pop();
+                                    }
+                                } else {
+                                    sub_responses.push((path.clone(), value.clone()));
+                                }
                             });
+
+                            let query = query.clone();
+                            let operation_name = operation_name.clone();
+
+                            let incremental = sub_responses
+                                .into_iter()
+                                .filter_map(move |(path, data)| {
+                                    // filter errors that match the path of this incremental response
+                                    let errors = response
+                                        .errors
+                                        .iter()
+                                        .filter(|error| match &error.path {
+                                            None => false,
+                                            Some(error_path) =>query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+
+                                        })
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+
+                                        let extensions: Object = response
+                                        .extensions
+                                        .iter()
+                                        .map(|(key, value)| {
+                                            if key.as_str() == "valueCompletion" {
+                                                let value = match value.as_array() {
+                                                    None => Value::Null,
+                                                    Some(v) => Value::Array(
+                                                        v.iter()
+                                                            .filter(|ext| {
+                                                                match ext
+                                                                    .as_object()
+                                                                    .as_ref()
+                                                                    .and_then(|ext| {
+                                                                        ext.get("path")
+                                                                    })
+                                                                    .and_then(|v| {
+                                                                        let p:Option<Path> = serde_json_bytes::from_value(v.clone()).ok();
+                                                                        p
+                                                                    }) {
+                                                                    None => false,
+                                                                    Some(ext_path) => {
+                                                                        ext_path
+                                                                            .starts_with(
+                                                                                &path,
+                                                                            )
+                                                                    }
+                                                                }
+                                                            })
+                                                            .cloned()
+                                                            .collect(),
+                                                    ),
+                                                };
+
+                                                (key.clone(), value)
+                                            } else {
+                                                (key.clone(), value.clone())
+                                            }
+                                        })
+                                        .collect();
+
+                                    // an empty response should not be sent
+                                    // still, if there's an error or extension to show, we should
+                                    // send it
+                                    if !data.is_null()
+                                        || !errors.is_empty()
+                                        || !extensions.is_empty()
+                                    {
+                                        Some(
+                                            IncrementalResponse::builder()
+                                                .and_label(response.label.clone())
+                                                .data(data)
+                                                .path(path)
+                                                .errors(errors)
+                                                .extensions(extensions)
+                                                .build(),
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
 
                             ready(Some(
                                 Response::builder()
                                     .has_next(has_next)
-                                    .incremental(
-                                        sub_responses
-                                            .into_iter()
-                                            .map(move |(path, data)| {
-                                                let errors = response
-                                                    .errors
-                                                    .iter()
-                                                    .filter(|error| match &error.path {
-                                                        None => false,
-                                                        Some(err_path) => {
-                                                            err_path.starts_with(&path)
-                                                        }
-                                                    })
-                                                    .cloned()
-                                                    .collect::<Vec<_>>();
-                                                IncrementalResponse::builder()
-                                                    .and_label(response.label.clone())
-                                                    .data(data)
-                                                    .path(path)
-                                                    .errors(errors)
-                                                    .extensions(response.extensions.clone())
-                                                    .build()
-                                            })
-                                            .collect(),
-                                    )
+                                    .incremental(incremental)
                                     .build(),
                             ))
+
                         }
                     }
                 })

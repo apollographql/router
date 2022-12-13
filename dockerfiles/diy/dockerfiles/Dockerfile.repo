@@ -9,7 +9,8 @@ WORKDIR /usr/src/router
 RUN apt-get update
 RUN apt-get -y install \
     npm \
-    nodejs
+    nodejs \
+    protobuf-compiler
 
 # Add rustfmt since build requires it
 RUN rustup component add rustfmt

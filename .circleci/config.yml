@@ -620,14 +620,17 @@ workflows:
               only:
                 - dev
       - prepare_release:
+          name: "Prepare major release"
           release_type: "major"
           requires:
             - prepare_major_release_approval
       - prepare_release:
+          name: "Prepare minor release"
           release_type: "minor"
           requires:
             - prepare_minor_release_approval
       - prepare_release:
+          name: "Prepare patch release"
           release_type: "patch"
           requires:
             - prepare_patch_release_approval
