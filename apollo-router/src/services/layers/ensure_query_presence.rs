@@ -37,6 +37,12 @@ where
                         message: "Must provide query string.".to_string(),
                         ..Default::default()
                     }];
+                    tracing::error!(
+                        monotonic_counter.apollo_router_http_requests_total = 1u64,
+                        status = %StatusCode::BAD_REQUEST.as_u16(),
+                        error = "Must provide query string",
+                        "Must provide query string"
+                    );
 
                     //We do not copy headers from the request to the response as this may lead to leakable of sensitive data
                     let res = SupergraphResponse::builder()

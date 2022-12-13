@@ -12,8 +12,10 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::AppSettings;
 use clap::ArgAction;
+use clap::Args;
 use clap::CommandFactory;
 use clap::Parser;
+use clap::Subcommand;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use tracing::dispatcher::with_default;
@@ -24,6 +26,7 @@ use url::ParseError;
 use url::Url;
 
 use crate::configuration::generate_config_schema;
+use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ConfigurationSource;
@@ -50,7 +53,6 @@ pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
 #[cfg(feature = "dhat-heap")]
-#[crate::_private::ctor::ctor]
 fn create_heap_profiler() {
     unsafe {
         match DHAT_HEAP_PROFILER.set(dhat::Profiler::new_heap()) {
@@ -74,7 +76,6 @@ extern "C" fn drop_heap_profiler() {
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
-#[crate::_private::ctor::ctor]
 fn create_ad_hoc_profiler() {
     unsafe {
         match DHAT_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
@@ -95,6 +96,37 @@ extern "C" fn drop_ad_hoc_profiler() {
             drop(p);
         }
     }
+}
+
+/// Subcommands
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Configuration subcommands.
+    Config(ConfigSubcommandArgs),
+}
+
+#[derive(Args, Debug)]
+struct ConfigSubcommandArgs {
+    /// Subcommands
+    #[clap(subcommand)]
+    command: ConfigSubcommand,
+}
+
+#[derive(Subcommand, Debug)]
+enum ConfigSubcommand {
+    /// Print the json configuration schema.
+    Schema,
+
+    /// Print upgraded configuration.
+    Upgrade {
+        /// The location of the config to upgrade.
+        #[clap(parse(from_os_str), env = "APOLLO_ROUTER_CONFIG_PATH")]
+        config_path: PathBuf,
+
+        /// Print a diff.
+        #[clap(parse(from_flag), long)]
+        diff: bool,
+    },
 }
 
 /// Options for the router
@@ -151,8 +183,12 @@ pub(crate) struct Opt {
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[clap(long, action(ArgAction::SetTrue))]
+    #[clap(long, action(ArgAction::SetTrue), hide(true))]
     schema: bool,
+
+    /// Subcommands
+    #[clap(subcommand)]
+    command: Option<Commands>,
 
     /// Your Apollo key.
     #[clap(skip = std::env::var("APOLLO_KEY").ok())]
@@ -220,6 +256,12 @@ impl fmt::Display for ProjectDir {
 ///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    create_heap_profiler();
+
+    #[cfg(feature = "dhat-ad-hoc")]
+    create_ad_hoc_profiler();
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
@@ -294,12 +336,6 @@ impl Executable {
 
         copy_args_to_env();
 
-        if opt.schema {
-            let schema = generate_config_schema();
-            println!("{}", serde_json::to_string_pretty(&schema)?);
-            return Ok(());
-        }
-
         let builder = tracing_subscriber::fmt::fmt().with_env_filter(
             EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
         );
@@ -315,15 +351,41 @@ impl Executable {
         };
 
         GLOBAL_ENV_FILTER.set(opt.log_level.clone()).expect(
-            "failed setting the global env filter. THe start() function should only be called once",
+            "failed setting the global env filter. The start() function should only be called once",
         );
 
-        // The dispatcher we created is passed explicitely here to make sure we display the logs
-        // in the initialization phase and in the state machine code, before a global subscriber
-        // is set using the configuration file
-        Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
-            .with_subscriber(dispatcher)
-            .await
+        if opt.schema {
+            eprintln!("`router --schema` is deprecated. Use `router config schema`");
+            let schema = generate_config_schema();
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+            return Ok(());
+        }
+
+        match opt.command.as_ref() {
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Schema,
+            })) => {
+                let schema = generate_config_schema();
+                println!("{}", serde_json::to_string_pretty(&schema)?);
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Upgrade { config_path, diff },
+            })) => {
+                let config_string = std::fs::read_to_string(config_path)?;
+                let output = generate_upgrade(&config_string, *diff)?;
+                println!("{}", output);
+                Ok(())
+            }
+            None => {
+                // The dispatcher we created is passed explicitly here to make sure we display the logs
+                // in the initialization phase and in the state machine code, before a global subscriber
+                // is set using the configuration file
+                Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
+                    .with_subscriber(dispatcher)
+                    .await
+            }
+        }
     }
 
     async fn inner_start(

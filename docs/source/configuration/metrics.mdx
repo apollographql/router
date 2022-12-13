@@ -24,6 +24,23 @@ telemetry:
       path: /metrics
 ```
 
+## Using in a containers environment
+
+The prometheus endpoint listens to 127.0.0.1 by default, which won't allow connections issued from a network.
+While this is a safe default, *other containers won't be able to access the prometheus endpoint*, which will disable metric scraping.
+
+You can change this by setting:
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    prometheus:
+      # By setting this endpoint you enable other containers and pods to access the prometheus endpoint
+      enabled: true
+      listen: 0.0.0.0:9090
+      path: /metrics
+```
+
+
 Assuming you're running locally:
 
 1. Run a query against the router.
@@ -44,7 +61,6 @@ The following metrics are available using Prometheus:
 - HTTP router request duration (`apollo_router_http_request_duration_seconds_bucket`)
 - HTTP request duration by subgraph (`apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`)
 - Total number of HTTP requests by HTTP Status (`apollo_router_http_requests_total`)
-- Total number of HTTP requests in error (`apollo_router_http_requests_error_total`)
 
 ## Using OpenTelemetry Collector
 
@@ -92,7 +108,7 @@ telemetry:
   metrics:
     common:
       attributes:
-        router: # Attribute configuration for requests to/responses from the router
+        supergraph: # Attribute configuration for requests to/responses from the router
           static:
             - name: "version"
               value: "v1.0.0"

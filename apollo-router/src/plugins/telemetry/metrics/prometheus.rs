@@ -3,6 +3,10 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
+use opentelemetry::sdk::export::metrics::aggregation;
+use opentelemetry::sdk::metrics::controllers;
+use opentelemetry::sdk::metrics::processors;
+use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use prometheus::Encoder;
@@ -56,18 +60,29 @@ impl MetricsConfigurator for Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            let exporter = opentelemetry_prometheus::exporter()
-                .with_default_histogram_boundaries(vec![
-                    0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-                ])
-                .with_resource(Resource::new(
-                    metrics_config
-                        .resources
-                        .clone()
-                        .into_iter()
-                        .map(|(k, v)| KeyValue::new(k, v)),
-                ))
-                .try_init()?;
+            tracing::info!(
+                "prometheus endpoint exposed at {}{}",
+                self.listen,
+                self.path
+            );
+            let controller = controllers::basic(
+                processors::factory(
+                    selectors::simple::histogram([
+                        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+                    ]),
+                    aggregation::stateless_temporality_selector(),
+                )
+                .with_memory(true),
+            )
+            .with_resource(Resource::new(
+                metrics_config
+                    .resources
+                    .clone()
+                    .into_iter()
+                    .map(|(k, v)| KeyValue::new(k, v)),
+            ))
+            .build();
+            let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),
@@ -79,7 +94,7 @@ impl MetricsConfigurator for Config {
                     .boxed(),
                 ),
             );
-            builder = builder.with_meter_provider(exporter.provider()?);
+            builder = builder.with_meter_provider(exporter.meter_provider()?);
             builder = builder.with_exporter(exporter);
         }
         Ok(builder)

@@ -29,7 +29,7 @@ use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jaeger_tracing() -> Result<(), BoxError> {
-    let tracer = opentelemetry_jaeger::new_pipeline()
+    let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("my_app")
         .install_simple()?;
 
@@ -42,7 +42,12 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
     tokio::task::spawn(subgraph());
 
     for _ in 0..10 {
-        let id = router.run_query().await;
+        let (id, result) = router.run_query().await;
+        assert!(!result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .is_empty());
         query_jaeger_for_trace(id).await?;
         router.touch_config()?;
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -227,14 +232,13 @@ fn parent_span<'a>(trace: &'a Value, span: &'a Value) -> Option<&'a Value> {
 async fn subgraph() {
     async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
         // create the opentelemetry-jaeger tracing infrastructure
-        let tracer_provider = opentelemetry_jaeger::new_pipeline()
+        let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
             .with_service_name("products")
             .build_simple()
             .unwrap();
         let tracer = tracer_provider.tracer("products");
 
         //extract the trace id from headers and create a child span from it
-        println!("headers: {:?}", request.headers());
         assert!(
             request.headers().get("uber-trace-id").is_some(),
             "the uber-trace-id is absent, trace propagation is broken"
@@ -274,7 +278,5 @@ async fn subgraph() {
 
     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
     let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
+    server.await.unwrap();
 }

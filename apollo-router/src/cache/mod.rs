@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -7,7 +6,11 @@ use tokio::sync::oneshot;
 use tokio::sync::Mutex;
 
 use self::storage::CacheStorage;
+use self::storage::KeyType;
+use self::storage::ValueType;
 
+#[cfg(feature = "experimental_cache")]
+mod redis;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
@@ -15,25 +18,45 @@ pub(crate) const DEFAULT_CACHE_CAPACITY: usize = 512;
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
-pub(crate) struct DeduplicatingCache<K: Clone + Send + Eq + Hash, V: Clone> {
+pub(crate) struct DeduplicatingCache<K: KeyType, V: ValueType> {
     wait_map: WaitMap<K, V>,
     storage: CacheStorage<K, V>,
 }
 
 impl<K, V> DeduplicatingCache<K, V>
 where
-    K: Clone + Send + Eq + Hash + 'static,
-    V: Clone + Send + 'static,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
+    #[cfg(test)]
     pub(crate) async fn new() -> Self {
-        Self::with_capacity(DEFAULT_CACHE_CAPACITY).await
+        Self::with_capacity(DEFAULT_CACHE_CAPACITY, None, "test").await
     }
 
-    pub(crate) async fn with_capacity(capacity: usize) -> Self {
+    pub(crate) async fn with_capacity(
+        capacity: usize,
+        redis_urls: Option<Vec<String>>,
+        caller: &str,
+    ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity).await,
+            storage: CacheStorage::new(capacity, redis_urls, caller).await,
         }
+    }
+
+    pub(crate) async fn from_configuration(
+        config: &crate::configuration::Cache,
+        caller: &str,
+    ) -> Self {
+        Self::with_capacity(
+            config.in_memory.limit,
+            #[cfg(feature = "experimental_cache")]
+            config.redis.as_ref().map(|c| c.urls.clone()),
+            #[cfg(not(feature = "experimental_cache"))]
+            None,
+            caller,
+        )
+        .await
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
@@ -107,10 +130,10 @@ where
     }
 }
 
-pub(crate) struct Entry<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+pub(crate) struct Entry<K: KeyType, V: ValueType> {
     inner: EntryInner<K, V>,
 }
-enum EntryInner<K: Clone + Send + Eq + Hash, V: Clone + Send> {
+enum EntryInner<K: KeyType, V: ValueType> {
     First {
         key: K,
         sender: broadcast::Sender<V>,
@@ -131,8 +154,8 @@ pub(crate) enum EntryError {
 
 impl<K, V> Entry<K, V>
 where
-    K: Clone + Send + Eq + Hash + 'static,
-    V: Clone + Send + 'static,
+    K: KeyType + 'static,
+    V: ValueType + 'static,
 {
     pub(crate) fn is_first(&self) -> bool {
         matches!(self.inner, EntryInner::First { .. })
@@ -186,7 +209,7 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(1).await;
+        let cache = DeduplicatingCache::with_capacity(1, None, "test").await;
 
         let entry = cache.get(&k).await;
 
@@ -202,7 +225,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(13).await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(13, None, "test").await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -224,7 +248,8 @@ mod tests {
 
         mock.expect_retrieve().times(1).return_const(1usize);
 
-        let cache: DeduplicatingCache<usize, usize> = DeduplicatingCache::with_capacity(10).await;
+        let cache: DeduplicatingCache<usize, usize> =
+            DeduplicatingCache::with_capacity(10, None, "test").await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made

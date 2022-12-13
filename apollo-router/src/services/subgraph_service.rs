@@ -20,7 +20,6 @@ use http::HeaderValue;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
-use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
@@ -39,6 +38,8 @@ use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
 use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
 use crate::graphql;
+use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -115,7 +116,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
         Box::pin(async move {
             let (parts, body) = subgraph_request.into_parts();
-
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
 
             let compressed_body = compress(body, &parts.headers)
@@ -142,7 +142,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 propagator.inject_context(
                     &Span::current().context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
             });
 
             let schema_uri = request.uri();
@@ -157,11 +157,20 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     0
                 }
             });
+            let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
+            let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+            if display_headers {
+                tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
+            }
+            if display_body {
+                tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
+            }
+
             let path = schema_uri.path().to_string();
             let response = client
                 .call(request)
                 .instrument(tracing::info_span!("subgraph_request",
-                    "otel.kind" = %SpanKind::Client,
+                    "otel.kind" = "CLIENT",
                     "net.peer.name" = &display(host),
                     "net.peer.port" = &display(port),
                     "http.route" = &display(path),
@@ -177,19 +186,34 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
-
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();
+            if display_headers {
+                tracing::info!(
+                    http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+                );
+            }
             if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                 if let Ok(content_type_str) = content_type.to_str() {
                     // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
                     if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
                         && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                     {
-                        return Err(BoxError::from(FetchError::SubrequestHttpError {
-                            service: service_name.clone(),
-                            reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
-                        }));
+                        return if !parts.status.is_success() {
+                            Err(BoxError::from(FetchError::SubrequestHttpError {
+                                service: service_name.clone(),
+                                reason: format!(
+                                    "{}: {}",
+                                    parts.status.as_str(),
+                                    parts.status.canonical_reason().unwrap_or("Unknown")
+                                ),
+                            }))
+                        } else {
+                            Err(BoxError::from(FetchError::SubrequestHttpError {
+                                service: service_name.clone(),
+                                reason: format!("subgraph didn't return JSON (expected content-type: {APPLICATION_JSON_HEADER_VALUE} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})"),
+                            }))
+                        };
                     }
                 }
             }
@@ -205,6 +229,12 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         reason: err.to_string(),
                     }
                 })?;
+
+            if display_body {
+                tracing::info!(
+                    http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+                );
+            }
 
             let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
                 .in_scope(|| {
@@ -376,9 +406,22 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+        server.await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning status code 401
+    async fn emulate_subgraph_unauthorized(socket_addr: SocketAddr) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, "text/html")
+                .status(StatusCode::UNAUTHORIZED)
+                .body(r#""#.into())
+                .unwrap())
         }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        server.await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning bad response format
@@ -393,9 +436,7 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
-        }
+        server.await.unwrap();
     }
 
     // starts a local server emulating a subgraph returning compressed response
@@ -442,9 +483,7 @@ mod tests {
 
         let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
         let server = Server::bind(&socket_addr).serve(make_svc);
-        if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
-        }
+        server.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -509,7 +548,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: \"text/html\")"
+            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: \"text/html\")"
         );
     }
 
@@ -548,5 +587,38 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &resp_from_subgraph);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_unauthorized() {
+        let socket_addr = SocketAddr::from_str("127.0.0.1:2828").unwrap();
+        tokio::task::spawn(emulate_subgraph_unauthorized(socket_addr));
+        let subgraph_service = SubgraphService::new("test");
+
+        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let err = subgraph_service
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE)
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "HTTP fetch failed from 'test': 401: Unauthorized"
+        );
     }
 }

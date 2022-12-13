@@ -13,6 +13,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🐛 Fixes
 ## 🛠 Maintenance
 ## 📚 Documentation
+## 🥼 Experimental
 
 ## Example section entry format
 
@@ -26,114 +27,182 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [x.x.x] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
+
+### Protoc now required to build ([Issue #1970](https://github.com/apollographql/router/issues/1970))
+
+Protoc is now required to build Apollo Router. Upgrading to Open Telemetry 0.18 has enabled us to upgrade tonic which in turn no longer bundles protoc.
+Users must install it themselves https://grpc.io/docs/protoc-installation/.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
+### Jaeger scheduled_delay moved to batch_processor->scheduled_delay ([Issue #2232](https://github.com/apollographql/router/issues/2232))
+
+Jager config previously allowed configuration of scheduled_delay for batch span processor. To bring it in line with all other exporters this is now set using a batch_processor section.
+
+Before:
+```yaml
+telemetry:
+  tracing:
+    jaeger:
+      scheduled_delay: 100ms
+```
+
+After:
+```yaml
+telemetry:
+  tracing:
+    jaeger:
+      batch_processor:
+        scheduled_delay: 100ms
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
 ## 🚀 Features
 
-### Add support for dhat based heap profiling ([PR #1829](https://github.com/apollographql/router/pull/1829))
+### Re-Deploy Router Pods If The SuperGraph Configmap Changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
+When setting the supergraph with th the `supergraphFile` variable a `sha256` checksum is calculated and set as an annotation for the router pods. This will spin up new pods when the supergraph is mounted via config map and the schema has changed.
 
-[dhat-rs](https://github.com/nnethercote/dhat-rs) provides [DHAT](https://www.valgrind.org/docs/manual/dh-manual.html) style heap profiling. We have added two compile features, dhat-heap and dhat-ad-hoc, which leverage this ability.
+Note: It is preferable to not have `--hot-reload` enabled with this feature since re-configuring the router during a pod restart is duplicating the work and may cause confusion in log messaging.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/1829
+By [@toneill818](https://github.com/toneill818) in https://github.com/apollographql/router/pull/2223
 
-### Add `trace_id` in logs to identify all logs related to a specific request ([Issue #1981](https://github.com/apollographql/router/issues/1981))
+### Tracing batch span processor is now configurable ([Issue #2232](https://github.com/apollographql/router/issues/2232))
 
-It automatically adds a `trace_id` on logs to identify which log is related to a specific request. Also adds `apollo_trace_id` in response headers to help the client to identify logs for this request.
+Exporting traces often requires performance tuning based on the throughput of the router, sampling settings and ingestion capability of tracing ingress.
 
-Example of logs in text:
-
-```logs
-2022-10-21T15:17:45.562553Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::services::subgraph_service: fetch_error="hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))"
-2022-10-21T15:17:45.565768Z ERROR [trace_id=5e6a6bda8d0dca26e5aec14dafa6d96f] apollo_router::query_planner::execution: Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)
+All exporters now support configuring the batch span processor in the router yaml. 
+```yaml
+telemetry:
+  apollo:
+    batch_processor:
+      scheduled_delay: 100ms
+      max_concurrent_exports: 1000
+      max_export_batch_size: 10000
+      max_export_timeout: 100s
+      max_queue_size: 10000
+  tracing:
+    jaeger|zipkin|otlp|datadog:
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
 ```
 
-Example of logs in JSON:
+See the Open Telemetry docs for more information.
 
-```logs
-{"timestamp":"2022-10-26T15:39:01.078260Z","level":"ERROR","fetch_error":"hyper::Error(Connect, ConnectError(\"tcp connect error\", Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }))","target":"apollo_router::services::subgraph_service","filename":"apollo-router/src/services/subgraph_service.rs","line_number":182,"span":{"name":"subgraph"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"},{"name":"fetch"},{"name":"subgraph"}]}
-{"timestamp":"2022-10-26T15:39:01.080259Z","level":"ERROR","message":"Fetch error: HTTP fetch failed from 'accounts': HTTP fetch failed from 'accounts': error trying to connect: tcp connect error: Connection refused (os error 111)","target":"apollo_router::query_planner::execution","filename":"apollo-router/src/query_planner/execution.rs","line_number":188,"span":{"name":"parallel"},"spans":[{"trace_id":"5e6a6bda8d0dca26e5aec14dafa6d96f","name":"request"},{"name":"supergraph"},{"name":"execution"},{"name":"parallel"}]}
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
+### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+
+Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+
+Example use from rhai as:
+
+```
+  response.headers["set-cookie"] = [
+    "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+    "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  ];
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1982
-
-### Reload the configuration when receiving the SIGHUP signal ([Issue #35](https://github.com/apollographql/router/issues/35))
-
-This adds support for reloading configuration when receiving the SIGHUP signal. This only works on unix-like platforms,
-and only with the configuration file.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2015
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
 
 ## 🐛 Fixes
 
-### Fix the deduplication logic in deduplication caching ([Issue #1984](https://github.com/apollographql/router/issues/1984))
+### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
 
-Under load, it is possible to break the router deduplication logic and leave orphaned entries in the waiter map. This fixes the logic to prevent this from occurring.
+[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
+mandate that a deferred response should not be sent if its path points to an element of the response that was nullified
+in a previous payload.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2014
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
 
-### Follow directives from Uplink ([Issue #1494](https://github.com/apollographql/router/issues/1494) [Issue #1539](https://github.com/apollographql/router/issues/1539))
+### Return root `__typename` when parts of a query with deferred fragment ([Issue #1677](https://github.com/apollographql/router/issues/1677))
 
-The Uplink API returns actionable info in its responses:
-- some error codes indicate an unrecoverable issue, for which the router should not retry the query (example: non-existing graph)
-- it can tell the router when it should retry the query
+With this query:
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2001
+```graphql
+{
+  __typename
+  fast
+  ...deferedFragment @defer
+}
 
-### Fix the rhai SDL print function ([Issue #2005](https://github.com/apollographql/router/issues/2005))
+fragment deferedFragment on Query {
+  slow
+}
+```
 
-A recent change to the way we provide the SDL to plugins broke the rhai SDL print. This fixes it.
+You will received first response chunk:
 
-By [@fernando-apollo](https://github.com/fernando-apollo) in https://github.com/apollographql/router/pull/2007
+```json
+{"data":{"__typename": "Query", "fast":0},"hasNext":true}
+```
 
-### Exports a missing strut (`router_factory::Endpoint`) that was preventing the `web_endpoints` trait from being implemented by Plugins
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2188
 
-By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2007
 
-### Validate default values for input object fields ([Issue #1979](https://github.com/apollographql/router/issues/1979))
+### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
 
-When validating variables, we should use default values for object fields if applicable.
+When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2003
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
+### Dispatch errors from the primary response to deferred responses ([Issue #1818](https://github.com/apollographql/router/issues/1818), [Issue #2185](https://github.com/apollographql/router/issues/2185))
 
-###  ([Issue #2036](https://github.com/apollographql/router/issues/2036))
+When errors are generated during the primary execution, some of them can be assigned to
+deferred responses.
 
-Work around for [opentelemetry-rust#908](https://github.com/open-telemetry/opentelemetry-rust/issues/908)
-The default URL currently incorrectly uses https causing errors when connecting to a default localhost OTel Collector.
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2192
 
-The router will detect and work around this by explicitly setting the correct endpoint URLs when not specified in config.
+### Reconstruct deferred queries with knowledge about fragments ([Issue #2105](https://github.com/apollographql/router/issues/2105))
 
-In addition: 
-* basic TLS defaulting will occur when the endpoint scheme uses `https`.
-* a warning will be raised if the endpoint port is 443 but no TLS config is specified.
+When we are using `@defer`, response formatting must apply on a subset of the query (primary or deferred), that is reconstructed from information provided by the query planner: a path into the response and a subselection. Previously, that path did not include information on fragment application, which resulted in query reconstruction issues if `@defer` was used under a fragment application on an interface.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#2048
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2109
 
 ## 🛠 Maintenance
 
-### Apply tower best practice to inner service cloning ([PR #2030](https://github.com/apollographql/router/pull/2030))
+### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
 
-Our service readiness checking can be improved by following tower project recommendations for cloning inner services.
+This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2030
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
 
-### Split the configuration file management in multiple modules ([Issue #1790](https://github.com/apollographql/router/issues/1790))
+### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
 
-The file is becoming large and hard to modify.
+This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/1996
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
 
-### Apply traffic shaping on supergraph and subgraph directly [PR #2034](https://github.com/apollographql/router/issues/2034))
+### update reports.proto protobuf definition ([PR #2247](https://github.com/apollographql/router/pull/2247))
 
-The plugin infrastructure works on `BoxService` instances, and makes no guarantee on plugin ordering.
-The traffic shaping plugin needs a clonable inner service, and should run right before calling
-the underlying service. So this changes the traffic plugin application so it can work directly
-on the underlying service. It is still a plugin though, so it keeps the same configuration.
+Update the reports.proto file, and change the prompt to update the file with the correct new location.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2034
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2247
+### Upgrade OpenTelemetry to 0.18 ([Issue #1970](https://github.com/apollographql/router/issues/1970))
+
+Update to OpenTelemetry 0.18.
+
+By [@bryncooke](https://github.com/bryncooke) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1970 and https://github.com/apollographql/router/pull/2236
+
+### Remove spaceport ([Issue #2233](https://github.com/apollographql/router/issues/2233))
+
+Removal significantly simplifies telemetry code and likely to increase performance and reliability.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+
+### Update to Rust 1.65 ([Issue #2220](https://github.com/apollographql/router/issues/2220))
+
+Rust MSRV incremented to 1.65.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221 and https://github.com/apollographql/router/pull/2240
 
 ## 📚 Documentation
+### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
 
-### Remove references to git submodules from DEVELOPMENT.md ([Issue #2012](https://github.com/apollographql/router/issues/2012))
+Added some yaml design guidance to help us create consistent yaml config for new and existing features.
 
-We don't need instructions about submodules since #1856. Let's remove them.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2045
-
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2159

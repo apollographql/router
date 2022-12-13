@@ -1,3 +1,5 @@
+// This entire file is license key functionality
+
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -9,7 +11,6 @@ use serde::Serialize;
 use serde_json_bytes::value::Serializer;
 use tower::ServiceExt;
 
-use super::QueryKey;
 use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
@@ -22,8 +23,11 @@ use crate::*;
 /// The query planner performs LRU caching.
 #[derive(Clone)]
 pub(crate) struct CachingQueryPlanner<T: Clone> {
-    cache: Arc<DeduplicatingCache<QueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>>,
+    cache: Arc<
+        DeduplicatingCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>,
+    >,
     delegate: T,
+    schema_id: Option<String>,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -31,9 +35,20 @@ where
     T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse>,
 {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
-    pub(crate) async fn new(delegate: T, plan_cache_limit: usize) -> CachingQueryPlanner<T> {
-        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit).await);
-        Self { cache, delegate }
+    pub(crate) async fn new(
+        delegate: T,
+        schema_id: Option<String>,
+        config: &crate::configuration::QueryPlanning,
+    ) -> CachingQueryPlanner<T> {
+        let cache = Arc::new(
+            DeduplicatingCache::from_configuration(&config.experimental_cache, "query planner")
+                .await,
+        );
+        Self {
+            cache,
+            delegate,
+            schema_id,
+        }
     }
 }
 
@@ -56,10 +71,16 @@ where
 
     fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
         let mut qp = self.clone();
+        let schema_id = self.schema_id.clone();
         Box::pin(async move {
-            let key = (request.query.clone(), request.operation_name.to_owned());
+            let caching_key = CachingQueryKey {
+                schema_id,
+                query: request.query.clone(),
+                operation: request.operation_name.to_owned(),
+            };
+
             let context = request.context.clone();
-            let entry = qp.cache.get(&key).await;
+            let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
                 let res = qp.delegate.ready().await?.call(request).await;
                 match res {
@@ -73,7 +94,7 @@ where
                         }
 
                         if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                            match (&plan.usage_reporting).serialize(Serializer) {
+                            match (plan.usage_reporting).serialize(Serializer) {
                                 Ok(v) => {
                                     context.insert_json_value(USAGE_REPORTING, v);
                                 }
@@ -106,7 +127,7 @@ where
                 match res {
                     Ok(content) => {
                         if let QueryPlannerContent::Plan { plan, .. } = &content {
-                            match (&plan.usage_reporting).serialize(Serializer) {
+                            match (plan.usage_reporting).serialize(Serializer) {
                                 Ok(v) => {
                                     context.insert_json_value(USAGE_REPORTING, v);
                                 }
@@ -162,17 +183,36 @@ where
     }
 }
 
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub(crate) struct CachingQueryKey {
+    pub(crate) schema_id: Option<String>,
+    pub(crate) query: String,
+    pub(crate) operation: Option<String>,
+}
+
+impl std::fmt::Display for CachingQueryKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "plan\0{}\0{}\0{}",
+            self.schema_id.as_deref().unwrap_or("-"),
+            self.query,
+            self.operation.as_deref().unwrap_or("-")
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mockall::mock;
     use mockall::predicate::*;
     use query_planner::QueryPlan;
-    use router_bridge::planner::PlanErrors;
     use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
+    use crate::error::PlanErrors;
     use crate::query_planner::QueryPlanOptions;
 
     mock! {
@@ -226,7 +266,12 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10).await;
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            None,
+            &crate::configuration::QueryPlanning::default(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner
@@ -282,7 +327,12 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10).await;
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            None,
+            &crate::configuration::QueryPlanning::default(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner

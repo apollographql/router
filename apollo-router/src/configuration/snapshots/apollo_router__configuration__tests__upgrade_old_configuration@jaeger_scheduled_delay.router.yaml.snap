@@ -1,0 +1,13 @@
+---
+source: apollo-router/src/configuration/tests.rs
+expression: new_config
+---
+---
+telemetry:
+  tracing:
+    jaeger:
+      agent:
+        endpoint: default
+      batch_processor:
+        scheduled_delay: 100ms
+

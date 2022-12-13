@@ -1,14 +1,18 @@
+use apollo_parser::ast;
 use apollo_parser::ast::Value;
-use apollo_parser::ast::{self};
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::ByteString;
 
+use super::Fragments;
 use crate::json_ext::Object;
+use crate::json_ext::PathElement;
 use crate::spec::TYPENAME;
 use crate::FieldType;
 use crate::Schema;
 use crate::SpecError;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Selection {
     Field {
         name: ByteString,
@@ -312,6 +316,85 @@ impl Selection {
 
         Ok(selection)
     }
+
+    pub(crate) fn is_typename_field(&self) -> bool {
+        matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
+    }
+
+    pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
+        match (path.get(0), self) {
+            (None, _) => true,
+            (
+                Some(PathElement::Key(key)),
+                Selection::Field {
+                    name,
+                    alias,
+                    selection_set,
+                    ..
+                },
+            ) => {
+                if alias.as_ref().unwrap_or(name).as_str() == key.as_str() {
+                    match selection_set {
+                        // if we don't select after that field, the path should stop there
+                        None => path.len() == 1,
+                        Some(set) => set
+                            .iter()
+                            .any(|selection| selection.contains_error_path(&path[1..], fragments)),
+                    }
+                } else {
+                    false
+                }
+            }
+            (
+                Some(PathElement::Fragment(fragment)),
+                Selection::InlineFragment {
+                    type_condition,
+                    selection_set,
+                    ..
+                },
+            ) => {
+                if fragment.as_str().strip_prefix("... on ") == Some(type_condition.as_str()) {
+                    selection_set
+                        .iter()
+                        .any(|selection| selection.contains_error_path(&path[1..], fragments))
+                } else {
+                    false
+                }
+            }
+            (Some(PathElement::Fragment(fragment)), Self::FragmentSpread { name, .. }) => {
+                if let Some(f) = fragments.get(name) {
+                    if fragment.as_str().strip_prefix("... on ") == Some(f.type_condition.as_str())
+                    {
+                        f.selection_set
+                            .iter()
+                            .any(|selection| selection.contains_error_path(&path[1..], fragments))
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            }
+            (_, Self::FragmentSpread { name, .. }) => {
+                if let Some(f) = fragments.get(name) {
+                    f.selection_set
+                        .iter()
+                        .any(|selection| selection.contains_error_path(path, fragments))
+                } else {
+                    false
+                }
+            }
+            (Some(PathElement::Index(_)), _) | (Some(PathElement::Flatten), _) => {
+                self.contains_error_path(&path[1..], fragments)
+            }
+            (Some(PathElement::Key(_)), Selection::InlineFragment { selection_set, .. }) => {
+                selection_set
+                    .iter()
+                    .any(|selection| selection.contains_error_path(&path[1..], fragments))
+            }
+            (Some(PathElement::Fragment(_)), Selection::Field { .. }) => false,
+        }
+    }
 }
 
 pub(crate) fn parse_skip(directive: &ast::Directive) -> Option<Skip> {
@@ -351,7 +434,7 @@ pub(crate) fn parse_skip(directive: &ast::Directive) -> Option<Skip> {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Skip {
     Yes,
     No,
@@ -410,7 +493,7 @@ pub(crate) fn parse_include(directive: &ast::Directive) -> Option<Include> {
     None
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub(crate) enum Include {
     Yes,
     No,
