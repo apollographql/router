@@ -5,6 +5,8 @@ use std::sync::Arc;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json::Number as JSONNumber;
+use serde_json_bytes::{Map, ByteString};
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -21,6 +23,11 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::*;
+
+const PERSISTED_QUERY_KEY: &str = "persistedQuery";
+const HASH_VERSION_KEY: &str = "version";
+const HASH_VERSION_VALUE: i32 = 1;
+const HASH_KEY: &str = "sha256hash";
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -201,6 +208,7 @@ impl FetchNode {
     {
         let FetchNode {
             operation,
+            operation_hash,
             operation_kind,
             operation_name,
             service_name,
@@ -225,6 +233,13 @@ impl FetchNode {
             }
         };
 
+        let mut persisted_query = Map::new();
+        persisted_query.insert(HASH_VERSION_KEY, Value::Number(JSONNumber::from(HASH_VERSION_VALUE)));
+        persisted_query.insert(HASH_KEY, Value::String(ByteString::from(operation_hash.to_string())));
+
+        let mut extensions = Map::new();
+        extensions.insert(PERSISTED_QUERY_KEY, Value::Object(persisted_query));
+
         let subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
@@ -248,6 +263,7 @@ impl FetchNode {
                             .query(operation)
                             .and_operation_name(operation_name.clone())
                             .variables(variables.clone())
+                            .extensions(extensions)
                             .build(),
                     )
                     .build()
