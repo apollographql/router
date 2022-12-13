@@ -23,6 +23,7 @@ use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
 use rhai::serde::to_dynamic;
+use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
@@ -1186,9 +1187,30 @@ impl Rhai {
                 );
                 Ok(())
             })
+            // Register an additional getter which allows us to get multiple values for the same
+            // key.
+            // Note: We can't register this as an indexer, because that would simply override the
+            // existing one, which would break code. When router 2.0 is released, we should replace
+            // the existing indexer_get for HeaderMap with this function and mark it as an
+            // incompatible change.
+            .register_fn("values",
+                |x: &mut HeaderMap, key: &str| -> Result<Array, Box<EvalAltResult>> {
+                    let search_name =
+                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+                    let mut response = Array::new();
+                    for value in x.get_all(search_name).iter() {
+                        response.push(value
+                            .to_str()
+                            .map_err(|e| e.to_string())?
+                            .to_string()
+                            .into())
+                    }
+                    Ok(response)
+                }
+            )
             // Register an additional setter which allows us to set multiple values for the same
-            // key
-            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: rhai::Array| {
+            // key.
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: Array| {
                 let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
                 for v in value {
                     x.append(
