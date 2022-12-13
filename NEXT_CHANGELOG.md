@@ -95,6 +95,19 @@ See the Open Telemetry docs for more information.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
+### Add hot-reload support for rhai scripts ([Issue #1071](https://github.com/apollographql/router/issues/1071))
+
+The router will "watch" your "rhai.scripts" directory for changes and prompt an interpreter re-load if changes are detected. Changes are defined as:
+
+ * creating a new file with a ".rhai" suffix
+ * modifying or removing an existing file with a ".rhai" suffix
+
+The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
+
+The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2198
+
 ### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
 
 Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
@@ -199,6 +212,20 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 Rust MSRV incremented to 1.65.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221 and https://github.com/apollographql/router/pull/2240
+
+### Improve automated release ([Pull #2220](https://github.com/apollographql/router/pull/2256))
+
+Improved the automated release to:
+* Update the scaffold files
+* Improve the names of prepare release steps in circle.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2256
+
+### Use Elastic-2.0 license spdx ([PR #2055](https://github.com/apollographql/router/issues/2055))
+
+Now that the Elastic-2.0 spdx is a valid identifier in the rust ecosystem, we can update the router references.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2054
 
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
