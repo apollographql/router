@@ -60,6 +60,13 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
+### Add support for experimental tooling ([Issue #2136](https://github.com/apollographql/router/issues/2136))
+
+Display a message at startup listing used `experimental_` configurations with related GitHub discussions.
+It also adds a new cli command `router config experimental` to display all available experimental configurations.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2242
+
 ### Re-Deploy Router Pods If The SuperGraph Configmap Changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
 When setting the supergraph with th the `supergraphFile` variable a `sha256` checksum is calculated and set as an annotation for the router pods. This will spin up new pods when the supergraph is mounted via config map and the schema has changed.
 
