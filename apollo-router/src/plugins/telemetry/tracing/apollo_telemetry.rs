@@ -720,11 +720,9 @@ impl Exporter {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::sdk::export::trace::{ SpanExporter};
-    use opentelemetry::{ Value};
+    use opentelemetry::Value;
     use prost::Message;
     use serde_json::json;
-    use crate::plugins::telemetry::apollo_exporter::proto::server::ReporterResponse;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;

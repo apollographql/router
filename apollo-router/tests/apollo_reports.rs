@@ -1,4 +1,5 @@
 use crate::proto::reports::Report;
+use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::{router, supergraph};
 use apollo_router::TestHarness;
 use axum::routing::post;
@@ -7,6 +8,7 @@ use bytes::Bytes;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use http::HeaderValue;
+use once_cell::sync::Lazy;
 use prost::Message;
 use serde_json::json;
 use serial_test::serial;
@@ -15,7 +17,54 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
-use tracing::{info_span, Instrument};
+
+static REPORTS: Lazy<Arc<Mutex<Vec<Report>>>> = Lazy::new(Default::default);
+
+fn clear_reports() {
+    (*REPORTS.clone().lock().unwrap()).clear();
+}
+
+static ROUTER_SERVICE: Lazy<Mutex<BoxCloneService>> = Lazy::new(|| {
+    let reports = &*REPORTS;
+    std::env::set_var("APOLLO_KEY", "test");
+    std::env::set_var("APOLLO_GRAPH_REF", "test");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = axum::Router::new()
+        .route("/", post(report))
+        .layer(DecompressionLayer::new())
+        .layer(tower_http::add_extension::AddExtensionLayer::new(
+            reports.clone(),
+        ));
+
+    let config = json!({"telemetry":{"tracing":{"trace_config":{"sampler": "always_on"}},"apollo":{"endpoint":format!("http://{}", addr), "batch_processor":{"scheduled_delay": "1ms"}, "field_level_instrumentation_sampler": "always_on"}}});
+
+    let async_runtime = tokio::runtime::Handle::current();
+
+    std::thread::spawn(move || {
+        async_runtime.block_on(async {
+            let _ = tokio::spawn(async move {
+                axum::Server::from_tcp(listener)
+                    .unwrap()
+                    .serve(app.into_make_service())
+                    .await
+                    .unwrap()
+            });
+
+            Mutex::new(
+                TestHarness::builder()
+                    .configuration_json(config)
+                    .unwrap()
+                    .build_router()
+                    .await
+                    .unwrap()
+                    .boxed_clone(),
+            )
+        })
+    })
+    .join()
+    .unwrap()
+});
 
 macro_rules! assert_report {
         ($report: expr)=> {
@@ -82,26 +131,8 @@ async fn report(
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_condition_if() {
-    let reports: Arc<Mutex<Vec<Report>>> = Arc::new(Mutex::new(Vec::new()));
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let app = axum::Router::new()
-        .route("/", post(report))
-        .layer(DecompressionLayer::new())
-        .layer(tower_http::add_extension::AddExtensionLayer::new(
-            reports.clone(),
-        ));
+    clear_reports();
 
-    let _ = tokio::spawn(async move {
-        axum::Server::from_tcp(listener)
-            .unwrap()
-            .serve(app.into_make_service())
-            .await
-            .unwrap()
-    });
-    let config = json!({"telemetry":{"tracing":{"trace_config":{"sampler": "always_on"}},"apollo":{"endpoint":format!("http://{}", addr), "batch_processor":{"scheduled_delay": "1ms"}, "field_level_instrumentation_sampler": "always_on"}}});
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
         .variable("if", true)
@@ -114,27 +145,56 @@ async fn test_condition_if() {
         HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
     );
 
-    {
-        let router = TestHarness::builder()
-            .configuration_json(config)
-            .unwrap()
-            .build_router()
-            .await
-            .unwrap();
-
-        let mut response = router.oneshot(req).await.unwrap();
-        while response.next_response().await.is_some() {
-            println!("got chunk");
-        }
+    let mut response = ROUTER_SERVICE
+        .lock()
+        .unwrap()
+        .clone()
+        .oneshot(req)
+        .await
+        .unwrap();
+    while response.next_response().await.is_some() {
+        println!("got chunk");
     }
 
-    tokio::time::sleep(Duration::from_millis(1000)).await;
-    println!("{}", reports.lock().unwrap().len());
-    assert_report!(reports.lock().unwrap().get(0).unwrap());
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    println!("{}", REPORTS.lock().unwrap().len());
+    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[serial]
 async fn test_condition_else() {
+    clear_reports();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
+        .variable("if", false)
+        .header("Accept", "multipart/mixed; deferSpec=20220824")
+        .build()
+        .unwrap();
+    let mut req: router::Request = request.try_into().unwrap();
+    req.router_request.headers_mut().insert(
+        ACCEPT,
+        HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
+    );
+
+    let mut response = ROUTER_SERVICE
+        .lock()
+        .unwrap()
+        .clone()
+        .oneshot(req)
+        .await
+        .unwrap();
+    while response.next_response().await.is_some() {
+        println!("got chunk");
+    }
+
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    println!("{}", REPORTS.lock().unwrap().len());
+    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+
     // The following curl request was used to generate this span data
     // curl --request POST \
     //     --header 'content-type: application/json' \
@@ -148,6 +208,7 @@ async fn test_condition_else() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_trace_id() {
     // let spandata = include_str!("testdata/condition_if_spandata.yaml");
     // let exporter = Exporter::test_builder()
