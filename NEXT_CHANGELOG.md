@@ -208,6 +208,11 @@ Improved the automated release to:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2256
 
+### Use Elastic-2.0 license spdx ([PR #2055](https://github.com/apollographql/router/issues/2055))
+
+Now that the Elastic-2.0 spdx is a valid identifier in the rust ecosystem, we can update the router references.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2054
 
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
