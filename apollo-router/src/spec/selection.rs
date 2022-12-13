@@ -317,6 +317,10 @@ impl Selection {
         Ok(selection)
     }
 
+    pub(crate) fn is_typename_field(&self) -> bool {
+        matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
+    }
+
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {
         match (path.get(0), self) {
             (None, _) => true,
