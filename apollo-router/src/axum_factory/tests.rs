@@ -1846,31 +1846,7 @@ async fn test_defer_is_not_buffered() {
 
     let (parts, counts): (Vec<_>, Vec<_>) = parts.map(|part| (part, counter.get())).unzip().await;
     let parts = serde_json::Value::Array(parts);
-    assert_eq!(
-        parts,
-        json!([
-            {
-                "data": {
-                    "topProducts": [
-                        {"upc": "1", "name": "Table", "reviews": null},
-                        {"upc": "2", "name": "Couch", "reviews": null}
-                    ]
-                },
-                "errors": [
-                    {
-                        "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}"
-                    },
-                    {
-                        "message": "Subgraph response from 'reviews' was missing key `_entities`",
-                        "path": [ "topProducts", "@" ]
-                    }],
-                "hasNext": true,
-            },
-            {"hasNext": false}
-        ]),
-        "{}",
-        serde_json::to_string(&parts).unwrap()
-    );
+    insta::assert_json_snapshot!(parts);
 
     // Non-regression test for https://github.com/apollographql/router/issues/1572
     //
