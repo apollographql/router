@@ -115,9 +115,11 @@ The router attempts to identify errors in scripts before applying the changes. I
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2198
 
-### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+### Add support for working with multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211), [Issue #2255](https://github.com/apollographql/router/issues/2255))
 
 Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+
+Adds support for a new `values()` fn which retrieves multiple values for a HeaderMap key as an array.
 
 Example use from rhai as:
 
@@ -126,9 +128,10 @@ Example use from rhai as:
     "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
     "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
   ];
+  response.headers.values("set-cookie"); // Returns the array of values
 ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219, https://github.com/apollographql/router/pull/2258
 
 ## 🐛 Fixes
 
