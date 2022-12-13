@@ -419,6 +419,7 @@ jobs:
             equal: [*macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
+            - macos_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -440,13 +441,33 @@ jobs:
           condition:
             or:
               - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
             - install_minimal_rust
+            - linux_amd_install_baseline
+            - run:
+                command: >
+                  cargo xtask dist
+            - run:
+                command: >
+                  mkdir -p artifacts
+            - run:
+                command: >
+                  cargo xtask package --output artifacts/
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  sudo apt-get update
+            - install_minimal_rust
+            - linux_arm_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -480,6 +501,7 @@ jobs:
                   [net]
                   git-fetch-with-cli = true
                   "@
+            - windows_install_baseline
             - run:
                 command: >
                   cargo xtask dist
