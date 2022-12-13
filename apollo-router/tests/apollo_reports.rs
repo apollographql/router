@@ -65,9 +65,6 @@ pub(crate) mod proto {
         #![allow(clippy::derive_partial_eq_without_eq)]
         tonic::include_proto!("reports");
     }
-    pub(crate) mod server {
-        tonic::include_proto!("server");
-    }
 }
 
 async fn report(
