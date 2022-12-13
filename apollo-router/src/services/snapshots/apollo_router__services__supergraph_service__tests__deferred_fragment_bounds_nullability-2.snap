@@ -23,24 +23,6 @@ expression: stream.next_response().await.unwrap()
               "suborga",
               0
             ]
-          },
-          {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
-            "path": [
-              "currentUser",
-              "activeOrganization",
-              "suborga",
-              1
-            ]
-          },
-          {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
-            "path": [
-              "currentUser",
-              "activeOrganization",
-              "suborga",
-              2
-            ]
           }
         ]
       }
@@ -61,25 +43,7 @@ expression: stream.next_response().await.unwrap()
               "currentUser",
               "activeOrganization",
               "suborga",
-              0
-            ]
-          },
-          {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
-            "path": [
-              "currentUser",
-              "activeOrganization",
-              "suborga",
               1
-            ]
-          },
-          {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
-            "path": [
-              "currentUser",
-              "activeOrganization",
-              "suborga",
-              2
             ]
           }
         ]
@@ -95,24 +59,6 @@ expression: stream.next_response().await.unwrap()
       ],
       "extensions": {
         "valueCompletion": [
-          {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
-            "path": [
-              "currentUser",
-              "activeOrganization",
-              "suborga",
-              0
-            ]
-          },
-          {
-            "message": "Cannot return null for non-nullable field Organization.nonNullId",
-            "path": [
-              "currentUser",
-              "activeOrganization",
-              "suborga",
-              1
-            ]
-          },
           {
             "message": "Cannot return null for non-nullable field Organization.nonNullId",
             "path": [
