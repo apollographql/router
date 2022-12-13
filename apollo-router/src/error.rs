@@ -2,7 +2,6 @@
 use std::sync::Arc;
 
 use displaydoc::Display;
-use heck::ToShoutySnakeCase;
 use lazy_static::__Deref;
 use miette::Diagnostic;
 use miette::NamedSource;
@@ -147,20 +146,20 @@ impl FetchError {
 impl ErrorExtension for FetchError {
     fn extension_code(&self) -> String {
         match self {
-            FetchError::ValidationInvalidTypeVariable { .. } => "ValidationInvalidTypeVariable",
-            FetchError::ValidationPlanningError { .. } => "ValidationPlanningError",
-            FetchError::SubrequestMalformedResponse { .. } => "SubrequestMalformedResponse",
+            FetchError::ValidationInvalidTypeVariable { .. } => "VALIDATION_INVALID_TYPE_VARIABLE",
+            FetchError::ValidationPlanningError { .. } => "VALIDATION_PLANNING_ERROR",
+            FetchError::SubrequestMalformedResponse { .. } => "SUBREQUEST_MALFORMED_RESPONSE",
             FetchError::SubrequestUnexpectedPatchResponse { .. } => {
-                "SubrequestUnexpectedPatchResponse"
+                "SUBREQUEST_UNEXPECTED_PATCH_RESPONSE"
             }
-            FetchError::SubrequestHttpError { .. } => "SubrequestHttpError",
-            FetchError::ExecutionFieldNotFound { .. } => "ExecutionFieldNotFound",
-            FetchError::ExecutionPathNotFound { .. } => "ExecutionPathNotFound",
-            FetchError::CompressionError { .. } => "CompressionError",
+            FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
+            FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
+            FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
+            FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             #[cfg(test)]
-            FetchError::ExecutionInvalidContent { .. } => "ExecutionInvalidContent",
+            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
         }
-        .to_shouty_snake_case()
+        .to_string()
     }
 }
 
@@ -268,17 +267,17 @@ impl IntoGraphQLErrors for QueryPlannerError {
 impl ErrorExtension for QueryPlannerError {
     fn extension_code(&self) -> String {
         match self {
-            QueryPlannerError::SchemaValidationErrors(_) => "SchemaValidationErrors",
-            QueryPlannerError::PlanningErrors(_) => "PlanningErrors",
-            QueryPlannerError::JoinError(_) => "JoinError",
-            QueryPlannerError::CacheResolverError(_) => "CacheResolverError",
-            QueryPlannerError::EmptyPlan(_) => "EmptyPlan",
-            QueryPlannerError::UnhandledPlannerResult => "UnhandledPlannerResult",
-            QueryPlannerError::RouterBridgeError(_) => "RouterBridgeError",
-            QueryPlannerError::SpecError(_) => "SpecError",
-            QueryPlannerError::Introspection(_) => "Introspection",
+            QueryPlannerError::SchemaValidationErrors(_) => "SCHEMA_VALIDATION_ERRORS",
+            QueryPlannerError::PlanningErrors(_) => "PLANNING_ERRORS",
+            QueryPlannerError::JoinError(_) => "JOIN_ERROR",
+            QueryPlannerError::CacheResolverError(_) => "CACHE_RESOLVER_ERROR",
+            QueryPlannerError::EmptyPlan(_) => "EMPTY_PLAN",
+            QueryPlannerError::UnhandledPlannerResult => "UNHANDLED_PLANNER_RESULT",
+            QueryPlannerError::RouterBridgeError(_) => "ROUTER_BRIDGE_ERROR",
+            QueryPlannerError::SpecError(_) => "SPEC_ERROR",
+            QueryPlannerError::Introspection(_) => "INTROSPECTION",
         }
-        .to_shouty_snake_case()
+        .to_string()
     }
 }
 

@@ -11,7 +11,6 @@ mod selection;
 use displaydoc::Display;
 pub(crate) use field_type::*;
 pub(crate) use fragments::*;
-use heck::ToShoutySnakeCase;
 pub(crate) use query::Query;
 pub(crate) use query::TYPENAME;
 pub(crate) use schema::Schema;
@@ -51,13 +50,13 @@ impl SpecError {
 impl ErrorExtension for SpecError {
     fn extension_code(&self) -> String {
         match self {
-            SpecError::RecursionLimitExceeded => "RecursionLimitExceeded",
-            SpecError::InvalidType(_) => "InvalidType",
-            SpecError::InvalidField(_, _) => "InvalidField",
-            SpecError::ParsingError(_) => "ParsingError",
-            SpecError::SubscriptionNotSupported => "SubscriptionNotSupported",
+            SpecError::RecursionLimitExceeded => "RECURSION_LIMIT_EXCEEDED",
+            SpecError::InvalidType(_) => "INVALID_TYPE",
+            SpecError::InvalidField(_, _) => "INVALID_FIELD",
+            SpecError::ParsingError(_) => "PARSING_ERROR",
+            SpecError::SubscriptionNotSupported => "SUBSCRIPTION_NOT_SUPPORTED",
         }
-        .to_shouty_snake_case()
+        .to_string()
     }
 
     fn custom_extension_details(&self) -> Option<Object> {

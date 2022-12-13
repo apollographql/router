@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::Extension;
 use axum::extract::Host;
 use axum::extract::OriginalUri;
@@ -314,21 +315,16 @@ where
                         .map(|t| t.to_string())
                         .unwrap_or_default();
 
-                    span.record(TRACE_ID_FIELD_NAME, &trace_id.as_str());
+                    span.record(TRACE_ID_FIELD_NAME, trace_id.as_str());
                 })
                 .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
                     // Duration here is instant based
-                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
+                    span.record("apollo_private.duration_ns", duration.as_nanos() as i64);
+                    // otel.status_code now has to be a string rather than enum. See opentelemetry_tracing::layer::str_to_status
                     if resp.status() >= StatusCode::BAD_REQUEST {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Error.as_str(),
-                        );
+                        span.record("otel.status_code", "error");
                     } else {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Ok.as_str(),
-                        );
+                        span.record("otel.status_code", "ok");
                     }
                 }),
         )
@@ -397,7 +393,7 @@ where
             .post({
                 move |host: Host,
                       uri: OriginalUri,
-                      request: Json<graphql::Request>,
+                      request: Result<Json<graphql::Request>, JsonRejection>,
                       Extension(service): Extension<RF>,
                       header_map: HeaderMap| {
                     {
