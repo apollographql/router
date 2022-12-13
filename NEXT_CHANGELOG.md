@@ -60,6 +60,13 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
+### Add support for experimental tooling ([Issue #2136](https://github.com/apollographql/router/issues/2136))
+
+Display a message at startup listing used `experimental_` configurations with related GitHub discussions.
+It also adds a new cli command `router config experimental` to display all available experimental configurations.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2242
+
 ### Re-Deploy Router Pods If The SuperGraph Configmap Changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
 When setting the supergraph with th the `supergraphFile` variable a `sha256` checksum is calculated and set as an annotation for the router pods. This will spin up new pods when the supergraph is mounted via config map and the schema has changed.
 
@@ -95,9 +102,24 @@ See the Open Telemetry docs for more information.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
-### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+### Add hot-reload support for rhai scripts ([Issue #1071](https://github.com/apollographql/router/issues/1071))
+
+The router will "watch" your "rhai.scripts" directory for changes and prompt an interpreter re-load if changes are detected. Changes are defined as:
+
+ * creating a new file with a ".rhai" suffix
+ * modifying or removing an existing file with a ".rhai" suffix
+
+The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
+
+The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2198
+
+### Add support for working with multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211), [Issue #2255](https://github.com/apollographql/router/issues/2255))
 
 Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+
+Adds support for a new `values()` fn which retrieves multiple values for a HeaderMap key as an array.
 
 Example use from rhai as:
 
@@ -106,9 +128,10 @@ Example use from rhai as:
     "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
     "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
   ];
+  response.headers.values("set-cookie"); // Returns the array of values
 ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219, https://github.com/apollographql/router/pull/2258
 
 ## 🐛 Fixes
 
@@ -200,8 +223,22 @@ Rust MSRV incremented to 1.65.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221 and https://github.com/apollographql/router/pull/2240
 
+### Improve automated release ([Pull #2220](https://github.com/apollographql/router/pull/2256))
+
+Improved the automated release to:
+* Update the scaffold files
+* Improve the names of prepare release steps in circle.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2256
+
+### Use Elastic-2.0 license spdx ([PR #2055](https://github.com/apollographql/router/issues/2055))
+
+Now that the Elastic-2.0 spdx is a valid identifier in the rust ecosystem, we can update the router references.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2054
+
 ## 📚 Documentation
-### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
+### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/issues/2158))
 
 Added some yaml design guidance to help us create consistent yaml config for new and existing features.
 
