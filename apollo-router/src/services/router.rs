@@ -121,21 +121,6 @@ impl From<http::Response<hyper::Body>> for Response {
     }
 }
 
-impl From<supergraph::Response> for Response {
-    fn from(supergraph_response: supergraph::Response) -> Self {
-        let context = supergraph_response.context;
-        let (parts, http_body) = supergraph_response.response.into_parts();
-
-        let body =
-            hyper::Body::wrap_stream(http_body.map(|response| serde_json::to_vec(&response)));
-
-        Self {
-            response: http::Response::from_parts(parts, body),
-            context,
-        }
-    }
-}
-
 #[buildstructor::buildstructor]
 impl Response {
     pub async fn next_response(&mut self) -> Option<Result<Bytes, hyper::Error>> {

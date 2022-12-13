@@ -25,8 +25,6 @@ static CLIENT: Lazy<Client> = Lazy::new(Client::new);
 /// Version of our externalised data. Rev this if it changes
 const EXTERNALIZABLE_VERSION: u8 = 1;
 
-// TODO: ALLOW DEAD CODE FOR NOW UNTIL DECIDE IF RESPONSE IS TO BE IMPLEMENTED
-#[allow(dead_code)]
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
     RouterRequest,

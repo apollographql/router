@@ -398,10 +398,17 @@ register_plugin!("experimental", "external", ExternalPlugin);
 
 #[cfg(test)]
 mod tests {
-    // If we run this test as follows: cargo test -- --nocapture
-    // we will see the message "Hello Bob" printed to standard out
+    use super::*;
+
+    use http::header::ACCEPT;
+    use http::header::CONTENT_TYPE;
+    use http::HeaderMap;
+    use http::HeaderValue;
+    use mime::APPLICATION_JSON;
+    use mime::TEXT_HTML;
+
     #[tokio::test]
-    async fn display_message() {
+    async fn load_plugin() {
         let config = serde_json::json!({
             "plugins": {
                 "experimental.external": {
@@ -418,5 +425,69 @@ mod tests {
             .build()
             .await
             .unwrap();
+    }
+
+    #[test]
+    fn it_externalizes_headers() {
+        // Build our expected HashMap
+        let mut expected = HashMap::new();
+
+        expected.insert(
+            "content-type".to_string(),
+            vec![APPLICATION_JSON.essence_str().to_string()],
+        );
+
+        expected.insert(
+            "accept".to_string(),
+            vec![
+                APPLICATION_JSON.essence_str().to_string(),
+                TEXT_HTML.essence_str().to_string(),
+            ],
+        );
+
+        let mut external_form = HeaderMap::new();
+
+        external_form.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
+
+        external_form.insert(
+            ACCEPT,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
+
+        external_form.append(ACCEPT, HeaderValue::from_static(TEXT_HTML.essence_str()));
+
+        let actual = externalize_header_map(&external_form).expect("externalized header map");
+
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn it_internalizes_headers() {
+        // Build our expected HeaderMap
+        let mut expected = HeaderMap::new();
+
+        expected.insert(
+            ACCEPT,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        );
+
+        expected.append(ACCEPT, HeaderValue::from_static(TEXT_HTML.essence_str()));
+
+        let mut external_form = HashMap::new();
+
+        external_form.insert(
+            "accept".to_string(),
+            vec![
+                APPLICATION_JSON.essence_str().to_string(),
+                TEXT_HTML.essence_str().to_string(),
+            ],
+        );
+
+        let actual = internalize_header_map(external_form).expect("internalized header map");
+
+        assert_eq!(expected, actual);
     }
 }
