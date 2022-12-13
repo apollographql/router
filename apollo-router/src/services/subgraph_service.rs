@@ -92,47 +92,7 @@ impl SubgraphService {
             service: Arc::new(service.into()),
         }
     }
-}
 
-impl tower::Service<crate::SubgraphRequest> for SubgraphService {
-    type Response = crate::SubgraphResponse;
-    type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.client
-            .poll_ready(cx)
-            .map(|res| res.map_err(|e| Box::new(e) as BoxError))
-    }
-
-    fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
-        let crate::SubgraphRequest {
-            subgraph_request,
-            context,
-            ..
-        } = request;
-
-        let clone = self.client.clone();
-
-        let client = std::mem::replace(&mut self.client, clone);
-        let service_name = (*self.service).to_owned();
-
-        let (parts, body) = subgraph_request.into_parts();
-
-        match body {
-            graphql::Request{ query, operation_name, variables, extensions } => {
-                let body_without_query = graphql::Request::builder()
-                    .and_operation_name(operation_name.clone())
-                    .variables(variables.clone())
-                    .extensions(extensions.clone())
-                    .build();
-                self.call_apq(parts, body_without_query, context, client.clone(), service_name)
-            }
-        }
-    }
-}
-
-impl SubgraphService {
     fn call_apq(
         &self,
         parts: Parts,
@@ -141,7 +101,6 @@ impl SubgraphService {
         mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
         service_name: String,
     ) -> BoxFuture<'static, Result<crate::SubgraphResponse, BoxError>> {
-
         Box::pin(async move {
             let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
             println!("------------REQUEST-------------\n{:?}",body);
@@ -278,6 +237,44 @@ impl SubgraphService {
             println!("-------------RESPONSE------------\n{:?}",resp);
             Ok(crate::SubgraphResponse::new_from_response(resp, context))
         })
+    }
+}
+
+impl tower::Service<crate::SubgraphRequest> for SubgraphService {
+    type Response = crate::SubgraphResponse;
+    type Error = BoxError;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.client
+            .poll_ready(cx)
+            .map(|res| res.map_err(|e| Box::new(e) as BoxError))
+    }
+
+    fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
+        let crate::SubgraphRequest {
+            subgraph_request,
+            context,
+            ..
+        } = request;
+
+        let clone = self.client.clone();
+
+        let client = std::mem::replace(&mut self.client, clone);
+        let service_name = (*self.service).to_owned();
+
+        let (parts, body) = subgraph_request.into_parts();
+
+        match body {
+            graphql::Request{ query, operation_name, variables, extensions } => {
+                let body_without_query = graphql::Request::builder()
+                    .and_operation_name(operation_name.clone())
+                    .variables(variables.clone())
+                    .extensions(extensions.clone())
+                    .build();
+                self.call_apq(parts, body_without_query, context, client.clone(), service_name)
+            }
+        }
     }
 }
 
