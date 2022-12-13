@@ -127,7 +127,6 @@ impl BridgeQueryPlanner {
 
                 // TODO handle unwrap
                 let node_with_hash = node.calculate_hash_recursively().unwrap();
-                println!("{:?}",node_with_hash);
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,

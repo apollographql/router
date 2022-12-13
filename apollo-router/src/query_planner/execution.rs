@@ -345,7 +345,6 @@ impl PlanNode {
         // tracing::trace!("calculating hash for plan:\n{:#?}", self);
         match self {
             PlanNode::Sequence {nodes} => {
-                println!("------- entered Sequence");
                 let mut nodes_new = Vec::new();
                 for node in nodes {
                     nodes_new.push(node.calculate_hash_recursively().unwrap());
@@ -353,7 +352,6 @@ impl PlanNode {
                 Ok(PlanNode::Sequence { nodes: nodes_new})
             }
             PlanNode::Parallel { nodes } => {
-                println!("------- entered Parallel");
                 let mut nodes_new = Vec::new();
                 for node in nodes {
                     nodes_new.push(node.calculate_hash_recursively().unwrap());
@@ -361,13 +359,10 @@ impl PlanNode {
                 Ok(PlanNode::Parallel { nodes: nodes_new})
             }
             PlanNode::Flatten(FlattenNode { node, path}) => {
-                println!("------- entered Flatten");
                 let node_new = Box::new(node.calculate_hash_recursively().unwrap());
                 Ok(PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_new}))
             }
             PlanNode::Fetch(fetch_node) => {
-                println!("------- entered Fetch");
-                println!("-----------------------\n before node : {:?}",self);
                 match fetch_node {
                     FetchNode{ service_name, requires, variable_usages, operation,
                               operation_name, operation_kind, id, .. } => {
@@ -385,7 +380,6 @@ impl PlanNode {
                             operation_kind: operation_kind.clone(),
                             id: id.clone(),
                         });
-                        println!("-----------------------\n after node : {:?}",plan_node);
                         Ok(plan_node)
                     }
                 }
@@ -398,7 +392,6 @@ impl PlanNode {
                 },
                 deferred,
             } => {
-                println!("------- entered Defer");
                 let new_inner_node;
                 if let Some(inner_node) = node {
                     new_inner_node = Some(Box::new(inner_node.calculate_hash_recursively().unwrap()));
@@ -443,7 +436,6 @@ impl PlanNode {
                 else_clause,
                 condition,
             } => {
-                println!("------- entered Condition");
                 let new_if_node;
                 if let Some(node) = if_clause {
                     new_if_node = Some(Box::new(node.calculate_hash_recursively().unwrap()));
