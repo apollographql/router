@@ -398,14 +398,14 @@ register_plugin!("experimental", "external", ExternalPlugin);
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
+
+    use super::*;
 
     #[tokio::test]
     async fn load_plugin() {
