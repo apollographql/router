@@ -6,6 +6,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.6.0] - 2022-12-13
 
+
+# [1.6.0] - 2022-12-13
+
 ## ❗ BREAKING ❗
 
 ### Protoc now required to build ([Issue #1970](https://github.com/apollographql/router/issues/1970))
