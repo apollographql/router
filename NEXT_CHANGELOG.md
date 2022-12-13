@@ -200,6 +200,15 @@ Rust MSRV incremented to 1.65.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221 and https://github.com/apollographql/router/pull/2240
 
+### Improve automated release ([Pull #2220](https://github.com/apollographql/router/pull/2256))
+
+Improved the automated release to:
+* Update the scaffold files
+* Improve the names of prepare release steps in circle.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2256
+
+
 ## 📚 Documentation
 ### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
 
