@@ -106,63 +106,66 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
     }
 
     fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
-        let crate::SubgraphRequest {
-            subgraph_request,
-            context,
-            ..
-        } = request.clone();
-
         let clone = self.client.clone();
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-
-        let (parts, body) = subgraph_request.into_parts();
-        match body.clone() {
-            graphql::Request { operation_name, variables, extensions, .. } => {
-                // Try the subgraph_request (body) without query first
-                let body_without_query = graphql::Request::builder()
-                    .and_operation_name(operation_name.clone())
-                    .variables(variables)
-                    .extensions(extensions.clone())
-                    .build();
-                async {
-                    let response = call_apq(
-                        parts,
-                        body_without_query,
-                        context.clone(),
-                        client.clone(),
-                        service_name.to_owned()
-                    ).await.unwrap();
-                    println!("-------------APQ-RESPONSE----------------\n{:?}", response);
-                };
-            }
-        }
-
-        // If PersistedQueryNotFound response is recieved, send the whole query
-        let crate::SubgraphRequest {
-            subgraph_request,
-            context,
-            ..
-        } = request;
-
-        let clone = self.client.clone();
-        let client = std::mem::replace(&mut self.client, clone);
-        let service_name = (*self.service).to_owned();
-        let (parts, body) = subgraph_request.into_parts();
-
-        call_apq(parts, body, context, client, service_name)
+        Box::pin(call_internal(request, client, service_name))
     }
 }
 
-fn call_apq(
+async fn call_internal(
+    request: crate::SubgraphRequest,
+    client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+    service_name: String,
+) -> Result<crate::SubgraphResponse, BoxError> {
+    let crate::SubgraphRequest {
+        subgraph_request,
+        context,
+        ..
+    } = request.clone();
+
+    let (parts, body) = subgraph_request.into_parts();
+    match body.clone() {
+        graphql::Request { operation_name, variables, extensions, .. } => {
+            // Try the subgraph_request (body) without query first
+            let body_without_query = graphql::Request::builder()
+                .and_operation_name(operation_name.clone())
+                .variables(variables)
+                .extensions(extensions.clone())
+                .build();
+
+            let response = call_apq(
+                parts,
+                body_without_query,
+                context.clone(),
+                client.clone(),
+                service_name.to_owned()
+            ).await;
+
+            println!("-------------APQ-RESPONSE----------------\n{:?}", response.unwrap());
+        }
+    }
+
+    // If PersistedQueryNotFound response is recieved, send the whole query
+    let crate::SubgraphRequest {
+        subgraph_request,
+        context,
+        ..
+    } = request;
+
+    let (parts, body_with_query) = subgraph_request.into_parts();
+
+    call_apq(parts, body_with_query, context, client, service_name).await
+}
+
+async fn call_apq(
     parts: Parts,
     body: graphql::Request,
     context: Context,
     mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
     service_name: String,
-) -> BoxFuture<'static, Result<crate::SubgraphResponse, BoxError>> {
-    Box::pin (async move {
+) -> Result<crate::SubgraphResponse, BoxError> {
         let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
         println!("------------REQUEST-------------\n{:?}", body);
         let compressed_body = compress(body, &parts.headers)
@@ -217,13 +220,13 @@ fn call_apq(
         let response = client
             .call(request)
             .instrument(tracing::info_span!("subgraph_request",
-            "otel.kind" = %SpanKind::Client,
-            "net.peer.name" = &display(host),
-            "net.peer.port" = &display(port),
-            "http.route" = &display(path),
-            "net.transport" = "ip_tcp",
-            "apollo.subgraph.name" = %service_name
-        ))
+                "otel.kind" = %SpanKind::Client,
+                "net.peer.name" = &display(host),
+                "net.peer.port" = &display(port),
+                "http.route" = &display(path),
+                "net.transport" = "ip_tcp",
+                "apollo.subgraph.name" = %service_name
+            ))
             .await
             .map_err(|err| {
                 tracing::error!(fetch_error = format!("{:?}", err).as_str());
@@ -238,8 +241,8 @@ fn call_apq(
 
         if display_headers {
             tracing::info!(
-            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-        );
+                http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+            );
         }
         if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
             if let Ok(content_type_str) = content_type.to_str() {
@@ -280,8 +283,8 @@ fn call_apq(
 
         if display_body {
             tracing::info!(
-            http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
-        );
+        http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+    );
         }
 
         let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
@@ -298,7 +301,6 @@ fn call_apq(
         println!("-------------RESPONSE------------\n{:?}", resp);
 
         Ok(crate::SubgraphResponse::new_from_response(resp, context))
-    })
 }
 
 pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
