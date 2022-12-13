@@ -31,21 +31,21 @@ use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::Report;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::http::Values;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ConditionNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferNodePrimary;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferredNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferredNodeDepends;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::FetchNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::FlattenNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::Node;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ParallelNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ResponsePathElement;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::SequenceNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::Details;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::Http;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::QueryPlanNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferNodePrimary;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferredNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferredNodeDepends;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::FetchNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::FlattenNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::Node;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ParallelNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ResponsePathElement;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExportError;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config;
@@ -120,7 +120,7 @@ pub(crate) struct Exporter {
 }
 
 enum TreeData {
-    Request(Result<Box<proto::Trace>, Error>),
+    Request(Result<Box<proto::reports::Trace>, Error>),
     Supergraph {
         http: Box<Http>,
         client_name: Option<String>,
@@ -134,7 +134,7 @@ enum TreeData {
     DeferDeferred(DeferredNode),
     ConditionIf(Option<QueryPlanNode>),
     ConditionElse(Option<QueryPlanNode>),
-    Trace(Option<Result<Box<proto::Trace>, Error>>),
+    Trace(Option<Result<Box<proto::reports::Trace>, Error>>),
 }
 
 #[buildstructor::buildstructor]
@@ -172,9 +172,9 @@ impl Exporter {
         &mut self,
         span: &SpanData,
         child_nodes: Vec<TreeData>,
-    ) -> Result<Box<proto::Trace>, Error> {
+    ) -> Result<Box<proto::reports::Trace>, Error> {
         let http = extract_http_data(span, &self.expose_trace_id_config);
-        let mut root_trace = proto::Trace {
+        let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
             duration_ns: span
@@ -223,7 +223,7 @@ impl Exporter {
         Ok(Box::new(root_trace))
     }
 
-    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::Trace>, Error> {
+    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::reports::Trace>, Error> {
         self.extract_data_from_spans(&span)?
             .pop()
             .and_then(|node| {
@@ -257,14 +257,14 @@ impl Exporter {
 
         Ok(match span.name.as_ref() {
             PARALLEL_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
-                node: Some(proto::trace::query_plan_node::Node::Parallel(
+                node: Some(proto::reports::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
                 )),
             })],
             SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
-                node: Some(proto::trace::query_plan_node::Node::Sequence(
+                node: Some(proto::reports::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
@@ -284,8 +284,8 @@ impl Exporter {
                     .as_str())
                 .to_string();
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
-                    node: Some(proto::trace::query_plan_node::Node::Fetch(Box::new(
-                        FetchNode {
+                    node: Some(proto::reports::trace::query_plan_node::Node::Fetch(
+                        Box::new(FetchNode {
                             service_name,
                             trace_parsing_failed,
                             trace,
@@ -297,22 +297,22 @@ impl Exporter {
                                 .unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
                             received_time: Some(span.end_time.into()),
-                        },
-                    ))),
+                        }),
+                    )),
                 })]
             }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
-                    node: Some(proto::trace::query_plan_node::Node::Flatten(Box::new(
-                        FlattenNode {
+                    node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
+                        Box::new(FlattenNode {
                             response_path: span
                                 .attributes
                                 .get(&PATH)
                                 .map(extract_path)
                                 .unwrap_or_default(),
                             node: child_nodes.remove_first_query_plan_node().map(Box::new),
-                        },
-                    ))),
+                        }),
+                    )),
                 })]
             }
             SUBGRAPH_SPAN_NAME => {
@@ -447,7 +447,7 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
                     if let Ok(index) = v.parse::<u32>() {
                         ResponsePathElement {
                             id: Some(
-                                proto::trace::query_plan_node::response_path_element::Id::Index(
+                                proto::reports::trace::query_plan_node::response_path_element::Id::Index(
                                     index,
                                 ),
                             ),
@@ -455,7 +455,7 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
                     } else {
                         ResponsePathElement {
                             id: Some(
-                                proto::trace::query_plan_node::response_path_element::Id::FieldName(
+                                proto::reports::trace::query_plan_node::response_path_element::Id::FieldName(
                                     v.to_string(),
                                 ),
                             ),
@@ -475,10 +475,10 @@ fn extract_i64(v: &Value) -> Option<i64> {
     }
 }
 
-fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::Trace>, Error>> {
+fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::reports::Trace>, Error>> {
     if let Some(v) = extract_string(v) {
         if let Ok(v) = base64::decode(v) {
-            if let Ok(t) = proto::Trace::decode(Cursor::new(v)) {
+            if let Ok(t) = proto::reports::Trace::decode(Cursor::new(v)) {
                 return Some(Ok(Box::new(t)));
             }
         }
@@ -496,16 +496,16 @@ fn extract_http_data(span: &SpanData, expose_trace_id_config: &ExposeTraceId) ->
         .unwrap_or_default()
         .as_ref()
     {
-        "OPTIONS" => proto::trace::http::Method::Options,
-        "GET" => proto::trace::http::Method::Get,
-        "HEAD" => proto::trace::http::Method::Head,
-        "POST" => proto::trace::http::Method::Post,
-        "PUT" => proto::trace::http::Method::Put,
-        "DELETE" => proto::trace::http::Method::Delete,
-        "TRACE" => proto::trace::http::Method::Trace,
-        "CONNECT" => proto::trace::http::Method::Connect,
-        "PATCH" => proto::trace::http::Method::Patch,
-        _ => proto::trace::http::Method::Unknown,
+        "OPTIONS" => proto::reports::trace::http::Method::Options,
+        "GET" => proto::reports::trace::http::Method::Get,
+        "HEAD" => proto::reports::trace::http::Method::Head,
+        "POST" => proto::reports::trace::http::Method::Post,
+        "PUT" => proto::reports::trace::http::Method::Put,
+        "DELETE" => proto::reports::trace::http::Method::Delete,
+        "TRACE" => proto::reports::trace::http::Method::Trace,
+        "CONNECT" => proto::reports::trace::http::Method::Connect,
+        "PATCH" => proto::reports::trace::http::Method::Patch,
+        _ => proto::reports::trace::http::Method::Unknown,
     };
     let request_headers = span
         .attributes
@@ -549,22 +549,10 @@ impl SpanExporter for Exporter {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
-
-        // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
-        let mut traces: Vec<(String, proto::Trace)> = Vec::new();
+        let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
+            println!("Exporting {}", span.name);
             if span.name == REQUEST_SPAN_NAME {
-                // Write spans for testing
-                // You can obtain new span data by uncommenting the following code and executing a query.
-                // In general this isn't something we'll want to do often, we are just verifying that the exporter constructs a correct report.
-                // let mut c = self
-                //     .spans_by_parent_id
-                //     .iter()
-                //     .flat_map(|(_, s)| s.iter())
-                //     .collect::<Vec<_>>();
-                // c.push(&span);
-                // std::fs::write("spandata.yaml", serde_yaml::to_string(&c).unwrap()).unwrap();
-
                 match self.extract_trace(span) {
                     Ok(mut trace) => {
                         let mut operation_signature = Default::default();
@@ -732,203 +720,16 @@ impl Exporter {
 
 #[cfg(test)]
 mod test {
-    use http::header::HeaderName;
-    use opentelemetry::sdk::export::trace::{SpanData, SpanExporter};
-    use opentelemetry::sdk::trace::{EvictedHashMap, EvictedQueue};
-    use opentelemetry::trace::{SpanContext, SpanId, SpanKind, TraceId};
-    use opentelemetry::{Key, KeyValue, Value};
+    use opentelemetry::sdk::export::trace::{ SpanExporter};
+    use opentelemetry::{ Value};
     use prost::Message;
     use serde_json::json;
-    use std::str::FromStr;
-    use std::time::SystemTime;
-
-    use crate::plugins::telemetry::apollo::{Report};
-    use crate::plugins::telemetry::apollo_exporter::proto::Trace;
-    use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
-    use crate::plugins::telemetry::apollo_exporter::proto::trace::QueryPlanNode;
-    use crate::plugins::telemetry::config::ExposeTraceId;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::proto::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, Exporter, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, ReportExporter, TreeData};
-
-    fn load_span_data(spandata: &str) -> Vec<SpanData> {
-        // Serde support was removed from otel 0.18
-        let value: Vec<serde_yaml::Value> =
-            serde_yaml::from_str(spandata).expect("test spans must be parsable");
-        value
-            .iter()
-            .map(|v| {
-                let span_data = v.as_mapping().expect("expected mapping");
-                let span_context = span_data
-                    .get(&serde_yaml::Value::String("span_context".into()))
-                    .expect("expected span_context")
-                    .as_mapping()
-                    .expect("expected mapping");
-                let mut attributes = EvictedHashMap::new(256, 256);
-                for (key, value) in span_data
-                    .get(&serde_yaml::Value::String("attributes".into()))
-                    .expect("expected attributes")
-                    .as_mapping()
-                    .expect("expected mapping")
-                    .get(&serde_yaml::Value::String("map".into()))
-                    .expect("expected map")
-                    .as_mapping()
-                    .expect("expected mapping")
-                {
-                    let value: Value = match value
-                        .as_mapping()
-                        .expect("expected mapping")
-                        .iter()
-                        .map(|(k, v)| (k.as_str().expect("expected str"), v))
-                        .next()
-                        .expect("expected value")
-                    {
-                        ("Bool", serde_yaml::Value::Bool(b)) => Value::Bool(*b),
-                        ("I64", serde_yaml::Value::Number(n)) if n.is_i64() => {
-                            Value::I64(n.as_i64().expect("qed"))
-                        }
-                        ("F64", serde_yaml::Value::Number(n)) if n.is_f64() => {
-                            Value::F64(n.as_f64().expect("qed"))
-                        }
-                        ("String", serde_yaml::Value::String(s)) => s.clone().into(),
-                        _ => panic!("unexpected value type {:?}", value),
-                    };
-                    attributes.insert(KeyValue::new(
-                        Key::from(key.as_str().expect("expected str").to_string()),
-                        value,
-                    ));
-                }
-                SpanData {
-                    span_context: SpanContext::new(
-                        TraceId::from_bytes(
-                            u128::from_str(
-                                span_context
-                                    .get(&serde_yaml::Value::String("trace_id".into()))
-                                    .expect("expected trace_id")
-                                    .as_str()
-                                    .expect("expected str"),
-                            )
-                            .expect("expected u128 parse")
-                            .to_be_bytes(),
-                        ),
-                        SpanId::from_bytes(
-                            span_context
-                                .get(&serde_yaml::Value::String("span_id".into()))
-                                .expect("expected span_id")
-                                .as_u64()
-                                .expect("expected u64")
-                                .to_be_bytes(),
-                        ),
-                        Default::default(),
-                        false,
-                        Default::default(),
-                    ),
-                    parent_span_id: SpanId::from_bytes(
-                        span_data
-                            .get(&serde_yaml::Value::String("parent_span_id".into()))
-                            .cloned()
-                            .unwrap_or_else(|| serde_yaml::Value::Number(0.into()))
-                            .as_u64()
-                            .expect("expected u64")
-                            .to_be_bytes(),
-                    ),
-                    span_kind: SpanKind::Client,
-                    name: span_data
-                        .get(&serde_yaml::Value::String("name".into()))
-                        .expect("name")
-                        .as_str()
-                        .expect("expected str")
-                        .to_string()
-                        .into(),
-                    start_time: SystemTime::now(),
-                    end_time: SystemTime::now(),
-                    attributes,
-                    events: EvictedQueue::new(100),
-                    links: EvictedQueue::new(100),
-                    status: Default::default(),
-                    resource: Default::default(),
-                    instrumentation_lib: Default::default(),
-                }
-            })
-            .collect()
-    }
-
-    async fn report(mut exporter: Exporter, spandata: &str) -> Report {
-        let spandata = load_span_data(spandata);
-
-        exporter
-            .export(spandata)
-            .await
-            .expect("span export must succeed");
-        assert!(matches!(
-            exporter.report_exporter,
-            ReportExporter::InMemory(_)
-        ));
-        if let ReportExporter::InMemory(storage) = exporter.report_exporter {
-            return storage
-                .lock()
-                .expect("lock poisoned")
-                .pop()
-                .expect("must have a report");
-        }
-        panic!("cannot happen");
-    }
-
-    macro_rules! assert_report {
-        ($report: expr)=> {
-            insta::with_settings!({sort_maps => true}, {
-                    insta::assert_yaml_snapshot!($report, {
-                        ".**.seconds" => "[seconds]",
-                        ".**.nanos" => "[nanos]",
-                        ".**.duration_ns" => "[duration_ns]",
-                        ".**.child[].start_time" => "[start_time]",
-                        ".**.child[].end_time" => "[end_time]",
-                        ".**.trace_id.value[]" => "[trace_id]",
-                        ".**.sent_time_offset" => "[sent_time_offset]"
-                    });
-                });
-        }
-    }
-
-    #[tokio::test]
-    async fn test_condition_if() {
-        // The following curl request was used to generate this span data
-        // curl --request POST \
-        //     --header 'content-type: application/json' \
-        //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
-        //     --url http://localhost:4000/ \
-        //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":true}}'
-        let spandata = include_str!("testdata/condition_if_spandata.yaml");
-        let exporter = Exporter::test_builder().build();
-        let report = report(exporter, spandata).await;
-        assert_report!(report);
-    }
-
-    #[tokio::test]
-    async fn test_condition_else() {
-        // The following curl request was used to generate this span data
-        // curl --request POST \
-        //     --header 'content-type: application/json' \
-        //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
-        //     --url http://localhost:4000/ \
-        //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":false}}'
-        let spandata = include_str!("testdata/condition_else_spandata.yaml");
-        let exporter = Exporter::test_builder().build();
-        let report = report(exporter, spandata).await;
-        assert_report!(report);
-    }
-
-    #[tokio::test]
-    async fn test_trace_id() {
-        let spandata = include_str!("testdata/condition_if_spandata.yaml");
-        let exporter = Exporter::test_builder()
-            .expose_trace_id_config(ExposeTraceId {
-                enabled: true,
-                header_name: Some(HeaderName::from_static("trace_id")),
-            })
-            .build();
-        let report = report(exporter, spandata).await;
-        assert_report!(report);
-    }
+    use crate::plugins::telemetry::apollo_exporter::proto::server::ReporterResponse;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();

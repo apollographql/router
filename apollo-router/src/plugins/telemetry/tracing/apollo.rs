@@ -6,7 +6,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo_exporter::proto::Trace;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;

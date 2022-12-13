@@ -19,10 +19,10 @@ use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
-use crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType;
-use crate::plugins::telemetry::apollo_exporter::proto::ReportHeader;
-use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
-use crate::plugins::telemetry::apollo_exporter::proto::Trace;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::ReportHeader;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
@@ -218,8 +218,8 @@ impl Report {
     pub(crate) fn into_report(
         self,
         header: ReportHeader,
-    ) -> crate::plugins::telemetry::apollo_exporter::proto::Report {
-        let mut report = crate::plugins::telemetry::apollo_exporter::proto::Report {
+    ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
+        let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
             operation_count: self.operation_count,
@@ -273,7 +273,9 @@ pub(crate) struct TracesAndStats {
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl From<TracesAndStats> for crate::plugins::telemetry::apollo_exporter::proto::TracesAndStats {
+impl From<TracesAndStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::TracesAndStats
+{
     fn from(stats: TracesAndStats) -> Self {
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),
