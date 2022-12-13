@@ -13,6 +13,7 @@ use schemars::schema::RootSchema;
 use super::expansion::coerce;
 use super::expansion::expand_env_variables;
 use super::expansion::Expansion;
+use super::experimental::log_used_experimental_conf;
 use super::plugins;
 use super::yaml;
 use super::Configuration;
@@ -102,6 +103,7 @@ pub(crate) fn validate_yaml_configuration(
             tracing::warn!("configuration could not be upgraded automatically as it had errors")
         }
     }
+    log_used_experimental_conf(&yaml);
     let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
 
     if let Err(errors) = schema.validate(&expanded_yaml) {
@@ -232,8 +234,7 @@ pub(crate) fn validate_yaml_configuration(
     // We can't do it with the `deny_unknown_fields` property on serde because we are using `flatten`
     let registered_plugins = plugins();
     let apollo_plugin_names: Vec<&str> = registered_plugins
-        .keys()
-        .filter_map(|n| n.strip_prefix(APOLLO_PLUGIN_PREFIX))
+        .filter_map(|factory| factory.name.strip_prefix(APOLLO_PLUGIN_PREFIX))
         .collect();
     let unknown_fields: Vec<&String> = config
         .apollo_plugins

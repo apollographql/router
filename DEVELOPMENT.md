@@ -18,7 +18,7 @@ The **Apollo Router** is a configurable, high-performance **graph router** for a
 
 ## Development
 
-You will need a recent version of rust (`1.63` works well as of writing). 
+You will need a recent version of rust (`1.65` works well as of writing). 
 Installing rust [using rustup](https://www.rust-lang.org/tools/install) is
 the recommended way to do it as it will install rustup, rustfmt and other 
 goodies that are not always included by default in other rust distribution channels:
@@ -26,6 +26,8 @@ goodies that are not always included by default in other rust distribution chann
 ```
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
+
+In addition, you will need to [install protoc](https://grpc.io/docs/protoc-installation/).
 
 Set up your git hooks:
 
@@ -77,6 +79,11 @@ The CI checks require `cargo-deny` and `cargo-about` which can both be installed
 
 They also need you to have the federation-demo project up and running,
 as explained in the Getting started section above.
+
+### Yaml configuration design
+
+If you are adding a new feature or modifying an existing feature then consult the [yaml design guidance](dev-docs/yaml-design-guidance.md) page.
+
 
 ### Investigating memory usage
 

@@ -25,6 +25,7 @@ use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
 
+use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
@@ -53,7 +54,6 @@ pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
 #[cfg(feature = "dhat-heap")]
-#[crate::_private::ctor::ctor]
 fn create_heap_profiler() {
     unsafe {
         match DHAT_HEAP_PROFILER.set(dhat::Profiler::new_heap()) {
@@ -77,7 +77,6 @@ extern "C" fn drop_heap_profiler() {
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
-#[crate::_private::ctor::ctor]
 fn create_ad_hoc_profiler() {
     unsafe {
         match DHAT_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
@@ -129,6 +128,8 @@ enum ConfigSubcommand {
         #[clap(parse(from_flag), long)]
         diff: bool,
     },
+    /// List all the available experimental configurations with related GitHub discussion
+    Experimental,
 }
 
 /// Options for the router
@@ -258,6 +259,12 @@ impl fmt::Display for ProjectDir {
 ///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    create_heap_profiler();
+
+    #[cfg(feature = "dhat-ad-hoc")]
+    create_ad_hoc_profiler();
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
@@ -371,6 +378,12 @@ impl Executable {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
                 println!("{}", output);
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Experimental,
+            })) => {
+                configuration::print_all_experimental_conf();
                 Ok(())
             }
             None => {
