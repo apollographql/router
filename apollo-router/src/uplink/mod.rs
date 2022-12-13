@@ -189,8 +189,7 @@ fn test_uplink_schema_is_up_to_date() {
     let client = GraphQLClient::new(
         "https://uplink.api.apollographql.com/",
         reqwest::blocking::Client::new(),
-    )
-    .unwrap();
+    );
 
     let should_retry = true;
     let introspection_response = introspect::run(

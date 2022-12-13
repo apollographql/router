@@ -10,7 +10,7 @@ publish = false
 
 [dev-dependencies]
 apollo-router = { path = "../apollo-router" }
-criterion = { version = "0.3", features = ["async_tokio", "async_futures"] }
+criterion = { version = "0.4", features = ["async_tokio", "async_futures"] }
 futures = "0.3"
 once_cell = "1"
 serde_json = { version = "1", features = ["preserve_order"] }

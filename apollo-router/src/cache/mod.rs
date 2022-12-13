@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -14,7 +15,7 @@ mod redis;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
-pub(crate) const DEFAULT_CACHE_CAPACITY: usize = 512;
+pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(512) };
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
@@ -34,7 +35,7 @@ where
     }
 
     pub(crate) async fn with_capacity(
-        capacity: usize,
+        capacity: NonZeroUsize,
         redis_urls: Option<Vec<String>>,
         caller: &str,
     ) -> Self {
@@ -199,6 +200,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use futures::stream::FuturesUnordered;
     use futures::stream::StreamExt;
     use mockall::mock;
@@ -209,7 +212,8 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(1, None, "test").await;
+        let cache =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test").await;
 
         let entry = cache.get(&k).await;
 
@@ -226,7 +230,7 @@ mod tests {
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(13, None, "test").await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, "test").await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -249,7 +253,7 @@ mod tests {
         mock.expect_retrieve().times(1).return_const(1usize);
 
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(10, None, "test").await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test").await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made
