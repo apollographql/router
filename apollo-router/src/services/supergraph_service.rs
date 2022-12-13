@@ -780,7 +780,7 @@ mod tests {
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 r#"query { 
                 computer(id: "Computer1") {   
@@ -1024,7 +1024,7 @@ mod tests {
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 "query { __typename currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
             )
@@ -1078,7 +1078,7 @@ mod tests {
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 "query { ...@defer { __typename currentUser { activeOrganization { id  suborga { id name } } } } }",
             )
@@ -1327,12 +1327,6 @@ mod tests {
         insta::assert_json_snapshot!(last);
     }
 
-    fn defer_context() -> Context {
-        let context = Context::new();
-        context.insert(ACCEPTS_MULTIPART_CONTEXT_KEY, true).unwrap();
-        context
-    }
-
     #[tokio::test]
     async fn reconstruct_deferred_query_under_interface() {
         let schema = r#"schema
@@ -1449,7 +1443,7 @@ mod tests {
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 r#"query {
                     me {
@@ -1475,5 +1469,11 @@ mod tests {
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    fn defer_context() -> Context {
+        let context = Context::new();
+        context.insert(ACCEPTS_MULTIPART_CONTEXT_KEY, true).unwrap();
+        context
     }
 }
