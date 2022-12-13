@@ -235,7 +235,7 @@ Now that the Elastic-2.0 spdx is a valid identifier in the rust ecosystem, we ca
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2054
 
 ## 📚 Documentation
-### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
+### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/issues/2158))
 
 Added some yaml design guidance to help us create consistent yaml config for new and existing features.
 
