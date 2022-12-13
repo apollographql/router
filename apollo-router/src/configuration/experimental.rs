@@ -21,7 +21,7 @@ pub(crate) fn print_all_experimental_conf() {
         }
         Err(err) => {
             panic!(
-                "cannot access to the list of available experimental configurations: {}",
+                "cannot load the list of available experimental configurations: {}",
                 err
             );
         }
