@@ -18,6 +18,7 @@ pub struct Request {
     ///
     /// For historical purposes, the term "query" is commonly used to refer to
     /// *any* GraphQL operation which might be, e.g., a `mutation`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub query: Option<String>,
 
     /// The (optional) GraphQL operation name.

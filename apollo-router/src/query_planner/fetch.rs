@@ -27,7 +27,7 @@ use crate::*;
 const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
-const HASH_KEY: &str = "sha256hash";
+const HASH_KEY: &str = "sha256Hash";
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]

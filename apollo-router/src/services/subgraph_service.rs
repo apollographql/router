@@ -17,6 +17,8 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
+use http::request::Parts;
+use hyper::Client;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
@@ -38,7 +40,7 @@ use super::Plugins;
 use crate::axum_factory::utils::APPLICATION_JSON_HEADER_VALUE;
 use crate::axum_factory::utils::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::error::FetchError;
-use crate::graphql;
+use crate::{Context, graphql};
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 
@@ -112,13 +114,37 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
         let clone = self.client.clone();
 
-        let mut client = std::mem::replace(&mut self.client, clone);
+        let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-        Box::pin(async move {
-            let (parts, body) = subgraph_request.into_parts();
-            let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+        let (parts, body) = subgraph_request.into_parts();
 
+        match body {
+            graphql::Request{ query, operation_name, variables, extensions } => {
+                let body_without_query = graphql::Request::builder()
+                    .and_operation_name(operation_name.clone())
+                    .variables(variables.clone())
+                    .extensions(extensions.clone())
+                    .build();
+                self.call_apq(parts, body_without_query, context, client.clone(), service_name)
+            }
+        }
+    }
+}
+
+impl SubgraphService {
+    fn call_apq(
+        &self,
+        parts: Parts,
+        body: graphql::Request,
+        context: Context,
+        mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
+        service_name: String,
+    ) -> BoxFuture<'static, Result<crate::SubgraphResponse, BoxError>> {
+
+        Box::pin(async move {
+            let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+            println!("------------REQUEST-------------\n{:?}",body);
             let compressed_body = compress(body, &parts.headers)
                 .instrument(tracing::debug_span!("body_compression"))
                 .await
@@ -189,6 +215,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 })?;
             // Keep our parts, we'll need them later
             let (parts, body) = response.into_parts();
+
             if display_headers {
                 tracing::info!(
                     http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
@@ -248,7 +275,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 })?;
 
             let resp = http::Response::from_parts(parts, graphql);
-
+            println!("-------------RESPONSE------------\n{:?}",resp);
             Ok(crate::SubgraphResponse::new_from_response(resp, context))
         })
     }
