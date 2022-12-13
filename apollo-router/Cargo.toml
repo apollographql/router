@@ -59,6 +59,7 @@ clap = { version = "4.0.29", default-features = false, features = [
     "env",
     "derive",
     "std",
+    "help",
 ] }
 console-subscriber = { version = "0.1.8", optional = true }
 dashmap = { version = "5.4.0", features = ["serde"] }

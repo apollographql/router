@@ -130,11 +130,8 @@ enum ConfigSubcommand {
 
 /// Options for the router
 #[derive(Parser, Debug)]
-#[clap(
-    name = "router",
-    about = "Apollo federation router",
-    global_setting(AppSettings::NoAutoVersion)
-)]
+#[clap(name = "router", about = "Apollo federation router")]
+#[command(disable_version_flag(true))]
 pub(crate) struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
