@@ -47,7 +47,7 @@ It also adds a new cli command `router config experimental` to display all avail
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2242
 
-### Re-Deploy Router Pods If The SuperGraph Configmap Changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
+### Re-deploy router pods if the SuperGraph configmap changes ([PR #2223](https://github.com/apollographql/router/pull/2223))
 When setting the supergraph with th the `supergraphFile` variable a `sha256` checksum is calculated and set as an annotation for the router pods. This will spin up new pods when the supergraph is mounted via config map and the schema has changed.
 
 Note: It is preferable to not have `--hot-reload` enabled with this feature since re-configuring the router during a pod restart is duplicating the work and may cause confusion in log messaging.
@@ -82,7 +82,7 @@ See the Open Telemetry docs for more information.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
 
-### Add hot-reload support for rhai scripts ([Issue #1071](https://github.com/apollographql/router/issues/1071))
+### Add hot-reload support for Rhai scripts ([Issue #1071](https://github.com/apollographql/router/issues/1071))
 
 The router will "watch" your "rhai.scripts" directory for changes and prompt an interpreter re-load if changes are detected. Changes are defined as:
 
@@ -91,17 +91,17 @@ The router will "watch" your "rhai.scripts" directory for changes and prompt an 
 
 The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
 
-The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
+The Router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2198
 
-### Add support for working with multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211), [Issue #2255](https://github.com/apollographql/router/issues/2255))
+### Add support for working with multi-value header keys to Rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211), [Issue #2255](https://github.com/apollographql/router/issues/2255))
 
 Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
 
 Adds support for a new `values()` fn which retrieves multiple values for a HeaderMap key as an array.
 
-Example use from rhai as:
+Example use from Rhai as:
 
 ```
   response.headers["set-cookie"] = [
@@ -117,9 +117,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
 
-[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
-mandate that a deferred response should not be sent if its path points to an element of the response that was nullified
-in a previous payload.
+[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470) mandates that a deferred response should not be sent if its path points to an element of the response that was nullified in a previous payload.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
 
@@ -139,7 +137,7 @@ fragment deferedFragment on Query {
 }
 ```
 
-You will received first response chunk:
+You will receive the first response chunk:
 
 ```json
 {"data":{"__typename": "Query", "fast":0},"hasNext":true}
@@ -148,15 +146,14 @@ You will received first response chunk:
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2188
 
 
-### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
+### Wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
 
 When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
 ### Dispatch errors from the primary response to deferred responses ([Issue #1818](https://github.com/apollographql/router/issues/1818), [Issue #2185](https://github.com/apollographql/router/issues/2185))
 
-When errors are generated during the primary execution, some of them can be assigned to
-deferred responses.
+When errors are generated during the primary execution, some may also be assigned to deferred responses.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2192
 
@@ -168,7 +165,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🛠 Maintenance
 
-### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
+### Improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
 
 This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
 
@@ -180,7 +177,7 @@ This test was failing frequently due to it being a timing test being run in a si
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
 
-### update reports.proto protobuf definition ([PR #2247](https://github.com/apollographql/router/pull/2247))
+### Update reports.proto protobuf definition ([PR #2247](https://github.com/apollographql/router/pull/2247))
 
 Update the reports.proto file, and change the prompt to update the file with the correct new location.
 
