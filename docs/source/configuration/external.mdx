@@ -36,7 +36,7 @@ sequenceDiagram
     alt has coprocessor
         RouterService->>CoProcessor: HTTP Post
         CoProcessor-->>RouterService: HTTP Post Response
-    else no cprocessor
+    else no coprocessor
         RouterService->>SupergraphService: Processes request
     end
     SupergraphService->>ExecutionService: Initiates query<br/>plan execution
@@ -55,7 +55,7 @@ sequenceDiagram
     alt has coprocessor
         RouterService->>CoProcessor: HTTP Post
         CoProcessor-->>RouterService: HTTP Post Response
-    else no cprocessor
+    else no coprocessor
         RouterService-->>Client: Returns HTTP response
     end
 ```
