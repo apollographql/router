@@ -47,6 +47,28 @@ impl AsRef<Request> for Arc<http_ext::Request<Request>> {
     }
 }
 
+#[cfg(test)]
+pub(crate) fn apollo_key() -> Option<String> {
+    // During tests we don't want env variables to affect defaults
+    None
+}
+
+#[cfg(not(test))]
+pub(crate) fn apollo_key() -> Option<String> {
+    std::env::var("APOLLO_KEY").ok()
+}
+
+#[cfg(test)]
+pub(crate) fn apollo_graph_reference() -> Option<String> {
+    // During tests we don't want env variables to affect defaults
+    None
+}
+
+#[cfg(not(test))]
+pub(crate) fn apollo_graph_reference() -> Option<String> {
+    std::env::var("APOLLO_GRAPH_REF").ok()
+}
+
 // set the supported `@defer` specification version to https://github.com/graphql/graphql-spec/pull/742/commits/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82
 pub(crate) const MULTIPART_DEFER_SPEC_PARAMETER: &str = "deferSpec";
 pub(crate) const MULTIPART_DEFER_SPEC_VALUE: &str = "20220824";

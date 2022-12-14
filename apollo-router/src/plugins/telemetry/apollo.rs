@@ -25,6 +25,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 
 pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
@@ -92,28 +94,6 @@ pub(crate) struct Config {
     pub(crate) expose_trace_id: ExposeTraceId,
 
     pub(crate) batch_processor: Option<BatchProcessorConfig>,
-}
-
-#[cfg(test)]
-fn apollo_key() -> Option<String> {
-    // During tests we don't want env variables to affect defaults
-    None
-}
-
-#[cfg(not(test))]
-fn apollo_key() -> Option<String> {
-    std::env::var("APOLLO_KEY").ok()
-}
-
-#[cfg(test)]
-fn apollo_graph_reference() -> Option<String> {
-    // During tests we don't want env variables to affect defaults
-    None
-}
-
-#[cfg(not(test))]
-fn apollo_graph_reference() -> Option<String> {
-    std::env::var("APOLLO_GRAPH_REF").ok()
 }
 
 fn endpoint_default() -> Url {

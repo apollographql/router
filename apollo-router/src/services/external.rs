@@ -17,10 +17,19 @@ use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
 
+use crate::error::LicenseError;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 use crate::tracer::TraceId;
 use crate::Context;
 
-static CLIENT: Lazy<Client> = Lazy::new(Client::new);
+static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
+    apollo_graph_reference().ok_or_else(|| LicenseError::MissingGraphReference)?;
+    apollo_key().ok_or_else(|| LicenseError::MissingKey)?;
+    // apollo_graph_reference().ok_or_else(|| "graph reference required".to_string())?;
+    // apollo_key().ok_or_else(|| "key required".to_string())?;
+    Ok(Client::new())
+});
 
 /// Version of our externalised data. Rev this if it changes
 const EXTERNALIZABLE_VERSION: u8 = 1;
@@ -99,7 +108,7 @@ where
     }
 
     pub(crate) async fn call(self, url: &str) -> Result<Self, BoxError> {
-        let my_client = CLIENT.clone();
+        let my_client = CLIENT.as_ref().map_err(|e| e.to_string())?.clone();
 
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
         let response = my_client

@@ -12,6 +12,7 @@
       "Overview": "/configuration/overview",
       "CORS": "/configuration/cors",
       "CSRF prevention": "/configuration/csrf",
+      "External extensibility": "/configuration/external",
       "Logging": "/configuration/logging",
       "Header propagation": "/configuration/header-propagation",
       "Traffic shaping": "/configuration/traffic-shaping",
