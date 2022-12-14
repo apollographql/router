@@ -15,7 +15,10 @@ mod redis;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
-pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = unsafe { NonZeroUsize::new_unchecked(512) };
+pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
+    Some(v) => v,
+    None => unreachable!(),
+};
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
