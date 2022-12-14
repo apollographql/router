@@ -13,7 +13,6 @@ use axum::Json;
 use bytes::Bytes;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
-use http::HeaderValue;
 use once_cell::sync::Lazy;
 use prost::Message;
 use serial_test::serial;
@@ -145,11 +144,7 @@ async fn report(
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
     clear_reports();
-    let mut req: router::Request = request.try_into().unwrap();
-    req.router_request.headers_mut().insert(
-        ACCEPT,
-        HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
-    );
+    let req: router::Request = request.try_into().unwrap();
 
     let mut response = ROUTER_SERVICE
         .lock()
@@ -165,7 +160,7 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
 
     let mut found_report = None;
     for _ in 0..100 {
-        let reports = REPORTS.lock().unwrap();
+        let reports = REPORTS.lock().expect("mutex poisoned");
         let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
         if report.is_some() {
             found_report = report.cloned();
@@ -193,7 +188,7 @@ async fn test_condition_if() {
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", true)
-        .header("Accept", "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
     let report = get_trace_report(request).await;
@@ -206,7 +201,7 @@ async fn test_condition_else() {
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
-        .header("Accept", "multipart/mixed; deferSpec=20220824")
+        .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
     let report = get_trace_report(request).await;
