@@ -42,7 +42,8 @@ traces_per_query:
             send-header:
               value:
                 - Header value
-          response_headers: {}
+          response_headers:
+            my_trace_id: "[my_trace_id]"
           status_code: 0
         cache_policy: ~
         query_plan:

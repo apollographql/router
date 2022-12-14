@@ -87,7 +87,7 @@ macro_rules! assert_report {
                         ".**.child[].end_time" => "[end_time]",
                         ".**.trace_id.value[]" => "[trace_id]",
                         ".**.sent_time_offset" => "[sent_time_offset]",
-                        ".**.response_headers" => "[response_headers]"
+                        ".**.my_trace_id" => "[my_trace_id]"
                     });
                 });
         }
