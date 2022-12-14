@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use apollo_router::services::router;
-use apollo_router::services::router::BoxCloneService;
+use apollo_router::services::router::BoxService;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use axum::routing::post;
@@ -12,7 +12,6 @@ use axum::Json;
 use bytes::Bytes;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
-use once_cell::sync::Lazy;
 use prost::Message;
 use tokio::sync::Mutex;
 use tower::Service;
@@ -20,59 +19,6 @@ use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
 
 use crate::proto::reports::Report;
-
-static REPORTS: Lazy<Arc<Mutex<Vec<Report>>>> = Lazy::new(Default::default);
-static TEST: Lazy<Arc<Mutex<bool>>> = Lazy::new(Default::default);
-
-static ROUTER_SERVICE: Lazy<Mutex<BoxCloneService>> = Lazy::new(|| {
-    let reports = &*REPORTS;
-    std::env::set_var("APOLLO_KEY", "test");
-    std::env::set_var("APOLLO_GRAPH_REF", "test");
-
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap();
-    let app = axum::Router::new()
-        .route("/", post(report))
-        .layer(DecompressionLayer::new())
-        .layer(tower_http::add_extension::AddExtensionLayer::new(
-            reports.clone(),
-        ));
-
-    let mut config: serde_json::Value =
-        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
-            .expect("apollo_reports.router.yaml was invalid");
-    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
-        Some(serde_json::Value::String(format!("http://{}", addr)))
-    })
-    .expect("Could not sub in endpoint");
-
-    let async_runtime = tokio::runtime::Handle::current();
-
-    std::thread::spawn(move || {
-        async_runtime.block_on(async {
-            let _ = tokio::spawn(async move {
-                axum::Server::from_tcp(listener)
-                    .unwrap()
-                    .serve(app.into_make_service())
-                    .await
-                    .expect("could not start axum server")
-            });
-
-            Mutex::new(
-                TestHarness::builder()
-                    .configuration_json(config)
-                    .unwrap()
-                    .with_subgraph_network_requests()
-                    .build_router()
-                    .await
-                    .expect("could create router test harness")
-                    .boxed_clone(),
-            )
-        })
-    })
-    .join()
-    .unwrap()
-});
 
 macro_rules! assert_report {
         ($report: expr)=> {
@@ -140,16 +86,14 @@ async fn report(
     Ok(Json(()))
 }
 
-async fn get_trace_report(request: supergraph::Request) -> Report {
-    let _test_guard = TEST.lock().await;
-    {
-        REPORTS.clone().lock().await.clear();
-    }
+async fn get_trace_report(
+    router_service: &mut BoxService,
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: supergraph::Request,
+) -> Report {
     let req: router::Request = request.try_into().expect("could not convert request");
 
-    let mut response = ROUTER_SERVICE
-        .lock()
-        .await
+    let mut response = router_service
         .ready()
         .await
         .unwrap()
@@ -161,103 +105,156 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
 
     let mut found_report = None;
     for _ in 0..100 {
-        let reports = REPORTS.lock().await;
+        let reports = reports.lock().await;
         let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
         if report.is_some() {
             found_report = report.cloned();
             break;
         }
-        drop(reports);
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    reports.lock().await.clear();
+
     found_report.expect("could not find report")
 }
+
 #[tokio::test(flavor = "multi_thread")]
-async fn non_defer() {
+async fn test_all() {
+    let reports: Arc<Mutex<Vec<Report>>> = Default::default();
+    std::env::set_var("APOLLO_KEY", "test");
+    std::env::set_var("APOLLO_GRAPH_REF", "test");
+
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = axum::Router::new()
+        .route("/", post(report))
+        .layer(DecompressionLayer::new())
+        .layer(tower_http::add_extension::AddExtensionLayer::new(
+            reports.clone(),
+        ));
+
+    let mut config: serde_json::Value =
+        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
+            .expect("apollo_reports.router.yaml was invalid");
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
+        Some(serde_json::Value::String(format!("http://{}", addr)))
+    })
+    .expect("Could not sub in endpoint");
+
+    let _ = tokio::spawn(async move {
+        axum::Server::from_tcp(listener)
+            .unwrap()
+            .serve(app.into_make_service())
+            .await
+            .expect("could not start axum server")
+    });
+
+    let mut router_service = TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .with_subgraph_network_requests()
+        .build_router()
+        .await
+        .expect("could create router test harness")
+        .boxed();
+
+    non_defer(&mut router_service, reports.clone()).await;
+    test_condition_if(&mut router_service, reports.clone()).await;
+    test_condition_else(&mut router_service, reports.clone()).await;
+    test_trace_id(&mut router_service, reports.clone()).await;
+    test_client_name(&mut router_service, reports.clone()).await;
+    test_client_version(&mut router_service, reports.clone()).await;
+    test_send_header(&mut router_service, reports.clone()).await;
+    test_send_variable_value(&mut router_service, reports.clone()).await;
+}
+
+async fn non_defer(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_condition_if() {
+async fn test_condition_if(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", true)
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_condition_else() {
+async fn test_condition_else(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_trace_id() {
+async fn test_trace_id(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
+
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_client_name() {
+async fn test_client_name(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .header("apollographql-client-name", "my client")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
+
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_client_version() {
+async fn test_client_version(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .header("apollographql-client-version", "my client version")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
+
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_send_header() {
+async fn test_send_header(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .header("send-header", "Header value")
         .header("dont-send-header", "Header value")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
+
     assert_report!(report);
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_send_variable_value() {
+async fn test_send_variable_value(
+    router_service: &mut BoxService,
+    reports: Arc<Mutex<Vec<Report>>>,
+) {
     let request = supergraph::Request::fake_builder()
         .query("query($send-variable-value: String!){topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .variable("send-value", "Variable value")
         .variable("dont-send-value", "Variable value")
         .build()
         .unwrap();
-    let report = get_trace_report(request).await;
+    let report = get_trace_report(router_service, reports, request).await;
+
     assert_report!(report);
 }
