@@ -342,7 +342,7 @@ impl PlanNode {
 
     // TODO handle all unwraps of this function
     pub(crate) fn calculate_hash_recursively(&self) -> Result<PlanNode, Error> {
-        // tracing::trace!("calculating hash for plan:\n{:#?}", self);
+        tracing::trace!("calculating hash for plan:\n{:#?}", self);
         match self {
             PlanNode::Sequence {nodes} => {
                 let mut nodes_new = Vec::new();
