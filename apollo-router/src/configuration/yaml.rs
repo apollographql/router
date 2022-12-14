@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use derivative::Derivative;
 use indexmap::IndexMap;
@@ -64,6 +65,7 @@ pub(crate) struct MarkedYaml {
     current_label: Option<Label>,
     object_stack: Vec<(Option<Label>, Value, usize)>,
     root: Option<Value>,
+    duplicated_fields: HashSet<(Option<Label>, Label)>,
 }
 
 impl MarkedYaml {
@@ -89,8 +91,11 @@ impl MarkedYaml {
         let (label, v, id) = self.object_stack.pop().expect("imbalanced parse events");
         self.anchors.insert(id, v.clone());
         match (label, self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(_current_label, mapping, _), _))) => {
-                mapping.insert(label, v);
+            (Some(label), Some((_, Value::Mapping(current_label, mapping, _), _))) => {
+                if let Some(_previous) = mapping.insert(label.clone(), v) {
+                    self.duplicated_fields
+                        .insert((current_label.clone(), label));
+                }
                 None
             }
             (None, Some((_, Value::Sequence(sequence, _), _))) => {
@@ -103,10 +108,13 @@ impl MarkedYaml {
 
     fn add_value(&mut self, marker: Marker, v: String, id: usize) {
         match (self.current_label.take(), self.object_stack.last_mut()) {
-            (Some(label), Some((_, Value::Mapping(_current_label, mapping, _), _))) => {
+            (Some(label), Some((_, Value::Mapping(current_label, mapping, _), _))) => {
                 let v = Value::String(v, marker);
                 self.anchors.insert(id, v.clone());
-                mapping.insert(label, v);
+                if let Some(_previous) = mapping.insert(label.clone(), v) {
+                    self.duplicated_fields
+                        .insert((current_label.clone(), label));
+                }
             }
             (None, Some((_, Value::Sequence(sequence, _), _))) => {
                 let v = Value::String(v, marker);
@@ -148,6 +156,26 @@ pub(crate) fn parse(source: &str) -> Result<MarkedYaml, ConfigurationError> {
             message: "could not parse yaml",
             error: e.to_string(),
         })?;
+
+    // Detect duplicated keys in configuration file
+    if !loader.duplicated_fields.is_empty() {
+        let error = loader
+            .duplicated_fields
+            .iter()
+            .map(|(parent_label, dup_label)| {
+                let prefix = parent_label
+                    .as_ref()
+                    .map(|l| format!("{}.", l.name))
+                    .unwrap_or_default();
+                format!("'{prefix}{}'", dup_label.name)
+            })
+            .collect::<Vec<String>>()
+            .join(", ");
+        return Err(ConfigurationError::InvalidConfiguration {
+            message: "duplicated keys detected in your yaml configuration",
+            error,
+        });
+    }
 
     Ok(loader)
 }
@@ -217,5 +245,22 @@ mod test {
         let parsed = parse(yaml).unwrap();
         let root = parsed.root().unwrap();
         assert_snapshot!(format!("{:#?}", root));
+    }
+
+    #[test]
+    fn test_duplicate_keys() {
+        // DON'T reformat this. It'll change the test results
+        let yaml = r#"test:
+  a: 4
+  b: 3
+  a: 5
+  c:
+    dup: 5
+    other: 3
+    dup: 8
+test:
+  foo: bar
+"#;
+        assert_snapshot!(format!("{:#?}", parse(yaml).unwrap_err()));
     }
 }
