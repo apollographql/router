@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::vec::Vec;
 
 use futures::future::join_all;
 use futures::prelude::*;
