@@ -551,7 +551,6 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
-            println!("Exporting {}", span.name);
             if span.name == REQUEST_SPAN_NAME {
                 match self.extract_trace(span) {
                     Ok(mut trace) => {
