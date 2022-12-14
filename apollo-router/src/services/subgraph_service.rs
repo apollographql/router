@@ -24,7 +24,7 @@ use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
-use serde_json_bytes::ByteString;
+use serde_json_bytes::{ByteString, Value};
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -46,7 +46,7 @@ use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 
 const APQ_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
-const CODE_STRING: &str = "CODE";
+const CODE_STRING: &str = "code";
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -148,9 +148,11 @@ async fn call_async(
             ).await;
 
             // Check if PERSISTED_QUERY_NOT_FOUND error is recieved
-            let body = response.as_ref().unwrap().response.body().clone();
-            if !check_persisted_query_not_found_error(body) {
-                return response;
+            let http_response = response.as_ref();
+            if  http_response.is_ok() {
+                if !check_persisted_query_not_found_error(http_response.unwrap().response.body().clone()) {
+                    return response;
+                }
             }
         }
     }
@@ -314,8 +316,8 @@ async fn call_http(
 fn check_persisted_query_not_found_error(response: graphql::Response) -> bool {
     println!("---------------ERRORS-----------------\n{:?}",response.errors.clone());
     for error in response.errors {
-        let value = error.extensions.get(&ByteString::from(EXTENSION_KEY));
-        if value != None && value.unwrap() == APQ_ERR_STRING.to_string() {
+        let value = error.extensions.get(&ByteString::from(CODE_STRING));
+        if value != None && value.unwrap() == &Value::String(ByteString::from(APQ_ERR_STRING)) {
             return true;
         }
     }
