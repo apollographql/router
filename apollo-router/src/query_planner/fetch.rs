@@ -233,11 +233,11 @@ impl FetchNode {
             }
         };
 
-        let mut persisted_query = Map::new();
+        let mut persisted_query: Object = Map::new();
         persisted_query.insert(HASH_VERSION_KEY, Value::Number(JSONNumber::from(HASH_VERSION_VALUE)));
         persisted_query.insert(HASH_KEY, Value::String(ByteString::from(operation_hash.to_string())));
 
-        let mut extensions = Map::new();
+        let mut extensions: Object = Map::new();
         extensions.insert(PERSISTED_QUERY_KEY, Value::Object(persisted_query));
 
         let subgraph_request = SubgraphRequest::builder()
