@@ -123,3 +123,13 @@ where
         Ok(response)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::CLIENT;
+
+    #[test]
+    fn it_will_not_externalize_without_environment() {
+        assert!(CLIENT.as_ref().is_err());
+    }
+}

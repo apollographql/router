@@ -259,7 +259,8 @@ impl Plugin for ExternalPlugin {
 
                     // Third, process our reply and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming response with the updated bits if they
-                    // are present in our co_processor_output.
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
 
                     let new_body = match co_processor_output.body {
                         Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
