@@ -21,6 +21,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::services::layers::apq;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::*;
 
@@ -430,5 +431,31 @@ impl FetchNode {
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
+    }
+
+    pub(crate) fn add_apq_hash(&self) -> FetchNode {
+        let FetchNode{
+            service_name,
+            requires,
+            variable_usages,
+            operation,
+            operation_name,
+            operation_kind,
+            id ,
+            ..
+        } = &self;
+
+        let hash_string = apq::calculate_hash_for_query(operation.clone());
+
+        FetchNode{
+            service_name: service_name.clone(),
+            requires: requires.clone(),
+            variable_usages: variable_usages.clone(),
+            operation: operation.clone(),
+            operation_hash: hash_string.to_string(),
+            operation_name: operation_name.clone(),
+            operation_kind: operation_kind.clone(),
+            id: id.clone(),
+        }
     }
 }

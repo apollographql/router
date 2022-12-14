@@ -12,7 +12,6 @@ use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::services::layers::apq;
 use crate::spec::query::SubSelection;
 use crate::*;
 
@@ -330,47 +329,25 @@ impl PlanNode {
         tracing::trace!("calculating hash for plan:\n{:#?}", self);
         match self {
             PlanNode::Sequence {nodes} => {
-                let mut nodes_new = Vec::new();
+                let mut nodes_with_apq = Vec::new();
                 for node in nodes {
-                    nodes_new.push(node.add_apq_hash());
+                    nodes_with_apq.push(node.add_apq_hash());
                 }
-                PlanNode::Sequence { nodes: nodes_new}
+                PlanNode::Sequence { nodes: nodes_with_apq}
             }
             PlanNode::Parallel { nodes } => {
-                let mut nodes_new = Vec::new();
+                let mut nodes_with_apq = Vec::new();
                 for node in nodes {
-                    nodes_new.push(node.add_apq_hash());
+                    nodes_with_apq.push(node.add_apq_hash());
                 }
-                PlanNode::Parallel { nodes: nodes_new}
+                PlanNode::Parallel { nodes: nodes_with_apq}
             }
             PlanNode::Flatten(FlattenNode { node, path}) => {
-                let node_new = Box::new(node.add_apq_hash());
-                PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_new})
+                let node_with_apq = Box::new(node.add_apq_hash());
+                PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_with_apq})
             }
             PlanNode::Fetch(fetch_node) => {
-                let fetch::FetchNode{
-                    service_name,
-                    requires,
-                    variable_usages,
-                    operation,
-                    operation_name,
-                    operation_kind,
-                    id ,
-                    ..
-                } = fetch_node;
-
-                let hash_string = apq::calculate_hash_for_query(operation.clone());
-
-                PlanNode::Fetch(fetch::FetchNode{
-                    service_name: service_name.clone(),
-                    requires: requires.clone(),
-                    variable_usages: variable_usages.clone(),
-                    operation: operation.clone(),
-                    operation_hash: hash_string.to_string(),
-                    operation_name: operation_name.clone(),
-                    operation_kind: operation_kind.clone(),
-                    id: id.clone(),
-                })
+                PlanNode::Fetch(fetch_node.add_apq_hash())
             }
             PlanNode::Defer {
                 primary: Primary {
@@ -380,32 +357,16 @@ impl PlanNode {
                 },
                 deferred,
             } => {
-                let mut deferred_new = Vec::new();
+                let mut deferred_with_apq = Vec::new();
                 for deferred_node in deferred {
-                    let DeferredNode{
-                        depends,
-                        label,
-                        path,
-                        subselection,
-                        node
-                    } = deferred_node;
-
-                    if let Some(node) = node {
-                        deferred_new.push(DeferredNode{
-                            depends: depends.clone(),
-                            label: label.clone(),
-                            path: path.clone(),
-                            subselection: subselection.clone(),
-                            node: Some(Arc::new(node.add_apq_hash())),
-                        })
-                    }
+                    deferred_with_apq.push(deferred_node.add_apq_hash().unwrap_or(deferred_node.clone()))
                 }
 
                 PlanNode::Defer { primary: Primary {
                     path: path.clone(),
                     subselection: subselection.clone(),
-                    node: apply_hash(node),
-                }, deferred: deferred_new }
+                    node: add_apq_hash_to_option_box(node),
+                }, deferred: deferred_with_apq }
             }
             PlanNode::Condition {
                 if_clause,
@@ -414,8 +375,8 @@ impl PlanNode {
             } => {
                 PlanNode::Condition {
                     condition: condition.clone(),
-                    if_clause: apply_hash(if_clause),
-                    else_clause: apply_hash(else_clause),
+                    if_clause: add_apq_hash_to_option_box(if_clause),
+                    else_clause: add_apq_hash_to_option_box(else_clause),
                 }
             }
         }
@@ -447,7 +408,7 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
     query
 }
 
-fn apply_hash(option: &Option<Box<PlanNode>>) -> Option<Box<PlanNode>> {
+fn add_apq_hash_to_option_box(option: &Option<Box<PlanNode>>) -> Option<Box<PlanNode>> {
     if let Some(node) = option {
         return Some(Box::new(node.add_apq_hash()));
     }
@@ -512,6 +473,28 @@ impl DeferredNode {
                 _ => None,
             })
         })
+    }
+    
+    pub(crate) fn add_apq_hash(&self) -> Option<DeferredNode> {
+        let DeferredNode{
+            depends,
+            label,
+            path,
+            subselection,
+            node: option
+        } = &self.clone();
+
+        if let Some(node) = option {
+            return Some(DeferredNode{
+                depends: depends.clone(),
+                label: label.clone(),
+                path: path.clone(),
+                subselection: subselection.clone(),
+                node: Some(Arc::new(node.add_apq_hash())),
+            });
+        }
+        
+        None
     }
 }
 
