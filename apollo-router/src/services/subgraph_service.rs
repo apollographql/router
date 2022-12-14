@@ -114,59 +114,54 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-        Box::pin(call_async(request, client, service_name))
-    }
-}
+        let make_calls = async move {
+            // Try the subgraph_request (body) without query first
+            let crate::SubgraphRequest {
+                subgraph_request,
+                context,
+                ..
+            } = request.clone();
 
-async fn call_async(
-    request: crate::SubgraphRequest,
-    client: Decompression<Client<HttpsConnector<HttpConnector>>>,
-    service_name: String,
-) -> Result<crate::SubgraphResponse, BoxError> {
-    // Try the subgraph_request (body) without query first
-    let crate::SubgraphRequest {
-        subgraph_request,
-        context,
-        ..
-    } = request.clone();
+            let (parts, body) = subgraph_request.into_parts();
+            match body.clone() {
+                graphql::Request { operation_name, variables, extensions, .. } => {
+                    let body_without_query = graphql::Request::builder()
+                        .and_operation_name(operation_name.clone())
+                        .variables(variables)
+                        .extensions(extensions.clone())
+                        .build();
 
-    let (parts, body) = subgraph_request.into_parts();
-    match body.clone() {
-        graphql::Request { operation_name, variables, extensions, .. } => {
-            let body_without_query = graphql::Request::builder()
-                .and_operation_name(operation_name.clone())
-                .variables(variables)
-                .extensions(extensions.clone())
-                .build();
+                    let response = call_http(
+                        parts,
+                        body_without_query,
+                        context.clone(),
+                        client.clone(),
+                        service_name.to_owned()
+                    ).await;
 
-            let response = call_http(
-                parts,
-                body_without_query,
-                context.clone(),
-                client.clone(),
-                service_name.to_owned()
-            ).await;
-
-            // Check if PERSISTED_QUERY_NOT_FOUND error is recieved
-            let http_response = response.as_ref();
-            if  http_response.is_ok() {
-                if !check_persisted_query_not_found_error(http_response.unwrap().response.body().clone()) {
-                    return response;
+                    // Check if PERSISTED_QUERY_NOT_FOUND error is recieved
+                    let http_response = response.as_ref();
+                    if  http_response.is_ok() {
+                        if !check_persisted_query_not_found_error(http_response.unwrap().response.body().clone()) {
+                            return response;
+                        }
+                    }
                 }
             }
-        }
+
+            // If PersistedQueryNotFound response is recieved, send the whole query
+            let crate::SubgraphRequest {
+                subgraph_request,
+                ..
+            } = request;
+
+            let (parts, body_with_query) = subgraph_request.into_parts();
+
+            call_http(parts, body_with_query, context, client, service_name).await
+        };
+
+        Box::pin(make_calls)
     }
-
-    // If PersistedQueryNotFound response is recieved, send the whole query
-    let crate::SubgraphRequest {
-        subgraph_request,
-        context,
-        ..
-    } = request;
-
-    let (parts, body_with_query) = subgraph_request.into_parts();
-
-    call_http(parts, body_with_query, context, client, service_name).await
 }
 
 async fn call_http(
