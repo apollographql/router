@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::axum_factory::utils::PropagatingMakeSpan;
+use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tower::{BoxError, ServiceBuilder};
 use tower_http::trace::MakeSpan;
 
+use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::test::canned;

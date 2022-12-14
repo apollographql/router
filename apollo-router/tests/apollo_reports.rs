@@ -1,9 +1,15 @@
-use crate::proto::reports::Report;
+use std::io::Read;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::time::Duration;
+
+use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
-use apollo_router::services::{router, supergraph};
+use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
 use axum::routing::post;
-use axum::{Extension, Json};
+use axum::Extension;
+use axum::Json;
 use bytes::Bytes;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
@@ -12,11 +18,11 @@ use once_cell::sync::Lazy;
 use prost::Message;
 use serde_json::json;
 use serial_test::serial;
-use std::io::Read;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
+
+use crate::proto::reports::Report;
 
 static REPORTS: Lazy<Arc<Mutex<Vec<Report>>>> = Lazy::new(Default::default);
 
@@ -128,84 +134,124 @@ async fn report(
     Ok(Json(()))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn test_condition_if() {
-    clear_reports();
+// #[tokio::test(flavor = "multi_thread")]
+// #[serial]
+// async fn non_defer() {
+//     clear_reports();
 
-    let request = supergraph::Request::fake_builder()
-        .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
-        .variable("if", true)
-        .header("Accept", "multipart/mixed; deferSpec=20220824")
-        .build()
-        .unwrap();
-    let mut req: router::Request = request.try_into().unwrap();
-    req.router_request.headers_mut().insert(
-        ACCEPT,
-        HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
-    );
+//     let request = supergraph::Request::fake_builder()
+//         .query("query($if: Boolean!) {\n  topProducts {\n    name\n     {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
+//         .variable("if", true)
+//         .header("Accept", "multipart/mixed; deferSpec=20220824")
+//         .build()
+//         .unwrap();
+//     let mut req: router::Request = request.try_into().unwrap();
+//     req.router_request.headers_mut().insert(
+//         ACCEPT,
+//         HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
+//     );
 
-    let mut response = ROUTER_SERVICE
-        .lock()
-        .unwrap()
-        .clone()
-        .oneshot(req)
-        .await
-        .unwrap();
-    while response.next_response().await.is_some() {
-        println!("got chunk");
-    }
+//     let mut response = ROUTER_SERVICE
+//         .lock()
+//         .unwrap()
+//         .ready()
+//         .await
+//         .unwrap()
+//         .call(req)
+//         .await
+//         .unwrap();
+//     while response.next_response().await.is_some() {
+//         println!("got chunk");
+//     }
 
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+//     tokio::time::sleep(Duration::from_millis(20000)).await;
 
-    println!("{}", REPORTS.lock().unwrap().len());
-    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
-}
+//     println!("{}", REPORTS.lock().unwrap().len());
+//     assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+// }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn test_condition_else() {
-    clear_reports();
+// #[tokio::test(flavor = "multi_thread")]
+// #[serial]
+// async fn test_condition_if() {
+//     clear_reports();
 
-    let request = supergraph::Request::fake_builder()
-        .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
-        .variable("if", false)
-        .header("Accept", "multipart/mixed; deferSpec=20220824")
-        .build()
-        .unwrap();
-    let mut req: router::Request = request.try_into().unwrap();
-    req.router_request.headers_mut().insert(
-        ACCEPT,
-        HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
-    );
+//     let request = supergraph::Request::fake_builder()
+//         .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
+//         .variable("if", true)
+//         .header("Accept", "multipart/mixed; deferSpec=20220824")
+//         .build()
+//         .unwrap();
+//     let mut req: router::Request = request.try_into().unwrap();
+//     req.router_request.headers_mut().insert(
+//         ACCEPT,
+//         HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
+//     );
 
-    let mut response = ROUTER_SERVICE
-        .lock()
-        .unwrap()
-        .clone()
-        .oneshot(req)
-        .await
-        .unwrap();
-    while response.next_response().await.is_some() {
-        println!("got chunk");
-    }
+//     let mut response = ROUTER_SERVICE
+//         .lock()
+//         .unwrap()
+//         .ready()
+//         .await
+//         .unwrap()
+//         .call(req)
+//         .await
+//         .unwrap();
+//     while response.next_response().await.is_some() {
+//         println!("got chunk");
+//     }
 
-    tokio::time::sleep(Duration::from_millis(2000)).await;
+//     tokio::time::sleep(Duration::from_millis(20000)).await;
 
-    println!("{}", REPORTS.lock().unwrap().len());
-    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+//     println!("{}", REPORTS.lock().unwrap().len());
+//     assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+// }
 
-    // The following curl request was used to generate this span data
-    // curl --request POST \
-    //     --header 'content-type: application/json' \
-    //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
-    //     --url http://localhost:4000/ \
-    //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":false}}'
-    // let spandata = include_str!("testdata/condition_else_spandata.yaml");
-    // let exporter = Exporter::test_builder().build();
-    // let report = report(exporter, spandata).await;
-    // assert_report!(report);
-}
+// #[tokio::test(flavor = "multi_thread")]
+// #[serial]
+// async fn test_condition_else() {
+//     clear_reports();
+
+//     let request = supergraph::Request::fake_builder()
+//         .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
+//         .variable("if", false)
+//         .header("Accept", "multipart/mixed; deferSpec=20220824")
+//         .build()
+//         .unwrap();
+//     let mut req: router::Request = request.try_into().unwrap();
+//     req.router_request.headers_mut().insert(
+//         ACCEPT,
+//         HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
+//     );
+
+//     let mut response = ROUTER_SERVICE
+//         .lock()
+//         .unwrap()
+//         .ready()
+//         .await
+//         .unwrap()
+//         .call(req)
+//         .await
+//         .unwrap();
+//     while response.next_response().await.is_some() {
+//         println!("got chunk");
+//     }
+
+//     tokio::time::sleep(Duration::from_millis(2000)).await;
+
+//     println!("{}", REPORTS.lock().unwrap().len());
+//     assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+
+//     // The following curl request was used to generate this span data
+//     // curl --request POST \
+//     //     --header 'content-type: application/json' \
+//     //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
+//     //     --url http://localhost:4000/ \
+//     //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":false}}'
+//     // let spandata = include_str!("testdata/condition_else_spandata.yaml");
+//     // let exporter = Exporter::test_builder().build();
+//     // let report = report(exporter, spandata).await;
+//     // assert_report!(report);
+// }
 
 #[tokio::test]
 #[serial]

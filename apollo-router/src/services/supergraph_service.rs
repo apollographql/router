@@ -226,10 +226,7 @@ where
 
                 Ok(SupergraphResponse {
                     context,
-                    response: http::Response::from_parts(
-                        parts,
-                        response_stream.in_current_span().boxed(),
-                    ),
+                    response: http::Response::from_parts(parts, response_stream.boxed()),
                 })
             }
         }

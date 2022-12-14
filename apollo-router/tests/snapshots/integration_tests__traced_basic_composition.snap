@@ -17,6 +17,47 @@ expression: get_spans()
     }
   },
   "children": {
+    "apollo_router::axum_factory::utils::request": {
+      "name": "apollo_router::axum_factory::utils::request",
+      "record": {
+        "entries": [
+          [
+            "http.method",
+            "POST"
+          ],
+          [
+            "http.route",
+            "http://default/"
+          ],
+          [
+            "http.flavor",
+            "HTTP/1.1"
+          ],
+          [
+            "otel.kind",
+            "SERVER"
+          ]
+        ],
+        "metadata": {
+          "name": "request",
+          "target": "apollo_router::axum_factory::utils",
+          "level": "INFO",
+          "module_path": "apollo_router::axum_factory::utils",
+          "fields": {
+            "names": [
+              "http.method",
+              "http.route",
+              "http.flavor",
+              "otel.kind",
+              "otel.status_code",
+              "apollo_private.duration_ns",
+              "trace_id"
+            ]
+          }
+        }
+      },
+      "children": {}
+    },
     "apollo_router::plugins::telemetry::router": {
       "name": "apollo_router::plugins::telemetry::router",
       "record": {
