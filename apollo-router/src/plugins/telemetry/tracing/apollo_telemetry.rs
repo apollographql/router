@@ -2,8 +2,6 @@
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
@@ -28,7 +26,6 @@ use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry;
-use crate::plugins::telemetry::apollo::Report;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
@@ -46,7 +43,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::ApolloExportError;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config::ExposeTraceId;
@@ -115,7 +111,7 @@ pub(crate) struct Exporter {
     expose_trace_id_config: config::ExposeTraceId,
     spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     #[derivative(Debug = "ignore")]
-    report_exporter: ReportExporter,
+    report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
 }
 
@@ -153,12 +149,12 @@ impl Exporter {
         Ok(Self {
             expose_trace_id_config,
             spans_by_parent_id: LruCache::new(buffer_size),
-            report_exporter: ReportExporter::Apollo(Arc::new(ApolloExporter::new(
+            report_exporter: Arc::new(ApolloExporter::new(
                 &endpoint,
                 &apollo_key,
                 &apollo_graph_ref,
                 &schema_id,
-            )?)),
+            )?),
             field_execution_weight: match field_execution_sampler {
                 Some(SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
                 Some(SamplerOption::Always(Sampler::AlwaysOff)) => 0.0,
@@ -680,40 +676,6 @@ impl ChildNodes for Vec<TreeData> {
             }
         }
         None
-    }
-}
-
-#[derive(Clone)]
-enum ReportExporter {
-    Apollo(Arc<ApolloExporter>),
-    #[cfg(test)]
-    InMemory(Arc<Mutex<Vec<Report>>>),
-}
-
-impl ReportExporter {
-    async fn submit_report(self, report: Report) -> Result<(), ApolloExportError> {
-        match self {
-            ReportExporter::Apollo(apollo) => apollo.submit_report(report).await,
-            #[cfg(test)]
-            ReportExporter::InMemory(store) => {
-                store.lock().expect("poisoned").push(report);
-                Ok(())
-            }
-        }
-    }
-}
-
-#[buildstructor::buildstructor]
-#[cfg(test)]
-impl Exporter {
-    #[builder]
-    pub(crate) fn test_new(expose_trace_id_config: Option<config::ExposeTraceId>) -> Self {
-        Exporter {
-            expose_trace_id_config: expose_trace_id_config.unwrap_or_default(),
-            spans_by_parent_id: LruCache::unbounded(),
-            report_exporter: ReportExporter::InMemory(Default::default()),
-            field_execution_weight: 1.0,
-        }
     }
 }
 

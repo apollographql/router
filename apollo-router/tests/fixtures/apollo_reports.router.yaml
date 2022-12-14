@@ -6,6 +6,8 @@ telemetry:
     trace_config:
       sampler: always_on
   apollo:
+    client_name_header: apollographql-client-name
+    client_version_header: apollographql-client-version
     endpoint: ENDPOINT
     batch_processor:
       scheduled_delay: 10ms

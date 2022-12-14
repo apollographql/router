@@ -215,3 +215,25 @@ async fn test_trace_id() {
     let report = get_trace_report(request).await;
     assert_report!(report);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_client_name() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-client-name", "my client")
+        .build()
+        .unwrap();
+    let report = get_trace_report(request).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_client_version() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("apollographql-client-version", "my client version")
+        .build()
+        .unwrap();
+    let report = get_trace_report(request).await;
+    assert_report!(report);
+}
