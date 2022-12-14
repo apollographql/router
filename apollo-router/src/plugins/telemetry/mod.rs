@@ -141,7 +141,7 @@ static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
 #[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
-    config: config::Conf,
+    config: Arc<config::Conf>,
     metrics: BasicMetrics,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
@@ -226,24 +226,30 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let headers = self
-            .config
-            .apollo
-            .as_ref()
-            .cloned()
-            .unwrap_or_default()
-            .send_headers;
+        let config = self.config.clone();
         ServiceBuilder::new()
             .instrument(move |request: &router::Request| {
+                let apollo = config.apollo.as_ref().cloned().unwrap_or_default();
                 let trace_id = TraceId::maybe_new()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 let router_request = &request.router_request;
+                let headers = router_request.headers();
+                let client_name = headers
+                    .get(&apollo.client_name_header)
+                    .cloned()
+                    .unwrap_or_else(|| HeaderValue::from_static(""));
+                let client_version = headers
+                    .get(&apollo.client_version_header)
+                    .cloned()
+                    .unwrap_or_else(|| HeaderValue::from_static(""));
                 let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %router_request.method(),
                     "http.route" = %router_request.uri(),
                     "http.flavor" = ?router_request.version(),
                     "trace_id" = %trace_id,
+                    "client.name" = client_name.to_str().unwrap_or_default(),
+                    "client.version" = client_version.to_str().unwrap_or_default(),
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
@@ -252,7 +258,11 @@ impl Plugin for Telemetry {
                 if is_span_sampled() {
                     span.record(
                         "apollo_private.http.request_headers",
-                        Self::filter_headers(request.router_request.headers(), &headers).as_str(),
+                        Self::filter_headers(
+                            request.router_request.headers(),
+                            &apollo.send_headers,
+                        )
+                        .as_str(),
                     );
                 }
                 span
@@ -284,7 +294,7 @@ impl Plugin for Telemetry {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = self.metrics.clone();
-        let config = Arc::new(self.config.clone());
+        let config = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         ServiceBuilder::new()
@@ -593,7 +603,7 @@ impl Telemetry {
             metrics: BasicMetrics::default(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            config,
+            config: Arc::new(config),
         });
 
         let _ = TELEMETRY_REFCOUNT.fetch_add(1, Ordering::Relaxed);
@@ -699,29 +709,18 @@ impl Telemetry {
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
-            let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
             let operation_name = http_request
                 .body()
                 .operation_name
                 .clone()
                 .unwrap_or_default();
-            let client_name = headers
-                .get(&config.client_name_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""));
-            let client_version = headers
-                .get(&config.client_version_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""));
 
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),
-                client.name = client_name.to_str().unwrap_or_default(),
-                client.version = client_version.to_str().unwrap_or_default(),
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
