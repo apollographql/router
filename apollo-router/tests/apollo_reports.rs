@@ -205,7 +205,7 @@ async fn test_condition_else() {
     assert_report!(report);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
