@@ -423,7 +423,7 @@ mod tests {
         let _test_harness = crate::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
     }
