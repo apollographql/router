@@ -86,7 +86,8 @@ macro_rules! assert_report {
                         ".**.child[].start_time" => "[start_time]",
                         ".**.child[].end_time" => "[end_time]",
                         ".**.trace_id.value[]" => "[trace_id]",
-                        ".**.sent_time_offset" => "[sent_time_offset]"
+                        ".**.sent_time_offset" => "[sent_time_offset]",
+                        ".**.response_headers" => "[response_headers]"
                     });
                 });
         }
@@ -209,7 +210,6 @@ async fn test_condition_else() {
 async fn test_trace_id() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
-        .header("my_trace_id", "my id")
         .build()
         .unwrap();
     let report = get_trace_report(request).await;

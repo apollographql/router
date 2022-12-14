@@ -36,10 +36,7 @@ traces_per_query:
             content-type:
               value:
                 - ""
-            my_trace_id:
-              value:
-                - ""
-          response_headers: {}
+          response_headers: "[response_headers]"
           status_code: 0
         cache_policy: ~
         query_plan:

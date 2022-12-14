@@ -227,6 +227,8 @@ impl Plugin for Telemetry {
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
+        let config_later = self.config.clone();
+
         ServiceBuilder::new()
             .instrument(move |request: &router::Request| {
                 let apollo = config.apollo.as_ref().cloned().unwrap_or_default();
@@ -253,38 +255,45 @@ impl Plugin for Telemetry {
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
-                    "apollo_private.http.request_headers" = field::Empty
+                    "apollo_private.http.request_headers" = Self::filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
+                    "apollo_private.http.response_headers" = field::Empty
                 );
-                if is_span_sampled() {
-                    span.record(
-                        "apollo_private.http.request_headers",
-                        Self::filter_headers(
-                            request.router_request.headers(),
-                            &apollo.send_headers,
-                        )
-                        .as_str(),
-                    );
-                }
                 span
             })
-            .map_future(|fut| {
+            .map_future(move |fut| {
                 let start = Instant::now();
+                let config = config_later.clone();
                 async move {
                     let span = Span::current();
-                    let result: Result<router::Response, BoxError> = fut.await;
+                    let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
                         "apollo_private.duration_ns",
                         start.elapsed().as_nanos() as i64,
                     );
-                    if let Ok(res) = &result {
-                        if res.response.status() >= StatusCode::BAD_REQUEST {
+
+
+                    let expose_trace_id = config.tracing.as_ref().cloned().unwrap_or_default().response_trace_id;
+                    if let Ok(response) = &response {
+                        if expose_trace_id.enabled {
+                            if let Some(header_name) = &expose_trace_id.header_name {
+                                let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+                                if let Some(value) = response.response.headers().get(header_name) {
+                                    headers.insert(header_name.to_string(), vec![value.to_str().unwrap_or_default().to_string()]);
+                                    let response_headers = serde_json::to_string(&headers).unwrap_or_default();
+                                    span.record("apollo_private.http.response_headers",&response_headers);
+                                }
+                            }
+                        }
+
+                        if response.response.status() >= StatusCode::BAD_REQUEST {
                             span.record("otel.status_code", "Error");
                         } else {
                             span.record("otel.status_code", "Ok");
                         }
+
                     }
-                    result
+                    response
                 }
             })
             .service(service)

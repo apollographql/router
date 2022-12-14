@@ -44,14 +44,13 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
-use crate::plugins::telemetry::config::ExposeTraceId;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::{config, ROUTER_SPAN_NAME};
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -70,6 +69,8 @@ const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
     Key::from_static_str("apollo_private.graphql.variables");
 const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
     Key::from_static_str("apollo_private.http.request_headers");
+const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
+    Key::from_static_str("apollo_private.http.response_headers");
 pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
@@ -81,7 +82,6 @@ const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
-pub(crate) const DEFAULT_TRACE_ID_HEADER_NAME: &str = "apollo-trace-id";
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -108,7 +108,6 @@ pub(crate) enum Error {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
-    expose_trace_id_config: config::ExposeTraceId,
     spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     #[derivative(Debug = "ignore")]
     report_exporter: Arc<ApolloExporter>,
@@ -140,7 +139,6 @@ enum TreeData {
 impl Exporter {
     #[builder]
     pub(crate) fn new(
-        expose_trace_id_config: config::ExposeTraceId,
         endpoint: Url,
         apollo_key: String,
         apollo_graph_ref: String,
@@ -150,7 +148,6 @@ impl Exporter {
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
         Ok(Self {
-            expose_trace_id_config,
             spans_by_parent_id: LruCache::new(buffer_size),
             report_exporter: Arc::new(ApolloExporter::new(
                 &endpoint,
@@ -172,7 +169,7 @@ impl Exporter {
         span: &SpanData,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        let http = extract_http_data(span, &self.expose_trace_id_config);
+        let http = extract_http_data(span);
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
@@ -194,14 +191,15 @@ impl Exporter {
                     client_version,
                     duration_ns,
                 } => {
-                    root_trace
+                    let root_http = root_trace
                         .http
                         .as_mut()
-                        .expect("http was extracted earlier, qed")
-                        .request_headers = http.request_headers;
+                        .expect("http was extracted earlier, qed");
+                    root_http.request_headers = http.request_headers;
+                    root_http.response_headers = http.response_headers;
                     root_trace.client_name = client_name.unwrap_or_default();
                     root_trace.client_version = client_version.unwrap_or_default();
-                    root_trace.duration_ns = duration_ns
+                    root_trace.duration_ns = duration_ns;
                 }
                 TreeData::Supergraph {
                     operation_signature,
@@ -349,7 +347,7 @@ impl Exporter {
             }
             ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
-                    http: Box::new(extract_http_data(span, &self.expose_trace_id_config)),
+                    http: Box::new(extract_http_data(span)),
                     client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
                     client_version: span
                         .attributes
@@ -498,7 +496,7 @@ fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::reports::Trace>, Er
     None
 }
 
-fn extract_http_data(span: &SpanData, expose_trace_id_config: &ExposeTraceId) -> Http {
+fn extract_http_data(span: &SpanData) -> Http {
     let method = match span
         .attributes
         .get(&HTTP_METHOD)
@@ -525,24 +523,14 @@ fn extract_http_data(span: &SpanData, expose_trace_id_config: &ExposeTraceId) ->
         .into_iter()
         .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
         .collect();
-    // For now, only trace_id
-    let response_headers = if expose_trace_id_config.enabled {
-        let mut res = HashMap::with_capacity(1);
-        res.insert(
-            expose_trace_id_config
-                .header_name
-                .as_ref()
-                .map(|h| h.to_string())
-                .unwrap_or_else(|| DEFAULT_TRACE_ID_HEADER_NAME.to_string()),
-            Values {
-                value: vec![span.span_context.trace_id().to_string()],
-            },
-        );
-
-        res
-    } else {
-        HashMap::new()
-    };
+    let response_headers = span
+        .attributes
+        .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
+        .and_then(extract_json::<HashMap<String, Vec<String>>>)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+        .collect();
 
     Http {
         method: method.into(),
