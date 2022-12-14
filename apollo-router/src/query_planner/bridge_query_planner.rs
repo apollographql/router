@@ -125,12 +125,10 @@ impl BridgeQueryPlanner {
                 let subselections = node.parse_subselections(&*self.schema)?;
                 selections.subselections = subselections;
 
-                // TODO handle unwrap
-                let node_with_hash = node.calculate_hash_recursively().unwrap();
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,
-                        root: node_with_hash,
+                        root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
                         options: QueryPlanOptions {
@@ -176,10 +174,15 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
-                Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
-                    .content(query_planner_content)
-                    .context(req.context)
-                    .build()),
+                Ok(query_planner_content) => {
+                    // Traverse the QueryPlan tree and calculate sha256 hash
+                    // values for subgraph queries in all Fetch Nodes
+                    let query_planner_content_with_apq = query_planner_content.create_apq();
+                    Ok(QueryPlannerResponse::builder()
+                        .content(query_planner_content_with_apq.unwrap_or(query_planner_content))
+                        .context(req.context)
+                        .build())
+                },
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {

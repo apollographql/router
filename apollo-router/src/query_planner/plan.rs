@@ -5,6 +5,7 @@ use std::sync::Arc;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
+use sha2::{Sha256,Digest};
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
@@ -322,6 +323,122 @@ impl PlanNode {
                     Box::new(if_node.service_usage().chain(else_node.service_usage()))
                 }
             },
+        }
+    }
+
+    pub(crate) fn calculate_hash_recursively(&self) -> PlanNode {
+        tracing::trace!("calculating hash for plan:\n{:#?}", self);
+        match self {
+            PlanNode::Sequence {nodes} => {
+                let mut nodes_new = Vec::new();
+                for node in nodes {
+                    nodes_new.push(node.calculate_hash_recursively());
+                }
+                PlanNode::Sequence { nodes: nodes_new}
+            }
+            PlanNode::Parallel { nodes } => {
+                let mut nodes_new = Vec::new();
+                for node in nodes {
+                    nodes_new.push(node.calculate_hash_recursively());
+                }
+                PlanNode::Parallel { nodes: nodes_new}
+            }
+            PlanNode::Flatten(FlattenNode { node, path}) => {
+                let node_new = Box::new(node.calculate_hash_recursively());
+                PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_new})
+            }
+            PlanNode::Fetch(fetch_node) => {
+                match fetch_node {
+                    fetch::FetchNode{ service_name, requires, variable_usages, operation,
+                        operation_name, operation_kind, id, .. } => {
+                        let mut hasher = Sha256::new();
+                        hasher.update(operation.clone());
+                        let hash_string = hex::encode(hasher.finalize());
+
+                        let plan_node = PlanNode::Fetch(fetch::FetchNode{
+                            service_name: service_name.clone(),
+                            requires: requires.clone(),
+                            variable_usages: variable_usages.clone(),
+                            operation: operation.clone(),
+                            operation_hash: hash_string.to_string(),
+                            operation_name: operation_name.clone(),
+                            operation_kind: operation_kind.clone(),
+                            id: id.clone(),
+                        });
+                        plan_node
+                    }
+                }
+            }
+            PlanNode::Defer {
+                primary: Primary {
+                    path,
+                    subselection,
+                    node,
+                },
+                deferred,
+            } => {
+                let new_inner_node;
+                if let Some(inner_node) = node {
+                    new_inner_node = Some(Box::new(inner_node.calculate_hash_recursively()));
+                } else {
+                    new_inner_node = None;
+                }
+                let mut deferred_new = Vec::new();
+                for deferred_node in deferred {
+                    match deferred_node {
+                        DeferredNode{depends, label, path, subselection,node} => {
+                            match node {
+                                Some(node) => {
+                                    deferred_new.push(DeferredNode{
+                                        depends: depends.clone(),
+                                        label: label.clone(),
+                                        path: path.clone(),
+                                        subselection: subselection.clone(),
+                                        node: Some(Arc::new(node.calculate_hash_recursively())),
+                                    })
+                                }
+                                None => {
+                                    deferred_new.push(DeferredNode{
+                                        depends: depends.clone(),
+                                        label: label.clone(),
+                                        path: path.clone(),
+                                        subselection: subselection.clone(),
+                                        node: None,
+                                    })
+                                }
+                            }
+                        }
+                    }
+                }
+                PlanNode::Defer { primary: Primary {
+                    path: path.clone(),
+                    subselection: subselection.clone(),
+                    node: new_inner_node,
+                }, deferred: deferred_new }
+            }
+            PlanNode::Condition {
+                if_clause,
+                else_clause,
+                condition,
+            } => {
+                let new_if_node;
+                if let Some(node) = if_clause {
+                    new_if_node = Some(Box::new(node.calculate_hash_recursively()));
+                } else {
+                    new_if_node = None;
+                }
+                let new_else_node;
+                if let Some(node) = else_clause {
+                    new_else_node = Some(Box::new(node.calculate_hash_recursively()));
+                } else {
+                    new_else_node = None;
+                }
+                PlanNode::Condition {
+                    condition: condition.clone(),
+                    if_clause: new_if_node,
+                    else_clause: new_else_node,
+                }
+            }
         }
     }
 }
