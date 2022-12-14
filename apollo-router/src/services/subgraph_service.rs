@@ -24,6 +24,7 @@ use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
 use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
+use serde_json_bytes::ByteString;
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -43,6 +44,9 @@ use crate::error::FetchError;
 use crate::{Context, graphql};
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+
+const APQ_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
+const CODE_STRING: &str = "CODE";
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -110,15 +114,16 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-        Box::pin(call_internal(request, client, service_name))
+        Box::pin(call_async(request, client, service_name))
     }
 }
 
-async fn call_internal(
+async fn call_async(
     request: crate::SubgraphRequest,
     client: Decompression<Client<HttpsConnector<HttpConnector>>>,
     service_name: String,
 ) -> Result<crate::SubgraphResponse, BoxError> {
+    // Try the subgraph_request (body) without query first
     let crate::SubgraphRequest {
         subgraph_request,
         context,
@@ -128,14 +133,13 @@ async fn call_internal(
     let (parts, body) = subgraph_request.into_parts();
     match body.clone() {
         graphql::Request { operation_name, variables, extensions, .. } => {
-            // Try the subgraph_request (body) without query first
             let body_without_query = graphql::Request::builder()
                 .and_operation_name(operation_name.clone())
                 .variables(variables)
                 .extensions(extensions.clone())
                 .build();
 
-            let response = call_apq(
+            let response = call_http(
                 parts,
                 body_without_query,
                 context.clone(),
@@ -143,7 +147,11 @@ async fn call_internal(
                 service_name.to_owned()
             ).await;
 
-            println!("-------------APQ-RESPONSE----------------\n{:?}", response.unwrap());
+            // Check if PERSISTED_QUERY_NOT_FOUND error is recieved
+            let body = response.as_ref().unwrap().response.body().clone();
+            if !check_persisted_query_not_found_error(body) {
+                return response;
+            }
         }
     }
 
@@ -156,10 +164,10 @@ async fn call_internal(
 
     let (parts, body_with_query) = subgraph_request.into_parts();
 
-    call_apq(parts, body_with_query, context, client, service_name).await
+    call_http(parts, body_with_query, context, client, service_name).await
 }
 
-async fn call_apq(
+async fn call_http(
     parts: Parts,
     body: graphql::Request,
     context: Context,
@@ -301,6 +309,17 @@ async fn call_apq(
         println!("-------------RESPONSE------------\n{:?}", resp);
 
         Ok(crate::SubgraphResponse::new_from_response(resp, context))
+}
+
+fn check_persisted_query_not_found_error(response: graphql::Response) -> bool {
+    println!("---------------ERRORS-----------------\n{:?}",response.errors.clone());
+    for error in response.errors {
+        let value = error.extensions.get(&ByteString::from(EXTENSION_KEY));
+        if value != None && value.unwrap() == APQ_ERR_STRING.to_string() {
+            return true;
+        }
+    }
+    false
 }
 
 pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
