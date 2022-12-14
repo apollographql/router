@@ -1,17 +1,17 @@
 ---
 source: apollo-router/tests/apollo_reports.rs
-expression: REPORTS.lock().unwrap().get(0).unwrap()
+expression: report
 ---
 header:
   graph_ref: test
-  hostname: ignition-apollo.local
+  hostname: "[hostname]"
   agent_version: apollo-router@1.5.0
   service_version: ""
   runtime_version: rust
-  uname: "Darwin, ignition-apollo.local, 21.6.0, Darwin Kernel Version 21.6.0: Mon Aug 22 20:20:05 PDT 2022; root:xnu-8020.140.49~2/RELEASE_ARM64_T8101, arm64,"
+  uname: "[uname]"
   executable_schema_id: aa612b3f4a2d35851c6864eaf903494e5e74ad4ac3b3b6f1ec47c5d7450e0cab
 traces_per_query:
-  "## GraphQLValidationFailure\n":
+  "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}":
     trace:
       - start_time:
           seconds: "[seconds]"
@@ -26,8 +26,7 @@ traces_per_query:
         unexecuted_operation_body: ""
         unexecuted_operation_name: ""
         details:
-          variables_json:
-            if: ""
+          variables_json: {}
           operation_name: ""
         client_name: ""
         client_version: ""
@@ -43,7 +42,62 @@ traces_per_query:
           response_headers: {}
           status_code: 0
         cache_policy: ~
-        query_plan: ~
+        query_plan:
+          node:
+            Sequence:
+              nodes:
+                - node:
+                    Fetch:
+                      service_name: products
+                      trace_parsing_failed: false
+                      trace: ~
+                      sent_time_offset: "[sent_time_offset]"
+                      sent_time:
+                        seconds: "[seconds]"
+                        nanos: "[nanos]"
+                      received_time:
+                        seconds: "[seconds]"
+                        nanos: "[nanos]"
+                - node:
+                    Flatten:
+                      response_path:
+                        - id:
+                            FieldName: topProducts
+                      node:
+                        node:
+                          Fetch:
+                            service_name: reviews
+                            trace_parsing_failed: false
+                            trace: ~
+                            sent_time_offset: "[sent_time_offset]"
+                            sent_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                            received_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                - node:
+                    Flatten:
+                      response_path:
+                        - id:
+                            FieldName: topProducts
+                        - id:
+                            FieldName: reviews
+                        - id:
+                            FieldName: author
+                      node:
+                        node:
+                          Fetch:
+                            service_name: accounts
+                            trace_parsing_failed: false
+                            trace: ~
+                            sent_time_offset: "[sent_time_offset]"
+                            sent_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                            received_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
         full_query_cache_hit: false
         persisted_query_hit: false
         persisted_query_register: false

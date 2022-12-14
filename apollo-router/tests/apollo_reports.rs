@@ -16,7 +16,6 @@ use http::header::ACCEPT;
 use http::HeaderValue;
 use once_cell::sync::Lazy;
 use prost::Message;
-use serde_json::json;
 use serial_test::serial;
 use tower::Service;
 use tower::ServiceExt;
@@ -34,6 +33,7 @@ static ROUTER_SERVICE: Lazy<Mutex<BoxCloneService>> = Lazy::new(|| {
     let reports = &*REPORTS;
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
+
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
@@ -43,7 +43,13 @@ static ROUTER_SERVICE: Lazy<Mutex<BoxCloneService>> = Lazy::new(|| {
             reports.clone(),
         ));
 
-    let config = json!({"telemetry":{"tracing":{"trace_config":{"sampler": "always_on"}},"apollo":{"endpoint":format!("http://{}", addr), "batch_processor":{"scheduled_delay": "1ms"}, "field_level_instrumentation_sampler": "always_on"}}});
+    let mut config: serde_json::Value =
+        serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
+            .expect("apollo_reports.router.yaml was invalid");
+    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
+        Some(serde_json::Value::String(format!("http://{}", addr)))
+    })
+    .expect("Could not sub in endpoint");
 
     let async_runtime = tokio::runtime::Handle::current();
 
@@ -54,16 +60,17 @@ static ROUTER_SERVICE: Lazy<Mutex<BoxCloneService>> = Lazy::new(|| {
                     .unwrap()
                     .serve(app.into_make_service())
                     .await
-                    .unwrap()
+                    .expect("could not start axum server")
             });
 
             Mutex::new(
                 TestHarness::builder()
                     .configuration_json(config)
                     .unwrap()
+                    .with_subgraph_network_requests()
                     .build_router()
                     .await
-                    .unwrap()
+                    .expect("could create router test harness")
                     .boxed_clone(),
             )
         })
@@ -76,6 +83,8 @@ macro_rules! assert_report {
         ($report: expr)=> {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
+                        ".header.hostname" => "[hostname]",
+                        ".header.uname" => "[uname]",
                         ".**.seconds" => "[seconds]",
                         ".**.nanos" => "[nanos]",
                         ".**.duration_ns" => "[duration_ns]",
@@ -134,17 +143,8 @@ async fn report(
     Ok(Json(()))
 }
 
-#[tokio::test(flavor = "multi_thread")]
-#[serial]
-async fn non_defer() {
+async fn get_trace_report(request: supergraph::Request) -> Report {
     clear_reports();
-
-    let request = supergraph::Request::fake_builder()
-        .query("query($if: Boolean!) {\n  topProducts {\n    name\n     {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
-        .variable("if", true)
-        .header("Accept", "multipart/mixed; deferSpec=20220824")
-        .build()
-        .unwrap();
     let mut req: router::Request = request.try_into().unwrap();
     req.router_request.headers_mut().insert(
         ACCEPT,
@@ -160,109 +160,61 @@ async fn non_defer() {
         .call(req)
         .await
         .unwrap();
-    while response.next_response().await.is_some() {
-        println!("got chunk");
+    // Drain the response
+    while response.next_response().await.is_some() {}
+
+    let mut found_report = None;
+    for _ in 0..100 {
+        let reports = REPORTS.lock().unwrap();
+        let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
+        if report.is_some() {
+            found_report = report.cloned();
+            break;
+        }
+        drop(reports);
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
-
-    tokio::time::sleep(Duration::from_millis(2000)).await;
-
-    println!("{}", REPORTS.lock().unwrap().len());
-    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+    found_report.expect("could not find report")
+}
+#[tokio::test(flavor = "multi_thread")]
+#[serial]
+async fn non_defer() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let report = get_trace_report(request).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_condition_if() {
-    clear_reports();
-
     let request = supergraph::Request::fake_builder()
-        .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
+        .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", true)
         .header("Accept", "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
-    let mut req: router::Request = request.try_into().unwrap();
-    req.router_request.headers_mut().insert(
-        ACCEPT,
-        HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
-    );
-
-    let mut response = ROUTER_SERVICE
-        .lock()
-        .unwrap()
-        .ready()
-        .await
-        .unwrap()
-        .call(req)
-        .await
-        .unwrap();
-    while response.next_response().await.is_some() {
-        println!("got chunk");
-    }
-
-    tokio::time::sleep(Duration::from_millis(2000)).await;
-
-    println!("{}", REPORTS.lock().unwrap().len());
-    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
+    let report = get_trace_report(request).await;
+    assert_report!(report);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[serial]
 async fn test_condition_else() {
-    clear_reports();
-
     let request = supergraph::Request::fake_builder()
-        .query("query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}")
+        .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
         .variable("if", false)
         .header("Accept", "multipart/mixed; deferSpec=20220824")
         .build()
         .unwrap();
-    let mut req: router::Request = request.try_into().unwrap();
-    req.router_request.headers_mut().insert(
-        ACCEPT,
-        HeaderValue::from_static("multipart/mixed; deferSpec=20220824"),
-    );
-
-    let mut response = ROUTER_SERVICE
-        .lock()
-        .unwrap()
-        .ready()
-        .await
-        .unwrap()
-        .call(req)
-        .await
-        .unwrap();
-    while response.next_response().await.is_some() {
-        println!("got chunk");
-    }
-
-    tokio::time::sleep(Duration::from_millis(2000)).await;
-
-    println!("{}", REPORTS.lock().unwrap().len());
-    assert_report!(REPORTS.lock().unwrap().get(0).unwrap());
-
-    // The following curl request was used to generate this span data
-    // curl --request POST \
-    //     --header 'content-type: application/json' \
-    //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
-    //     --url http://localhost:4000/ \
-    //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":false}}'
-    // let spandata = include_str!("testdata/condition_else_spandata.yaml");
-    // let exporter = Exporter::test_builder().build();
-    // let report = report(exporter, spandata).await;
-    // assert_report!(report);
+    let report = get_trace_report(request).await;
+    assert_report!(report);
 }
 
 #[tokio::test]
 #[serial]
 async fn test_trace_id() {
-    // let spandata = include_str!("testdata/condition_if_spandata.yaml");
-    // let exporter = Exporter::test_builder()
-    //     .expose_trace_id_config(ExposeTraceId {
-    //         enabled: true,
-    //         header_name: Some(HeaderName::from_static("trace_id")),
-    //     })
-    //     .build();
-    // let report = report(exporter, spandata).await;
-    // assert_report!(report);
+    todo!()
 }
