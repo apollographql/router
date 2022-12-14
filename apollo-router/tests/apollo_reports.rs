@@ -237,3 +237,27 @@ async fn test_client_version() {
     let report = get_trace_report(request).await;
     assert_report!(report);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_send_header() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("send-header", "Header value")
+        .header("dont-send-header", "Header value")
+        .build()
+        .unwrap();
+    let report = get_trace_report(request).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_send_variable_value() {
+    let request = supergraph::Request::fake_builder()
+        .query("query($send-variable-value: String!){topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .variable("send-value", "Variable value")
+        .variable("dont-send-value", "Variable value")
+        .build()
+        .unwrap();
+    let report = get_trace_report(request).await;
+    assert_report!(report);
+}

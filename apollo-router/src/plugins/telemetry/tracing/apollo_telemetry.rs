@@ -44,7 +44,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
-use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::config::ExposeTraceId;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
@@ -52,6 +51,7 @@ use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::{config, ROUTER_SPAN_NAME};
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
 use crate::query_planner::CONDITION_IF_SPAN_NAME;
 use crate::query_planner::CONDITION_SPAN_NAME;
@@ -117,10 +117,13 @@ pub(crate) struct Exporter {
 
 enum TreeData {
     Request(Result<Box<proto::reports::Trace>, Error>),
-    Supergraph {
+    Router {
         http: Box<Http>,
         client_name: Option<String>,
         client_version: Option<String>,
+        duration_ns: u64,
+    },
+    Supergraph {
         operation_signature: String,
         operation_name: String,
         variables_json: HashMap<String, String>,
@@ -173,12 +176,7 @@ impl Exporter {
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
-            duration_ns: span
-                .attributes
-                .get(&APOLLO_PRIVATE_DURATION_NS)
-                .and_then(extract_i64)
-                .map(|e| e as u64)
-                .unwrap_or_default(),
+            duration_ns: 0,
             root: None,
             details: None,
             http: Some(http),
@@ -190,13 +188,11 @@ impl Exporter {
                 TreeData::QueryPlanNode(query_plan) => {
                     root_trace.query_plan = Some(Box::new(query_plan))
                 }
-                TreeData::Supergraph {
+                TreeData::Router {
                     http,
                     client_name,
                     client_version,
-                    operation_signature,
-                    operation_name,
-                    variables_json,
+                    duration_ns,
                 } => {
                     root_trace
                         .http
@@ -205,6 +201,13 @@ impl Exporter {
                         .request_headers = http.request_headers;
                     root_trace.client_name = client_name.unwrap_or_default();
                     root_trace.client_version = client_version.unwrap_or_default();
+                    root_trace.duration_ns = duration_ns
+                }
+                TreeData::Supergraph {
+                    operation_signature,
+                    operation_name,
+                    variables_json,
+                } => {
                     root_trace.field_execution_weight = self.field_execution_weight;
                     root_trace.signature = operation_signature;
                     root_trace.details = Some(Details {
@@ -321,12 +324,6 @@ impl Exporter {
             SUPERGRAPH_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
-                    http: Box::new(extract_http_data(span, &self.expose_trace_id_config)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
-                    client_version: span
-                        .attributes
-                        .get(&CLIENT_VERSION)
-                        .and_then(extract_string),
                     operation_signature: span
                         .attributes
                         .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
@@ -349,6 +346,23 @@ impl Exporter {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
+            }
+            ROUTER_SPAN_NAME => {
+                child_nodes.push(TreeData::Router {
+                    http: Box::new(extract_http_data(span, &self.expose_trace_id_config)),
+                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION)
+                        .and_then(extract_string),
+                    duration_ns: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_DURATION_NS)
+                        .and_then(extract_i64)
+                        .map(|e| e as u64)
+                        .unwrap_or_default(),
+                });
+                child_nodes
             }
             DEFER_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {

@@ -226,25 +226,41 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        let headers = self
+            .config
+            .apollo
+            .as_ref()
+            .cloned()
+            .unwrap_or_default()
+            .send_headers;
         ServiceBuilder::new()
-            .instrument(|request: &router::Request| {
+            .instrument(move |request: &router::Request| {
                 let trace_id = TraceId::maybe_new()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 let router_request = &request.router_request;
-                ::tracing::info_span!(ROUTER_SPAN_NAME,
+                let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %router_request.method(),
                     "http.route" = %router_request.uri(),
                     "http.flavor" = ?router_request.version(),
                     "trace_id" = %trace_id,
-                    "otel.kind" = "INTERNAL"
-                )
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "apollo_private.duration_ns" = ::tracing::field::Empty,
+                    "apollo_private.http.request_headers" = field::Empty
+                );
+                if is_span_sampled() {
+                    span.record(
+                        "apollo_private.http.request_headers",
+                        Self::filter_headers(request.router_request.headers(), &headers).as_str(),
+                    );
+                }
+                span
             })
             .map_future(|fut| {
-                let span = Span::current();
                 let start = Instant::now();
-
                 async move {
+                    let span = Span::current();
                     let result: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
@@ -711,26 +727,14 @@ impl Telemetry {
                     field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
                 apollo_private.graphql.variables = field::Empty,
-                apollo_private.http.request_headers = field::Empty
             );
 
             if is_span_sampled() {
-                span.record(
-                    "apollo_private.graphql.variables",
-                    Self::filter_variables_values(
-                        &request.supergraph_request.body().variables,
-                        &config.send_variable_values,
-                    )
-                    .as_str(),
+                let variable_values = Self::filter_variables_values(
+                    &request.supergraph_request.body().variables,
+                    &config.send_variable_values,
                 );
-                span.record(
-                    "apollo_private.http.request_headers",
-                    Self::filter_headers(
-                        request.supergraph_request.headers(),
-                        &config.send_headers,
-                    )
-                    .as_str(),
-                );
+                span.record("apollo_private.graphql.variables", variable_values.as_str());
             }
 
             span
