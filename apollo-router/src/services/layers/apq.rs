@@ -171,6 +171,12 @@ fn redis_key(query_hash: &str) -> String {
     format!("apq\0{query_hash}")
 }
 
+pub(crate) fn calculate_hash_for_query(query: String) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(query);
+    hex::encode(hasher.finalize())
+}
+
 #[cfg(test)]
 mod apq_tests {
     use std::borrow::Cow;

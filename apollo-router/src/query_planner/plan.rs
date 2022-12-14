@@ -5,7 +5,6 @@ use std::sync::Arc;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
-use sha2::{Sha256,Digest};
 
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
@@ -13,6 +12,7 @@ use crate::error::QueryPlannerError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::services::layers::apq;
 use crate::spec::query::SubSelection;
 use crate::*;
 
@@ -326,48 +326,43 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn calculate_hash_recursively(&self) -> PlanNode {
+    pub(crate) fn add_apq_hash(&self) -> PlanNode {
         tracing::trace!("calculating hash for plan:\n{:#?}", self);
         match self {
             PlanNode::Sequence {nodes} => {
                 let mut nodes_new = Vec::new();
                 for node in nodes {
-                    nodes_new.push(node.calculate_hash_recursively());
+                    nodes_new.push(node.add_apq_hash());
                 }
                 PlanNode::Sequence { nodes: nodes_new}
             }
             PlanNode::Parallel { nodes } => {
                 let mut nodes_new = Vec::new();
                 for node in nodes {
-                    nodes_new.push(node.calculate_hash_recursively());
+                    nodes_new.push(node.add_apq_hash());
                 }
                 PlanNode::Parallel { nodes: nodes_new}
             }
             PlanNode::Flatten(FlattenNode { node, path}) => {
-                let node_new = Box::new(node.calculate_hash_recursively());
+                let node_new = Box::new(node.add_apq_hash());
                 PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_new})
             }
             PlanNode::Fetch(fetch_node) => {
-                match fetch_node {
-                    fetch::FetchNode{ service_name, requires, variable_usages, operation,
-                        operation_name, operation_kind, id, .. } => {
-                        let mut hasher = Sha256::new();
-                        hasher.update(operation.clone());
-                        let hash_string = hex::encode(hasher.finalize());
+                let fetch::FetchNode{ service_name, requires, variable_usages, operation,
+                    operation_name, operation_kind, id , .. } = fetch_node;
 
-                        let plan_node = PlanNode::Fetch(fetch::FetchNode{
-                            service_name: service_name.clone(),
-                            requires: requires.clone(),
-                            variable_usages: variable_usages.clone(),
-                            operation: operation.clone(),
-                            operation_hash: hash_string.to_string(),
-                            operation_name: operation_name.clone(),
-                            operation_kind: operation_kind.clone(),
-                            id: id.clone(),
-                        });
-                        plan_node
-                    }
-                }
+                let hash_string = apq::calculate_hash_for_query(operation.clone());
+
+                PlanNode::Fetch(fetch::FetchNode{
+                    service_name: service_name.clone(),
+                    requires: requires.clone(),
+                    variable_usages: variable_usages.clone(),
+                    operation: operation.clone(),
+                    operation_hash: hash_string.to_string(),
+                    operation_name: operation_name.clone(),
+                    operation_kind: operation_kind.clone(),
+                    id: id.clone(),
+                })
             }
             PlanNode::Defer {
                 primary: Primary {
@@ -379,7 +374,7 @@ impl PlanNode {
             } => {
                 let new_inner_node;
                 if let Some(inner_node) = node {
-                    new_inner_node = Some(Box::new(inner_node.calculate_hash_recursively()));
+                    new_inner_node = Some(Box::new(inner_node.add_apq_hash()));
                 } else {
                     new_inner_node = None;
                 }
@@ -394,7 +389,7 @@ impl PlanNode {
                                         label: label.clone(),
                                         path: path.clone(),
                                         subselection: subselection.clone(),
-                                        node: Some(Arc::new(node.calculate_hash_recursively())),
+                                        node: Some(Arc::new(node.add_apq_hash())),
                                     })
                                 }
                                 None => {
@@ -421,18 +416,20 @@ impl PlanNode {
                 else_clause,
                 condition,
             } => {
-                let new_if_node;
+                let (new_if_node, new_else_node);
+
                 if let Some(node) = if_clause {
-                    new_if_node = Some(Box::new(node.calculate_hash_recursively()));
+                    new_if_node = Some(Box::new(node.add_apq_hash()));
                 } else {
                     new_if_node = None;
                 }
-                let new_else_node;
+
                 if let Some(node) = else_clause {
-                    new_else_node = Some(Box::new(node.calculate_hash_recursively()));
+                    new_else_node = Some(Box::new(node.add_apq_hash()));
                 } else {
                     new_else_node = None;
                 }
+
                 PlanNode::Condition {
                     condition: condition.clone(),
                     if_clause: new_if_node,

@@ -71,7 +71,7 @@ pub(crate) enum QueryPlannerContent {
 }
 
 impl QueryPlannerContent{
-    pub(crate) fn create_apq(&self) -> Option<QueryPlannerContent> {
+    pub(crate) fn add_apq_hash(&self) -> Option<QueryPlannerContent> {
         if let &QueryPlannerContent::Plan { plan: query_plan } = &self {
             let QueryPlan {
                 usage_reporting,
@@ -80,7 +80,7 @@ impl QueryPlannerContent{
                 query,
                 options,
             } = query_plan.as_ref();
-            let node_with_hashes = node.calculate_hash_recursively();
+            let node_with_hashes = node.add_apq_hash();
             return Some(QueryPlannerContent::Plan {
                 plan: Arc::new(QueryPlan {
                     usage_reporting: usage_reporting.clone(),
