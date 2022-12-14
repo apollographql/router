@@ -162,7 +162,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "access-json",
  "ansi_term",
@@ -278,7 +278,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "apollo-router",
  "async-trait",
@@ -294,7 +294,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.5.0"
+version = "1.6.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -708,9 +708,9 @@ checksum = "c1db59621ec70f09c5e9b597b220c7a2b43611f4710dc03ceb8748637775692c"
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.8.6"
+version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29870394429099fd98f0a518aff593310b5c9fe25178a17949219a15ae3882eb"
+checksum = "a14e2a7adeaf890958568da541ab7b52fefb784937d8ea7f18a03218b1701fe9"
 dependencies = [
  "anyhow",
  "buildstructor 0.3.2",
