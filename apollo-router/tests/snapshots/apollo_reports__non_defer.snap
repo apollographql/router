@@ -1,0 +1,59 @@
+---
+source: apollo-router/tests/apollo_reports.rs
+expression: REPORTS.lock().unwrap().get(0).unwrap()
+---
+header:
+  graph_ref: test
+  hostname: ignition-apollo.local
+  agent_version: apollo-router@1.5.0
+  service_version: ""
+  runtime_version: rust
+  uname: "Darwin, ignition-apollo.local, 21.6.0, Darwin Kernel Version 21.6.0: Mon Aug 22 20:20:05 PDT 2022; root:xnu-8020.140.49~2/RELEASE_ARM64_T8101, arm64,"
+  executable_schema_id: aa612b3f4a2d35851c6864eaf903494e5e74ad4ac3b3b6f1ec47c5d7450e0cab
+traces_per_query:
+  "## GraphQLValidationFailure\n":
+    trace:
+      - start_time:
+          seconds: "[seconds]"
+          nanos: "[nanos]"
+        end_time:
+          seconds: "[seconds]"
+          nanos: "[nanos]"
+        duration_ns: "[duration_ns]"
+        root: ~
+        is_incomplete: false
+        signature: ""
+        unexecuted_operation_body: ""
+        unexecuted_operation_name: ""
+        details:
+          variables_json:
+            if: ""
+          operation_name: ""
+        client_name: ""
+        client_version: ""
+        http:
+          method: 4
+          request_headers:
+            accept:
+              value:
+                - ""
+            content-type:
+              value:
+                - ""
+          response_headers: {}
+          status_code: 0
+        cache_policy: ~
+        query_plan: ~
+        full_query_cache_hit: false
+        persisted_query_hit: false
+        persisted_query_register: false
+        registered_operation: false
+        forbidden_operation: false
+        field_execution_weight: 1
+    stats_with_context: []
+    referenced_fields_by_type: {}
+    internal_traces_contributing_to_stats: []
+end_time: "[end_time]"
+operation_count: 1
+traces_pre_aggregated: false
+

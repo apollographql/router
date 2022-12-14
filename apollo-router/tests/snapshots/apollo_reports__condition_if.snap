@@ -12,376 +12,121 @@ header:
   executable_schema_id: aa612b3f4a2d35851c6864eaf903494e5e74ad4ac3b3b6f1ec47c5d7450e0cab
 traces_per_query:
   "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}":
-    trace: []
-    stats_with_context:
-      - context:
-          client_name: ""
-          client_version: ""
-        query_latency_stats:
-          latency_count:
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 1
-          request_count: 1
-          cache_hits: 0
-          persisted_query_hits: 0
-          persisted_query_misses: 0
-          cache_latency_count:
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-          root_error_stats:
-            children: {}
-            errors_count: 0
-            requests_with_errors_count: 0
-          requests_with_errors_count: 1
-          public_cache_ttl_count:
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-          private_cache_ttl_count:
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-            - 0
-          registered_operation_count: 0
-          forbidden_operation_count: 0
-          requests_without_field_instrumentation: 0
-        per_type_stat: {}
-    referenced_fields_by_type:
-      Product:
-        field_names:
-          - name
-          - reviews
-        is_interface: false
-      Query:
-        field_names:
-          - topProducts
-        is_interface: false
-      Review:
-        field_names:
-          - author
-        is_interface: false
-      User:
-        field_names:
-          - name
-        is_interface: false
+    trace:
+      - start_time:
+          seconds: "[seconds]"
+          nanos: "[nanos]"
+        end_time:
+          seconds: "[seconds]"
+          nanos: "[nanos]"
+        duration_ns: "[duration_ns]"
+        root: ~
+        is_incomplete: false
+        signature: ""
+        unexecuted_operation_body: ""
+        unexecuted_operation_name: ""
+        details:
+          variables_json:
+            if: ""
+          operation_name: ""
+        client_name: ""
+        client_version: ""
+        http:
+          method: 4
+          request_headers:
+            accept:
+              value:
+                - ""
+            content-type:
+              value:
+                - ""
+          response_headers: {}
+          status_code: 0
+        cache_policy: ~
+        query_plan:
+          node:
+            Condition:
+              condition: if
+              if_clause:
+                node:
+                  Defer:
+                    primary:
+                      node:
+                        node:
+                          Fetch:
+                            service_name: products
+                            trace_parsing_failed: false
+                            trace: ~
+                            sent_time_offset: "[sent_time_offset]"
+                            sent_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                            received_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                    deferred:
+                      - depends:
+                          - id: "0"
+                            defer_label: ""
+                        label: ""
+                        path:
+                          - id:
+                              FieldName: topProducts
+                        node:
+                          node:
+                            Sequence:
+                              nodes:
+                                - node:
+                                    Flatten:
+                                      response_path:
+                                        - id:
+                                            FieldName: topProducts
+                                      node:
+                                        node:
+                                          Fetch:
+                                            service_name: reviews
+                                            trace_parsing_failed: false
+                                            trace: ~
+                                            sent_time_offset: "[sent_time_offset]"
+                                            sent_time:
+                                              seconds: "[seconds]"
+                                              nanos: "[nanos]"
+                                            received_time:
+                                              seconds: "[seconds]"
+                                              nanos: "[nanos]"
+                                - node:
+                                    Flatten:
+                                      response_path:
+                                        - id:
+                                            FieldName: topProducts
+                                        - id:
+                                            FieldName: reviews
+                                        - id:
+                                            FieldName: author
+                                      node:
+                                        node:
+                                          Fetch:
+                                            service_name: accounts
+                                            trace_parsing_failed: false
+                                            trace: ~
+                                            sent_time_offset: "[sent_time_offset]"
+                                            sent_time:
+                                              seconds: "[seconds]"
+                                              nanos: "[nanos]"
+                                            received_time:
+                                              seconds: "[seconds]"
+                                              nanos: "[nanos]"
+              else_clause: ~
+        full_query_cache_hit: false
+        persisted_query_hit: false
+        persisted_query_register: false
+        registered_operation: false
+        forbidden_operation: false
+        field_execution_weight: 1
+    stats_with_context: []
+    referenced_fields_by_type: {}
     internal_traces_contributing_to_stats: []
 end_time: "[end_time]"
 operation_count: 1
+traces_pre_aggregated: false
 
