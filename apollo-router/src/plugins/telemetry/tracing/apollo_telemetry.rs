@@ -44,6 +44,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::config;
+use crate::plugins::telemetry::config::ExposeTraceId;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
@@ -704,6 +706,7 @@ mod test {
                 TreeData::ConditionIf(_) => elements.push("condition_if"),
                 TreeData::ConditionElse(_) => elements.push("condition_else"),
                 TreeData::Trace(_) => elements.push("trace"),
+                TreeData::Router { .. } => elements.push("router"),
             }
         }
         elements

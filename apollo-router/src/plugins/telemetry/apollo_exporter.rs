@@ -255,7 +255,7 @@ impl ApolloExporter {
                     }
                 }
                 Err(e) => {
-                    println!("Got {}", e.to_string());
+                    println!("Got {}", e);
                     // TODO: Ultimately need more sophisticated handling here. For example
                     // a redirect should not be treated the same way as a connect or a
                     // type builder error...
