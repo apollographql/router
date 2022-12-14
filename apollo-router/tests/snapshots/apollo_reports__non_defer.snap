@@ -33,9 +33,6 @@ traces_per_query:
         http:
           method: 4
           request_headers:
-            accept:
-              value:
-                - ""
             content-type:
               value:
                 - ""

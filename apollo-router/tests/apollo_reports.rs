@@ -1,6 +1,5 @@
 use std::io::Read;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 
 use apollo_router::services::router;
@@ -15,6 +14,7 @@ use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
 use prost::Message;
+use tokio::sync::Mutex;
 use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
@@ -23,10 +23,6 @@ use crate::proto::reports::Report;
 
 static REPORTS: Lazy<Arc<Mutex<Vec<Report>>>> = Lazy::new(Default::default);
 static TEST: Lazy<Arc<Mutex<bool>>> = Lazy::new(Default::default);
-
-fn clear_reports() {
-    (*REPORTS.clone().lock().unwrap()).clear();
-}
 
 static ROUTER_SERVICE: Lazy<Mutex<BoxCloneService>> = Lazy::new(|| {
     let reports = &*REPORTS;
@@ -136,20 +132,23 @@ async fn report(
 ) -> Result<Json<()>, http::StatusCode> {
     let mut gz = GzDecoder::new(&*bytes);
     let mut buf = Vec::new();
-    gz.read_to_end(&mut buf).unwrap();
-    let report = Report::decode(&*buf).unwrap();
-    state.lock().unwrap().push(report);
+    gz.read_to_end(&mut buf)
+        .expect("could not decompress bytes");
+    let report = Report::decode(&*buf).expect("could not deserialize report");
+    state.lock().await.push(report);
     Ok(Json(()))
 }
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
-    let _test_guard = TEST.lock().expect("lock poisoned");
-    clear_reports();
-    let req: router::Request = request.try_into().unwrap();
+    let _test_guard = TEST.lock().await;
+    {
+        REPORTS.clone().lock().await.clear();
+    }
+    let req: router::Request = request.try_into().expect("could not convert request");
 
     let mut response = ROUTER_SERVICE
         .lock()
-        .unwrap()
+        .await
         .ready()
         .await
         .unwrap()
@@ -161,7 +160,7 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
 
     let mut found_report = None;
     for _ in 0..100 {
-        let reports = REPORTS.lock().expect("mutex poisoned");
+        let reports = REPORTS.lock().await;
         let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
         if report.is_some() {
             found_report = report.cloned();
@@ -208,5 +207,11 @@ async fn test_condition_else() {
 
 #[tokio::test]
 async fn test_trace_id() {
-    todo!()
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .header("my_trace_id", "my id")
+        .build()
+        .unwrap();
+    let report = get_trace_report(request).await;
+    assert_report!(report);
 }
