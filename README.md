@@ -38,6 +38,10 @@ OPTIONS:
             The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_UPLINK_POLL_INTERVAL=]
             [default: 10s]
 
+        --apollo-uplink-client-timeout <APOLLO_UPLINK_CLIENT_TIMEOUT>
+            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_CLIENT_TIMEOUT=]
+            [default: 30s]
+
     -c, --config <CONFIG_PATH>
             Configuration location relative to the project directory [env:
             APOLLO_ROUTER_CONFIG_PATH=]
