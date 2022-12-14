@@ -177,7 +177,6 @@ async fn call_http(
     service_name: String,
 ) -> Result<crate::SubgraphResponse, BoxError> {
         let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
-        println!("------------REQUEST-------------\n{:?}", body);
         let compressed_body = compress(body, &parts.headers)
             .instrument(tracing::debug_span!("body_compression"))
             .await
@@ -308,13 +307,11 @@ async fn call_http(
             })?;
 
         let resp = http::Response::from_parts(parts, graphql);
-        println!("-------------RESPONSE------------\n{:?}", resp);
 
         Ok(crate::SubgraphResponse::new_from_response(resp, context))
 }
 
 fn check_persisted_query_not_found_error(response: graphql::Response) -> bool {
-    println!("---------------ERRORS-----------------\n{:?}",response.errors.clone());
     for error in response.errors {
         let value = error.extensions.get(&ByteString::from(CODE_STRING));
         if value != None && value.unwrap() == &Value::String(ByteString::from(APQ_ERR_STRING)) {
