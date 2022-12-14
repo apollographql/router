@@ -348,8 +348,16 @@ impl PlanNode {
                 PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_new})
             }
             PlanNode::Fetch(fetch_node) => {
-                let fetch::FetchNode{ service_name, requires, variable_usages, operation,
-                    operation_name, operation_kind, id , .. } = fetch_node;
+                let fetch::FetchNode{
+                    service_name,
+                    requires,
+                    variable_usages,
+                    operation,
+                    operation_name,
+                    operation_kind,
+                    id ,
+                    ..
+                } = fetch_node;
 
                 let hash_string = apq::calculate_hash_for_query(operation.clone());
 
@@ -372,43 +380,31 @@ impl PlanNode {
                 },
                 deferred,
             } => {
-                let new_inner_node;
-                if let Some(inner_node) = node {
-                    new_inner_node = Some(Box::new(inner_node.add_apq_hash()));
-                } else {
-                    new_inner_node = None;
-                }
                 let mut deferred_new = Vec::new();
                 for deferred_node in deferred {
-                    match deferred_node {
-                        DeferredNode{depends, label, path, subselection,node} => {
-                            match node {
-                                Some(node) => {
-                                    deferred_new.push(DeferredNode{
-                                        depends: depends.clone(),
-                                        label: label.clone(),
-                                        path: path.clone(),
-                                        subselection: subselection.clone(),
-                                        node: Some(Arc::new(node.add_apq_hash())),
-                                    })
-                                }
-                                None => {
-                                    deferred_new.push(DeferredNode{
-                                        depends: depends.clone(),
-                                        label: label.clone(),
-                                        path: path.clone(),
-                                        subselection: subselection.clone(),
-                                        node: None,
-                                    })
-                                }
-                            }
-                        }
+                    let DeferredNode{
+                        depends,
+                        label,
+                        path,
+                        subselection,
+                        node
+                    } = deferred_node;
+
+                    if let Some(node) = node {
+                        deferred_new.push(DeferredNode{
+                            depends: depends.clone(),
+                            label: label.clone(),
+                            path: path.clone(),
+                            subselection: subselection.clone(),
+                            node: Some(Arc::new(node.add_apq_hash())),
+                        })
                     }
                 }
+
                 PlanNode::Defer { primary: Primary {
                     path: path.clone(),
                     subselection: subselection.clone(),
-                    node: new_inner_node,
+                    node: apply_hash(node),
                 }, deferred: deferred_new }
             }
             PlanNode::Condition {
@@ -416,24 +412,10 @@ impl PlanNode {
                 else_clause,
                 condition,
             } => {
-                let (new_if_node, new_else_node);
-
-                if let Some(node) = if_clause {
-                    new_if_node = Some(Box::new(node.add_apq_hash()));
-                } else {
-                    new_if_node = None;
-                }
-
-                if let Some(node) = else_clause {
-                    new_else_node = Some(Box::new(node.add_apq_hash()));
-                } else {
-                    new_else_node = None;
-                }
-
                 PlanNode::Condition {
                     condition: condition.clone(),
-                    if_clause: new_if_node,
-                    else_clause: new_else_node,
+                    if_clause: apply_hash(if_clause),
+                    else_clause: apply_hash(else_clause),
                 }
             }
         }
@@ -463,6 +445,13 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
     query.push_str(&" }".repeat(len));
 
     query
+}
+
+fn apply_hash(option: &Option<Box<PlanNode>>) -> Option<Box<PlanNode>> {
+    if let Some(node) = option {
+        return Some(Box::new(node.add_apq_hash()));
+    }
+    None
 }
 
 /// A flatten node.
