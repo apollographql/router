@@ -24,10 +24,8 @@ use crate::tracer::TraceId;
 use crate::Context;
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
-    apollo_graph_reference().ok_or_else(|| LicenseError::MissingGraphReference)?;
-    apollo_key().ok_or_else(|| LicenseError::MissingKey)?;
-    // apollo_graph_reference().ok_or_else(|| "graph reference required".to_string())?;
-    // apollo_key().ok_or_else(|| "key required".to_string())?;
+    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
+    apollo_key().ok_or(LicenseError::MissingKey)?;
     Ok(Client::new())
 });
 
