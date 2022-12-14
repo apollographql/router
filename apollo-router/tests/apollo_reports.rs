@@ -15,7 +15,6 @@ use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
 use prost::Message;
-use serial_test::serial;
 use tower::Service;
 use tower::ServiceExt;
 use tower_http::decompression::DecompressionLayer;
@@ -23,6 +22,7 @@ use tower_http::decompression::DecompressionLayer;
 use crate::proto::reports::Report;
 
 static REPORTS: Lazy<Arc<Mutex<Vec<Report>>>> = Lazy::new(Default::default);
+static TEST: Lazy<Arc<Mutex<bool>>> = Lazy::new(Default::default);
 
 fn clear_reports() {
     (*REPORTS.clone().lock().unwrap()).clear();
@@ -143,6 +143,7 @@ async fn report(
 }
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
+    let _test_guard = TEST.lock().expect("lock poisoned");
     clear_reports();
     let req: router::Request = request.try_into().unwrap();
 
@@ -172,7 +173,6 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
     found_report.expect("could not find report")
 }
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn non_defer() {
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -183,7 +183,6 @@ async fn non_defer() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn test_condition_if() {
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
@@ -196,7 +195,6 @@ async fn test_condition_if() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[serial]
 async fn test_condition_else() {
     let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
@@ -209,7 +207,6 @@ async fn test_condition_else() {
 }
 
 #[tokio::test]
-#[serial]
 async fn test_trace_id() {
     todo!()
 }
