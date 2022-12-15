@@ -42,6 +42,7 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::subgraph_http;
 use crate::services::supergraph;
 use crate::ListenAddr;
 
@@ -216,6 +217,18 @@ pub trait Plugin: Send + Sync + 'static {
         service
     }
 
+    /// This service handles HTTP communication between the Apollo Router and your subgraphs.
+    /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only on specific subgraphs.
+    /// The difference with a subgraph_service is that it operates at the HTTP level, payloads are raw bytes instead of graphql objects
+    fn subgraph_http_service(
+        &self,
+        _subgraph_name: &str,
+        service: subgraph_http::BoxService,
+    ) -> subgraph_http::BoxService {
+        service
+    }
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str
     where
@@ -276,6 +289,16 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService;
 
+    /// This service handles HTTP communication between the Apollo Router and your subgraphs.
+    /// Define `subgraph_service` to configure this communication (for example, to dynamically add headers to pass to a subgraph).
+    /// The `_subgraph_name` parameter is useful if you need to apply a customization only on specific subgraphs.
+    /// The difference with a subgraph_service is that it operates at the HTTP level, payloads are raw bytes instead of graphql objects
+    fn subgraph_http_service(
+        &self,
+        _subgraph_name: &str,
+        service: subgraph_http::BoxService,
+    ) -> subgraph_http::BoxService;
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -305,6 +328,14 @@ where
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
+    }
+
+    fn subgraph_http_service(
+        &self,
+        name: &str,
+        service: subgraph_http::BoxService,
+    ) -> subgraph_http::BoxService {
+        self.subgraph_http_service(name, service)
     }
 
     fn name(&self) -> &'static str {

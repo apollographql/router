@@ -93,17 +93,6 @@ pub struct Response {
 
 #[buildstructor::buildstructor]
 impl Response {
-    /// This is the constructor to use when constructing a real Response..
-    ///
-    /// In this case, you already have a valid response and just wish to associate it with a context
-    /// and create a Response.
-    pub(crate) fn new_from_response(
-        response: http::Response<hyper::Body>,
-        context: Context,
-    ) -> Response {
-        Self { response, context }
-    }
-
     /// This is the constructor (or builder) to use when constructing a real Response.
     ///
     /// The parameters are not optional, because in a live situation all of these properties must be

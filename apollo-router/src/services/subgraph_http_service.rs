@@ -9,14 +9,12 @@ use ::serde::Deserialize;
 use async_compression::tokio::write::BrotliEncoder;
 use async_compression::tokio::write::GzipEncoder;
 use async_compression::tokio::write::ZlibEncoder;
-use bytes::BufMut;
 use bytes::Bytes;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
-use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
 use hyper::client::HttpConnector;
@@ -39,7 +37,6 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
-use crate::graphql;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 
@@ -274,18 +271,18 @@ pub(crate) trait SubgraphHTTPServiceFactory: Clone + Send + Sync + 'static {
 }
 
 #[derive(Clone)]
-pub(crate) struct SubgraphCreator {
+pub(crate) struct SubgraphHTTPCreator {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphHTTPService>>>,
 
     pub(crate) plugins: Arc<Plugins>,
 }
 
-impl SubgraphCreator {
+impl SubgraphHTTPCreator {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphHTTPService>)>,
         plugins: Arc<Plugins>,
     ) -> Self {
-        SubgraphCreator {
+        SubgraphHTTPCreator {
             services: Arc::new(services.into_iter().collect()),
             plugins,
         }
@@ -319,7 +316,7 @@ where
     }
 }
 
-impl SubgraphHTTPServiceFactory for SubgraphCreator {
+impl SubgraphHTTPServiceFactory for SubgraphHTTPCreator {
     type SubgraphHTTPService =
         BoxService<crate::SubgraphHTTPRequest, crate::SubgraphHTTPResponse, BoxError>;
     type Future =
@@ -330,12 +327,10 @@ impl SubgraphHTTPServiceFactory for SubgraphCreator {
     fn create(&self, name: &str) -> Option<Self::SubgraphHTTPService> {
         self.services.get(name).map(|service| {
             let service = service.make();
-            // TODO: lets plug a service stack in there
-            // self.plugins
-            //     .iter()
-            //     .rev()
-            //     .fold(service, |acc, (_, e)| e.subgraph_http_service(name, acc))
-            service
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service, |acc, (_, e)| e.subgraph_http_service(name, acc))
         })
     }
 }

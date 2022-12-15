@@ -6,6 +6,7 @@ use apollo_router::services::supergraph;
 use apollo_router::services::router;
 use apollo_router::services::execution;
 use apollo_router::services::subgraph;
+use apollo_router::services::subgraph_http;
 {{/if}}
 {{#if type_auth}}
 use apollo_router::layers::ServiceBuilderExt;
@@ -92,6 +93,15 @@ impl Plugin for {{pascal_name}} {
         _name: &str,
         service: subgraph::BoxService,
     ) -> subgraph::BoxService {
+        service
+    }
+
+    // Delete this function if you are not customizing it.
+    fn subgraph_http_service(
+        &self,
+        _name: &str,
+        service: subgraph_http::BoxService,
+    ) -> subgraph_http::BoxService {
         service
     }
 }
