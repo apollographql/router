@@ -168,6 +168,9 @@ pub enum SchemaSource {
 
         /// The duration between polling
         poll_interval: Duration,
+
+        /// The HTTP client timeout for each poll
+        timeout: Duration,
     },
 }
 
@@ -227,20 +230,27 @@ impl SchemaSource {
                 apollo_graph_ref,
                 urls,
                 poll_interval,
+                timeout,
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
-                        })
+                crate::uplink::stream_supergraph(
+                    apollo_key,
+                    apollo_graph_ref,
+                    urls,
+                    poll_interval,
+                    timeout,
+                )
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
+                        Err(e) => {
+                            tracing::error!("{}", e);
+                            None
+                        }
                     })
-                    .boxed()
+                })
+                .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
