@@ -166,9 +166,10 @@ thiserror = "1.0.37"
 tokio = { version = "1.23.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
 tokio-util = { version = "0.7.4", features = ["net", "codec"] }
-tonic = { version = "0.8.2", features = ["transport", "tls", "tls-roots"] }
+tonic = { version = "0.8.2", features = ["transport", "tls", "tls-roots", "gzip"] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.3.5", features = [
+    "add-extension",
     "trace",
     "cors",
     "compression-br",

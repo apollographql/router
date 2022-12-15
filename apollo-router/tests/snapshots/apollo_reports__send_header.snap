@@ -1,0 +1,117 @@
+---
+source: apollo-router/tests/apollo_reports.rs
+expression: report
+---
+header:
+  graph_ref: test
+  hostname: "[hostname]"
+  agent_version: apollo-router@1.5.0
+  service_version: ""
+  runtime_version: rust
+  uname: "[uname]"
+  executable_schema_id: aa612b3f4a2d35851c6864eaf903494e5e74ad4ac3b3b6f1ec47c5d7450e0cab
+traces_per_query:
+  "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}":
+    trace:
+      - start_time:
+          seconds: "[seconds]"
+          nanos: "[nanos]"
+        end_time:
+          seconds: "[seconds]"
+          nanos: "[nanos]"
+        duration_ns: "[duration_ns]"
+        root: ~
+        is_incomplete: false
+        signature: ""
+        unexecuted_operation_body: ""
+        unexecuted_operation_name: ""
+        details:
+          variables_json: {}
+          operation_name: ""
+        client_name: ""
+        client_version: ""
+        http:
+          method: 4
+          request_headers:
+            content-type:
+              value:
+                - ""
+            dont-send-header:
+              value:
+                - ""
+            send-header:
+              value:
+                - Header value
+          response_headers:
+            my_trace_id: "[my_trace_id]"
+          status_code: 0
+        cache_policy: ~
+        query_plan:
+          node:
+            Sequence:
+              nodes:
+                - node:
+                    Fetch:
+                      service_name: products
+                      trace_parsing_failed: false
+                      trace: ~
+                      sent_time_offset: "[sent_time_offset]"
+                      sent_time:
+                        seconds: "[seconds]"
+                        nanos: "[nanos]"
+                      received_time:
+                        seconds: "[seconds]"
+                        nanos: "[nanos]"
+                - node:
+                    Flatten:
+                      response_path:
+                        - id:
+                            FieldName: topProducts
+                      node:
+                        node:
+                          Fetch:
+                            service_name: reviews
+                            trace_parsing_failed: false
+                            trace: ~
+                            sent_time_offset: "[sent_time_offset]"
+                            sent_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                            received_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                - node:
+                    Flatten:
+                      response_path:
+                        - id:
+                            FieldName: topProducts
+                        - id:
+                            FieldName: reviews
+                        - id:
+                            FieldName: author
+                      node:
+                        node:
+                          Fetch:
+                            service_name: accounts
+                            trace_parsing_failed: false
+                            trace: ~
+                            sent_time_offset: "[sent_time_offset]"
+                            sent_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+                            received_time:
+                              seconds: "[seconds]"
+                              nanos: "[nanos]"
+        full_query_cache_hit: false
+        persisted_query_hit: false
+        persisted_query_register: false
+        registered_operation: false
+        forbidden_operation: false
+        field_execution_weight: 1
+    stats_with_context: []
+    referenced_fields_by_type: {}
+    internal_traces_contributing_to_stats: []
+end_time: "[end_time]"
+operation_count: 1
+traces_pre_aggregated: false
+

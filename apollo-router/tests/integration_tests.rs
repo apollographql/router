@@ -1055,8 +1055,18 @@ fn redact_dynamic() -> Redaction {
                     Content::String("[REDACTED]".to_string()),
                 ]);
             }
-            if value_slice.get(0).and_then(|v| v.as_str())
-                == Some("apollo_private.sent_time_offset")
+            if value_slice
+                .get(0)
+                .and_then(|v| {
+                    v.as_str().map(|s| {
+                        [
+                            "apollo_private.sent_time_offset",
+                            "apollo_private.duration_ns",
+                        ]
+                        .contains(&s)
+                    })
+                })
+                .unwrap_or_default()
             {
                 return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
             }

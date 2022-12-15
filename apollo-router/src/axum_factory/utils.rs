@@ -93,7 +93,7 @@ pub(super) async fn decompress_request_body(
 }
 
 #[derive(Clone, Default)]
-pub(super) struct PropagatingMakeSpan;
+pub(crate) struct PropagatingMakeSpan;
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
@@ -118,9 +118,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
                 "otel.kind" = "SERVER",
-                "otel.status_code" = tracing::field::Empty,
-                "apollo_private.duration_ns" = tracing::field::Empty,
-                "trace_id" = tracing::field::Empty
+
             )
         } else {
             // No remote span, we can go ahead and create the span without context.
@@ -131,9 +129,6 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
                 "otel.kind" = "SERVER",
-                "otel.status_code" = tracing::field::Empty,
-                "apollo_private.duration_ns" = tracing::field::Empty,
-                "trace_id" = tracing::field::Empty
             )
         }
     }
