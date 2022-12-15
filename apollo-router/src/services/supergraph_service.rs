@@ -964,6 +964,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn root_typename_with_defer_and_empty_first_response() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "Organization", "id":"0"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [{ "suborga": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2"},
+                    { "__typename": "Organization", "id": "3"},
+                    ] }]
+                },
+                }}
+        )
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": {
+                    "representations":[
+                        {"__typename": "Organization", "id":"1"},
+                        {"__typename": "Organization", "id":"2"},
+                        {"__typename": "Organization", "id":"3"}
+
+                        ]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2", "name": "A"},
+                    { "__typename": "Organization", "id": "3"},
+                    ]
+                }
+                }}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .query(
+                "query { __typename ... @defer { currentUser { activeOrganization { id  suborga { id name } } } } }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(
+            res.data.as_ref().unwrap().get("__typename"),
+            Some(&serde_json_bytes::Value::String("Query".into()))
+        );
+
+        // Must have 2 chunks
+        let _ = stream.next_response().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn root_typename_with_defer_in_defer() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
