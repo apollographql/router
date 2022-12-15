@@ -25,3 +25,31 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 -->
 
 # [x.x.x] (unreleased) - 2022-mm-dd
+
+## ❗ BREAKING ❗
+## 🚀 Features
+## 🐛 Fixes
+
+### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
+
+If you have duplicated keys in your yaml configuration like this:
+
+```yaml
+telemetry:
+  tracing:
+    propagation:
+      jaeger: true
+  tracing:
+    propagation:
+      jaeger: false
+```
+
+It will now throw an error on router startup:
+
+`ERROR duplicated keys detected in your yaml configuration: 'telemetry.tracing'`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2270
+
+## 🛠 Maintenance
+## 📚 Documentation
+## 🥼 Experimental
