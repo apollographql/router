@@ -218,6 +218,7 @@ impl Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
             operation_count: self.operation_count,
+            traces_pre_aggregated: true,
             ..Default::default()
         };
 
