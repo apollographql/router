@@ -744,8 +744,10 @@ mod tests {
             UpdateConfiguration(_)
         ));
 
+        // Need different contents, since we won't get an event if content is the same
+        let contents_datadog = include_str!("testdata/datadog.router.yaml");
         // Modify the file and try again
-        write_and_flush(&mut file, contents).await;
+        write_and_flush(&mut file, contents_datadog).await;
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
@@ -853,15 +855,17 @@ mod tests {
         // First update is guaranteed
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
 
+        // Need different contents, since we won't get an event if content is the same
+        let schema_minimal = include_str!("testdata/minimal_supergraph.graphql");
         // Modify the file and try again
-        write_and_flush(&mut file, schema).await;
+        write_and_flush(&mut file, schema_minimal).await;
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
     }
 
     #[test(tokio::test)]
     async fn schema_by_file_missing() {
         let mut stream = SchemaSource::File {
-            path: temp_dir().join("does_not_exit"),
+            path: temp_dir().join("does_not_exist"),
             watch: true,
             delay: None,
         }

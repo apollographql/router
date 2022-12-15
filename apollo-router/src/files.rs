@@ -13,6 +13,12 @@ use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
 
+#[cfg(not(test))]
+const DEFAULT_WATCH_DURATION: Duration = Duration::from_secs(3);
+
+#[cfg(test)]
+const DEFAULT_WATCH_DURATION: Duration = Duration::from_millis(100);
+
 /// Creates a stream events whenever the file at the path has changes. The stream never terminates
 /// and must be dropped to finish watching.
 ///
@@ -23,7 +29,7 @@ use notify::Watcher;
 /// returns: impl Stream<Item=()>
 ///
 pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
-    watch_with_duration(path, Duration::from_secs(3))
+    watch_with_duration(path, DEFAULT_WATCH_DURATION)
 }
 
 fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> {
