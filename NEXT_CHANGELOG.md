@@ -28,6 +28,20 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## ❗ BREAKING ❗
 ## 🚀 Features
+
+### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
+
+In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
+
+```bash
+        --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>
+            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_TIMEOUT=] [default: 30s]
+```
+
+It defaults to 30 seconds.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
+
 ## 🐛 Fixes
 
 ### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
