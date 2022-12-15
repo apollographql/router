@@ -2,6 +2,7 @@
 // This entire file is license key functionality
 pub(crate) mod cors;
 mod expansion;
+mod experimental;
 mod schema;
 #[cfg(test)]
 mod tests;
@@ -17,6 +18,7 @@ use cors::*;
 use derivative::Derivative;
 use displaydoc::Display;
 use expansion::*;
+pub(crate) use experimental::print_all_experimental_conf;
 use itertools::Itertools;
 pub(crate) use schema::generate_config_schema;
 pub(crate) use schema::generate_upgrade;

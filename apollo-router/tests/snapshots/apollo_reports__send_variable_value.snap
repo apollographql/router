@@ -5,7 +5,7 @@ expression: report
 header:
   graph_ref: test
   hostname: "[hostname]"
-  agent_version: apollo-router@1.5.0
+  agent_version: apollo-router@1.6.0
   service_version: ""
   runtime_version: rust
   uname: "[uname]"

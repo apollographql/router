@@ -117,7 +117,9 @@ impl Plugin for Csrf {
                                 or provide one of the following headers: {}", 
                                 NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
                                 required_headers.join(", ")
-                            )).build();
+                            ))
+                            .extension_code("CSRF_ERROR")
+                            .build();
                         let res = SupergraphResponse::builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)

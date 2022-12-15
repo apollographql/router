@@ -35,6 +35,10 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
+// Set to 90 seconds to err on the side of caution. This + our backoffs and attemps
+// should be more than enough to make sure the reports are sent,
+// while preventing potential hangs.
+pub(crate) const HTTP_CLIENT_TIMEOUT_DURATION: Duration = Duration::from_secs(90);
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 #[derive(thiserror::Error, Debug)]
@@ -121,7 +125,10 @@ impl ApolloExporter {
         Ok(ApolloExporter {
             endpoint: endpoint.clone(),
             apollo_key: apollo_key.to_string(),
-            client: reqwest::Client::default(),
+            client: reqwest::Client::builder()
+                .timeout(HTTP_CLIENT_TIMEOUT_DURATION)
+                .build()
+                .map_err(BoxError::from)?,
             header,
             strip_traces: Default::default(),
         })
