@@ -94,6 +94,7 @@ mediatype = "0.19.11"
 mockall = "0.11.3"
 miette = { version = "5.5.0", features = ["fancy"] }
 mime = "0.3.16"
+multer = "2.0.4"
 multimap = "0.8.3"
 # To avoid tokio issues
 notify = { version = "5.0.0", default-features = false, features=["macos_kqueue"] }

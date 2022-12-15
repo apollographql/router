@@ -15,6 +15,7 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
@@ -593,22 +594,20 @@ async fn normal_query_with_defer_accept_header() {
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .expect("expecting valid request");
-    let (actual, _registry) = {
+    let (mut response, _registry) = {
         let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
         (
             router
                 .oneshot(request.try_into().unwrap())
                 .await
                 .unwrap()
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap(),
+                .into_graphql_response_stream()
+                .await,
             counting_registry,
         )
     };
-
-    insta::assert_snapshot!(std::str::from_utf8(actual.to_vec().as_slice()).unwrap());
+    insta::assert_json_snapshot!(response.next().await.unwrap().unwrap());
+    assert!(response.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -640,10 +639,15 @@ async fn defer_path_with_disabled_config() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let only = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(only.to_vec().as_slice()).unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -672,13 +676,16 @@ async fn defer_path() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
-
-    let second = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -712,13 +719,16 @@ async fn defer_path_in_array() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
-
-    let second = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -753,7 +763,6 @@ async fn defer_query_without_accept() {
     let (router, _) = setup_router_and_registry(config).await;
 
     let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
-
     let first = stream.next_response().await.unwrap().unwrap();
     insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 }
@@ -783,13 +792,16 @@ async fn defer_empty_primary_response() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
-
-    let second = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -817,13 +829,16 @@ async fn defer_default_variable() {
 
     let (router, _) = setup_router_and_registry(config.clone()).await;
 
-    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
-
-    let second = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(second.to_vec().as_slice()).unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -834,13 +849,15 @@ async fn defer_default_variable() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap().unwrap();
-    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
-
-    let second = stream.next_response().await;
-    assert!(second.is_none());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {

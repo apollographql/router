@@ -1,11 +1,14 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-expression: "std::str::from_utf8(only.to_vec().as_slice()).unwrap()"
+expression: stream.next().await.unwrap().unwrap()
 ---
-
---graphql
-content-type: application/json
-
-{"errors":[{"message":"Unknown directive \"@defer\".","extensions":{"code":"GRAPHQL_VALIDATION_FAILED"}}]}
---graphql--
-
+{
+  "errors": [
+    {
+      "message": "Unknown directive \"@defer\".",
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED"
+      }
+    }
+  ]
+}
