@@ -32,6 +32,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::subgraph_http;
+use super::subgraph_http_service::MakeSubgraphHTTPService;
 use super::Plugins;
 use crate::error::FetchError;
 use crate::graphql;
@@ -61,51 +62,52 @@ impl Display for Compression {
 
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
-pub(crate) struct SubgraphService<HTTPService>
+pub(crate) struct SubgraphService<SubgraphHTTPCreator>
 where
-    HTTPService: Service<subgraph_http::Request, Response = subgraph_http::Response, Error = BoxError>
+    SubgraphHTTPCreator: Service<subgraph_http::Request, Response = subgraph_http::Response, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <HTTPService as Service<subgraph_http::Request>>::Future: std::marker::Send,
+    <SubgraphHTTPCreator as Service<subgraph_http::Request>>::Future: std::marker::Send,
 {
-    http_service: HTTPService, //Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
+    http_creator: SubgraphHTTPCreator, //Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service_name: Arc<String>,
 }
 
-impl<HTTPService> SubgraphService<HTTPService>
+impl<SubgraphHTTPCreator> SubgraphService<SubgraphHTTPCreator>
 where
-    HTTPService: Service<subgraph_http::Request, Response = subgraph_http::Response, Error = BoxError>
+    SubgraphHTTPCreator: Service<subgraph_http::Request, Response = subgraph_http::Response, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <HTTPService as Service<subgraph_http::Request>>::Future: std::marker::Send,
+    <SubgraphHTTPCreator as Service<subgraph_http::Request>>::Future: std::marker::Send,
 {
-    pub(crate) fn new(service_name: impl Into<String>, http_service: HTTPService) -> Self {
+    pub(crate) fn new(service_name: impl Into<String>, http_creator: SubgraphHTTPCreator) -> Self {
         Self {
-            http_service,
+            http_creator,
             service_name: Arc::new(service_name.into()),
         }
     }
 }
 
-impl<HTTPService> tower::Service<crate::SubgraphRequest> for SubgraphService<HTTPService>
+impl<SubgraphHTTPCreator> tower::Service<crate::SubgraphRequest>
+    for SubgraphService<SubgraphHTTPCreator>
 where
-    HTTPService: Service<subgraph_http::Request, Response = subgraph_http::Response, Error = BoxError>
+    SubgraphHTTPCreator: Service<subgraph_http::Request, Response = subgraph_http::Response, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <HTTPService as Service<subgraph_http::Request>>::Future: std::marker::Send,
+    <SubgraphHTTPCreator as Service<subgraph_http::Request>>::Future: std::marker::Send,
 {
     type Response = crate::SubgraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
-    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.http_service.poll_ready(cx)
+    fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
     }
 
     fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
@@ -115,9 +117,7 @@ where
             ..
         } = request;
 
-        let clone = self.http_service.clone();
-
-        let mut client = std::mem::replace(&mut self.http_service, clone);
+        let mut client = self.http_creator.make();
         let service_name = (*self.service_name).to_owned();
 
         Box::pin(async move {
