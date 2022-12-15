@@ -261,6 +261,21 @@ mod test {
 test:
   foo: bar
 "#;
-        assert_snapshot!(format!("{:#?}", parse(yaml).unwrap_err()));
+        let err = parse(yaml).unwrap_err();
+        match err {
+            crate::configuration::ConfigurationError::InvalidConfiguration { message, error } => {
+                assert_eq!(
+                    message,
+                    "duplicated keys detected in your yaml configuration"
+                );
+                // Can't do an assert on error because under the hood it uses an hashset then the order is not guaranteed
+                let error_splitted: Vec<&str> = error.split(", ").collect();
+                assert_eq!(error_splitted.len(), 3);
+                assert!(error_splitted.contains(&"'test.a'"));
+                assert!(error_splitted.contains(&"'test'"));
+                assert!(error_splitted.contains(&"'c.dup'"));
+            }
+            _ => panic!("this error must be InvalidConfiguration variant"),
+        }
     }
 }
