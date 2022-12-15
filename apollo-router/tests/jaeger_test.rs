@@ -98,7 +98,7 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
     // Verify that all spans have a path to the root 'client_request' span
     verify_span_parenting(&trace)?;
 
-    // Verify that router span fields are present
+    // Verify that supergraph span fields are present
     verify_supergraph_span_fields(&trace)?;
 
     // Verify that router span fields are present
@@ -127,16 +127,16 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
 }
 
 fn verify_supergraph_span_fields(trace: &Value) -> Result<(), BoxError> {
-    let router_span = trace.select_path("$..spans[?(@.operationName == 'supergraph')]")?[0];
+    let supergraph_span = trace.select_path("$..spans[?(@.operationName == 'supergraph')]")?[0];
     // We can't actually assert the values on a span. Only that a field has been set.
     assert_eq!(
-        router_span
+        supergraph_span
             .select_path("$.tags[?(@.key == 'graphql.document')].value")?
             .get(0),
         Some(&&Value::String("{topProducts{name}}".to_string()))
     );
     assert_eq!(
-        router_span
+        supergraph_span
             .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
             .get(0),
         Some(&&Value::String("".to_string()))

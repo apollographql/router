@@ -1,8 +1,8 @@
-use anyhow::anyhow;
 use std::io::Read;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::anyhow;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
