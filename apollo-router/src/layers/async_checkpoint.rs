@@ -151,31 +151,35 @@ mod async_checkpoint_tests {
     use crate::ExecutionRequest;
     use crate::ExecutionResponse;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_service_builder() {
         let expected_label = "from_mock_service";
 
-        /*let mut execution_service = MockExecutionService::new();
-        execution_service.expect_clone().return_once(move || {
-            let mut execution_service = MockExecutionService::new();
-            execution_service.expect_call().times(1).returning(
-                move |_req: crate::ExecutionRequest| {
-                    Ok(ExecutionResponse::fake_builder()
-                        .label(expected_label.to_string())
-                        .build()
-                        .unwrap())
-                },
-            );
+        let mut exec = MockExecutionService::new();
+        /*execution_service.expect_clone().return_once(move || {
+        let mut execution_service = MockExecutionService::new();*/
+        exec.expect_call()
+            .times(2)
+            .returning(move |_req: crate::ExecutionRequest| {
+                Ok(ExecutionResponse::fake_builder()
+                    .label(expected_label.to_string())
+                    .build()
+                    .unwrap())
+            });
 
-            execution_service
+        //drop(exec);
+        //panic!();
+        /*execution_service
         });*/
         let mut execution_service: MockService<ExecutionRequest, ExecutionResponse, BoxError> =
-            MockService::create(|req| {
+            MockService::create(move |req| {
+                exec.call(req)
+
                 /*Ok(ExecutionResponse::fake_builder()
                 .label(expected_label.to_string())
                 .build()
                 .unwrap())*/
-                panic!();
+                //panic!();
             });
 
         let service_stack = ServiceBuilder::new()
@@ -196,7 +200,8 @@ mod async_checkpoint_tests {
             .label
             .unwrap();
 
-        assert_eq!(actual_label, expected_label)
+        assert_eq!(actual_label, expected_label);
+        panic!()
     }
 
     #[tokio::test]

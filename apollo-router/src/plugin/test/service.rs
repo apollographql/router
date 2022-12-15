@@ -1,7 +1,6 @@
 #![allow(dead_code, unreachable_pub)]
 #![allow(missing_docs)] // FIXME
 
-use std::fmt::Debug;
 use std::panic;
 use std::sync::Arc;
 use std::thread;
@@ -47,6 +46,7 @@ macro_rules! mock_service {
                 fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), tower::BoxError>> {
                     std::task::Poll::Ready(Ok(()))
                 }
+                #[track_caller]
                 fn call(&mut self, req: $request_type) -> Self::Future {
                     let r  = self.call(req);
                     Box::pin(async move { r })
@@ -111,12 +111,16 @@ where
                     let sender = store.lock().await.take().unwrap();
                     sender.send(Ok(res));
                 }
+                //println!("end of loop");
             })
             .await
             {
+                let error = e.try_into_panic().unwrap();
+                println!("task got panic: {:?}", error);
                 let sender = store_sender.lock().await.take().unwrap();
-                sender.send(Err(e.try_into_panic().unwrap()));
+                sender.send(Err(error));
             }
+            //println!("end of outer task");
         });
 
         Self { tx }
