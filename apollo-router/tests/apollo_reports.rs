@@ -153,7 +153,7 @@ async fn report(
 async fn get_trace_report(request: supergraph::Request) -> Report {
     ROUTER_SERVICE_RUNTIME
         .spawn(async {
-            let mut found_report = None;
+            let mut found_report;
             {
                 let _test_guard = TEST.lock().await;
                 {
@@ -169,31 +169,37 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
                     .call(req)
                     .await
                     .expect("router service call failed");
+
                 // Drain the response
-                match hyper::body::to_bytes(response.response.into_body())
+                found_report = match hyper::body::to_bytes(response.response.into_body())
                     .await
                     .map(|b| String::from_utf8(b.to_vec()))
                 {
                     Ok(Ok(response)) => {
                         if response.contains("errors") {
-                            return Err(anyhow!("Response had errors {}", response));
+                            eprintln!("response had errors {}", response);
                         }
+                        Ok(None)
                     }
-                    _ => return Err(anyhow!("Error retrieving response")),
-                }
+                    _ => Err(anyhow!("error retrieving response")),
+                };
 
+                // We must always try to find the report regardless of if the response had failures
                 for _ in 0..10 {
                     let reports = REPORTS.lock().await;
                     let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
                     if report.is_some() {
-                        found_report = report.cloned();
+                        if matches!(found_report, Ok(None)) {
+                            found_report = Ok(report.cloned());
+                        }
                         break;
                     }
                     drop(reports);
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
             }
-            Ok(found_report)
+
+            found_report
         })
         .await
         .expect("failed to get report")
