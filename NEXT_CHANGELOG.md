@@ -65,5 +65,12 @@ It will now throw an error on router startup:
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2270
 
 ## 🛠 Maintenance
+
+### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
+
+Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
+
 ## 📚 Documentation
 ## 🥼 Experimental
