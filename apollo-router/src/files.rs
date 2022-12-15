@@ -128,19 +128,17 @@ pub(crate) mod tests {
         assert!(futures::poll!(watch.next()).is_ready())
     }
 
-    #[cfg(test)]
     pub(crate) fn create_temp_file() -> (PathBuf, File) {
         let path = temp_dir().join(format!("{}", uuid::Uuid::new_v4()));
         let file = std::fs::File::create(&path).unwrap();
         (path, file)
     }
 
-    #[cfg(test)]
     pub(crate) async fn write_and_flush(file: &mut File, contents: &str) {
         file.seek(SeekFrom::Start(0)).unwrap();
         file.set_len(0).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
     }
 }
