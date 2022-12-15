@@ -72,7 +72,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
-use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 #[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::config::default_display_filename;
 #[cfg(not(feature = "console"))]
@@ -141,7 +141,7 @@ static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
 #[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
-    config: config::Conf,
+    config: Arc<config::Conf>,
     metrics: BasicMetrics,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
     // Typically the handles are a PushController but may be something else. Dropping the handle will
@@ -226,39 +226,74 @@ impl Plugin for Telemetry {
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        let config = self.config.clone();
+        let config_later = self.config.clone();
+
         ServiceBuilder::new()
-            .instrument(|request: &router::Request| {
+            .instrument(move |request: &router::Request| {
+                let apollo = config.apollo.as_ref().cloned().unwrap_or_default();
                 let trace_id = TraceId::maybe_new()
                     .map(|t| t.to_string())
                     .unwrap_or_default();
                 let router_request = &request.router_request;
-                ::tracing::info_span!(ROUTER_SPAN_NAME,
+                let headers = router_request.headers();
+                let client_name = headers
+                    .get(&apollo.client_name_header)
+                    .cloned()
+                    .unwrap_or_else(|| HeaderValue::from_static(""));
+                let client_version = headers
+                    .get(&apollo.client_version_header)
+                    .cloned()
+                    .unwrap_or_else(|| HeaderValue::from_static(""));
+                let span = ::tracing::info_span!(ROUTER_SPAN_NAME,
                     "http.method" = %router_request.method(),
                     "http.route" = %router_request.uri(),
                     "http.flavor" = ?router_request.version(),
                     "trace_id" = %trace_id,
-                    "otel.kind" = "INTERNAL"
-                )
+                    "client.name" = client_name.to_str().unwrap_or_default(),
+                    "client.version" = client_version.to_str().unwrap_or_default(),
+                    "otel.kind" = "INTERNAL",
+                    "otel.status_code" = ::tracing::field::Empty,
+                    "apollo_private.duration_ns" = ::tracing::field::Empty,
+                    "apollo_private.http.request_headers" = Self::filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
+                    "apollo_private.http.response_headers" = field::Empty
+                );
+                span
             })
-            .map_future(|fut| {
-                let span = Span::current();
+            .map_future(move |fut| {
                 let start = Instant::now();
-
+                let config = config_later.clone();
                 async move {
-                    let result: Result<router::Response, BoxError> = fut.await;
+                    let span = Span::current();
+                    let response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
                         "apollo_private.duration_ns",
                         start.elapsed().as_nanos() as i64,
                     );
-                    if let Ok(res) = &result {
-                        if res.response.status() >= StatusCode::BAD_REQUEST {
+
+
+                    let expose_trace_id = config.tracing.as_ref().cloned().unwrap_or_default().response_trace_id;
+                    if let Ok(response) = &response {
+                        if expose_trace_id.enabled {
+                            if let Some(header_name) = &expose_trace_id.header_name {
+                                let mut headers: HashMap<String, Vec<String>> = HashMap::new();
+                                if let Some(value) = response.response.headers().get(header_name) {
+                                    headers.insert(header_name.to_string(), vec![value.to_str().unwrap_or_default().to_string()]);
+                                    let response_headers = serde_json::to_string(&headers).unwrap_or_default();
+                                    span.record("apollo_private.http.response_headers",&response_headers);
+                                }
+                            }
+                        }
+
+                        if response.response.status() >= StatusCode::BAD_REQUEST {
                             span.record("otel.status_code", "Error");
                         } else {
                             span.record("otel.status_code", "Ok");
                         }
+
                     }
-                    result
+                    response
                 }
             })
             .service(service)
@@ -268,7 +303,7 @@ impl Plugin for Telemetry {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
         let metrics = self.metrics.clone();
-        let config = Arc::new(self.config.clone());
+        let config = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         ServiceBuilder::new()
@@ -577,7 +612,7 @@ impl Telemetry {
             metrics: BasicMetrics::default(),
             apollo_metrics_sender: builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            config,
+            config: Arc::new(config),
         });
 
         let _ = TELEMETRY_REFCOUNT.fetch_add(1, Ordering::Relaxed);
@@ -683,54 +718,31 @@ impl Telemetry {
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
-            let headers = http_request.headers();
             let query = http_request.body().query.clone().unwrap_or_default();
             let operation_name = http_request
                 .body()
                 .operation_name
                 .clone()
                 .unwrap_or_default();
-            let client_name = headers
-                .get(&config.client_name_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""));
-            let client_version = headers
-                .get(&config.client_version_header)
-                .cloned()
-                .unwrap_or_else(|| HeaderValue::from_static(""));
 
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
                 graphql.document = query.as_str(),
                 // TODO add graphql.operation.type
                 graphql.operation.name = operation_name.as_str(),
-                client.name = client_name.to_str().unwrap_or_default(),
-                client.version = client_version.to_str().unwrap_or_default(),
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
                 apollo_private.graphql.variables = field::Empty,
-                apollo_private.http.request_headers = field::Empty
             );
 
             if is_span_sampled() {
-                span.record(
-                    "apollo_private.graphql.variables",
-                    Self::filter_variables_values(
-                        &request.supergraph_request.body().variables,
-                        &config.send_variable_values,
-                    )
-                    .as_str(),
+                let variable_values = Self::filter_variables_values(
+                    &request.supergraph_request.body().variables,
+                    &config.send_variable_values,
                 );
-                span.record(
-                    "apollo_private.http.request_headers",
-                    Self::filter_headers(
-                        request.supergraph_request.headers(),
-                        &config.send_headers,
-                    )
-                    .as_str(),
-                );
+                span.record("apollo_private.graphql.variables", variable_values.as_str());
             }
 
             span
@@ -1296,8 +1308,8 @@ fn operation_count(stats_report_key: &str) -> u64 {
 
 fn convert(
     referenced_fields: router_bridge::planner::ReferencedFieldsForType,
-) -> crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType {
-    crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType {
+) -> crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType {
+    crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType {
         field_names: referenced_fields.field_names,
         is_interface: referenced_fields.is_interface,
     }
@@ -1671,6 +1683,7 @@ mod tests {
                         Error::builder()
                             .message(String::from("an error occured"))
                             .extensions(extension)
+                            .extension_code("FETCH_ERROR")
                             .build(),
                     )
                     .build())
@@ -1737,8 +1750,8 @@ mod tests {
                                     "errors": {
                                         "include_messages": true,
                                         "extensions": [{
-                                            "name": "subgraph_error_extended_type",
-                                            "path": ".type"
+                                            "name": "subgraph_error_extended_code",
+                                            "path": ".code"
                                         }, {
                                             "name": "message",
                                             "path": ".reason"

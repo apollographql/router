@@ -25,6 +25,7 @@ use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
 
+use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
@@ -127,6 +128,8 @@ enum ConfigSubcommand {
         #[clap(parse(from_flag), long)]
         diff: bool,
     },
+    /// List all the available experimental configurations with related GitHub discussion
+    Experimental,
 }
 
 /// Options for the router
@@ -206,6 +209,10 @@ pub(crate) struct Opt {
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
     apollo_uplink_poll_interval: Duration,
+
+    /// The timeout for an http call to Apollo uplink. Defaults to 30s.
+    #[clap(long, default_value = "30s", parse(try_from_str = humantime::parse_duration), env)]
+    apollo_uplink_timeout: Duration,
 
     /// Display version and exit.
     #[clap(parse(from_flag), long, short = 'V')]
@@ -377,6 +384,12 @@ impl Executable {
                 println!("{}", output);
                 Ok(())
             }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Experimental,
+            })) => {
+                configuration::print_all_experimental_conf();
+                Ok(())
+            }
             None => {
                 // The dispatcher we created is passed explicitly here to make sure we display the logs
                 // in the initialization phase and in the state machine code, before a global subscriber
@@ -484,6 +497,7 @@ impl Executable {
                     apollo_graph_ref,
                     urls: uplink_endpoints,
                     poll_interval: opt.apollo_uplink_poll_interval,
+                    timeout: opt.apollo_uplink_timeout
                 }
             }
             _ => {

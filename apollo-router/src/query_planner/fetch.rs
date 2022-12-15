@@ -367,6 +367,7 @@ impl FetchNode {
                         "Subgraph response from '{}' was missing key `_entities`",
                         self.service_name
                     ))
+                    .extension_code("PARSE_ERROR")
                     .build(),
             );
 

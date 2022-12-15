@@ -18,6 +18,7 @@ use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
 pub(crate) use crate::graphql::Error;
+use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::json_ext::Path;
@@ -28,18 +29,12 @@ use crate::spec::SpecError;
 ///
 /// Note that these are not actually returned to the client, but are instead converted to JSON for
 /// [`struct@Error`].
-#[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[derive(Error, Display, Debug, Clone, Serialize)]
+#[serde(untagged)]
 #[ignore_extra_doc_attributes]
 #[non_exhaustive]
 #[allow(missing_docs)] // FIXME
 pub(crate) enum FetchError {
-    /// query references unknown service '{service}'
-    ValidationUnknownServiceError {
-        /// The service that was unknown.
-        service: String,
-    },
-
     /// invalid type for variable: '{name}'
     ValidationInvalidTypeVariable {
         /// Name of the variable.
@@ -50,18 +45,6 @@ pub(crate) enum FetchError {
     ValidationPlanningError {
         /// The failure reason.
         reason: String,
-    },
-
-    /// response was malformed: {reason}
-    MalformedResponse {
-        /// The reason the serialization failed.
-        reason: String,
-    },
-
-    /// service '{service}' returned no response.
-    SubrequestNoResponse {
-        /// The service that returned no response.
-        service: String,
     },
 
     /// service '{service}' response was malformed: {reason}
@@ -96,6 +79,7 @@ pub(crate) enum FetchError {
         field: String,
     },
 
+    #[cfg(test)]
     /// invalid content: {reason}
     ExecutionInvalidContent { reason: String },
 
@@ -113,7 +97,34 @@ pub(crate) enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
-        let value: Value = serde_json::to_value(self).unwrap().into();
+        let mut value: Value = serde_json::to_value(self).unwrap_or_default().into();
+        if let Some(extensions) = value.as_object_mut() {
+            extensions
+                .entry("code")
+                .or_insert_with(|| self.extension_code().into());
+            // Following these specs https://www.apollographql.com/docs/apollo-server/data/errors/#including-custom-error-details
+            match self {
+                FetchError::SubrequestMalformedResponse { service, .. }
+                | FetchError::SubrequestUnexpectedPatchResponse { service }
+                | FetchError::SubrequestHttpError { service, .. }
+                | FetchError::CompressionError { service, .. } => {
+                    extensions
+                        .entry("service")
+                        .or_insert_with(|| service.clone().into());
+                }
+                FetchError::ExecutionFieldNotFound { field, .. } => {
+                    extensions
+                        .entry("field")
+                        .or_insert_with(|| field.clone().into());
+                }
+                FetchError::ValidationInvalidTypeVariable { name } => {
+                    extensions
+                        .entry("name")
+                        .or_insert_with(|| name.clone().into());
+                }
+                _ => (),
+            }
+        }
 
         Error {
             message: self.to_string(),
@@ -129,6 +140,26 @@ impl FetchError {
             errors: vec![self.to_graphql_error(None)],
             ..Response::default()
         }
+    }
+}
+
+impl ErrorExtension for FetchError {
+    fn extension_code(&self) -> String {
+        match self {
+            FetchError::ValidationInvalidTypeVariable { .. } => "VALIDATION_INVALID_TYPE_VARIABLE",
+            FetchError::ValidationPlanningError { .. } => "VALIDATION_PLANNING_ERROR",
+            FetchError::SubrequestMalformedResponse { .. } => "SUBREQUEST_MALFORMED_RESPONSE",
+            FetchError::SubrequestUnexpectedPatchResponse { .. } => {
+                "SUBREQUEST_UNEXPECTED_PATCH_RESPONSE"
+            }
+            FetchError::SubrequestHttpError { .. } => "SUBREQUEST_HTTP_ERROR",
+            FetchError::ExecutionFieldNotFound { .. } => "EXECUTION_FIELD_NOT_FOUND",
+            FetchError::ExecutionPathNotFound { .. } => "EXECUTION_PATH_NOT_FOUND",
+            FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
+            #[cfg(test)]
+            FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
+        }
+        .to_string()
     }
 }
 
@@ -205,10 +236,21 @@ pub(crate) enum QueryPlannerError {
 impl IntoGraphQLErrors for QueryPlannerError {
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         match self {
-            QueryPlannerError::SpecError(err) => Ok(vec![Error {
-                message: err.to_string(),
-                ..Default::default()
-            }]),
+            QueryPlannerError::SpecError(err) => {
+                let gql_err = match err.custom_extension_details() {
+                    Some(extension_details) => Error::builder()
+                        .message(err.to_string())
+                        .extension_code(err.extension_code())
+                        .extensions(extension_details)
+                        .build(),
+                    None => Error::builder()
+                        .message(err.to_string())
+                        .extension_code(err.extension_code())
+                        .build(),
+                };
+
+                Ok(vec![gql_err])
+            }
             QueryPlannerError::SchemaValidationErrors(errs) => errs
                 .into_graphql_errors()
                 .map_err(QueryPlannerError::SchemaValidationErrors),
@@ -219,6 +261,23 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 .collect()),
             err => Err(err),
         }
+    }
+}
+
+impl ErrorExtension for QueryPlannerError {
+    fn extension_code(&self) -> String {
+        match self {
+            QueryPlannerError::SchemaValidationErrors(_) => "SCHEMA_VALIDATION_ERRORS",
+            QueryPlannerError::PlanningErrors(_) => "PLANNING_ERRORS",
+            QueryPlannerError::JoinError(_) => "JOIN_ERROR",
+            QueryPlannerError::CacheResolverError(_) => "CACHE_RESOLVER_ERROR",
+            QueryPlannerError::EmptyPlan(_) => "EMPTY_PLAN",
+            QueryPlannerError::UnhandledPlannerResult => "UNHANDLED_PLANNER_RESULT",
+            QueryPlannerError::RouterBridgeError(_) => "ROUTER_BRIDGE_ERROR",
+            QueryPlannerError::SpecError(_) => "SPEC_ERROR",
+            QueryPlannerError::Introspection(_) => "INTROSPECTION",
+        }
+        .to_string()
     }
 }
 

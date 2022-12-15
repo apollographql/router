@@ -33,10 +33,10 @@ where
                 // A query must be available at this point
                 let query = req.supergraph_request.body().query.as_ref();
                 if query.is_none() || query.unwrap().trim().is_empty() {
-                    let errors = vec![crate::error::Error {
-                        message: "Must provide query string.".to_string(),
-                        ..Default::default()
-                    }];
+                    let errors = vec![crate::error::Error::builder()
+                        .message("Must provide query string.".to_string())
+                        .extension_code("MISSING_QUERY_STRING")
+                        .build()];
                     tracing::error!(
                         monotonic_counter.apollo_router_http_requests_total = 1u64,
                         status = %StatusCode::BAD_REQUEST.as_u16(),
@@ -109,6 +109,7 @@ mod ensure_query_presence_tests {
         let actual_error = response.errors[0].message.clone();
 
         assert_eq!(expected_error, actual_error);
+        assert!(response.errors[0].extensions.contains_key("code"));
     }
 
     #[tokio::test]
@@ -130,5 +131,6 @@ mod ensure_query_presence_tests {
             .unwrap();
         let actual_error = response.errors[0].message.clone();
         assert_eq!(expected_error, actual_error);
+        assert!(response.errors[0].extensions.contains_key("code"));
     }
 }

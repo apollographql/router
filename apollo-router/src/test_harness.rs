@@ -2,8 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_http::trace::MakeSpan;
+use tracing_futures::Instrument;
 
+use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
@@ -213,7 +217,13 @@ impl<'a> TestHarness<'a> {
     }
 
     /// Builds the supergraph service
+    #[deprecated = "use build_supergraph instead"]
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
+        self.build_supergraph().await
+    }
+
+    /// Builds the supergraph service
+    pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
         let (_config, supergraph_creator) = self.build_common().await?;
 
         Ok(tower::service_fn(move |request| {
@@ -229,10 +239,10 @@ impl<'a> TestHarness<'a> {
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config);
 
-        Ok(tower::service_fn(move |request| {
-            let router = router_creator.make();
-
-            async move { router.oneshot(request).await }
+        Ok(tower::service_fn(move |request: router::Request| {
+            let router = ServiceBuilder::new().service(router_creator.make()).boxed();
+            let span = PropagatingMakeSpan::default().make_span(&request.router_request);
+            async move { router.oneshot(request).await }.instrument(span)
         })
         .boxed_clone())
     }

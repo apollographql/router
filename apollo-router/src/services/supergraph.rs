@@ -50,6 +50,15 @@ impl From<http::Request<graphql::Request>> for Request {
     }
 }
 
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            // .field("supergraph_request", &self.supergraph_request)
+            .field("context", &self.context)
+            .finish()
+    }
+}
+
 #[buildstructor::buildstructor]
 impl Request {
     /// This is the constructor (or builder) to use when constructing a real Request.

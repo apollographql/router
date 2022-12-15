@@ -398,7 +398,10 @@ mod tests {
                 .status(StatusCode::BAD_REQUEST)
                 .body(
                     serde_json::to_string(&Response {
-                        errors: vec![Error::builder().message("This went wrong").build()],
+                        errors: vec![Error::builder()
+                            .message("This went wrong")
+                            .extension_code("FETCH_ERROR")
+                            .build()],
                         ..Response::default()
                     })
                     .expect("always valid")

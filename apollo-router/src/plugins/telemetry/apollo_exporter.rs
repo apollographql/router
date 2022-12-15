@@ -35,6 +35,10 @@ const DEFAULT_QUEUE_SIZE: usize = 65_536;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
 pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
+// Set to 90 seconds to err on the side of caution. This + our backoffs and attemps
+// should be more than enough to make sure the reports are sent,
+// while preventing potential hangs.
+pub(crate) const HTTP_CLIENT_TIMEOUT_DURATION: Duration = Duration::from_secs(90);
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 #[derive(thiserror::Error, Debug)]
@@ -90,7 +94,7 @@ impl Default for Sender {
 pub(crate) struct ApolloExporter {
     endpoint: Url,
     apollo_key: String,
-    header: crate::plugins::telemetry::apollo_exporter::proto::ReportHeader,
+    header: proto::reports::ReportHeader,
     client: Client,
     strip_traces: Arc<Mutex<bool>>,
 }
@@ -102,7 +106,7 @@ impl ApolloExporter {
         apollo_graph_ref: &str,
         schema_id: &str,
     ) -> Result<ApolloExporter, BoxError> {
-        let header = crate::plugins::telemetry::apollo_exporter::proto::ReportHeader {
+        let header = proto::reports::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
             hostname: hostname()?,
             agent_version: format!(
@@ -121,7 +125,10 @@ impl ApolloExporter {
         Ok(ApolloExporter {
             endpoint: endpoint.clone(),
             apollo_key: apollo_key.to_string(),
-            client: reqwest::Client::default(),
+            client: reqwest::Client::builder()
+                .timeout(HTTP_CLIENT_TIMEOUT_DURATION)
+                .build()
+                .map_err(BoxError::from)?,
             header,
             strip_traces: Default::default(),
         })
@@ -182,7 +189,6 @@ impl ApolloExporter {
             .finish()
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         let mut backoff = Duration::from_millis(0);
-
         let req = self
             .client
             .post(self.endpoint.clone())
@@ -256,6 +262,7 @@ impl ApolloExporter {
                     }
                 }
                 Err(e) => {
+                    println!("Got {}", e);
                     // TODO: Ultimately need more sophisticated handling here. For example
                     // a redirect should not be treated the same way as a connect or a
                     // type builder error...
@@ -295,8 +302,10 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
 
 #[allow(unreachable_pub)]
 pub(crate) mod proto {
-    #![allow(clippy::derive_partial_eq_without_eq)]
-    tonic::include_proto!("report");
+    pub(crate) mod reports {
+        #![allow(clippy::derive_partial_eq_without_eq)]
+        tonic::include_proto!("reports");
+    }
 }
 
 /// Reporting Error type

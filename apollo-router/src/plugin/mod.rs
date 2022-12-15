@@ -182,6 +182,8 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// This function is EXPERIMENTAL and its signature is subject to change.
+    ///
     /// This service runs at the very beginning and very end of the request lifecycle.
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.

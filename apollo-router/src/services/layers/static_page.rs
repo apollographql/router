@@ -29,7 +29,7 @@ use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
 use crate::Configuration;
 
-/// [`Layer`] for APQ implementation.
+/// [`Layer`] That serves Static pages such as Homepage and Sandbox.
 #[derive(Clone)]
 pub(crate) struct StaticPageLayer {
     static_page: Option<String>,
