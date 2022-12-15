@@ -1,8 +1,15 @@
 use std::path::Path;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use futures::channel::mpsc;
 use futures::prelude::*;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
+use notify::event::ModifyKind;
+use notify::Config;
+use notify::EventKind;
+use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
 
@@ -16,17 +23,36 @@ use notify::Watcher;
 /// returns: impl Stream<Item=()>
 ///
 pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
+    watch_with_duration(path, Duration::from_secs(3))
+}
+
+fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()> {
+    // Due to the vagaries of file watching across multiple platforms, instead of watching the
+    // supplied path (file), we are going to watch the parent (directory) of the path.
+    let mut directory = PathBuf::from(path);
+    let watched_path = directory.clone();
+    directory.pop();
+
     let (mut watch_sender, watch_receiver) = mpsc::channel(1);
-    let mut watcher =
-        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
+    // We can't use the recommended watcher, because there's just too much variation across
+    // platforms and file systems. We use the Poll Watcher, which is implemented consistently
+    // across all platforms. Less reactive than other mechanisms, but at least it's predictable
+    // across all environments. We compare contents as well, which reduces false positives with
+    // some additional processing burden.
+    let config = Config::default()
+        .with_poll_interval(duration)
+        .with_compare_contents(true);
+    let mut watcher = PollWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| match res {
             Ok(event) => {
-                // We are only interested in  modify events.
-                // We don't want to lose events and a slow consumer could make us
-                // miss an event notification without a re-send strategy.
-                // If we can't send the event because the channel is full, wait
-                // for a short while and try again. Otherwise, we will panic
-                // because it's a non-recoverable error.
-                if let notify::event::EventKind::Modify(_) = event.kind {
+                // The two kinds of events of interest to use are writes to the metadata of a
+                // watched file and changes to the data of a watched file
+                if matches!(
+                    event.kind,
+                    EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
+                        | EventKind::Modify(ModifyKind::Data(DataChange::Any))
+                ) && event.paths.contains(&watched_path)
+                {
                     loop {
                         match watch_sender.try_send(()) {
                             Ok(_) => break,
@@ -43,14 +69,28 @@ pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
                             }
                         }
                     }
+                    // }
                 }
             }
-            Err(e) => eprintln!("event error: {:?}", e),
-        })
-        .unwrap_or_else(|_| panic!("could not create watch on: {:?}", path));
+            Err(e) => tracing::error!("event error: {:?}", e),
+        },
+        config,
+    )
+    .unwrap_or_else(|_| panic!("could not create watch on: {:?}", directory));
+    /*
+    tracing::info!(
+        "Default config: interval: {:?}, compare: {}",
+        Config::default().poll_interval(),
+        Config::default().compare_contents()
+    );
+    let config = Config::default()
+        .with_poll_interval(Duration::from_secs(3))
+        .with_compare_contents(true);
+    watcher.configure(config).expect("configuring watcher");
+    */
     watcher
-        .watch(path, RecursiveMode::NonRecursive)
-        .unwrap_or_else(|_| panic!("could not watch: {:?}", path));
+        .watch(&directory, RecursiveMode::NonRecursive)
+        .unwrap_or_else(|_| panic!("could not watch: {:?}", directory));
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
@@ -59,7 +99,7 @@ pub(crate) fn watch(path: &Path) -> impl Stream<Item = ()> {
             // This exists to give the stream ownership of the hotwatcher.
             // Without it hotwatch will get dropped and the stream will terminate.
             // This code never actually gets run.
-            //The ideal would be that hotwatch implements a stream and
+            // The ideal would be that hotwatch implements a stream and
             // therefore we don't need this hackery.
             drop(watcher);
         }))
@@ -82,15 +122,15 @@ pub(crate) mod tests {
     #[test(tokio::test)]
     async fn basic_watch() {
         let (path, mut file) = create_temp_file();
-        let mut watch = watch(&path);
+        let mut watch = watch_with_duration(&path, Duration::from_millis(100));
         // This test can be very racy. Without synchronisation, all
         // we can hope is that if we wait long enough between each
         // write/flush then the future will become ready.
         // Signal telling us we are ready
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "Some data").await;
+        write_and_flush(&mut file, "Some data 1").await;
         assert!(futures::poll!(watch.next()).is_ready());
-        write_and_flush(&mut file, "Some data").await;
+        write_and_flush(&mut file, "Some data 2").await;
         assert!(futures::poll!(watch.next()).is_ready())
     }
 
@@ -107,6 +147,6 @@ pub(crate) mod tests {
         file.set_len(0).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();
-        tokio::time::sleep(Duration::from_millis(500)).await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
 }
