@@ -108,7 +108,7 @@ mod tests {
                         })
                         .boxed()
                 })
-                .build()
+                .build_supergraph()
                 .await
                 .unwrap()
                 .oneshot(supergraph::Request::canned_builder().build().unwrap())

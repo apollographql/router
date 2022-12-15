@@ -12,6 +12,7 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
+pub type Body = hyper::Body;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -20,14 +21,14 @@ assert_impl_all!(Request: Send);
 #[non_exhaustive]
 pub struct Request {
     /// Original request to the Router.
-    pub router_request: http::Request<hyper::Body>,
+    pub router_request: http::Request<Body>,
 
     /// Context for extension
     pub context: Context,
 }
 
-impl From<http::Request<hyper::Body>> for Request {
-    fn from(router_request: http::Request<hyper::Body>) -> Self {
+impl From<http::Request<Body>> for Request {
+    fn from(router_request: http::Request<Body>) -> Self {
         Self {
             router_request,
             context: Context::new(),
@@ -76,13 +77,11 @@ impl TryFrom<supergraph::Request> for Request {
                 .parse()
                 .map_err(ParseError::InvalidUri)?;
 
-            http::Request::from_parts(parts, hyper::Body::empty())
+            http::Request::from_parts(parts, Body::empty())
         } else {
             http::Request::from_parts(
                 parts,
-                hyper::Body::from(
-                    serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
-                ),
+                Body::from(serde_json::to_vec(&request).map_err(ParseError::SerializationError)?),
             )
         };
         Ok(Self {
@@ -95,12 +94,12 @@ impl TryFrom<supergraph::Request> for Request {
 assert_impl_all!(Response: Send);
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<hyper::Body>,
+    pub response: http::Response<Body>,
     pub context: Context,
 }
 
-impl From<http::Response<hyper::Body>> for Response {
-    fn from(response: http::Response<hyper::Body>) -> Self {
+impl From<http::Response<Body>> for Response {
+    fn from(response: http::Response<Body>) -> Self {
         Self {
             response,
             context: Context::new(),
@@ -115,7 +114,7 @@ impl Response {
 
     pub fn map<F>(self, f: F) -> Response
     where
-        F: FnOnce(hyper::Body) -> hyper::Body,
+        F: FnOnce(Body) -> Body,
     {
         Response {
             context: self.context,
@@ -186,7 +185,7 @@ impl Response {
 //             .clone();
 //         assert_eq!(
 //             request.supergraph_request.body(),
-//             &hyper::Body::builder()
+//             &Body::builder()
 //                 .variables(variables)
 //                 .extensions(extensions)
 //                 .operation_name("Default")

@@ -584,7 +584,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -620,7 +620,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -678,7 +678,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -774,7 +774,7 @@ mod tests {
             .unwrap()
             .schema(schema)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -864,7 +864,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -946,7 +946,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -1018,7 +1018,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -1072,7 +1072,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -1173,7 +1173,7 @@ mod tests {
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
             .schema(schema)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -1286,7 +1286,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -1437,7 +1437,7 @@ mod tests {
             .unwrap()
             .schema(schema)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
