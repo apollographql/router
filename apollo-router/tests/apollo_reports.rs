@@ -142,10 +142,15 @@ async fn test_all() {
     })
     .expect("Could not sub in endpoint");
 
-    let _ = tokio::spawn(async move {
+    let (server_shutdown_tx, server_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+
+    tokio::spawn(async move {
         axum::Server::from_tcp(listener)
             .unwrap()
             .serve(app.into_make_service())
+            .with_graceful_shutdown(async {
+                server_shutdown_rx.await.ok();
+            })
             .await
             .expect("could not start axum server")
     });
@@ -167,6 +172,8 @@ async fn test_all() {
     test_client_version(&mut router_service, reports.clone()).await;
     test_send_header(&mut router_service, reports.clone()).await;
     test_send_variable_value(&mut router_service, reports.clone()).await;
+
+    server_shutdown_tx.send(()).unwrap();
 }
 
 async fn non_defer(router_service: &mut BoxService, reports: Arc<Mutex<Vec<Report>>>) {
