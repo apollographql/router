@@ -33,8 +33,8 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
 
 ```bash
-        --apollo-uplink-client-timeout <APOLLO_UPLINK_CLIENT_TIMEOUT>
-            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_CLIENT_TIMEOUT=] [default: 30s]
+        --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>
+            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_TIMEOUT=] [default: 30s]
 ```
 
 It defaults to 30 seconds.

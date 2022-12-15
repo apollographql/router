@@ -212,7 +212,7 @@ pub(crate) struct Opt {
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
     #[clap(long, default_value = "30s", parse(try_from_str = humantime::parse_duration), env)]
-    apollo_uplink_client_timeout: Duration,
+    apollo_uplink_timeout: Duration,
 
     /// Display version and exit.
     #[clap(parse(from_flag), long, short = 'V')]
@@ -497,7 +497,7 @@ impl Executable {
                     apollo_graph_ref,
                     urls: uplink_endpoints,
                     poll_interval: opt.apollo_uplink_poll_interval,
-                    timeout: opt.apollo_uplink_client_timeout
+                    timeout: opt.apollo_uplink_timeout
                 }
             }
             _ => {
