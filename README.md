@@ -70,10 +70,10 @@ SUBCOMMANDS:
 
 [Apollo](https://apollographql.com/) is building software and a graph platform to unify GraphQL across your apps and services. We help you ship faster with:
 
-- [Apollo Studio](https://www.apollographql.com/studio/develop/) – A free, end-to-end platform for managing your GraphQL lifecycle. Track your GraphQL schemas in a hosted registry to create a source of truth for everything in your graph. Studio provides an IDE (Apollo Explorer) so you can explore data, collaborate on queries, observe usage, and safely make schema changes.
-- [Apollo Federation](https://www.apollographql.com/apollo-federation) – The industry-standard open architecture for building a distributed graph. Compose and manage your graphs using [Rover](https://www.apollographql.com/rover/) and then use Apollo Router to query plan and route requests across multiple subgraphs.
-- [Apollo Client](https://www.apollographql.com/apollo-client/) – The most popular GraphQL client for the web. Apollo also builds and maintains [Apollo iOS](https://github.com/apollographql/apollo-ios) and [Apollo Android](https://github.com/apollographql/apollo-android).
-- [Apollo Server](https://www.apollographql.com/docs/apollo-server/) – A production-ready JavaScript GraphQL server that connects to any microservice, API, or database. Compatible with all popular JavaScript frameworks and deployable in serverless environments.
+* [Apollo Studio](https://www.apollographql.com/studio/develop/) – A free, end-to-end platform for managing your GraphQL lifecycle. Track your GraphQL schemas in a hosted registry to create a source of truth for everything in your graph. Studio provides an IDE (Apollo Explorer) so you can explore data, collaborate on queries, observe usage, and safely make schema changes.
+* [Apollo Federation](https://www.apollographql.com/apollo-federation) – The industry-standard open architecture for building a distributed graph. Compose and manage your graphs using [Rover](https://www.apollographql.com/rover/) and then use Apollo Router to query plan and route requests across multiple subgraphs.
+* [Apollo Client](https://www.apollographql.com/apollo-client/) – The most popular GraphQL client for the web. Apollo also builds and maintains [Apollo iOS](https://github.com/apollographql/apollo-ios) and [Apollo Android](https://github.com/apollographql/apollo-android).
+* [Apollo Server](https://www.apollographql.com/docs/apollo-server/) – A production-ready JavaScript GraphQL server that connects to any microservice, API, or database. Compatible with all popular JavaScript frameworks and deployable in serverless environments.
 
 ## Learn how to build with Apollo
 
@@ -91,9 +91,8 @@ architecture decisions and implementation.
 **Safe experimentation:** the router will support all the future work around Federation, so it must allow new ideas and explorations without disturbing existing features. The project is still in movement, we cannot allow it to crystallize too early, while still following the principles of correctness and reliability.
 
 **Usability:** the router must be simple to operate. Prefer extensibility over configuration options, and ensure that the user has enough information to help themselves when things go wrong. For example:
-
-- Common environmental misconfiguration should be detected and surfaced to the user in the form of mitigation steps.
-- User supplied extensions should be observable and flagged when they cause performance issues. Tell the users how much time an extension is consuming per request and why.
+* Common environmental misconfiguration should be detected and surfaced to the user in the form of mitigation steps.
+* User supplied extensions should be observable and flagged when they cause performance issues. Tell the users how much time an extension is consuming per request and why.
 
 ### Architecture
 
