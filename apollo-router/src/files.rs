@@ -69,7 +69,6 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                             }
                         }
                     }
-                    // }
                 }
             }
             Err(e) => tracing::error!("event error: {:?}", e),
@@ -77,17 +76,6 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
         config,
     )
     .unwrap_or_else(|_| panic!("could not create watch on: {:?}", directory));
-    /*
-    tracing::info!(
-        "Default config: interval: {:?}, compare: {}",
-        Config::default().poll_interval(),
-        Config::default().compare_contents()
-    );
-    let config = Config::default()
-        .with_poll_interval(Duration::from_secs(3))
-        .with_compare_contents(true);
-    watcher.configure(config).expect("configuring watcher");
-    */
     watcher
         .watch(&directory, RecursiveMode::NonRecursive)
         .unwrap_or_else(|_| panic!("could not watch: {:?}", directory));
