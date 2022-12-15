@@ -91,7 +91,7 @@ where
         );
         endpoints.insert(
             configuration.health_check.listen.clone(),
-            Endpoint::new(
+            Endpoint::from_router_service(
                 "/health".to_string(),
                 service_fn(move |req: router::Request| {
                     let health = Health {
