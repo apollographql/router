@@ -1,4 +1,3 @@
-// TODO[bryn]: remember to update the exporter
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::Arc;
