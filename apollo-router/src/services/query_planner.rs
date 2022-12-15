@@ -43,14 +43,6 @@ pub(crate) struct Response {
     pub(crate) context: Context,
 }
 
-/// Query, QueryPlan and Introspection data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum QueryPlannerContent {
-    Plan { plan: Arc<QueryPlan> },
-    Introspection { response: Box<graphql::Response> },
-    IntrospectionDisabled,
-}
-
 #[buildstructor::buildstructor]
 impl Response {
     /// This is the constructor (or builder) to use when constructing a real QueryPlannerResponse.
@@ -67,5 +59,38 @@ impl Response {
             context,
             errors,
         }
+    }
+}
+
+/// Query, QueryPlan and Introspection data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) enum QueryPlannerContent {
+    Plan { plan: Arc<QueryPlan> },
+    Introspection { response: Box<graphql::Response> },
+    IntrospectionDisabled,
+}
+
+impl QueryPlannerContent{
+    pub(crate) fn add_apq_hash(&self) -> Option<QueryPlannerContent> {
+        if let &QueryPlannerContent::Plan { plan: query_plan } = &self {
+            let QueryPlan {
+                usage_reporting,
+                root: node,
+                formatted_query_plan,
+                query,
+                options,
+            } = query_plan.as_ref();
+            let node_with_hashes = node.add_apq_hash();
+            return Some(QueryPlannerContent::Plan {
+                plan: Arc::new(QueryPlan {
+                    usage_reporting: usage_reporting.clone(),
+                    root: node_with_hashes,
+                    formatted_query_plan: formatted_query_plan.clone(),
+                    query: query.clone(),
+                    options: options.clone(),
+                })
+            });
+        }
+        None
     }
 }
