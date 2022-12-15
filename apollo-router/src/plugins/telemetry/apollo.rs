@@ -86,6 +86,7 @@ pub(crate) struct Config {
     #[schemars(skip)]
     pub(crate) schema_id: String,
 
+    /// Configuration for batch processing.
     pub(crate) batch_processor: Option<BatchProcessorConfig>,
 }
 

@@ -154,13 +154,13 @@ pub(crate) struct BatchProcessorConfig {
     #[schemars(with = "String", default)]
     /// The delay interval in milliseconds between two consecutive processing
     /// of batches. The default value is 5 seconds.
-    scheduled_delay: Option<Duration>,
+    pub(crate) scheduled_delay: Option<Duration>,
 
     /// The maximum queue size to buffer spans for delayed processing. If the
     /// queue gets full it drops the spans. The default value of is 2048.
     #[schemars(default)]
     #[serde(default)]
-    max_queue_size: Option<usize>,
+    pub(crate) max_queue_size: Option<usize>,
 
     /// The maximum number of spans to process in a single batch. If there are
     /// more than one batch worth of spans then it processes multiple batches
@@ -168,12 +168,12 @@ pub(crate) struct BatchProcessorConfig {
     /// is 512.
     #[schemars(default)]
     #[serde(default)]
-    max_export_batch_size: Option<usize>,
+    pub(crate) max_export_batch_size: Option<usize>,
 
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     /// The maximum duration to export a batch of data.
-    max_export_timeout: Option<Duration>,
+    pub(crate) max_export_timeout: Option<Duration>,
 
     /// Maximum number of concurrent exports
     ///
@@ -182,7 +182,7 @@ pub(crate) struct BatchProcessorConfig {
     /// synchronously on the BatchSpanProcessor task.
     #[schemars(default)]
     #[serde(default)]
-    max_concurrent_exports: Option<usize>,
+    pub(crate) max_concurrent_exports: Option<usize>,
 }
 
 impl From<BatchProcessorConfig> for BatchConfig {

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
 use flate2::Compression;
@@ -34,11 +35,11 @@ use super::apollo::SingleReport;
 const DEFAULT_QUEUE_SIZE: usize = 65_536;
 // Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
 // It's less error prone to set a different value to let us compute traces and metrics
-pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
+pub(crate) const DEFAULT_SCHEDULED_DELAY: Duration = Duration::from_secs(6);
 // Set to 90 seconds to err on the side of caution. This + our backoffs and attemps
 // should be more than enough to make sure the reports are sent,
 // while preventing potential hangs.
-pub(crate) const HTTP_CLIENT_TIMEOUT_DURATION: Duration = Duration::from_secs(90);
+pub(crate) const DEFAULT_TIMEOUT_DURATION: Duration = Duration::from_secs(90);
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 #[derive(thiserror::Error, Debug)]
@@ -92,6 +93,7 @@ impl Default for Sender {
 /// Sending periodically (in the case of metrics).
 #[derive(Clone)]
 pub(crate) struct ApolloExporter {
+    batch_processor_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
@@ -102,6 +104,7 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
+        batch_processor_config: BatchProcessorConfig,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
@@ -124,9 +127,14 @@ impl ApolloExporter {
 
         Ok(ApolloExporter {
             endpoint: endpoint.clone(),
+            batch_processor_config: batch_processor_config.clone(),
             apollo_key: apollo_key.to_string(),
             client: reqwest::Client::builder()
-                .timeout(HTTP_CLIENT_TIMEOUT_DURATION)
+                .timeout(
+                    batch_processor_config
+                        .max_export_timeout
+                        .unwrap_or(DEFAULT_TIMEOUT_DURATION),
+                )
                 .build()
                 .map_err(BoxError::from)?,
             header,
@@ -135,10 +143,18 @@ impl ApolloExporter {
     }
 
     pub(crate) fn start(self) -> Sender {
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(
+            self.batch_processor_config
+                .max_queue_size
+                .unwrap_or(DEFAULT_QUEUE_SIZE),
+        );
         // This is the task that actually sends metrics
+        let interval = self
+            .batch_processor_config
+            .scheduled_delay
+            .unwrap_or(DEFAULT_SCHEDULED_DELAY);
         tokio::spawn(async move {
-            let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
+            let timeout = tokio::time::interval(interval);
             let mut report = Report::default();
 
             tokio::pin!(timeout);
