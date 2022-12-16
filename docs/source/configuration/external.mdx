@@ -36,6 +36,11 @@ sequenceDiagram
     alt has coprocessor
         RouterService->>CoProcessor: HTTP Post
         CoProcessor-->>RouterService: HTTP Post Response
+        alt continue
+            RouterService->>SupergraphService: Continues request
+        else break
+            RouterService-->>Client: Breaks and returns HTTP response
+        end
     else no coprocessor
         RouterService->>SupergraphService: Processes request
     end
@@ -55,6 +60,7 @@ sequenceDiagram
     alt has coprocessor
         RouterService->>CoProcessor: HTTP Post
         CoProcessor-->>RouterService: HTTP Post Response
+        RouterService-->>Client: Returns HTTP response
     else no coprocessor
         RouterService-->>Client: Returns HTTP response
     end

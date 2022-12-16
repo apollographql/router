@@ -10,6 +10,7 @@
     "Federation version support": "/federation-version-support",
     "Configuration": {
       "Overview": "/configuration/overview",
+      "Caching": "/configuration/caching",
       "CORS": "/configuration/cors",
       "CSRF prevention": "/configuration/csrf",
       "External extensibility": "/configuration/external",
