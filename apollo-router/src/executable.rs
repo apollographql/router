@@ -207,7 +207,7 @@ pub(crate) struct Opt {
     apollo_uplink_poll_interval: Duration,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
-    #[clap(long, default_value = "30s", parse(try_from_str = humantime::parse_duration), env)]
+    #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_timeout: Duration,
 
     /// Display version and exit.
