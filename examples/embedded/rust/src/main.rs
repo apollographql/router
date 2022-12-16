@@ -8,7 +8,7 @@ async fn main() -> Result<(), tower::BoxError> {
     let router = TestHarness::builder()
         .schema(include_str!("../../../graphql/supergraph.graphql"))
         .with_subgraph_network_requests()
-        .build()
+        .build_router()
         .await?;
 
     // ...then create a GraphQL request...
@@ -19,19 +19,13 @@ async fn main() -> Result<(), tower::BoxError> {
 
     // ... and run it against the router service!
     let res = router
-        .oneshot(request)
+        .oneshot(request.try_into()?)
         .await?
         .next_response()
         .await
-        .unwrap();
+        .unwrap()?;
 
-    // {
-    //   "data": {
-    //     "me": {
-    //       "name": "Ada Lovelace"
-    //     }
-    //   }
-    // }
-    println!("{}", serde_json::to_string_pretty(&res)?);
+    // {"data":{"me":{"name":"Ada Lovelace"}}}
+    println!("{}", std::str::from_utf8(res.to_vec().as_slice())?);
     Ok(())
 }

@@ -367,18 +367,22 @@ mod tests {
 
     use super::*;
     use crate::axum_factory::tests::init_with_config;
-    use crate::axum_factory::tests::MockSupergraphService;
     use crate::configuration::Sandbox;
     use crate::configuration::Supergraph;
-    use crate::services::transport;
+    use crate::services::router;
+    use crate::services::router_service;
 
     #[tokio::test]
     async fn it_makes_sure_same_listenaddrs_are_accepted() {
         let configuration = Configuration::fake_builder().build().unwrap();
 
-        init_with_config(MockSupergraphService::new(), configuration, MultiMap::new())
-            .await
-            .unwrap();
+        init_with_config(
+            router_service::empty().await,
+            Arc::new(configuration),
+            MultiMap::new(),
+        )
+        .await
+        .unwrap();
     }
 
     #[tokio::test]
@@ -393,24 +397,29 @@ mod tests {
             .build()
             .unwrap();
 
-        let endpoint = service_fn(|_req: transport::Request| async move {
-            Ok::<_, BoxError>(
-                http::Response::builder()
-                    .body("this is a test".to_string().into())
+        let endpoint = service_fn(|req: router::Request| async move {
+            Ok::<_, BoxError>(router::Response {
+                response: http::Response::builder()
+                    .body::<hyper::Body>("this is a test".to_string().into())
                     .unwrap(),
-            )
+                context: req.context,
+            })
         })
         .boxed();
 
         let mut web_endpoints = MultiMap::new();
         web_endpoints.insert(
             SocketAddr::from_str("0.0.0.0:4010").unwrap().into(),
-            Endpoint::new("/".to_string(), endpoint),
+            Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(MockSupergraphService::new(), configuration, web_endpoints)
-            .await
-            .unwrap_err();
+        let error = init_with_config(
+            router_service::empty().await,
+            Arc::new(configuration),
+            web_endpoints,
+        )
+        .await
+        .unwrap_err();
         assert_eq!(
             "tried to bind 127.0.0.1 and 0.0.0.0 on port 4010",
             error.to_string()
@@ -427,22 +436,23 @@ mod tests {
             )
             .build()
             .unwrap();
-        let endpoint = service_fn(|_req: transport::Request| async move {
-            Ok::<_, BoxError>(
-                http::Response::builder()
-                    .body("this is a test".to_string().into())
+        let endpoint = service_fn(|req: router::Request| async move {
+            Ok::<_, BoxError>(router::Response {
+                response: http::Response::builder()
+                    .body::<hyper::Body>("this is a test".to_string().into())
                     .unwrap(),
-            )
+                context: req.context,
+            })
         })
         .boxed();
 
         let mut mm = MultiMap::new();
         mm.insert(
             SocketAddr::from_str("127.0.0.1:4010").unwrap().into(),
-            Endpoint::new("/".to_string(), endpoint),
+            Endpoint::from_router_service("/".to_string(), endpoint),
         );
 
-        let error = init_with_config(MockSupergraphService::new(), configuration, mm)
+        let error = init_with_config(router_service::empty().await, Arc::new(configuration), mm)
             .await
             .unwrap_err();
 

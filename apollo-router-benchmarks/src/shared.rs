@@ -3,6 +3,7 @@
 // in dev mode
 use apollo_router::graphql::Response;
 use apollo_router::plugin::test::MockSubgraph;
+use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::MockedSubgraphs;
 use apollo_router::TestHarness;
@@ -17,23 +18,29 @@ static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
 
 static QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-pub async fn basic_composition_benchmark(mut supergraph_service: supergraph::BoxCloneService) {
+pub async fn basic_composition_benchmark(mut router_service: router::BoxCloneService) {
     let request = supergraph::Request::fake_builder()
         .query(QUERY.to_string())
         .variable("first", 2usize)
         .build()
-        .expect("expecting valid request");
-
-    let response = supergraph_service
-        .ready()
-        .await
-        .unwrap()
-        .call(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
+        .expect("expecting valid request")
+        .try_into()
         .unwrap();
+
+    let response: Response = serde_json::from_slice(
+        &router_service
+            .ready()
+            .await
+            .unwrap()
+            .call(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
 
     assert_eq!(response, *EXPECTED_RESPONSE);
 }
