@@ -1,6 +1,7 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
@@ -68,7 +69,7 @@ pub(crate) struct Config {
 
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     #[serde(default = "default_buffer_size")]
-    pub(crate) buffer_size: usize,
+    pub(crate) buffer_size: NonZeroUsize,
 
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
@@ -110,8 +111,8 @@ const fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
-pub(crate) const fn default_buffer_size() -> usize {
-    10000
+pub(crate) const fn default_buffer_size() -> NonZeroUsize {
+    unsafe { NonZeroUsize::new_unchecked(10000) }
 }
 
 impl Default for Config {
