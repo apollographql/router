@@ -98,7 +98,10 @@ macro_rules! assert_report {
                         ".**.trace_id.value[]" => "[trace_id]",
                         ".**.sent_time_offset" => "[sent_time_offset]",
                         ".**.my_trace_id" => "[my_trace_id]",
-                        ".**.latency_count" => "[latency_count]"
+                        ".**.latency_count" => "[latency_count]",
+                        ".**.cache_latency_count" => "[cache_latency_count]",
+                        ".**.public_cache_ttl_count" => "[public_cache_ttl_count]",
+                        ".**.private_cache_ttl_count" => "[private_cache_ttl_count]",
                     });
                 });
         }
