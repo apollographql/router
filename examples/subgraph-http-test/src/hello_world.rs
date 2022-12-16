@@ -63,7 +63,7 @@ impl Plugin for HelloWorld {
                         .await
                         .unwrap();
 
-                    dbg!("my ip is {my_ip} and the subgraph name is {name}");
+                    tracing::info!("my ip is {} and the subgraph name is {}", &my_ip, &name);
 
                     req.subgraph_request.headers_mut().insert(
                         "x-server-ip",

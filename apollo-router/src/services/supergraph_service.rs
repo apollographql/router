@@ -22,11 +22,13 @@ use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
 use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_http_service::MakeSubgraphHTTPService;
+use super::subgraph_http_service::SubgraphHTTPCreator;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use super::SubgraphService;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
@@ -366,8 +368,32 @@ impl PluggableSupergraphServiceBuilder {
 
         let plugins = Arc::new(self.plugins);
 
+        let http_creator = SubgraphHTTPCreator::new(plugins.clone());
+        let mut all_subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)> = self
+            .schema
+            .subgraphs()
+            .map(|(name, _)| {
+                let service = match plugins
+                    .iter()
+                    .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+                    .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+                {
+                    Some(shaping) => Arc::new(Either::A(shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(name, http_creator.clone()),
+                    ))),
+
+                    None => Arc::new(Either::B(SubgraphService::new(name, http_creator.clone()))),
+                };
+                (name.clone(), service as Arc<dyn MakeSubgraphService>)
+            })
+            .collect::<Vec<_>>();
+
+        all_subgraph_services.extend(self.subgraph_services.into_iter());
+
         let subgraph_creator = Arc::new(SubgraphCreator::new(
-            self.subgraph_services,
+            all_subgraph_services.into_iter().collect(),
+            SubgraphHTTPCreator::new(plugins.clone()),
             plugins.clone(),
         ));
 

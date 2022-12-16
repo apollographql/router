@@ -267,29 +267,21 @@ pub(crate) trait SubgraphHTTPServiceFactory: Clone + Send + Sync + 'static {
         + 'static;
     type Future: Send + 'static;
 
-    fn create(&self, name: &str) -> Option<Self::SubgraphHTTPService>;
+    fn create(&self, name: &str) -> Self::SubgraphHTTPService;
 }
 
 #[derive(Clone)]
 pub(crate) struct SubgraphHTTPCreator {
-    pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphHTTPService>>>,
-
     pub(crate) plugins: Arc<Plugins>,
 }
 
 impl SubgraphHTTPCreator {
-    pub(crate) fn new(
-        services: Vec<(String, Arc<dyn MakeSubgraphHTTPService>)>,
-        plugins: Arc<Plugins>,
-    ) -> Self {
-        SubgraphHTTPCreator {
-            services: Arc::new(services.into_iter().collect()),
-            plugins,
-        }
+    pub(crate) fn new(plugins: Arc<Plugins>) -> Self {
+        SubgraphHTTPCreator { plugins }
     }
 }
 
-/// make new instances of the subgraph service
+/// make new instances of the subgraph http service
 ///
 /// there can be multiple instances of that service executing at any given time
 pub(crate) trait MakeSubgraphHTTPService: Send + Sync + 'static {
@@ -324,13 +316,11 @@ impl SubgraphHTTPServiceFactory for SubgraphHTTPCreator {
             crate::SubgraphHTTPRequest,
         >>::Future;
 
-    fn create(&self, name: &str) -> Option<Self::SubgraphHTTPService> {
-        self.services.get(name).map(|service| {
-            let service = service.make();
-            self.plugins
-                .iter()
-                .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_http_service(name, acc))
-        })
+    fn create(&self, name: &str) -> Self::SubgraphHTTPService {
+        let service = SubgraphHTTPService::new(name).boxed();
+        self.plugins
+            .iter()
+            .rev()
+            .fold(service, |acc, (_, e)| e.subgraph_http_service(name, acc))
     }
 }
