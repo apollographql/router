@@ -37,6 +37,7 @@ use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
+#[cfg(unix)]
 use tokio::io::BufReader;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -1576,19 +1577,19 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&*first).unwrap(),
+            std::str::from_utf8(&first).unwrap(),
             "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":true}\r\n--graphql\r\n"
         );
 
     let second = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&*second).unwrap(),
+            std::str::from_utf8(&second).unwrap(),
         "content-type: application/json\r\n\r\n{\"hasNext\":true,\"incremental\":[{\"data\":{\"other\":\"world\"},\"path\":[]}]}\r\n--graphql\r\n"
         );
 
     let third = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-        std::str::from_utf8(&*third).unwrap(),
+        std::str::from_utf8(&third).unwrap(),
         "content-type: application/json\r\n\r\n{\"hasNext\":false}\r\n--graphql--\r\n"
     );
 
@@ -1639,7 +1640,7 @@ async fn multipart_response_shape_with_one_chunk() -> Result<(), ApolloRouterErr
 
     let first = response.chunk().await.unwrap().unwrap();
     assert_eq!(
-            std::str::from_utf8(&*first).unwrap(),
+            std::str::from_utf8(&first).unwrap(),
             "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"test\":\"hello\"},\"hasNext\":false}\r\n--graphql--\r\n"
         );
 
@@ -1922,31 +1923,7 @@ async fn test_defer_is_not_buffered() {
 
     let (parts, counts): (Vec<_>, Vec<_>) = parts.map(|part| (part, counter.get())).unzip().await;
     let parts = serde_json::Value::Array(parts);
-    assert_eq!(
-        parts,
-        json!([
-            {
-                "data": {
-                    "topProducts": [
-                        {"upc": "1", "name": "Table", "reviews": null},
-                        {"upc": "2", "name": "Couch", "reviews": null}
-                    ]
-                },
-                "errors": [
-                    {
-                        "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}"
-                    },
-                    {
-                        "message": "Subgraph response from 'reviews' was missing key `_entities`",
-                        "path": [ "topProducts", "@" ]
-                    }],
-                "hasNext": true,
-            },
-            {"hasNext": false}
-        ]),
-        "{}",
-        serde_json::to_string(&parts).unwrap()
-    );
+    insta::assert_json_snapshot!(parts);
 
     // Non-regression test for https://github.com/apollographql/router/issues/1572
     //

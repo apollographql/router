@@ -48,6 +48,17 @@ To use Rhai scripts with the Apollo Router, you must do the following:
     * By default, the Apollo Router looks for `main.rhai` in your Rhai script directory.
     * You can override this default with the `main` key (see above).
 
+## Hot reloading
+
+The router will "watch" your "rhai.scripts" directory for changes and prompt an interpreter re-load if changes are detected. Changes are defined as:
+
+ * creating a new file with a ".rhai" suffix
+ * modifying or removing an existing file with a ".rhai" suffix
+
+The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
+
+The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
+
 ## The main file
 
 Your Rhai script's main file defines whichever combination of supported entry point hooks you want to use. Here's a skeleton `main.rhai` file that includes all available hooks and also registers all available [callbacks](#service-callbacks):
@@ -301,4 +312,4 @@ If your router customization needs to do any of these, you can instead create a 
 
 The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
 
-This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/rhai-surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/rhai-surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
+This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.

@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.0.0-rc.7](https://img.shields.io/badge/Version-1.0.0--rc.7-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.3.0](https://img.shields.io/badge/AppVersion-v1.3.0-informational?style=flat-square)
+![Version: 1.0.0-rc.10](https://img.shields.io/badge/Version-1.0.0--rc.10-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.6.0](https://img.shields.io/badge/AppVersion-v1.6.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.7
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.10
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.7
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.7 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.10 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -29,7 +29,7 @@ _See [configuration](#configuration) below._
 See [Customizing the Chart Before Installing](https://helm.sh/docs/intro/using_helm/#customizing-the-chart-before-installing). To see all configurable options with detailed comments, visit the chart's [values.yaml](./values.yaml), or run these configuration commands:
 
 ```console
-helm show values apollographql/router
+helm show values oci://ghcr.io/apollographql/helm-charts/router
 ```
 
 ## Values
@@ -80,6 +80,7 @@ helm show values apollographql/router
 | serviceAccount.name | string | `""` |  |
 | serviceMonitor.enabled | bool | `false` |  |
 | serviceentry.enabled | bool | `false` |  |
+| supergraphFile | string | `nil` |  |
 | tolerations | list | `[]` |  |
 | virtualservice.enabled | bool | `false` |  |
 

@@ -1,11 +1,15 @@
 //! Customization via Rhai.
 
+use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use arc_swap::ArcSwap;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -18,11 +22,15 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
-use opentelemetry::trace::SpanKind;
+use notify::event::ModifyKind;
+use notify::EventKind;
+use notify::RecursiveMode;
+use notify::Watcher;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
 use rhai::serde::to_dynamic;
+use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
@@ -354,12 +362,45 @@ mod router_plugin_mod {
     }
 }
 
-/// Plugin which implements Rhai functionality
-#[derive(Default, Clone)]
-pub(crate) struct Rhai {
+struct EngineBlock {
     ast: AST,
     engine: Arc<Engine>,
     scope: Arc<Mutex<Scope<'static>>>,
+}
+
+impl EngineBlock {
+    fn try_new(
+        scripts: Option<PathBuf>,
+        main: PathBuf,
+        sdl: Arc<String>,
+    ) -> Result<Self, BoxError> {
+        let engine = Arc::new(Rhai::new_rhai_engine(scripts));
+        let ast = engine.compile_file(main)?;
+        let mut scope = Scope::new();
+        scope.push_constant("apollo_sdl", sdl.to_string());
+        scope.push_constant("apollo_start", Instant::now());
+
+        // Run the AST with our scope to put any global variables
+        // defined in scripts into scope.
+        engine.run_ast_with_scope(&mut scope, &ast)?;
+
+        Ok(EngineBlock {
+            ast,
+            engine,
+            scope: Arc::new(Mutex::new(scope)),
+        })
+    }
+}
+
+/// Plugin which implements Rhai functionality
+/// Note: We use ArcSwap here in preference to a shared RwLock. Updates to
+/// the engine block will be infrequent in relation to the accesses of it.
+/// We'd love to use AtomicArc if such a thing existed, but since it doesn't
+/// we'll use ArcSwap to accomplish our goal.
+struct Rhai {
+    block: Arc<ArcSwap<EngineBlock>>,
+    park_flag: Arc<AtomicBool>,
+    watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Configuration for the Rhai Plugin
@@ -375,6 +416,7 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let sdl = init.supergraph_sdl.clone();
         let scripts_path = match init.config.scripts {
             Some(path) => path,
             None => "./rhai".into(),
@@ -386,21 +428,85 @@ impl Plugin for Rhai {
         };
 
         let main = scripts_path.join(&main_file);
-        let sdl = init.supergraph_sdl.clone();
-        let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
-        let ast = engine.compile_file(main)?;
-        let mut scope = Scope::new();
-        scope.push_constant("apollo_sdl", sdl.to_string());
-        scope.push_constant("apollo_start", Instant::now());
 
-        // Run the AST with our scope to put any global variables
-        // defined in scripts into scope.
-        engine.run_ast_with_scope(&mut scope, &ast)?;
+        let watched_path = scripts_path.clone();
+        let watched_main = main.clone();
+        let watched_sdl = sdl.clone();
+
+        let block = Arc::new(ArcSwap::from_pointee(EngineBlock::try_new(
+            Some(scripts_path),
+            main,
+            sdl,
+        )?));
+        let watched_block = block.clone();
+
+        let park_flag = Arc::new(AtomicBool::new(false));
+        let watching_flag = park_flag.clone();
+
+        let watcher_handle = std::thread::spawn(move || {
+            let watching_path = watched_path.clone();
+            let mut watcher =
+                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+                    match res {
+                        Ok(event) => {
+                            // Let's limit the events we are interested in to:
+                            //  - Modified files
+                            //  - Created/Remove files
+                            //  - with suffix "rhai"
+                            if matches!(
+                                event.kind,
+                                EventKind::Modify(ModifyKind::Data(_))
+                                    | EventKind::Create(_)
+                                    | EventKind::Remove(_)
+                            ) {
+                                let mut proceed = false;
+                                for path in event.paths {
+                                    if path.extension().map_or(false, |ext| ext == "rhai") {
+                                        proceed = true;
+                                        break;
+                                    }
+                                }
+
+                                if proceed {
+                                    match EngineBlock::try_new(
+                                        Some(watching_path.clone()),
+                                        watched_main.clone(),
+                                        watched_sdl.clone(),
+                                    ) {
+                                        Ok(eb) => {
+                                            tracing::info!("updating rhai execution engine");
+                                            watched_block.store(Arc::new(eb))
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "could not create new rhai execution engine: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => tracing::error!("rhai watching event error: {:?}", e),
+                    }
+                })
+                .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
+            watcher
+                .watch(&watched_path, RecursiveMode::Recursive)
+                .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
+            // Park the thread until this Rhai instance is dropped (see Drop impl)
+            // We may actually unpark() before this code executes or exit from park() spuriously.
+            // Use the watching_flag to control a loop which waits from the flag to be updated
+            // from Drop.
+            while !watching_flag.load(Ordering::Acquire) {
+                std::thread::park();
+            }
+        });
 
         Ok(Self {
-            ast,
-            engine,
-            scope: Arc::new(Mutex::new(scope)),
+            block,
+            park_flag,
+            watcher_handle: Some(watcher_handle),
         })
     }
 
@@ -415,7 +521,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
-            self.scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -433,7 +539,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
-            self.scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -451,11 +557,21 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
-            self.scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
+    }
+}
+
+impl Drop for Rhai {
+    fn drop(&mut self) {
+        if let Some(wh) = self.watcher_handle.take() {
+            self.park_flag.store(true, Ordering::Release);
+            wh.thread().unpark();
+            wh.join().expect("rhai file watcher thread terminating");
+        }
     }
 }
 
@@ -475,7 +591,7 @@ macro_rules! gen_map_request {
                     tracing::info_span!(
                         "rhai plugin",
                         "rhai service" = stringify!($base::Request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     )
                 }
             }
@@ -485,47 +601,41 @@ macro_rules! gen_map_request {
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
-                        msg: String,
+                        error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
                     {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
+                            .status_code(error_details.status)
                             .context(context)
                             .build()?;
                         Ok(ControlFlow::Break(res))
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
-                    let result: Result<Dynamic, String> = if $callback.is_curried() {
-                        $callback
-                            .call(
-                                &$rhai_service.engine,
-                                &$rhai_service.ast,
-                                (shared_request.clone(),),
-                            )
-                            .map_err(|err| err.to_string())
+                    let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
+                        $callback.call(
+                            &$rhai_service.engine,
+                            &$rhai_service.ast,
+                            (shared_request.clone(),),
+                        )
                     } else {
                         let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service
-                            .engine
-                            .call_fn(
-                                &mut guard,
-                                &$rhai_service.ast,
-                                $callback.fn_name(),
-                                (shared_request.clone(),),
-                            )
-                            .map_err(|err| err.to_string())
+                        $rhai_service.engine.call_fn(
+                            &mut guard,
+                            &$rhai_service.ast,
+                            $callback.fn_name(),
+                            (shared_request.clone(),),
+                        )
                     };
                     if let Err(error) = result {
-                        tracing::error!("map_request callback failed: {error}");
+                        let error_details = process_error(error);
+                        tracing::error!("map_request callback failed: {error_details}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(
-                            request_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                        );
+                        return failure_message(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -546,7 +656,7 @@ macro_rules! gen_map_deferred_request {
                     tracing::info_span!(
                         "rhai plugin",
                         "rhai service" = stringify!($request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     )
                 }
             }
@@ -556,15 +666,14 @@ macro_rules! gen_map_deferred_request {
                     // Let's define a local function to build an error response
                     fn failure_message(
                         context: Context,
-                        msg: String,
-                        status: StatusCode,
+                        error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$response, $request>, BoxError> {
                         let res = $response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
-                            .status_code(status)
+                            .status_code(error_details.status)
                             .context(context)
                             .build()?;
                         Ok(ControlFlow::Break(res))
@@ -574,13 +683,10 @@ macro_rules! gen_map_deferred_request {
 
                     if let Err(error) = result {
                         tracing::error!("map_request callback failed: {error}");
+                        let error_details = process_error(error);
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(
-                            request_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                        );
+                        return failure_message(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -602,46 +708,43 @@ macro_rules! gen_map_response {
                     // the significantly different treatment of errors in different
                     // response types makes this extremely painful. This needs to be
                     // re-visited at some point post GA.
-                    fn failure_message(context: Context, msg: String) -> $base::Response {
+                    fn failure_message(
+                        context: Context,
+                        error_details: ErrorDetails,
+                    ) -> $base::Response {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
+                            .status_code(error_details.status)
                             .context(context)
                             .build()
                             .expect("can't fail to build our error message");
                         res
                     }
                     let shared_response = Shared::new(Mutex::new(Some(response)));
-                    let result: Result<Dynamic, String> = if $callback.is_curried() {
-                        $callback
-                            .call(
-                                &$rhai_service.engine,
-                                &$rhai_service.ast,
-                                (shared_response.clone(),),
-                            )
-                            .map_err(|err| err.to_string())
+                    let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
+                        $callback.call(
+                            &$rhai_service.engine,
+                            &$rhai_service.ast,
+                            (shared_response.clone(),),
+                        )
                     } else {
                         let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service
-                            .engine
-                            .call_fn(
-                                &mut guard,
-                                &$rhai_service.ast,
-                                $callback.fn_name(),
-                                (shared_response.clone(),),
-                            )
-                            .map_err(|err| err.to_string())
+                        $rhai_service.engine.call_fn(
+                            &mut guard,
+                            &$rhai_service.ast,
+                            $callback.fn_name(),
+                            (shared_response.clone(),),
+                        )
                     };
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
+                        let error_details = process_error(error);
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
-                        return failure_message(
-                            response_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                        );
+                        return failure_message(response_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_response.lock().unwrap();
                     let response_opt = guard.take();
@@ -665,15 +768,14 @@ macro_rules! gen_map_deferred_response {
                     // re-visited at some point post GA.
                     fn failure_message(
                         context: Context,
-                        msg: String,
-                        status: StatusCode,
+                        error_details: ErrorDetails,
                     ) -> $response {
                         let res = $response::error_builder()
                             .errors(vec![Error {
-                                message: msg,
+                                message: error_details.message,
                                 ..Default::default()
                             }])
-                            .status_code(status)
+                            .status_code(error_details.status)
                             .context(context)
                             .build()
                             .expect("can't fail to build our error message");
@@ -687,10 +789,14 @@ macro_rules! gen_map_deferred_response {
                     let (first, rest) = stream.into_future().await;
 
                     if first.is_none() {
+                        let error_details = ErrorDetails {
+                            status: StatusCode::INTERNAL_SERVER_ERROR,
+                            message: "rhai execution error: empty response".to_string(),
+                            position: None
+                        };
                         return Ok(failure_message(
                             context,
-                            "rhai execution error: empty response".to_string(),
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            error_details
                         ));
                     }
 
@@ -708,12 +814,12 @@ macro_rules! gen_map_deferred_response {
                         execute(&$rhai_service, &$callback, (shared_response.clone(),));
                     if let Err(error) = result {
                         tracing::error!("map_response callback failed: {error}");
+                        let error_details = process_error(error);
                         let mut guard = shared_response.lock().unwrap();
                         let response_opt = guard.take();
                         return Ok(failure_message(
                             response_opt.unwrap().context,
-                            format!("rhai execution error: '{}'", error),
-                            StatusCode::INTERNAL_SERVER_ERROR,
+                            error_details
                         ));
                     }
 
@@ -769,21 +875,25 @@ macro_rules! gen_map_deferred_response {
     };
 }
 
+#[derive(Default)]
 pub(crate) struct RhaiExecutionResponse {
     context: Context,
     response: http_ext::Response<Response>,
 }
 
+#[derive(Default)]
 pub(crate) struct RhaiExecutionDeferredResponse {
     context: Context,
     response: Response,
 }
 
+#[derive(Default)]
 pub(crate) struct RhaiSupergraphResponse {
     context: Context,
     response: http_ext::Response<Response>,
 }
 
+#[derive(Default)]
 pub(crate) struct RhaiSupergraphDeferredResponse {
     context: Context,
     response: Response,
@@ -956,23 +1066,99 @@ impl ServiceStep {
     }
 }
 
+struct ErrorDetails {
+    status: StatusCode,
+    message: String,
+    position: Option<Position>,
+    // Add support for extension_code ?
+}
+
+impl fmt::Display for ErrorDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.position {
+            Some(pos) => {
+                write!(f, "{}: {}({})", self.status, self.message, pos)
+            }
+            None => {
+                write!(f, "{}: {}", self.status, self.message)
+            }
+        }
+    }
+}
+
+fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
+    let mut error_details = ErrorDetails {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        message: format!("rhai execution error: '{}'", error),
+        position: None,
+    };
+
+    // We only want to process errors raised in functions
+    if let EvalAltResult::ErrorInFunctionCall(..) = &*error {
+        let inner_error = error.unwrap_inner();
+        // We only want to process runtime errors raised in functions
+        if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
+            error_details.position = Some(*pos);
+            // If we have a dynamic map, try to process it
+            if obj.is_map() {
+                // Clone is annoying, but we only have a reference, so...
+                let map = obj.clone().cast::<Map>();
+
+                let mut ed_status: Option<StatusCode> = None;
+                let mut ed_message: Option<String> = None;
+
+                let status_opt = map.get("status");
+                let message_opt = map.get("message");
+
+                // Now we have optional Dynamics
+                // Try to process each independently
+                if let Some(status_dyn) = status_opt {
+                    if let Ok(value) = status_dyn.as_int() {
+                        if let Ok(status) = StatusCode::try_from(value as u16) {
+                            ed_status = Some(status);
+                        }
+                    }
+                }
+
+                if let Some(message_dyn) = message_opt {
+                    let cloned = message_dyn.clone();
+                    if let Ok(value) = cloned.into_string() {
+                        ed_message = Some(value);
+                    }
+                }
+
+                if let Some(status) = ed_status {
+                    // Decide in future if returning a 200 here is ok.
+                    // If it is, we can simply remove this check
+                    if status != StatusCode::OK {
+                        error_details.status = status;
+                    }
+                }
+
+                if let Some(message) = ed_message {
+                    error_details.message = message;
+                }
+            }
+        }
+    }
+    error_details
+}
+
 fn execute(
     rhai_service: &RhaiService,
     callback: &FnPtr,
     args: impl FuncArgs,
-) -> Result<Dynamic, String> {
+) -> Result<Dynamic, Box<EvalAltResult>> {
     if callback.is_curried() {
-        callback
-            .call(&rhai_service.engine, &rhai_service.ast, args)
-            .map_err(|err| err.to_string())
+        callback.call(&rhai_service.engine, &rhai_service.ast, args)
     } else {
         let mut guard = rhai_service.scope.lock().unwrap();
         rhai_service
             .engine
             .call_fn(&mut guard, &rhai_service.ast, callback.fn_name(), args)
-            .map_err(|err| err.to_string())
     }
 }
+
 #[derive(Clone, Debug)]
 pub(crate) struct RhaiService {
     scope: Arc<Mutex<Scope<'static>>>,
@@ -989,27 +1175,35 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
+        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: self.engine.clone(),
-            ast: self.ast.clone(),
+            engine: block.engine.clone(),
+            ast: block.ast.clone(),
         };
         let mut guard = scope.lock().unwrap();
+        // Note: We don't use `process_error()` here, because this code executes in the context of
+        // the pipeline processing. We can't return an HTTP error, we can only return a boxed
+        // service which represents the next stage of the pipeline.
+        // We could have an error pipeline which always returns results, but that's a big
+        // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                self.engine
+                block
+                    .engine
                     .call_fn(
                         &mut guard,
-                        &self.ast,
+                        &block.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                self.engine
-                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
+                block
+                    .engine
+                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1061,6 +1255,22 @@ impl Rhai {
                     Err(_e) => false,
                 }
             })
+            // Register a contains function for Context so that "in" works
+            .register_fn("contains", |x: &mut Context, key: &str| -> bool {
+                x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+            })
+            // Register urlencode/decode functions
+            .register_fn("urlencode", |x: &mut ImmutableString| -> String {
+                urlencoding::encode(x).into_owned()
+            })
+            .register_fn(
+                "urldecode",
+                |x: &mut ImmutableString| -> Result<String, Box<EvalAltResult>> {
+                    Ok(urlencoding::decode(x)
+                        .map_err(|e| e.to_string())?
+                        .into_owned())
+                },
+            )
             .register_fn(
                 "headers_are_available",
                 |_: &mut SharedMut<supergraph::Response>| -> bool { true },
@@ -1094,6 +1304,39 @@ impl Rhai {
                     HeaderName::from_str(key).map_err(|e| e.to_string())?,
                     HeaderValue::from_str(value).map_err(|e| e.to_string())?,
                 );
+                Ok(())
+            })
+            // Register an additional getter which allows us to get multiple values for the same
+            // key.
+            // Note: We can't register this as an indexer, because that would simply override the
+            // existing one, which would break code. When router 2.0 is released, we should replace
+            // the existing indexer_get for HeaderMap with this function and mark it as an
+            // incompatible change.
+            .register_fn("values",
+                |x: &mut HeaderMap, key: &str| -> Result<Array, Box<EvalAltResult>> {
+                    let search_name =
+                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+                    let mut response = Array::new();
+                    for value in x.get_all(search_name).iter() {
+                        response.push(value
+                            .to_str()
+                            .map_err(|e| e.to_string())?
+                            .to_string()
+                            .into())
+                    }
+                    Ok(response)
+                }
+            )
+            // Register an additional setter which allows us to set multiple values for the same
+            // key.
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: Array| {
+                let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+                for v in value {
+                    x.append(
+                        h_key.clone(),
+                        HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+                    );
+                }
                 Ok(())
             })
             // Register a Context indexer so we can get/set context
@@ -1325,11 +1568,21 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{:?}", x)
             })
-            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) });
-
-        register_rhai_interface!(engine, supergraph, execution, subgraph);
-
-        engine
+            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) })
+            // Add query plan getter to execution request
+            .register_get(
+                "query_plan",
+                |obj: &mut SharedMut<execution::Request>| -> String {
+                    obj.with_mut(|request| {
+                        request
+                            .query_plan
+                            .formatted_query_plan
+                            .clone()
+                            .unwrap_or_default()
+                    })
+                },
+            )
+            // Add context getter/setters for deferred responses
             .register_get(
                 "context",
                 |obj: &mut SharedMut<supergraph::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
@@ -1342,9 +1595,7 @@ impl Rhai {
                     obj.with_mut(|response| response.context = context);
                     Ok(())
                 },
-            );
-
-        engine
+            )
             .register_get(
                 "context",
                 |obj: &mut SharedMut<execution::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
@@ -1358,12 +1609,18 @@ impl Rhai {
                     Ok(())
                 },
             );
+        // Add common getter/setters for different types
+        register_rhai_interface!(engine, supergraph, execution, subgraph);
 
         engine
     }
 
     fn ast_has_function(&self, name: &str) -> bool {
-        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
+        self.block
+            .load()
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == name)
     }
 }
 
@@ -1373,6 +1630,7 @@ register_plugin!("apollo", "rhai", Rhai);
 mod tests {
     use std::str::FromStr;
 
+    use rhai::EvalAltResult;
     use serde_json::Value;
     use tower::util::BoxService;
     use tower::Service;
@@ -1383,9 +1641,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::Context;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
+    use crate::SubgraphRequest;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {
@@ -1402,7 +1658,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1453,7 +1709,7 @@ mod tests {
         });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1571,7 +1827,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_access_sdl_constant() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1583,16 +1839,333 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
         // Call our function to make sure we can access the sdl
-        let sdl: String = rhai_instance
+        let sdl: String = block
             .engine
-            .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
+            .call_fn(&mut guard, &block.ast, "get_sdl", ())
             .expect("can get sdl");
         assert_eq!(sdl.as_str(), "");
+    }
+
+    #[test]
+    fn it_provides_helpful_headermap_errors() {
+        let mut engine = Rhai::new_rhai_engine(None);
+        engine.register_fn("new_hm", HeaderMap::new);
+
+        let result = engine.eval::<HeaderMap>(
+            r#"
+    let map = new_hm();
+    map["ümlaut"] = "will fail";
+    map
+"#,
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            *result.unwrap_err(),
+            EvalAltResult::ErrorRuntime(..)
+        ));
+    }
+
+    // There is a lot of repetition in these tests, so I've tried to reduce that with these two
+    // macros. The repetition could probably be reduced further, but ...
+
+    macro_rules! gen_request_test {
+        ($base: ident, $fn_name: literal) => {
+            let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+                .find(|factory| factory.name == "apollo.rhai")
+                .expect("Plugin not found")
+                .create_instance_without_schema(
+                    &Value::from_str(
+                        r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            // Downcast our generic plugin. We know it must be Rhai
+            let it: &dyn std::any::Any = dyn_plugin.as_any();
+            let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+            let block = rhai_instance.block.load();
+
+            // Get a scope to use for our test
+            let scope = block.scope.clone();
+
+            let mut guard = scope.lock().unwrap();
+
+            // We must wrap our canned request in Arc<Mutex<Option<>>> to keep the rhai runtime
+            // happy
+            let request = Arc::new(Mutex::new(Some($base::fake_builder().build())));
+
+            // Call our rhai test function. If it return an error, the test failed.
+            let result: Result<(), Box<rhai::EvalAltResult>> =
+                block
+                    .engine
+                    .call_fn(&mut guard, &block.ast, $fn_name, (request,));
+            result.expect("test failed");
+        };
+    }
+
+    macro_rules! gen_response_test {
+        ($base: ident, $fn_name: literal) => {
+            let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+                .find(|factory| factory.name == "apollo.rhai")
+                .expect("Plugin not found")
+                .create_instance_without_schema(
+                    &Value::from_str(
+                        r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            // Downcast our generic plugin. We know it must be Rhai
+            let it: &dyn std::any::Any = dyn_plugin.as_any();
+            let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+            let block = rhai_instance.block.load();
+
+            // Get a scope to use for our test
+            let scope = block.scope.clone();
+
+            let mut guard = scope.lock().unwrap();
+
+            // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
+            // happy
+            let response = Arc::new(Mutex::new(Some($base::default())));
+
+            // Call our rhai test function. If it return an error, the test failed.
+            let result: Result<(), Box<rhai::EvalAltResult>> =
+                block
+                    .engine
+                    .call_fn(&mut guard, &block.ast, $fn_name, (response,));
+            result.expect("test failed");
+        };
+    }
+
+    #[tokio::test]
+    async fn it_can_process_supergraph_request() {
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Downcast our generic plugin. We know it must be Rhai
+        let it: &dyn std::any::Any = dyn_plugin.as_any();
+        let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+        let block = rhai_instance.block.load();
+
+        // Get a scope to use for our test
+        let scope = block.scope.clone();
+
+        let mut guard = scope.lock().unwrap();
+
+        // We must wrap our canned request in Arc<Mutex<Option<>>> to keep the rhai runtime
+        // happy
+        let request = Arc::new(Mutex::new(Some(
+            SupergraphRequest::canned_builder()
+                .operation_name("canned")
+                .build()
+                .expect("build canned supergraph request"),
+        )));
+
+        // Call our rhai test function. If it return an error, the test failed.
+        let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
+            &mut guard,
+            &block.ast,
+            "process_supergraph_request",
+            (request,),
+        );
+        result.expect("test failed");
+    }
+
+    #[tokio::test]
+    async fn it_can_process_execution_request() {
+        gen_request_test!(ExecutionRequest, "process_execution_request");
+    }
+
+    #[tokio::test]
+    async fn it_can_process_subgraph_request() {
+        gen_request_test!(SubgraphRequest, "process_subgraph_request");
+    }
+
+    #[tokio::test]
+    async fn it_can_process_supergraph_response() {
+        gen_response_test!(RhaiSupergraphResponse, "process_supergraph_response");
+    }
+
+    #[tokio::test]
+    async fn it_can_process_supergraph_deferred_response() {
+        gen_response_test!(
+            RhaiSupergraphDeferredResponse,
+            "process_supergraph_response"
+        );
+    }
+
+    #[tokio::test]
+    async fn it_can_process_execution_response() {
+        gen_response_test!(RhaiExecutionResponse, "process_execution_response");
+    }
+
+    #[tokio::test]
+    async fn it_can_process_execution_deferred_response() {
+        gen_response_test!(RhaiExecutionDeferredResponse, "process_execution_response");
+    }
+
+    #[tokio::test]
+    async fn it_can_process_subgraph_response() {
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Downcast our generic plugin. We know it must be Rhai
+        let it: &dyn std::any::Any = dyn_plugin.as_any();
+        let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+        let block = rhai_instance.block.load();
+        // Get a scope to use for our test
+        let scope = block.scope.clone();
+
+        let mut guard = scope.lock().unwrap();
+
+        // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
+        // happy
+        let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
+
+        // Call our rhai test function. If it return an error, the test failed.
+        let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
+            &mut guard,
+            &block.ast,
+            "process_subgraph_response",
+            (response,),
+        );
+        result.expect("test failed");
+    }
+
+    #[test]
+    fn it_can_urlencode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let encoded: String = engine
+            .eval(r#"urlencode("This has an ümlaut in it.")"#)
+            .expect("can encode string");
+        assert_eq!(encoded, "This%20has%20an%20%C3%BCmlaut%20in%20it.");
+    }
+
+    #[test]
+    fn it_can_urldecode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let decoded: String = engine
+            .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
+            .expect("can decode string");
+        assert_eq!(decoded, "This has an ümlaut in it.");
+    }
+
+    async fn base_process_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult>> {
+        let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
+            .find(|factory| factory.name == "apollo.rhai")
+            .expect("Plugin not found")
+            .create_instance_without_schema(
+                &Value::from_str(
+                    r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Downcast our generic plugin. We know it must be Rhai
+        let it: &dyn std::any::Any = dyn_plugin.as_any();
+        let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
+
+        let block = rhai_instance.block.load();
+
+        // Get a scope to use for our test
+        let scope = block.scope.clone();
+
+        let mut guard = scope.lock().unwrap();
+
+        // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
+        // happy
+        let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
+
+        // Call our rhai test function. If it doesn't return an error, the test failed.
+        block
+            .engine
+            .call_fn(&mut guard, &block.ast, fn_name, (response,))
+    }
+
+    #[tokio::test]
+    async fn it_can_process_om_subgraph_forbidden() {
+        if let Err(error) = base_process_function("process_subgraph_response_om_forbidden").await {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
+            assert_eq!(processed_error.message, "I have raised a 403");
+        } else {
+            // Test failed
+            panic!("error processed incorrectly");
+        }
+    }
+
+    #[tokio::test]
+    async fn it_can_process_string_subgraph_forbidden() {
+        if let Err(error) = base_process_function("process_subgraph_response_string").await {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
+        } else {
+            // Test failed
+            panic!("error processed incorrectly");
+        }
+    }
+
+    #[tokio::test]
+    async fn it_cannot_process_ok_subgraph_forbidden() {
+        if let Err(error) = base_process_function("process_subgraph_response_om_ok").await {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(processed_error.message, "I have raised a 200");
+        } else {
+            // Test failed
+            panic!("error processed incorrectly");
+        }
+    }
+
+    #[tokio::test]
+    async fn it_cannot_process_om_subgraph_missing_message() {
+        if let Err(error) =
+            base_process_function("process_subgraph_response_om_missing_message").await
+        {
+            let processed_error = process_error(error);
+            assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
+        } else {
+            // Test failed
+            panic!("error processed incorrectly");
+        }
     }
 }

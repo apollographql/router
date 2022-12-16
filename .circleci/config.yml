@@ -56,6 +56,9 @@ parameters:
     type: string
     # update this as new versions of jaeger become available
     default: "1.33.0"
+  protoc_version:
+    type: string
+    default: "21.8"
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -85,6 +88,12 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   linux_arm_install_baseline:
     steps:
       - linux_install_baseline
@@ -94,6 +103,12 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   macos_install_baseline:
     steps:
       - run:
@@ -103,6 +118,12 @@ commands:
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
       - install_minimal_rust
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   windows_install_baseline:
     steps:
       - run:
@@ -112,6 +133,19 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
+      - run:
+          name: Install protoc
+          shell: bash.exe
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Add protoc to env
+          command: |
+            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
+            $newpath = "$oldpath;$HOME/.local/bin"
+            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
   # This job makes sure everything is ready to run integration tests
   macos_prepare_env:
@@ -175,6 +209,11 @@ commands:
           command: |
             set -e -o pipefail
             cargo about --version || cargo install cargo-about
+      - run:
+          name: Install cargo edit if not present
+          command: |
+            set -e -o pipefail
+            cargo edit --version || cargo install cargo-edit
       - save_cache:
           key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
           paths:
@@ -380,6 +419,7 @@ jobs:
             equal: [*macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
+            - macos_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -401,13 +441,33 @@ jobs:
           condition:
             or:
               - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
             - install_minimal_rust
+            - linux_amd_install_baseline
+            - run:
+                command: >
+                  cargo xtask dist
+            - run:
+                command: >
+                  mkdir -p artifacts
+            - run:
+                command: >
+                  cargo xtask package --output artifacts/
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  sudo apt-get update
+            - install_minimal_rust
+            - linux_arm_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -441,6 +501,7 @@ jobs:
                   [net]
                   git-fetch-with-cli = true
                   "@
+            - windows_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -486,16 +547,17 @@ jobs:
           name: Docker build
           command: |
             ROUTER_TAG=ghcr.io/apollographql/router
-            # Build debug image
-            docker build --build-arg ROUTER_RELEASE=${VERSION} --build-arg DEBUG_IMAGE=":debug" -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
-            # Build release image
-            docker build --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
+            # Create a multi-arch builder which works properly under qemu
+            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+            docker context create buildx-build
+            docker buildx create --driver docker-container --use buildx-build
+            docker buildx inspect --bootstrap
             # Note: GH Token owned by apollo-bot2, no expire
             echo ${GITHUB_OCI_TOKEN} | docker login ghcr.io -u apollo-bot2 --password-stdin
-            # Push debug image
-            docker push ${ROUTER_TAG}:${VERSION}-debug
-            # Push release image
-            docker push ${ROUTER_TAG}:${VERSION}
+            # Build and push debug image
+            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION}-debug .
+            # Build and push release image
+            docker buildx build --platform linux/amd64,linux/arm64 --push --build-arg ROUTER_RELEASE=${VERSION} -f dockerfiles/Dockerfile.router -t ${ROUTER_TAG}:${VERSION} .
       - run:
           name: Helm build
           command: |
@@ -509,6 +571,23 @@ jobs:
             echo ${GITHUB_OCI_TOKEN} | helm registry login -u apollo-bot2 --password-stdin ghcr.io
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
+
+  prepare_release:
+    parameters:
+      release_type:
+        type: string
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - checkout
+      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools:
+          os: linux_amd
+      - run:
+          command: >
+            cargo xtask release prepare << parameters.release_type >>
 
 workflows:
   ci_checks:
@@ -538,6 +617,46 @@ workflows:
             parameters:
               platform:
                 [macos_test, windows_test, amd_linux_test, arm_linux_test]
+      - prepare_major_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_minor_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_patch_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_release:
+          name: "Prepare major release"
+          release_type: "major"
+          requires:
+            - prepare_major_release_approval
+      - prepare_release:
+          name: "Prepare minor release"
+          release_type: "minor"
+          requires:
+            - prepare_minor_release_approval
+      - prepare_release:
+          name: "Prepare patch release"
+          release_type: "patch"
+          requires:
+            - prepare_patch_release_approval
+
   release:
     jobs:
       - build_release:

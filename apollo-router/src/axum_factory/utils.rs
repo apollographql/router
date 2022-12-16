@@ -25,7 +25,6 @@ use mediatype::MediaType;
 use mediatype::MediaTypeList;
 use mediatype::ReadParams;
 use opentelemetry::global;
-use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::TraceContextExt;
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
@@ -102,20 +101,27 @@ pub(super) async fn decompress_request_body(
                 "deflate" => decode_body!(ZlibDecoder, "cannot decompress (deflate) request body"),
                 "identity" => Ok(next.run(Request::from_parts(parts, body)).await),
                 unknown => {
-                    tracing::error!("unknown content-encoding header value {:?}", unknown);
-                    Err((
-                        StatusCode::BAD_REQUEST,
-                        format!("unknown content-encoding header value: {unknown:?}"),
-                    )
-                        .into_response())
+                    let message = format!("unknown content-encoding header value {:?}", unknown);
+                    tracing::error!(message);
+                    ::tracing::error!(
+                       monotonic_counter.apollo_router_http_requests_total = 1u64,
+                       status = %400u16,
+                       error = %message,
+                    );
+
+                    Err((StatusCode::BAD_REQUEST, message).into_response())
                 }
             },
 
-            Err(err) => Err((
-                StatusCode::BAD_REQUEST,
-                format!("cannot read content-encoding header: {err}"),
-            )
-                .into_response()),
+            Err(err) => {
+                let message = format!("cannot read content-encoding header: {err}");
+                ::tracing::error!(
+                   monotonic_counter.apollo_router_http_requests_total = 1u64,
+                   status = %400u16,
+                   error = %message,
+                );
+                Err((StatusCode::BAD_REQUEST, message).into_response())
+            }
         },
         None => Ok(next.run(Request::from_parts(parts, body)).await),
     }
@@ -127,18 +133,23 @@ pub(super) async fn check_accept_header(
 ) -> Result<Response, Response> {
     let ask_for_html = req.method() == Method::GET && prefers_html(req.headers());
 
-    if req.headers().get(ACCEPT).is_some()
-        && (accepts_wildcard(req.headers())
-            || ask_for_html
-            || accepts_multipart(req.headers())
-            || accepts_json(req.headers()))
+    if accepts_wildcard(req.headers())
+        || ask_for_html
+        || accepts_multipart(req.headers())
+        || accepts_json(req.headers())
     {
         Ok(next.run(req).await)
     } else {
+        ::tracing::error!(
+            monotonic_counter.apollo_router_http_requests_total = 1u64,
+            status = %406u16,
+            error = "accept header is wrong",
+        );
+
         Err((
             StatusCode::NOT_ACCEPTABLE,
             format!(
-                r#"'accept' header is mandatory and can't be different than {:?}, {:?} or {:?}"#,
+                r#"'accept' header can't be different than \"*/*\", {:?}, {:?} or {:?}"#,
                 APPLICATION_JSON_HEADER_VALUE,
                 GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                 MULTIPART_DEFER_CONTENT_TYPE
@@ -239,7 +250,9 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
         // If there was no span from the request then it will default to the NOOP span.
         // Attaching the NOOP span has the effect of preventing further tracing.
-        if context.span().span_context().is_valid() {
+        if context.span().span_context().is_valid()
+            || context.span().span_context().trace_id() != opentelemetry::trace::TraceId::INVALID
+        {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
             tracing::span!(
@@ -248,7 +261,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
-                "otel.kind" = %SpanKind::Server,
+                "otel.kind" = "SERVER",
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty,
                 "trace_id" = tracing::field::Empty
@@ -261,7 +274,7 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
-                "otel.kind" = %SpanKind::Server,
+                "otel.kind" = "SERVER",
                 "otel.status_code" = tracing::field::Empty,
                 "apollo_private.duration_ns" = tracing::field::Empty,
                 "trace_id" = tracing::field::Empty

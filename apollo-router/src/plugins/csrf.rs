@@ -118,7 +118,9 @@ impl Plugin for Csrf {
                                 or provide one of the following headers: {}", 
                                 NON_PREFLIGHTED_CONTENT_TYPES.join(", "),
                                 required_headers.join(", ")
-                            )).build();
+                            ))
+                            .extension_code("CSRF_ERROR")
+                            .build();
                         let res = SupergraphResponse::builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)
@@ -213,14 +215,14 @@ mod csrf_tests {
     #[tokio::test]
     async fn plugin_registered() {
         crate::plugin::plugins()
-            .get("apollo.csrf")
+            .find(|factory| factory.name == "apollo.csrf")
             .expect("Plugin not found")
             .create_instance_without_schema(&serde_json::json!({ "unsafe_disabled": true }))
             .await
             .unwrap();
 
         crate::plugin::plugins()
-            .get("apollo.csrf")
+            .find(|factory| factory.name == "apollo.csrf")
             .expect("Plugin not found")
             .create_instance_without_schema(&serde_json::json!({}))
             .await

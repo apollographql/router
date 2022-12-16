@@ -1,32 +1,34 @@
 //! Tracing configuration for apollo telemetry.
 // With regards to ELv2 licensing, this entire file is license key functionality
+use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
+use crate::plugins::telemetry::apollo_exporter::proto::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::spaceport::Trace;
 
 impl TracingConfigurator for Config {
-    fn apply(&self, builder: Builder, trace_config: &config::Trace) -> Result<Builder, BoxError> {
+    fn apply(&self, builder: Builder, _trace_config: &config::Trace) -> Result<Builder, BoxError> {
         tracing::debug!("configuring Apollo tracing");
         Ok(match self {
             Config {
-                endpoint: Some(endpoint),
+                endpoint,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
                 buffer_size,
                 field_level_instrumentation_sampler,
+                expose_trace_id,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
 
                 let exporter = apollo_telemetry::Exporter::builder()
-                    .trace_config(trace_config.clone())
+                    .expose_trace_id_config(expose_trace_id.clone())
                     .endpoint(endpoint.clone())
                     .apollo_key(key)
                     .apollo_graph_ref(reference)
@@ -34,7 +36,17 @@ impl TracingConfigurator for Config {
                     .buffer_size(*buffer_size)
                     .and_field_execution_sampler(field_level_instrumentation_sampler.clone())
                     .build()?;
-                builder.with_batch_exporter(exporter, opentelemetry::runtime::Tokio)
+                builder.with_span_processor(
+                    BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                        .with_batch_config(
+                            self.batch_processor
+                                .as_ref()
+                                .cloned()
+                                .unwrap_or_default()
+                                .into(),
+                        )
+                        .build(),
+                )
             }
             _ => builder,
         })

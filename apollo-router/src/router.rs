@@ -65,7 +65,13 @@ async fn make_transport_service<RF>(
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
 
-    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
+    let apq = APQLayer::with_cache(
+        DeduplicatingCache::from_configuration(
+            &configuration.supergraph.apq.experimental_cache,
+            "APQ",
+        )
+        .await,
+    );
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
     // FIXME: how should
@@ -107,7 +113,7 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not create the HTTP pipeline: {0}
+    /// could not create router: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
@@ -162,6 +168,9 @@ pub enum SchemaSource {
 
         /// The duration between polling
         poll_interval: Duration,
+
+        /// The HTTP client timeout for each poll
+        timeout: Duration,
     },
 }
 
@@ -221,20 +230,27 @@ impl SchemaSource {
                 apollo_graph_ref,
                 urls,
                 poll_interval,
+                timeout,
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
-                        })
+                crate::uplink::stream_supergraph(
+                    apollo_key,
+                    apollo_graph_ref,
+                    urls,
+                    poll_interval,
+                    timeout,
+                )
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
+                        Err(e) => {
+                            tracing::error!("{}", e);
+                            None
+                        }
                     })
-                    .boxed()
+                })
+                .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
@@ -743,10 +759,18 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn config_dev_mode_without_file() {
-        let mut stream =
-            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
-                .into_stream()
-                .boxed();
+        let telemetry_configuration = serde_json::json!({
+            "telemetry": {}
+        });
+        let mut stream = ConfigurationSource::from(
+            Configuration::builder()
+                .apollo_plugin("telemetry", telemetry_configuration)
+                .dev(true)
+                .build()
+                .unwrap(),
+        )
+        .into_stream()
+        .boxed();
 
         let cfg = match stream.next().await.unwrap() {
             UpdateConfiguration(configuration) => configuration,

@@ -1,26 +1,18 @@
 use std::collections::HashMap;
 
-use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::error::Error as SubgraphError;
+use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
 use crate::SubgraphResponse;
 
-#[allow(clippy::field_reassign_with_default)]
-static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
-    let mut error: SubgraphError = Default::default();
-
-    error.message = "Subgraph errors redacted".to_string();
-
-    vec![error]
-});
+static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
@@ -57,7 +49,10 @@ impl Plugin for IncludeSubgraphErrors {
                 .map_response(move |mut response: SubgraphResponse| {
                     if !response.response.body().errors.is_empty() {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        response.response.body_mut().errors = REDACTED_ERROR_MESSAGE.clone();
+                        for error in response.response.body_mut().errors.iter_mut() {
+                            error.message = REDACTED_ERROR_MESSAGE.to_string();
+                            error.extensions = Object::default();
+                        }
                     }
                     response
                 })
@@ -82,6 +77,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use once_cell::sync::Lazy;
     use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
@@ -102,7 +98,7 @@ mod test {
         serde_json::from_str(r#"{"data": {"topProducts":null},
         "errors":[{"message":
         "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
-        "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
+        "locations": [], "path": null, "extensions": { "test": "value", "code": "FETCH_ERROR" }}]}"#).unwrap()
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
@@ -202,7 +198,7 @@ mod test {
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         // Build a redacting plugin
         crate::plugin::plugins()
-            .get("apollo.include_subgraph_errors")
+            .find(|factory| factory.name == "apollo.include_subgraph_errors")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -214,7 +210,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+        execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -222,7 +218,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": false })).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -230,7 +226,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({})).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -238,7 +234,7 @@ mod test {
         // Build a redacting plugin
         let plugin = get_redacting_plugin(&serde_json::json!({ "all": true })).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -247,7 +243,7 @@ mod test {
         let plugin =
             get_redacting_plugin(&serde_json::json!({ "subgraphs": {"products": true }})).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -256,7 +252,7 @@ mod test {
         let plugin =
             get_redacting_plugin(&serde_json::json!({ "subgraphs": {"reviews": true }})).await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -267,7 +263,7 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -278,7 +274,7 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*REDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &REDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -289,7 +285,7 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_PRODUCT_QUERY, &*UNREDACTED_PRODUCT_RESPONSE, router).await;
+        execute_router_test(ERROR_PRODUCT_QUERY, &UNREDACTED_PRODUCT_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -300,6 +296,6 @@ mod test {
         )
         .await;
         let router = build_mock_router(plugin).await;
-        execute_router_test(ERROR_ACCOUNT_QUERY, &*REDACTED_ACCOUNT_RESPONSE, router).await;
+        execute_router_test(ERROR_ACCOUNT_QUERY, &REDACTED_ACCOUNT_RESPONSE, router).await;
     }
 }

@@ -6,11 +6,11 @@ import ElasticNotice from '../../shared/elastic-notice.mdx';
 
 > More details about Apollo Router images are available [on GitHub](https://github.com/apollographql/router/pkgs/container/router).
 
-Each release of the Apollo Router includes both default and debug images. Each image for a release contains the same build. Debug images additionally contain a "busybox" to help with container debugging.
+Each release of the Apollo Router includes both default and debug images. Each image for a release contains the same build. Debug images have helpful debugging utilities installed and run the router under the control of heaptrack (https://github.com/KDE/heaptrack).
 
 <ElasticNotice />
 
-Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v0.1.0-preview.1`):
+Here's a basic example of running a router image with Docker (make sure to replace `<image version>` with whichever version you want to use, such as `v1.4.0`):
 
 ```bash title="Docker"
 docker run -p 4000:4000 \
@@ -35,4 +35,4 @@ For examples of using router images in specific environments, see the guides for
 
 ## Image build
 
-Apollo Router images are based on [distroless](https://github.com/GoogleContainerTools/distroless), which is designed to provide constrained, secure, and small images.
+Apollo Router images are based on [debian:bullseye-slim](https://hub.docker.com/_/debian/), which is designed to provide constrained, secure, and small images.
