@@ -99,6 +99,9 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) cors: Cors,
 
+    #[serde(default)]
+    pub(crate) tls: Tls,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -136,6 +139,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
+            #[serde(default)]
+            tls: Tls,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -148,6 +153,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
+            .tls(ad_hoc.tls)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -179,6 +185,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
             server: server.unwrap_or_default(),
@@ -193,6 +200,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -306,6 +314,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
             server: server.unwrap_or_default(),
@@ -320,6 +329,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -598,6 +608,73 @@ impl Default for InMemoryCache {
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<String>,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Tls {
+    #[serde(default)]
+    pub(crate) subgraphs: Option<Subgraph>,
+}
+
+#[buildstructor::buildstructor]
+impl Tls {
+    #[builder]
+    pub(crate) fn new(subgraphs: Option<Subgraph>) -> Self {
+        Self { subgraphs }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Tls {
+    #[builder]
+    pub(crate) fn fake_new(subgraphs: Option<Subgraph>) -> Self {
+        Self { subgraphs }
+    }
+}
+
+impl Default for Tls {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Subgraph {
+    /// Path to a list of certificate authorities in PEM format
+    #[serde(default)]
+    pub(crate) certificate_authorities_path: Option<String>,
+}
+
+#[buildstructor::buildstructor]
+impl Subgraph {
+    #[builder]
+    pub(crate) fn new(certificate_authorities_path: Option<String>) -> Self {
+        Self {
+            certificate_authorities_path,
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Subgraph {
+    #[builder]
+    pub(crate) fn fake_new(certificate_authorities_path: Option<String>) -> Self {
+        Self {
+            certificate_authorities_path,
+        }
+    }
+}
+
+impl Default for Subgraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 /// Configuration options pertaining to the sandbox page.

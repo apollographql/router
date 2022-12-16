@@ -1,3 +1,5 @@
+use std::fs;
+use std::io;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
@@ -5,6 +7,7 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
+use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
@@ -122,6 +125,36 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
+        let tls_root_store = configuration
+            .tls
+            .subgraphs
+            .as_ref()
+            .and_then(|subgraphs| subgraphs.certificate_authorities_path.as_ref())
+            .and_then(|path| {
+                println!("will load certificates from {path}");
+                let mut store = RootCertStore::empty();
+                let certificates = load_certs(&path)
+                    .map_err(|e| {
+                        tracing::error!("could not parse certificate list: {e:?}");
+                    })
+                    .ok()?;
+                for certificate in certificates {
+                    println!("adding cert: {certificate:?}");
+
+                    store
+                        .add(&certificate)
+                        .map_err(|e| {
+                            tracing::error!("could not add certificate to root store: {e:?}");
+                        })
+                        .ok()?;
+                }
+                if store.is_empty() {
+                    None
+                } else {
+                    Some(store)
+                }
+            });
+
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
@@ -131,10 +164,11 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
-                }
-                None => Either::B(SubgraphService::new(name)),
+                Some(shaping) => Either::A(shaping.subgraph_service_internal(
+                    name,
+                    SubgraphService::new(name, tls_root_store.clone()),
+                )),
+                None => Either::B(SubgraphService::new(name, tls_root_store.clone())),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -148,6 +182,28 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
 
         Ok(pluggable_router_service)
     }
+}
+
+fn load_certs(filename: &str) -> io::Result<Vec<rustls::Certificate>> {
+    tracing::debug!("loading certificate from {}", filename);
+
+    // Open certificate file.
+    let certfile = fs::File::open(filename).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            format!("failed to open {}: {}", filename, e),
+        )
+    })?;
+    let mut reader = io::BufReader::new(certfile);
+
+    // Load and return certificate.
+    let certs = rustls_pemfile::certs(&mut reader).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "failed to load certificate".to_string(),
+        )
+    })?;
+    Ok(certs.into_iter().map(rustls::Certificate).collect())
 }
 
 /// test only helper method to create a router factory in integration tests
