@@ -13,6 +13,7 @@ use bytes::Bytes;
 use http::header;
 use http::header::HeaderName;
 use http::HeaderValue;
+use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 
 use crate::graphql;
@@ -392,17 +393,6 @@ pub(crate) struct Response<T> {
     pub(crate) inner: http::Response<T>,
 }
 
-#[cfg(test)]
-pub(crate) fn from_response_to_stream(
-    http: http::response::Response<graphql::Response>,
-) -> http::Response<graphql::ResponseStream> {
-    use futures::future::ready;
-    use futures::stream::once;
-    use futures::StreamExt;
-
-    http.map(|body| once(ready(body)).boxed())
-}
-
 impl<T> Deref for Response<T> {
     type Target = http::Response<T>;
 
@@ -453,7 +443,7 @@ impl IntoResponse for Response<graphql::Response> {
             Bytes::from(serde_json::to_vec(&body).expect("body should be serializable; qed"));
         parts.headers.insert(
             header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
         );
 
         axum::response::Response::from_parts(parts, boxed(http_body::Full::new(json_body_bytes)))

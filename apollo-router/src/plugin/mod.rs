@@ -40,9 +40,9 @@ use tower::ServiceBuilder;
 use crate::layers::ServiceBuilderExt;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::transport;
 use crate::ListenAddr;
 
 type InstanceFactory =
@@ -182,9 +182,19 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// This function is EXPERIMENTAL and its signature is subject to change.
+    ///
     /// This service runs at the very beginning and very end of the request lifecycle.
+    /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         service
     }
@@ -246,6 +256,11 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
@@ -276,6 +291,10 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        self.router_service(service)
+    }
+
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         self.supergraph_service(service)
     }
@@ -325,19 +344,19 @@ macro_rules! register_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<transport::BoxService, transport::Request>,
+    service: Buffer<router::BoxService, router::Request>,
 }
 
 impl Handler {
-    pub(crate) fn new(service: transport::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
 
-impl Service<transport::Request> for Handler {
-    type Response = transport::Response;
+impl Service<router::Request> for Handler {
+    type Response = router::Response;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -345,13 +364,13 @@ impl Service<transport::Request> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: transport::Request) -> Self::Future {
+    fn call(&mut self, req: router::Request) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<transport::BoxService> for Handler {
-    fn from(original: transport::BoxService) -> Self {
+impl From<router::BoxService> for Handler {
+    fn from(original: router::BoxService) -> Self {
         Self::new(original)
     }
 }

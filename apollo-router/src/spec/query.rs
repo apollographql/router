@@ -1004,10 +1004,6 @@ impl Query {
         response_path: Option<&Path>,
         path: &Path,
     ) -> bool {
-        println!(
-            "Query::contains_error_path: path = {path}, query: {}",
-            self.string,
-        );
         let operation = if let Some(subselection) = subselection {
             // Get subselection from hashmap
             match self.subselections.get(&SubSelection {

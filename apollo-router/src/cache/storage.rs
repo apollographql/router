@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::hash::Hash;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lru::LruCache;
@@ -56,7 +57,7 @@ where
     V: ValueType,
 {
     pub(crate) async fn new(
-        max_capacity: usize,
+        max_capacity: NonZeroUsize,
         _redis_urls: Option<Vec<String>>,
         _caller: &str,
     ) -> Self {

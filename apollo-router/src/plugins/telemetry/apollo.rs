@@ -1,6 +1,7 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::time::SystemTime;
 
@@ -12,17 +13,16 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
-use super::config::ExposeTraceId;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
-use crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType;
-use crate::plugins::telemetry::apollo_exporter::proto::ReportHeader;
-use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
-use crate::plugins::telemetry::apollo_exporter::proto::Trace;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::ReportHeader;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
@@ -67,7 +67,7 @@ pub(crate) struct Config {
 
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     #[serde(default = "default_buffer_size")]
-    pub(crate) buffer_size: usize,
+    pub(crate) buffer_size: NonZeroUsize,
 
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
@@ -85,11 +85,6 @@ pub(crate) struct Config {
     // The purpose is to allow is to pass this in to the plugin.
     #[schemars(skip)]
     pub(crate) schema_id: String,
-
-    // Skipped because only useful at runtime, it's a copy of the configuration in tracing config
-    #[schemars(skip)]
-    #[serde(skip)]
-    pub(crate) expose_trace_id: ExposeTraceId,
 
     pub(crate) batch_processor: Option<BatchProcessorConfig>,
 }
@@ -136,8 +131,8 @@ const fn client_version_header_default() -> HeaderName {
     HeaderName::from_static(client_version_header_default_str())
 }
 
-pub(crate) const fn default_buffer_size() -> usize {
-    10000
+pub(crate) const fn default_buffer_size() -> NonZeroUsize {
+    unsafe { NonZeroUsize::new_unchecked(10000) }
 }
 
 impl Default for Config {
@@ -153,7 +148,7 @@ impl Default for Config {
             field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
-            expose_trace_id: ExposeTraceId::default(),
+
             batch_processor: Some(BatchProcessorConfig::default()),
         }
     }
@@ -218,8 +213,8 @@ impl Report {
     pub(crate) fn into_report(
         self,
         header: ReportHeader,
-    ) -> crate::plugins::telemetry::apollo_exporter::proto::Report {
-        let mut report = crate::plugins::telemetry::apollo_exporter::proto::Report {
+    ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
+        let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
             operation_count: self.operation_count,
@@ -273,7 +268,9 @@ pub(crate) struct TracesAndStats {
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl From<TracesAndStats> for crate::plugins::telemetry::apollo_exporter::proto::TracesAndStats {
+impl From<TracesAndStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::TracesAndStats
+{
     fn from(stats: TracesAndStats) -> Self {
         Self {
             stats_with_context: stats.stats_with_context.into_values().map_into().collect(),

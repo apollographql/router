@@ -19,13 +19,13 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let mut content = std::fs::read_to_string(&reports_src)?;
     let message = "\nmessage";
     let msg_index = content.find(message).ok_or("cannot find message string")?;
-    content.insert_str(msg_index, "\npackage Report;\n");
+    content.insert_str(msg_index, "\npackage Reports;\n");
     content = content.replace("[(js_use_toArray)=true]", "");
     content = content.replace("[(js_preEncoded)=true]", "");
     std::fs::write(&reports_out, &content)?;
 
     // Process the proto files
-    let proto_files = [reports_out];
+
     tonic_build::configure()
         .field_attribute(
             "Trace.start_time",
@@ -49,7 +49,7 @@ pub fn main() -> Result<(), Box<dyn Error>> {
         )
         .type_attribute(".", "#[derive(serde::Serialize)]")
         .type_attribute("StatsContext", "#[derive(Eq, Hash)]")
-        .compile(&proto_files, &[&out_dir, &proto_dir])?;
+        .compile(&[reports_out],  &[&out_dir])?;
 
     Ok(())
 }

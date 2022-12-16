@@ -52,7 +52,7 @@ mod tests {
             .configuration_json(config)
             .unwrap()
             .supergraph_hook(move |_| mock_service.clone().boxed())
-            .build()
+            .build_router()
             .await
             .unwrap();
 
@@ -60,7 +60,10 @@ mod tests {
         let request_with_no_name = supergraph::Request::canned_builder().build().unwrap();
 
         // ...And call our service stack with it
-        let mut service_response = test_harness.oneshot(request_with_no_name).await.unwrap();
+        let mut service_response = test_harness
+            .oneshot(request_with_no_name.try_into().unwrap())
+            .await
+            .unwrap();
 
         let _response = service_response.next_response().await.unwrap();
         println!("RESPONSE: {:?}", _response);

@@ -18,22 +18,8 @@ use super::TRACE_ID_FIELD_NAME;
 
 /// The JSON [`FormatFields`] implementation.
 ///
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct JsonFields;
-
-impl JsonFields {
-    /// Returns a new JSON [`FormatFields`] implementation.
-    ///
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-}
-
-impl Default for JsonFields {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 impl<'a> FormatFields<'a> for JsonFields {
     /// Format the provided `fields` to the provided `writer`, returning a result.
