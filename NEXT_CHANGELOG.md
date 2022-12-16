@@ -41,6 +41,45 @@ It defaults to 30 seconds.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
+### Override the root certificate list for subgraph requests ([Issue #1503](https://github.com/apollographql/router/issues/1503))
+
+we might want to connect over TLS to a subgraph with a self signed certificate, or using a custom certificate authority.
+This adds a configuration option to set the list of certificate authorities for all the subgraphs, as follows:
+
+```yaml
+tls:
+  subgraphs:
+    certificate_authorities_path: /path/to/ca.crt
+```
+
+The file is expected to be a list of certificates in PEM format, concatenated (as in Apache configuration).
+
+This uses a configuration option because the SSL_CERT_FILE environment variable would override certificates for telemetry and Uplink as well.
+The configuration option takes root in a tls field to allow for future work around TLS termination in the router (if it does not happen, the option is fine as is, but if it does, we would like to have them in the same place). This is a global option for all subgraphs.
+
+If this is used with self signed certificates, those certificates have to be generated with the proper extensions:
+
+extensions file `v3.ext`:
+
+```
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer:always
+# this has to be disabled
+# basicConstraints       = CA:TRUE
+keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
+subjectAltName         = DNS:local.apollo.dev
+issuerAltName          = issuer:copy
+```
+
+And the certificate can be generated as follows from a certificate signing request:
+
+```
+openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
+```
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2008
+
+
 ## 🐛 Fixes
 
 ### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
