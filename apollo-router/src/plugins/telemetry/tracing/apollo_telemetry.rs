@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
@@ -145,7 +146,7 @@ impl Exporter {
         apollo_key: String,
         apollo_graph_ref: String,
         schema_id: String,
-        buffer_size: usize,
+        buffer_size: NonZeroUsize,
         field_execution_sampler: Option<SamplerOption>,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");

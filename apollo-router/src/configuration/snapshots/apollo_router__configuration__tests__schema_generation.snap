@@ -654,7 +654,7 @@ expression: "&schema"
                       "description": "Number of entries in the Least Recently Used cache",
                       "type": "integer",
                       "format": "uint",
-                      "minimum": 0.0
+                      "minimum": 1.0
                     }
                   },
                   "additionalProperties": false
@@ -724,7 +724,7 @@ expression: "&schema"
                       "description": "Number of entries in the Least Recently Used cache",
                       "type": "integer",
                       "format": "uint",
-                      "minimum": 0.0
+                      "minimum": 1.0
                     }
                   },
                   "additionalProperties": false
@@ -789,7 +789,7 @@ expression: "&schema"
               "default": 10000,
               "type": "integer",
               "format": "uint",
-              "minimum": 0.0
+              "minimum": 1.0
             },
             "client_name_header": {
               "description": "The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.",
