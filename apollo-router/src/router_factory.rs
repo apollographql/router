@@ -150,7 +150,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             .and_then(|path| {
                 println!("will load certificates from {path}");
                 let mut store = RootCertStore::empty();
-                let certificates = load_certs(&path)
+                let certificates = load_certs(path)
                     .map_err(|e| {
                         tracing::error!("could not parse certificate list: {e:?}");
                     })
@@ -221,7 +221,7 @@ impl YamlRouterFactory {
             .and_then(|path| {
                 println!("will load certificates from {path}");
                 let mut store = RootCertStore::empty();
-                let certificates = load_certs(&path)
+                let certificates = load_certs(path)
                     .map_err(|e| {
                         tracing::error!("could not parse certificate list: {e:?}");
                     })

@@ -624,15 +624,6 @@ impl Tls {
     }
 }
 
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl Tls {
-    #[builder]
-    pub(crate) fn fake_new(subgraphs: Option<Subgraph>) -> Self {
-        Self { subgraphs }
-    }
-}
-
 impl Default for Tls {
     fn default() -> Self {
         Self::builder().build()
@@ -652,17 +643,6 @@ pub(crate) struct Subgraph {
 impl Subgraph {
     #[builder]
     pub(crate) fn new(certificate_authorities_path: Option<String>) -> Self {
-        Self {
-            certificate_authorities_path,
-        }
-    }
-}
-
-#[cfg(test)]
-#[buildstructor::buildstructor]
-impl Subgraph {
-    #[builder]
-    pub(crate) fn fake_new(certificate_authorities_path: Option<String>) -> Self {
         Self {
             certificate_authorities_path,
         }
