@@ -41,6 +41,14 @@ It defaults to 30 seconds.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
+## 🐛 Fixes
+
+### Keep the error path when redacting subgraph errors ([Issue #1818](https://github.com/apollographql/router/issues/1818))
+
+Error redaction was erasing the error's path, which made it impossible to affect the errors to deferred responses. Now the redacted errors keep the path. Since the response shape for the primary and deferred responses are defined from the API schema, there is no possibility of leaking internal schema information here.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
+
 ## 🛠 Maintenance
 
 ### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
