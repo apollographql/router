@@ -42,7 +42,7 @@ It defaults to 30 seconds.
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
 ## 🐛 Fixes
-### Traces won't cause missing field-stats ([Issue #2277](https://github.com/apollographql/router/issues/2267))
+### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
 
 Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
 Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
