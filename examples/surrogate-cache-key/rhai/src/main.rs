@@ -28,7 +28,7 @@ mod tests {
         let test_harness = apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
 
@@ -48,7 +48,9 @@ mod tests {
                     .and_operation_name(operation_name)
                     .and_context(context)
                     .build()
-                    .expect("a valid SupergraphRequest"),
+                    .expect("a valid SupergraphRequest")
+                    .try_into()
+                    .unwrap(),
             )
             .await
             .expect("a router response");

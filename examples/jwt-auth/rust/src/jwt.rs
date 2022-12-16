@@ -406,7 +406,7 @@ mod tests {
         apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
     }

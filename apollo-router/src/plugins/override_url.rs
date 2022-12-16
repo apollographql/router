@@ -97,7 +97,7 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
-                Arc::new(configuration::Configuration::default()),
+                Arc::default(),
             )
             .await
             .unwrap();

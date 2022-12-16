@@ -1,10 +1,18 @@
 ---
-source: apollo-router/src/plugins/telemetry/tracing/apollo_telemetry.rs
+source: apollo-router/tests/apollo_reports.rs
 expression: report
 ---
+header:
+  graph_ref: test
+  hostname: "[hostname]"
+  agent_version: "[agent_version]"
+  service_version: ""
+  runtime_version: rust
+  uname: "[uname]"
+  executable_schema_id: "[executable_schema_id]"
 traces_per_query:
   "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if){reviews{author{name}}reviews{author{name}}}}}":
-    traces:
+    trace:
       - start_time:
           seconds: "[seconds]"
           nanos: "[nanos]"
@@ -19,7 +27,7 @@ traces_per_query:
         unexecuted_operation_name: ""
         details:
           variables_json:
-            if: "true"
+            if: ""
           operation_name: ""
         client_name: ""
         client_version: ""
@@ -29,22 +37,11 @@ traces_per_query:
             accept:
               value:
                 - ""
-            content-length:
-              value:
-                - ""
             content-type:
               value:
                 - ""
-            host:
-              value:
-                - ""
-            user-agent:
-              value:
-                - ""
           response_headers:
-            trace_id:
-              value:
-                - "[trace_id]"
+            my_trace_id: "[my_trace_id]"
           status_code: 0
         cache_policy: ~
         query_plan:
@@ -608,5 +605,8 @@ traces_per_query:
         field_execution_weight: 1
     stats_with_context: []
     referenced_fields_by_type: {}
+    internal_traces_contributing_to_stats: []
+end_time: "[end_time]"
 operation_count: 1
+traces_pre_aggregated: false
 

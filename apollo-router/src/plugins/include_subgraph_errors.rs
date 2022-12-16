@@ -1,26 +1,18 @@
 use std::collections::HashMap;
 
-use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::error::Error as SubgraphError;
+use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
 use crate::SubgraphResponse;
 
-#[allow(clippy::field_reassign_with_default)]
-static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
-    let mut error: SubgraphError = Default::default();
-
-    error.message = "Subgraph errors redacted".to_string();
-
-    vec![error]
-});
+static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
@@ -57,7 +49,10 @@ impl Plugin for IncludeSubgraphErrors {
                 .map_response(move |mut response: SubgraphResponse| {
                     if !response.response.body().errors.is_empty() {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        response.response.body_mut().errors = REDACTED_ERROR_MESSAGE.clone();
+                        for error in response.response.body_mut().errors.iter_mut() {
+                            error.message = REDACTED_ERROR_MESSAGE.to_string();
+                            error.extensions = Object::default();
+                        }
                     }
                     response
                 })
@@ -82,43 +77,43 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use once_cell::sync::Lazy;
     use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use tower::util::BoxCloneService;
     use tower::Service;
 
     use super::*;
-    use crate::configuration;
-    use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::router_factory::create_plugins;
+    use crate::services::router;
+    use crate::services::router_service::RouterCreator;
+    use crate::Configuration;
     use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
 
-    static UNREDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null},
-        "errors":[{"message":
-        "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
-        "locations": [], "path": null, "extensions": { "test": "value", "code": "FETCH_ERROR" }}]}"#).unwrap()
+    static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
     });
 
-    static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data": {"topProducts":null}, "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#).unwrap()
+    static REDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(
+            r#"{"data":{"topProducts":null},"errors":[{"message":"Subgraph errors redacted"}]}"#
+                .as_bytes(),
+        )
     });
 
-    static REDACTED_ACCOUNT_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        Response::from_bytes("account", Bytes::from_static(r#"{
-                "data": null,
-                "errors":[{"message": "Subgraph errors redacted", "locations": [], "path": null, "extensions": {}}]}"#.as_bytes())
-    ).unwrap()
+    static REDACTED_ACCOUNT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(
+            r#"{"data":null,"errors":[{"message":"Subgraph errors redacted"}]}"#.as_bytes(),
+        )
     });
 
-    static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
+    static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
@@ -129,14 +124,16 @@ mod test {
 
     async fn execute_router_test(
         query: &str,
-        body: &Response,
-        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
+        body: &Bytes,
+        mut router_service: router::BoxService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
-            .expect("expecting valid request");
+            .expect("expecting valid request")
+            .try_into()
+            .unwrap();
 
         let response = router_service
             .ready()
@@ -147,13 +144,12 @@ mod test {
             .unwrap()
             .next_response()
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(response, *body);
+        assert_eq!(*body, response);
     }
 
-    async fn build_mock_router(
-        plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
+    async fn build_mock_router(plugin: Box<dyn DynPlugin>) -> router::BoxService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -190,14 +186,26 @@ mod test {
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
         let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+
+        let plugins = create_plugins(Arc::default(), &schema, None).await.unwrap();
+
+        for (name, plugin) in plugins.into_iter() {
+            builder = builder.with_dyn_plugin(name, plugin);
+        }
+
         let builder = builder
             .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        builder.build().await.expect("should build").test_service()
+        RouterCreator::new(
+            Arc::new(builder.build().await.expect("should build")),
+            &Configuration::default(),
+        )
+        .make()
+        .boxed()
     }
 
     async fn get_redacting_plugin(config: &jValue) -> Box<dyn DynPlugin> {
@@ -205,10 +213,7 @@ mod test {
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.include_subgraph_errors")
             .expect("Plugin not found")
-            .create_instance_without_schema(
-                config,
-                Arc::new(configuration::Configuration::default()),
-            )
+            .create_instance_without_schema(config, Arc::default())
             .await
             .expect("Plugin not created")
     }
