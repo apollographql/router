@@ -63,7 +63,6 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
-    use crate::configuration;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
     use crate::Context;

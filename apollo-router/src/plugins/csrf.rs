@@ -212,7 +212,6 @@ register_plugin!("apollo", "csrf", Csrf);
 mod csrf_tests {
     use std::sync::Arc;
 
-    use crate::configuration;
     use crate::plugin::PluginInit;
     #[tokio::test]
     async fn plugin_registered() {

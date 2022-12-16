@@ -1649,7 +1649,6 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
-    use crate::configuration;
     use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;

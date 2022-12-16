@@ -485,11 +485,11 @@ pub(crate) struct MockSupergraphCreator {
 impl MockSupergraphCreator {
     pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
         let canned_schema = include_str!("../../testing_schema.graphql");
-        let configuration = Configuration::builder().build().unwrap();
+        let configuration = Arc::new(Configuration::builder().build().unwrap());
 
         use crate::router_factory::create_plugins;
         let plugins = create_plugins(
-            &configuration,
+            configuration.clone(),
             &Schema::parse(canned_schema, &configuration).unwrap(),
             None,
         )

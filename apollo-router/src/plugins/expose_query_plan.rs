@@ -119,7 +119,6 @@ mod tests {
     use tower::Service;
 
     use super::*;
-    use crate::configuration;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
