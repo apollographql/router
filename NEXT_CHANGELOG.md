@@ -48,3 +48,12 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
+
+## 🥼 Experimental
+
+
+### Introduce a `router_service` ([Issue #1496](https://github.com/apollographql/router/issues/1496))
+
+A `router_service` is now part of our service stack, which allows plugin developers to process raw http requests and raw http responses, that wrap the already available `supergraph_service`
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2170
