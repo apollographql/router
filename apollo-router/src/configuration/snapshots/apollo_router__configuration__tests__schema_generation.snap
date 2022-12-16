@@ -2582,6 +2582,31 @@ expression: "&schema"
         }
       }
     },
+    "tls": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "default": {
+        "subgraphs": null
+      },
+      "type": "object",
+      "properties": {
+        "subgraphs": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": null,
+          "type": "object",
+          "properties": {
+            "certificate_authorities_path": {
+              "description": "Path to a list of certificate authorities in PEM format",
+              "default": null,
+              "type": "string",
+              "nullable": true
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "traffic_shaping": {
       "type": "object",
       "properties": {
