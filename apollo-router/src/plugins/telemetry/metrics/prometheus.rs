@@ -86,7 +86,7 @@ impl MetricsConfigurator for Config {
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),
-                Endpoint::new(
+                Endpoint::from_router_service(
                     self.path.clone(),
                     PrometheusService {
                         registry: exporter.registry().clone(),
