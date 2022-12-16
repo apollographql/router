@@ -24,8 +24,8 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
+use crate::services::subgraph_http_service;
 use crate::services::subgraph_http_service::SubgraphHTTPCreator;
-use crate::services::subgraph_http_service::SubgraphHTTPService;
 use crate::services::transport;
 use crate::services::Plugins;
 use crate::services::SubgraphService;
@@ -142,22 +142,19 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let plugins: Plugins = plugins.into_iter().collect();
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_http_creator = SubgraphHTTPCreator::new(name, Arc::new(plugins));
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => Either::A(shaping.subgraph_service_internal(
-                    name,
-                    SubgraphService::new(name, subgraph_http_creator),
-                )),
-                None => Either::B(SubgraphService::new(name, subgraph_http_creator)),
+                Some(shaping) => {
+                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
+                }
+                None => Either::B(SubgraphService::new(name)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -187,21 +184,21 @@ impl YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
+        let plugins: Arc<Plugins> = Arc::new(plugins.into_iter().collect());
+
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
-            let subgraph_http_service = SubgraphHTTPService::new(name);
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => Either::A(shaping.subgraph_service_internal(
-                    name,
-                    SubgraphService::new(name, subgraph_http_service),
-                )),
-                None => Either::B(SubgraphService::new(name, subgraph_http_service)),
+                Some(shaping) => {
+                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
+                }
+                None => Either::B(SubgraphService::new(name)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
