@@ -77,6 +77,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use once_cell::sync::Lazy;
     use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
