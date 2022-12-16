@@ -1628,6 +1628,7 @@ mod tests {
                         Error::builder()
                             .message(String::from("an error occured"))
                             .extensions(extension)
+                            .extension_code("FETCH_ERROR")
                             .build(),
                     )
                     .build())
@@ -1694,8 +1695,8 @@ mod tests {
                                     "errors": {
                                         "include_messages": true,
                                         "extensions": [{
-                                            "name": "subgraph_error_extended_type",
-                                            "path": ".type"
+                                            "name": "subgraph_error_extended_code",
+                                            "path": ".code"
                                         }, {
                                             "name": "message",
                                             "path": ".reason"

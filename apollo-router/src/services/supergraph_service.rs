@@ -176,6 +176,7 @@ where
                 graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("introspection has been disabled"))
+                        .extension_code("INTROSPECTION_DISABLED")
                         .build()])
                     .build(),
                 context,
@@ -191,6 +192,7 @@ where
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
+                        .extension_code("DEFER_BAD_HEADER")
                         .build()])
                     .build(), context);
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;

@@ -101,6 +101,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                     "couldn't find mock for query {}",
                     serde_json::to_string(&req.subgraph_request.body()).unwrap()
                 ))
+                .extension_code("FETCH_ERROR".to_string())
                 .extensions(self.extensions.clone().unwrap_or_default())
                 .build();
             SubgraphResponse::fake_builder()
