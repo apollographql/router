@@ -22,6 +22,7 @@ impl TracingConfigurator for Config {
                 schema_id,
                 buffer_size,
                 field_level_instrumentation_sampler,
+                batch_processor,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
@@ -32,17 +33,12 @@ impl TracingConfigurator for Config {
                     .apollo_graph_ref(reference)
                     .schema_id(schema_id)
                     .buffer_size(*buffer_size)
-                    .and_field_execution_sampler(field_level_instrumentation_sampler.clone())
+                    .field_execution_sampler(field_level_instrumentation_sampler.clone())
+                    .batch_config(batch_processor.clone())
                     .build()?;
                 builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                        .with_batch_config(
-                            self.batch_processor
-                                .as_ref()
-                                .cloned()
-                                .unwrap_or_default()
-                                .into(),
-                        )
+                        .with_batch_config(batch_processor.clone().into())
                         .build(),
                 )
             }

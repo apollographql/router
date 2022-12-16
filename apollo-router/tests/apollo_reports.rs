@@ -97,7 +97,11 @@ macro_rules! assert_report {
                         ".**.child[].end_time" => "[end_time]",
                         ".**.trace_id.value[]" => "[trace_id]",
                         ".**.sent_time_offset" => "[sent_time_offset]",
-                        ".**.my_trace_id" => "[my_trace_id]"
+                        ".**.my_trace_id" => "[my_trace_id]",
+                        ".**.latency_count" => "[latency_count]",
+                        ".**.cache_latency_count" => "[cache_latency_count]",
+                        ".**.public_cache_ttl_count" => "[public_cache_ttl_count]",
+                        ".**.private_cache_ttl_count" => "[private_cache_ttl_count]",
                     });
                 });
         }
@@ -151,8 +155,35 @@ async fn report(
 }
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
+    get_report(request, |r| {
+        !r.traces_per_query
+            .values()
+            .next()
+            .expect("traces and stats required")
+            .trace
+            .is_empty()
+    })
+    .await
+}
+
+async fn get_metrics_report(request: supergraph::Request) -> Report {
+    get_report(request, |r| {
+        !r.traces_per_query
+            .values()
+            .next()
+            .expect("traces and stats required")
+            .stats_with_context
+            .is_empty()
+    })
+    .await
+}
+
+async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+    request: supergraph::Request,
+    filter: T,
+) -> Report {
     ROUTER_SERVICE_RUNTIME
-        .spawn(async {
+        .spawn(async move {
             let mut found_report;
             {
                 let _test_guard = TEST.lock().await;
@@ -187,7 +218,7 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
                 // We must always try to find the report regardless of if the response had failures
                 for _ in 0..10 {
                     let reports = REPORTS.lock().await;
-                    let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
+                    let report = reports.iter().find(filter);
                     if report.is_some() {
                         if matches!(found_report, Ok(None)) {
                             found_report = Ok(report.cloned());
@@ -293,5 +324,15 @@ async fn test_send_variable_value() {
         .build()
         .unwrap();
     let report = get_trace_report(request).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let report = get_metrics_report(request).await;
     assert_report!(report);
 }

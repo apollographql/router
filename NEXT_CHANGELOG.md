@@ -81,6 +81,12 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 
 ## 🐛 Fixes
+### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
+
+Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
+Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277
 
 ### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
 
