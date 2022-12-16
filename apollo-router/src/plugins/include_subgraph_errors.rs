@@ -1,26 +1,18 @@
 use std::collections::HashMap;
 
-use once_cell::sync::Lazy;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use crate::error::Error as SubgraphError;
+use crate::json_ext::Object;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
 use crate::SubgraphResponse;
 
-#[allow(clippy::field_reassign_with_default)]
-static REDACTED_ERROR_MESSAGE: Lazy<Vec<SubgraphError>> = Lazy::new(|| {
-    let mut error: SubgraphError = Default::default();
-
-    error.message = "Subgraph errors redacted".to_string();
-
-    vec![error]
-});
+static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
@@ -57,7 +49,10 @@ impl Plugin for IncludeSubgraphErrors {
                 .map_response(move |mut response: SubgraphResponse| {
                     if !response.response.body().errors.is_empty() {
                         tracing::info!("redacted subgraph({sub_name_response}) errors");
-                        response.response.body_mut().errors = REDACTED_ERROR_MESSAGE.clone();
+                        for error in response.response.body_mut().errors.iter_mut() {
+                            error.message = REDACTED_ERROR_MESSAGE.to_string();
+                            error.extensions = Object::default();
+                        }
                     }
                     response
                 })
@@ -82,6 +77,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use once_cell::sync::Lazy;
     use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;

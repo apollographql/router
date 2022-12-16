@@ -12,6 +12,7 @@ mod yaml;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 
 use cors::*;
@@ -577,7 +578,7 @@ pub(crate) struct Cache {
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache
-    pub(crate) limit: usize,
+    pub(crate) limit: NonZeroUsize,
 }
 
 impl Default for InMemoryCache {
