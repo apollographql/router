@@ -145,23 +145,23 @@ impl Exporter {
         apollo_graph_ref: String,
         schema_id: String,
         buffer_size: NonZeroUsize,
-        field_execution_sampler: Option<SamplerOption>,
+        field_execution_sampler: SamplerOption,
+        batch_config: BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             report_exporter: Arc::new(ApolloExporter::new(
                 &endpoint,
-                BatchProcessorConfig::default(),
+                &batch_config,
                 &apollo_key,
                 &apollo_graph_ref,
                 &schema_id,
             )?),
             field_execution_weight: match field_execution_sampler {
-                Some(SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
-                Some(SamplerOption::Always(Sampler::AlwaysOff)) => 0.0,
-                Some(SamplerOption::TraceIdRatioBased(ratio)) => 1.0 / ratio,
-                None => 0.0,
+                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+                SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
         })
     }

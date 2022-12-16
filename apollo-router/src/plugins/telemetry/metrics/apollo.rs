@@ -34,7 +34,7 @@ impl MetricsConfigurator for Config {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
                     tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
                 }
-                let batch_processor_config = batch_processor.as_ref().cloned().unwrap_or_default();
+                let batch_processor_config = batch_processor;
                 tracing::debug!("creating metrics exporter");
                 let exporter = ApolloExporter::new(
                     endpoint,

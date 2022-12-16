@@ -72,7 +72,8 @@ pub(crate) struct Config {
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
     /// Value MUST be less than global sampling rate
-    pub(crate) field_level_instrumentation_sampler: Option<SamplerOption>,
+    #[serde(default = "default_field_level_instrumentation_sampler")]
+    pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     #[serde(default)]
@@ -87,7 +88,12 @@ pub(crate) struct Config {
     pub(crate) schema_id: String,
 
     /// Configuration for batch processing.
-    pub(crate) batch_processor: Option<BatchProcessorConfig>,
+    #[serde(default)]
+    pub(crate) batch_processor: BatchProcessorConfig,
+}
+
+fn default_field_level_instrumentation_sampler() -> SamplerOption {
+    SamplerOption::TraceIdRatioBased(0.01)
 }
 
 #[cfg(test)]
@@ -146,11 +152,10 @@ impl Default for Config {
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
-            field_level_instrumentation_sampler: Some(SamplerOption::TraceIdRatioBased(0.01)),
+            field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
-
-            batch_processor: Some(BatchProcessorConfig::default()),
+            batch_processor: BatchProcessorConfig::default(),
         }
     }
 }
