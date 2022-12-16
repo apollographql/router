@@ -82,7 +82,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
+        let service_stack = ForbidMutations::new(PluginInit::fake_builder().config(true).build())
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock_service.boxed());
@@ -106,7 +106,7 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
+        let service_stack = ForbidMutations::new(PluginInit::fake_builder().config(false).build())
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(MockExecutionService::new().boxed());
@@ -127,7 +127,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(false, Default::default()))
+        let service_stack = ForbidMutations::new(PluginInit::fake_builder().config(false).build())
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock_service.boxed());

@@ -211,20 +211,29 @@ register_plugin!("apollo", "csrf", Csrf);
 
 #[cfg(test)]
 mod csrf_tests {
+    use std::sync::Arc;
+
+    use crate::configuration;
     use crate::plugin::PluginInit;
     #[tokio::test]
     async fn plugin_registered() {
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.csrf")
             .expect("Plugin not found")
-            .create_instance_without_schema(&serde_json::json!({ "unsafe_disabled": true }))
+            .create_instance_without_schema(
+                &serde_json::json!({ "unsafe_disabled": true }),
+                Arc::new(configuration::Configuration::default()),
+            )
             .await
             .unwrap();
 
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.csrf")
             .expect("Plugin not found")
-            .create_instance_without_schema(&serde_json::json!({}))
+            .create_instance_without_schema(
+                &serde_json::json!({}),
+                Arc::new(configuration::Configuration::default()),
+            )
             .await
             .unwrap();
     }
@@ -300,7 +309,7 @@ mod csrf_tests {
                 .unwrap())
         });
 
-        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
+        let service_stack = Csrf::new(PluginInit::fake_builder().config(config).build())
             .await
             .unwrap()
             .supergraph_service(mock_service.boxed());
@@ -317,7 +326,7 @@ mod csrf_tests {
     }
 
     async fn assert_rejected(config: CSRFConfig, request: SupergraphRequest) {
-        let service_stack = Csrf::new(PluginInit::new(config, Default::default()))
+        let service_stack = Csrf::new(PluginInit::fake_builder().config(config).build())
             .await
             .unwrap()
             .supergraph_service(MockSupergraphService::new().boxed());

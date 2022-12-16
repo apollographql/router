@@ -221,13 +221,12 @@ mod tests {
         let mock_service = test::MockSupergraphService::new();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let init = PluginInit::new(
-            AllowClientIdConfig {
+        let init = PluginInit::fake_builder()
+            .config(AllowClientIdConfig {
                 path: "allowedClientIds.json".to_string(),
                 header: "x-client-id".to_string(),
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = AllowClientIdFromFile::new(init)
             .await
             .expect("couldn't create AllowClientIdFromFile")
@@ -265,13 +264,12 @@ mod tests {
         let mock_service = test::MockSupergraphService::new();
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let init = PluginInit::new(
-            AllowClientIdConfig {
+        let init = PluginInit::fake_builder()
+            .config(AllowClientIdConfig {
                 path: "allowedClientIds.json".to_string(),
                 header: "x-client-id".to_string(),
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = AllowClientIdFromFile::new(init)
             .await
             .expect("couldn't create AllowClientIdFromFile")
@@ -335,13 +333,12 @@ mod tests {
             });
 
         // In this service_stack, AllowClientIdFromFile is `decorating` or `wrapping` our mock_service.
-        let init = PluginInit::new(
-            AllowClientIdConfig {
+        let init = PluginInit::fake_builder()
+            .config(AllowClientIdConfig {
                 path: "allowedClientIds.json".to_string(),
                 header: "x-client-id".to_string(),
-            },
-            Default::default(),
-        );
+            })
+            .build();
         let service_stack = AllowClientIdFromFile::new(init)
             .await
             .expect("couldn't create AllowClientIdFromFile")

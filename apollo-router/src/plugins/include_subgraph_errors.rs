@@ -89,6 +89,7 @@ mod test {
     use tower::Service;
 
     use super::*;
+    use crate::configuration;
     use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
@@ -204,7 +205,10 @@ mod test {
         crate::plugin::plugins()
             .find(|factory| factory.name == "apollo.include_subgraph_errors")
             .expect("Plugin not found")
-            .create_instance_without_schema(config)
+            .create_instance_without_schema(
+                config,
+                Arc::new(configuration::Configuration::default()),
+            )
             .await
             .expect("Plugin not created")
     }

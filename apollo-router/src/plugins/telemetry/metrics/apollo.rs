@@ -238,15 +238,16 @@ mod test {
     async fn create_plugin_with_apollo_config(
         apollo_config: apollo::Config,
     ) -> Result<Telemetry, BoxError> {
-        Telemetry::new(PluginInit::new(
-            config::Conf {
-                logging: None,
-                metrics: None,
-                tracing: None,
-                apollo: Some(apollo_config),
-            },
-            Default::default(),
-        ))
+        Telemetry::new(
+            PluginInit::fake_builder()
+                .config(config::Conf {
+                    logging: None,
+                    metrics: None,
+                    tracing: None,
+                    apollo: Some(apollo_config),
+                })
+                .build(),
+        )
         .await
     }
 }

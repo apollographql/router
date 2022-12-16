@@ -120,7 +120,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::SupergraphServiceFactory, BoxError> {
         // Process the plugins.
-        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+        let plugins = create_plugins(configuration.clone(), &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
@@ -174,7 +174,7 @@ caused by
 }
 
 async fn create_plugins(
-    configuration: &Configuration,
+    configuration: Arc<Configuration>,
     schema: &Schema,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
 ) -> Result<Vec<(String, Box<dyn DynPlugin>)>, BoxError> {
@@ -190,7 +190,7 @@ async fn create_plugins(
     let mut plugin_instances = Vec::new();
     let extra = extra_plugins.unwrap_or_default();
 
-    for (name, mut configuration) in configuration.plugins().into_iter() {
+    for (name, mut plugin_configuration) in configuration.plugins().into_iter() {
         if extra.iter().any(|(n, _)| *n == name) {
             // An instance of this plugin was already added through TestHarness::extra_plugin
             continue;
@@ -201,13 +201,17 @@ async fn create_plugins(
                 tracing::debug!(
                     "creating plugin: '{}' with configuration:\n{:#}",
                     name,
-                    configuration
+                    plugin_configuration
                 );
                 if name == "apollo.telemetry" {
-                    inject_schema_id(schema, &mut configuration);
+                    inject_schema_id(schema, &mut plugin_configuration);
                 }
                 match factory
-                    .create_instance(&configuration, schema.as_string().clone())
+                    .create_instance(
+                        &plugin_configuration,
+                        schema.as_string().clone(),
+                        configuration.clone(),
+                    )
                     .await
                 {
                     Ok(plugin) => {
@@ -258,7 +262,11 @@ async fn create_plugins(
                             inject_schema_id(schema, &mut config);
                         }
                         match factory
-                            .create_instance(&config, schema.as_string().clone())
+                            .create_instance(
+                                &config,
+                                schema.as_string().clone(),
+                                configuration.clone(),
+                            )
                             .await
                         {
                             Ok(plugin) => {

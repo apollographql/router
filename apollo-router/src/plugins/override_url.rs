@@ -55,6 +55,7 @@ register_plugin!("apollo", "override_subgraph_url", OverrideSubgraphUrl);
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use http::Uri;
     use serde_json::Value;
@@ -62,6 +63,7 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
+    use crate::configuration;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
     use crate::Context;
@@ -95,6 +97,7 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();

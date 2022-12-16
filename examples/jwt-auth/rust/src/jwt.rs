@@ -592,7 +592,7 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let jwt_auth = JwtAuth::new(PluginInit::new(conf, Default::default()))
+        let jwt_auth = JwtAuth::new(PluginInit::fake_builder().config(conf).build())
             .await
             .expect("valid configuration should succeed");
 
@@ -649,7 +649,7 @@ mod tests {
         }))
         .expect("json must be valid");
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let jwt_auth = JwtAuth::new(PluginInit::new(conf, Default::default()))
+        let jwt_auth = JwtAuth::new(PluginInit::fake_builder().config(conf).build())
             .await
             .expect("valid configuration should succeed");
 
@@ -703,7 +703,7 @@ mod tests {
         .expect("json must be valid");
 
         // In this service_stack, JwtAuth is `decorating` or `wrapping` our mock_service.
-        let jwt_auth = JwtAuth::new(PluginInit::new(conf, Default::default()))
+        let jwt_auth = JwtAuth::new(PluginInit::fake_builder().config(conf).build())
             .await
             .expect("valid configuration should succeed");
 

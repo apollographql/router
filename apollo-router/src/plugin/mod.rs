@@ -37,6 +37,7 @@ use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
 
+use crate::configuration;
 use crate::layers::ServiceBuilderExt;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -45,8 +46,11 @@ use crate::services::supergraph;
 use crate::transport;
 use crate::ListenAddr;
 
-type InstanceFactory =
-    fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
+type InstanceFactory = fn(
+    &serde_json::Value,
+    Arc<String>,
+    Arc<configuration::Configuration>,
+) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
 
@@ -61,17 +65,50 @@ pub struct PluginInit<T> {
     pub config: T,
     /// Router Supergraph Schema (schema definition language)
     pub supergraph_sdl: Arc<String>,
+    /// Router Supergraph Schema (schema definition language)
+    pub router_config: Arc<configuration::Configuration>,
 }
 
+#[buildstructor::buildstructor]
 impl<T> PluginInit<T>
 where
     T: for<'de> Deserialize<'de>,
 {
+    #[deprecated = "use PluginInit::builder() instead"]
     /// Create a new PluginInit for the supplied config and SDL.
     pub fn new(config: T, supergraph_sdl: Arc<String>) -> Self {
         PluginInit {
             config,
             supergraph_sdl,
+            router_config: Arc::default(),
+        }
+    }
+
+    #[builder(entry = "builder", visibility = "pub")]
+    /// Builder function to create a PluginInit builder
+    fn new_builder(
+        config: T,
+        supergraph_sdl: Arc<String>,
+        router_config: Arc<configuration::Configuration>,
+    ) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl,
+            router_config,
+        }
+    }
+
+    #[builder]
+    /// Builder function to create a fake PluginInit builder
+    pub fn fake_new(
+        config: T,
+        supergraph_sdl: Option<Arc<String>>,
+        router_config: Option<Arc<configuration::Configuration>>,
+    ) -> Self {
+        PluginInit {
+            config,
+            supergraph_sdl: supergraph_sdl.unwrap_or_default(),
+            router_config: router_config.unwrap_or_default(),
         }
     }
 
@@ -82,11 +119,13 @@ where
     pub fn try_new(
         config: serde_json::Value,
         supergraph_sdl: Arc<String>,
+        router_config: Arc<configuration::Configuration>,
     ) -> Result<Self, BoxError> {
         let config: T = serde_json::from_value(config)?;
         Ok(PluginInit {
             config,
             supergraph_sdl,
+            router_config,
         })
     }
 }
@@ -120,9 +159,10 @@ impl PluginFactory {
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {
             name: plugin_factory_name,
-            instance_factory: |configuration, schema| {
+            instance_factory: |plugin_configuration, schema, configuration| {
                 Box::pin(async move {
-                    let init = PluginInit::try_new(configuration.clone(), schema)?;
+                    let init =
+                        PluginInit::try_new(plugin_configuration.clone(), schema, configuration)?;
                     let plugin = P::new(init).await?;
                     Ok(Box::new(plugin) as Box<dyn DynPlugin>)
                 })
@@ -134,18 +174,20 @@ impl PluginFactory {
 
     pub(crate) async fn create_instance(
         &self,
-        configuration: &serde_json::Value,
+        plugin_configuration: &serde_json::Value,
         supergraph_sdl: Arc<String>,
+        configuration: Arc<configuration::Configuration>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, supergraph_sdl).await
+        (self.instance_factory)(plugin_configuration, supergraph_sdl, configuration).await
     }
 
     #[cfg(test)]
     pub(crate) async fn create_instance_without_schema(
         &self,
-        configuration: &serde_json::Value,
+        plugin_configuration: &serde_json::Value,
+        configuration: Arc<configuration::Configuration>,
     ) -> Result<Box<dyn DynPlugin>, BoxError> {
-        (self.instance_factory)(configuration, Default::default()).await
+        (self.instance_factory)(plugin_configuration, Default::default(), configuration).await
     }
 
     pub(crate) fn create_schema(&self, gen: &mut SchemaGenerator) -> schemars::schema::Schema {

@@ -1395,6 +1395,7 @@ impl TextMapPropagator for CustomTraceIdPropagator {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use http::StatusCode;
     use insta::assert_snapshot;
@@ -1427,6 +1428,7 @@ mod tests {
             .create_instance(
                 &serde_json::json!({"apollo": {"schema_id":"abc"}, "tracing": {}}),
                 Default::default(),
+                Arc::default(),
             )
             .await
             .unwrap();
@@ -1575,6 +1577,7 @@ mod tests {
                     }
                 }),
                 Default::default(),
+                Arc::default(),
             )
             .await
             .unwrap();
@@ -1742,6 +1745,7 @@ mod tests {
                 )
                 .unwrap(),
                 Default::default(),
+                Arc::default(),
             )
             .await
             .unwrap();

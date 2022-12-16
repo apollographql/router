@@ -1629,6 +1629,7 @@ register_plugin!("apollo", "rhai", Rhai);
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use rhai::EvalAltResult;
     use serde_json::Value;
@@ -1637,6 +1638,7 @@ mod tests {
     use tower::ServiceExt;
 
     use super::*;
+    use crate::configuration;
     use crate::http_ext;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;
@@ -1662,6 +1664,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();
@@ -1713,6 +1716,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();
@@ -1831,6 +1835,7 @@ mod tests {
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();
@@ -1886,6 +1891,7 @@ mod tests {
                         r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
                     )
                     .unwrap(),
+                    Arc::new(configuration::Configuration::default()),
                 )
                 .await
                 .unwrap();
@@ -1924,6 +1930,7 @@ mod tests {
                         r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
                     )
                     .unwrap(),
+                    Arc::new(configuration::Configuration::default()),
                 )
                 .await
                 .unwrap();
@@ -1962,6 +1969,7 @@ mod tests {
                     r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
                 )
                 .unwrap(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();
@@ -2039,6 +2047,7 @@ mod tests {
                     r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
                 )
                 .unwrap(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();
@@ -2094,6 +2103,7 @@ mod tests {
                     r#"{"scripts":"tests/fixtures", "main":"request_response_test.rhai"}"#,
                 )
                 .unwrap(),
+                Arc::new(configuration::Configuration::default()),
             )
             .await
             .unwrap();
