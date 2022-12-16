@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::string::ToString;
+use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -22,6 +23,8 @@ use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 use crate::tracer::TraceId;
 use crate::Context;
+
+const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
@@ -105,8 +108,9 @@ where
         }
     }
 
-    pub(crate) async fn call(self, url: &str) -> Result<Self, BoxError> {
+    pub(crate) async fn call(self, url: &str, timeout: Option<Duration>) -> Result<Self, BoxError> {
         let my_client = CLIENT.as_ref().map_err(|e| e.to_string())?.clone();
+        let t = timeout.unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT);
 
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
         let response = my_client
@@ -114,6 +118,7 @@ where
             .json(&self)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
+            .timeout(t)
             .send()
             .await?;
 

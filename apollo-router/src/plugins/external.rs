@@ -6,6 +6,7 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::header::HeaderName;
@@ -70,8 +71,13 @@ struct Stages {
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // Put your plugin configuration here. It will automatically be deserialized from JSON.
-    url: String, // The url you'd like to offload processing to
+    // The url you'd like to offload processing to
+    url: String,
+    // The timeout for external requests
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    timeout: Option<Duration>,
+    // The stages request/response configuration
     #[serde(default)]
     stages: Option<Stages>,
 }
@@ -114,6 +120,7 @@ impl Plugin for ExternalPlugin {
                 move |mut request: router::Request| {
                     let my_sdl = request_sdl.to_string();
                     let proto_url = request_full_config.url.clone();
+                    let timeout = request_full_config.timeout;
                     let request_config = request_config.clone();
                     async move {
                         // Call into our out of process processor with a body of our body
@@ -134,6 +141,7 @@ impl Plugin for ExternalPlugin {
                         // Second, call our co-processor and get a reply.
                         let co_processor_output = call_external(
                             proto_url,
+                            timeout,
                             PipelineStep::RouterRequest,
                             headers,
                             payload,
@@ -225,6 +233,7 @@ impl Plugin for ExternalPlugin {
             Some(MapFutureLayer::new(move |fut| {
                 let my_sdl = response_sdl.to_string();
                 let proto_url = response_full_config.url.clone();
+                let timeout = response_full_config.timeout;
                 let response_config = response_config.clone();
                 async move {
                     let mut response: router::Response = fut.await?;
@@ -247,6 +256,7 @@ impl Plugin for ExternalPlugin {
                     // Second, call our co-processor and get a reply.
                     let co_processor_output = call_external(
                         proto_url,
+                        timeout,
                         PipelineStep::RouterResponse,
                         headers,
                         payload,
@@ -344,6 +354,7 @@ fn prepare_external_params<'a>(
 
 async fn call_external<T>(
     url: String,
+    timeout: Option<Duration>,
     stage: PipelineStep,
     headers: Option<&HeaderMap<HeaderValue>>,
     payload: Option<T>,
@@ -359,7 +370,7 @@ where
     };
     let output = Externalizable::new(stage, converted_headers, payload, context, sdl);
     tracing::debug!(?output, "externalized output");
-    output.call(&url).await
+    output.call(&url, timeout).await
 }
 
 /// Convert a HeaderMap into a HashMap
