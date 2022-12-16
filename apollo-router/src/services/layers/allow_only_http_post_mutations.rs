@@ -34,12 +34,10 @@ where
                 if req.supergraph_request.method() != Method::POST
                     && req.query_plan.contains_mutations()
                 {
-                    let errors = vec![Error {
-                        message: "Mutations can only be sent over HTTP POST".to_string(),
-                        locations: Default::default(),
-                        path: Default::default(),
-                        extensions: Default::default(),
-                    }];
+                    let errors = vec![Error::builder()
+                        .message("Mutations can only be sent over HTTP POST".to_string())
+                        .extension_code("MUTATION_FORBIDDEN")
+                        .build()];
                     let mut res = ExecutionResponse::builder()
                         .errors(errors)
                         .extensions(Object::default())
@@ -150,7 +148,12 @@ mod forbid_http_get_mutations_tests {
             message: "Mutations can only be sent over HTTP POST".to_string(),
             locations: Default::default(),
             path: Default::default(),
-            extensions: Default::default(),
+            extensions: serde_json_bytes::json!({
+                "code": "MUTATION_FORBIDDEN"
+            })
+            .as_object()
+            .unwrap()
+            .to_owned(),
         };
         let expected_status = StatusCode::METHOD_NOT_ALLOWED;
         let expected_allow_header = "POST";

@@ -40,3 +40,11 @@ In addition to the url and poll interval, Uplink poll timeout can now be configu
 It defaults to 30 seconds.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
+
+## 🛠 Maintenance
+
+### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
+
+Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178

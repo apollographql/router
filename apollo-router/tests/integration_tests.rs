@@ -190,7 +190,10 @@ async fn simple_queries_should_not_work() {
     Please either specify a 'content-type' header \
     (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
     or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
-    let expected_error = graphql::Error::builder().message(message).build();
+    let expected_error = graphql::Error::builder()
+        .message(message)
+        .extension_code("CSRF_ERROR")
+        .build();
 
     let mut request = supergraph::Request::fake_builder()
         .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
@@ -268,6 +271,7 @@ async fn service_errors_should_be_propagated() {
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
         .extensions(extensions_map)
+        .extension_code("VALIDATION_ERROR")
         .build();
 
     let request = supergraph::Request::fake_builder()
@@ -357,13 +361,13 @@ async fn automated_persisted_queries() {
 
     let expected_apq_miss_error = apollo_router::graphql::Error::builder()
         .message("PersistedQueryNotFound")
-        .extension("code", "PERSISTED_QUERY_NOT_FOUND")
         .extension(
             "exception",
             json!({
                 "stacktrace": ["PersistedQueryNotFoundError: PersistedQueryNotFound"]
             }),
         )
+        .extension_code("PERSISTED_QUERY_NOT_FOUND")
         .build();
 
     let persisted = json!({
@@ -477,12 +481,12 @@ async fn missing_variables() {
     let mut expected = vec![
         graphql::Error::builder()
             .message("invalid type for variable: 'missingVariable'")
-            .extension("type", "ValidationInvalidTypeVariable")
+            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "missingVariable")
             .build(),
         graphql::Error::builder()
             .message("invalid type for variable: 'yetAnotherMissingVariable'")
-            .extension("type", "ValidationInvalidTypeVariable")
+            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "yetAnotherMissingVariable")
             .build(),
     ];
