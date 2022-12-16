@@ -239,7 +239,7 @@ dependencies = [
  "prost-types",
  "proteus",
  "rand",
- "redis 0.22.1",
+ "redis",
  "redis_cluster_async",
  "regex",
  "reqwest",
@@ -3875,26 +3875,6 @@ dependencies = [
  "async-trait",
  "bytes",
  "combine 4.6.6",
- "futures-util",
- "itoa",
- "percent-encoding",
- "pin-project-lite",
- "ryu",
- "sha1 0.6.1",
- "tokio",
- "tokio-util",
- "url",
-]
-
-[[package]]
-name = "redis"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "513b3649f1a111c17954296e4a3b9eecb108b766c803e2b99f179ebe27005985"
-dependencies = [
- "async-trait",
- "bytes",
- "combine 4.6.6",
  "crc16",
  "futures-util",
  "itoa",
@@ -3902,7 +3882,7 @@ dependencies = [
  "pin-project-lite",
  "rand",
  "ryu",
- "sha1_smol",
+ "sha1 0.6.1",
  "tokio",
  "tokio-util",
  "url",
@@ -3919,7 +3899,7 @@ dependencies = [
  "log",
  "pin-project-lite",
  "rand",
- "redis 0.21.7",
+ "redis",
  "tokio",
 ]
 
