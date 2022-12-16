@@ -59,7 +59,7 @@ impl Plugin for {{pascal_name}} {
         //             .service(service)
         //             .boxed()
 
-        // Returning the original service means that we didn't add any extra functionality for at this point in the lifecycle.
+        // Returning the original service means that we didn't add any extra functionality at this point in the lifecycle.
         service
     }
 

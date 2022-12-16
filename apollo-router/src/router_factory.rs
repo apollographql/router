@@ -184,7 +184,7 @@ impl YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let plugins: Arc<Plugins> = Arc::new(plugins.into_iter().collect());
+        // let plugins: Arc<Plugins> = Arc::new(plugins.into_iter().collect());
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration);
