@@ -98,7 +98,7 @@ mod test {
         serde_json::from_str(r#"{"data": {"topProducts":null},
         "errors":[{"message":
         "couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}",
-        "locations": [], "path": null, "extensions": { "test": "value" }}]}"#).unwrap()
+        "locations": [], "path": null, "extensions": { "test": "value", "code": "FETCH_ERROR" }}]}"#).unwrap()
     });
 
     static REDACTED_PRODUCT_RESPONSE: Lazy<Response> = Lazy::new(|| {
