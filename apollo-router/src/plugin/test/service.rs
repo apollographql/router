@@ -60,16 +60,18 @@ mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
 
-pub(crate) struct MockService<Request, Response, Error>
+type MockServiceMessage<Request, Response, Error> = (
+    Request,
+    oneshot::Sender<thread::Result<Result<Response, Error>>>,
+);
+
+pub struct MockService<Request, Response, Error>
 where
     Request: Send,
     Response: Send,
     Error: Send,
 {
-    tx: mpsc::Sender<(
-        Request,
-        oneshot::Sender<thread::Result<Result<Response, Error>>>,
-    )>,
+    tx: mpsc::Sender<MockServiceMessage<Request, Response, Error>>,
 }
 
 impl<Request, Response, Error> Clone for MockService<Request, Response, Error>
@@ -91,14 +93,11 @@ where
     Response: Send + 'static,
     Error: Send + 'static,
 {
-    pub(crate) fn create<F>(mut closure: F) -> Self
+    pub fn create<F>(mut closure: F) -> Self
     where
         F: FnMut(Request) -> Result<Response, Error> + Send + 'static,
     {
-        let (tx, mut rx) = mpsc::channel::<(
-            Request,
-            oneshot::Sender<thread::Result<Result<Response, Error>>>,
-        )>(100);
+        let (tx, mut rx) = mpsc::channel::<MockServiceMessage<Request, Response, Error>>(100);
 
         let store_sender = Arc::new(Mutex::new(None));
 
@@ -109,18 +108,16 @@ where
                     *store.lock().await = Some(sender);
                     let res = closure(request);
                     let sender = store.lock().await.take().unwrap();
-                    sender.send(Ok(res));
+                    let _ = sender.send(Ok(res));
                 }
-                //println!("end of loop");
             })
             .await
             {
                 let error = e.try_into_panic().unwrap();
                 println!("task got panic: {:?}", error);
                 let sender = store_sender.lock().await.take().unwrap();
-                sender.send(Err(error));
+                let _ = sender.send(Err(error));
             }
-            //println!("end of outer task");
         });
 
         Self { tx }

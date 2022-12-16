@@ -171,7 +171,7 @@ mod async_checkpoint_tests {
         //panic!();
         /*execution_service
         });*/
-        let mut execution_service: MockService<ExecutionRequest, ExecutionResponse, BoxError> =
+        let execution_service: MockService<ExecutionRequest, ExecutionResponse, BoxError> =
             MockService::create(move |req| {
                 exec.call(req)
 
