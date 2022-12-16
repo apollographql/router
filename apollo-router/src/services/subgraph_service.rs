@@ -23,7 +23,6 @@ use hyper_rustls::HttpsConnector;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use rustls::RootCertStore;
-
 use schemars::JsonSchema;
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;

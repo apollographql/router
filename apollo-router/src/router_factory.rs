@@ -142,6 +142,34 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
+        let tls_root_store = configuration
+            .tls
+            .subgraphs
+            .as_ref()
+            .and_then(|subgraphs| subgraphs.certificate_authorities_path.as_ref())
+            .and_then(|path| {
+                println!("will load certificates from {path}");
+                let mut store = RootCertStore::empty();
+                let certificates = load_certs(&path)
+                    .map_err(|e| {
+                        tracing::error!("could not parse certificate list: {e:?}");
+                    })
+                    .ok()?;
+                for certificate in certificates {
+                    store
+                        .add(&certificate)
+                        .map_err(|e| {
+                            tracing::error!("could not add certificate to root store: {e:?}");
+                        })
+                        .ok()?;
+                }
+                if store.is_empty() {
+                    None
+                } else {
+                    Some(store)
+                }
+            });
+
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration.clone());
 
@@ -151,10 +179,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
-                }
-                None => Either::B(SubgraphService::new(name)),
+                Some(shaping) => Either::A(shaping.subgraph_service_internal(
+                    name,
+                    SubgraphService::new(name, tls_root_store.clone()),
+                )),
+                None => Either::B(SubgraphService::new(name, tls_root_store.clone())),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
