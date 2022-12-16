@@ -1094,7 +1094,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
