@@ -43,6 +43,12 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🐛 Fixes
 
+### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
+
+We noticed that we kept receiving issues about hot reload. We tried to fix this a while back by moving from HotWatch to Notify, but there are still issues. The problem appears to be caused by having different mechanisms on different platforms. Switching to the PollWatcher, which offers less sophisticated functionality but is the same on all platforms, should solve these issues at the expense of slightly worse reactiveness.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2276
+
 ### Keep the error path when redacting subgraph errors ([Issue #1818](https://github.com/apollographql/router/issues/1818))
 
 Error redaction was erasing the error's path, which made it impossible to affect the errors to deferred responses. Now the redacted errors keep the path. Since the response shape for the primary and deferred responses are defined from the API schema, there is no possibility of leaking internal schema information here.
@@ -56,3 +62,12 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
+
+## 🥼 Experimental
+
+
+### Introduce a `router_service` ([Issue #1496](https://github.com/apollographql/router/issues/1496))
+
+A `router_service` is now part of our service stack, which allows plugin developers to process raw http requests and raw http responses, that wrap the already available `supergraph_service`
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2170

@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/services/supergraph_service/tests.rs
+source: apollo-router/src/services/supergraph_service.rs
 expression: primary
 ---
 {

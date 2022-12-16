@@ -19,7 +19,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use super::new_service::NewService;
+use super::new_service::ServiceFactory;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::IncrementalResponse;
@@ -326,7 +326,7 @@ async fn consume_responses(
 }
 
 pub(crate) trait ExecutionServiceFactory:
-    NewService<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
+    ServiceFactory<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
 {
     type ExecutionService: Service<
             ExecutionRequest,
@@ -344,13 +344,13 @@ pub(crate) struct ExecutionCreator<SF: SubgraphServiceFactory> {
     pub(crate) subgraph_creator: Arc<SF>,
 }
 
-impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
+impl<SF> ServiceFactory<ExecutionRequest> for ExecutionCreator<SF>
 where
     SF: SubgraphServiceFactory,
 {
     type Service = execution::BoxService;
 
-    fn new_service(&self) -> Self::Service {
+    fn create(&self) -> Self::Service {
         ServiceBuilder::new()
             .layer(AllowOnlyHttpPostMutationsLayer::default())
             .service(
@@ -369,7 +369,8 @@ where
 
 impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
     type ExecutionService = execution::BoxService;
-    type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
-        ExecutionRequest,
-    >>::Future;
+    type Future =
+        <<ExecutionCreator<SF> as ServiceFactory<ExecutionRequest>>::Service as Service<
+            ExecutionRequest,
+        >>::Future;
 }

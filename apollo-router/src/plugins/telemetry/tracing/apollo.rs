@@ -6,7 +6,7 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo_exporter::proto::Trace;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -22,13 +22,11 @@ impl TracingConfigurator for Config {
                 schema_id,
                 buffer_size,
                 field_level_instrumentation_sampler,
-                expose_trace_id,
                 ..
             } => {
                 tracing::debug!("configuring exporter to Studio");
 
                 let exporter = apollo_telemetry::Exporter::builder()
-                    .expose_trace_id_config(expose_trace_id.clone())
                     .endpoint(endpoint.clone())
                     .apollo_key(key)
                     .apollo_graph_ref(reference)

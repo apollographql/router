@@ -22,7 +22,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
-use crate::services::transport;
+use crate::services::router;
 use crate::ListenAddr;
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -86,7 +86,7 @@ impl MetricsConfigurator for Config {
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),
-                Endpoint::new(
+                Endpoint::from_router_service(
                     self.path.clone(),
                     PrometheusService {
                         registry: exporter.registry().clone(),
@@ -106,8 +106,8 @@ pub(crate) struct PrometheusService {
     registry: Registry,
 }
 
-impl Service<transport::Request> for PrometheusService {
-    type Response = transport::Response;
+impl Service<router::Request> for PrometheusService {
+    type Response = router::Response;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -115,16 +115,19 @@ impl Service<transport::Request> for PrometheusService {
         Ok(()).into()
     }
 
-    fn call(&mut self, _req: transport::Request) -> Self::Future {
+    fn call(&mut self, req: router::Request) -> Self::Future {
         let metric_families = self.registry.gather();
         Box::pin(async move {
             let encoder = TextEncoder::new();
             let mut result = Vec::new();
             encoder.encode(&metric_families, &mut result)?;
-            http::Response::builder()
-                .status(StatusCode::OK)
-                .body(result.into())
-                .map_err(|err| BoxError::from(err.to_string()))
+            Ok(router::Response {
+                response: http::Response::builder()
+                    .status(StatusCode::OK)
+                    .body::<hyper::Body>(result.into())
+                    .map_err(BoxError::from)?,
+                context: req.context,
+            })
         })
     }
 }
