@@ -11,7 +11,7 @@ use self::storage::KeyType;
 use self::storage::ValueType;
 
 #[cfg(feature = "experimental_cache")]
-mod redis;
+pub(crate) mod redis;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;

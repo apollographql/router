@@ -126,7 +126,41 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         tracing::trace!("getting from redis: {:?}", key);
         let mut guard = self.inner.lock().await;
-        guard.get(key).await.ok()
+        let res = guard.get(&key).await.ok();
+
+        res
+    }
+
+    pub(crate) async fn mget<K: KeyType, V: ValueType>(
+        &self,
+        keys: Vec<RedisKey<K>>,
+    ) -> Option<Vec<Option<RedisValue<V>>>> {
+        tracing::trace!("getting multiple values from redis: {:?}", keys);
+        let mut guard = self.inner.lock().await;
+
+        let res = if keys.len() == 1 {
+            let res = guard
+                .get(keys.first().unwrap())
+                .await
+                .map_err(|e| {
+                    tracing::error!("mget error: {}", e);
+                    e
+                })
+                .ok();
+            Some(vec![res])
+        } else {
+            guard
+                .get::<Vec<RedisKey<K>>, Vec<Option<RedisValue<V>>>>(keys.clone())
+                .await
+                .map_err(|e| {
+                    tracing::error!("mget error: {}", e);
+                    e
+                })
+                .ok()
+        };
+        tracing::trace!("result for '{:?}': {:?}", keys, res);
+
+        res
     }
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
@@ -138,6 +172,20 @@ impl RedisCacheStorage {
         let mut guard = self.inner.lock().await;
         let r = guard
             .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+            .await;
+        tracing::trace!("insert result {:?}", r);
+    }
+
+    pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
+        &self,
+        data: &[(RedisKey<K>, RedisValue<V>)],
+    ) {
+        tracing::trace!("inserting into redis: {:#?}", data);
+
+        let mut guard = self.inner.lock().await;
+
+        let r = guard
+            .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
             .await;
         tracing::trace!("insert result {:?}", r);
     }
