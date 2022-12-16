@@ -65,7 +65,7 @@ where
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             #[cfg(feature = "experimental_cache")]
             redis: if let Some(urls) = _redis_urls {
-                match RedisCacheStorage::new(urls).await {
+                match RedisCacheStorage::new(urls, None).await {
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
@@ -107,12 +107,14 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.inner.lock().await.put(key.clone(), value.clone());
-
         #[cfg(feature = "experimental_cache")]
         if let Some(redis) = self.redis.as_ref() {
-            redis.insert(RedisKey(key), RedisValue(value)).await;
+            redis
+                .insert(RedisKey(key.clone()), RedisValue(value.clone()))
+                .await;
         }
+
+        self.inner.lock().await.put(key, value);
     }
 
     #[cfg(test)]

@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use redis::AsyncCommands;
 use redis::FromRedisValue;
@@ -28,6 +29,7 @@ where
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
     inner: Arc<Mutex<Connection>>,
+    ttl: Option<Duration>,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -84,15 +86,10 @@ where
 {
     fn from_redis_value(v: &redis::Value) -> RedisResult<Self> {
         match v {
-            redis::Value::Bulk(bulk_data) => {
-                for entry in bulk_data {
-                    tracing::trace!("entry: {:?}", entry);
-                }
-                Err(redis::RedisError::from((
-                    redis::ErrorKind::TypeError,
-                    "the data is the wrong type",
-                )))
-            }
+            redis::Value::Bulk(_bulk_data) => Err(redis::RedisError::from((
+                redis::ErrorKind::TypeError,
+                "the data is the wrong type",
+            ))),
             redis::Value::Data(v) => serde_json::from_slice(v).map(RedisValue).map_err(|e| {
                 redis::RedisError::from((
                     redis::ErrorKind::TypeError,
@@ -110,14 +107,22 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(urls: Vec<String>) -> Result<Self, redis::RedisError> {
+    pub(crate) async fn new(
+        urls: Vec<String>,
+        ttl: Option<Duration>,
+    ) -> Result<Self, redis::RedisError> {
         let client = Client::open(urls)?;
         let connection = client.get_connection().await?;
 
         tracing::trace!("redis connection established");
         Ok(Self {
             inner: Arc::new(Mutex::new(connection)),
+            ttl,
         })
+    }
+
+    pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
+        self.ttl = ttl;
     }
 
     pub(crate) async fn get<K: KeyType, V: ValueType>(
@@ -180,13 +185,30 @@ impl RedisCacheStorage {
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
     ) {
-        tracing::trace!("inserting into redis: {:#?}", data);
+        tracing::info!("inserting into redis: {:#?}", data);
 
-        let mut guard = self.inner.lock().await;
+        if let Some(ttl) = self.ttl.as_ref() {
+            let expiration: usize = ttl.as_secs().try_into().unwrap();
+            let mut pipeline = redis::pipe();
+            pipeline.atomic();
 
-        let r = guard
-            .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
-            .await;
-        tracing::trace!("insert result {:?}", r);
+            for (key, value) in data {
+                pipeline.set_ex(key, value, expiration);
+            }
+
+            let mut guard = self.inner.lock().await;
+
+            let r = pipeline
+                .query_async::<Connection, redis::Value>(&mut *guard)
+                .await;
+            tracing::info!("insert result {:?}", r);
+        } else {
+            let mut guard = self.inner.lock().await;
+
+            let r = guard
+                .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
+                .await;
+            tracing::info!("insert result {:?}", r);
+        }
     }
 }
