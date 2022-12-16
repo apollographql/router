@@ -15,6 +15,7 @@ pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
 pub type Body = hyper::Body;
+pub type Error = hyper::Error;
 
 assert_impl_all!(Request: Send);
 /// Represents the router processing step of the processing pipeline.
@@ -110,7 +111,7 @@ impl From<http::Response<Body>> for Response {
 }
 
 impl Response {
-    pub async fn next_response(&mut self) -> Option<Result<Bytes, hyper::Error>> {
+    pub async fn next_response(&mut self) -> Option<Result<Bytes, Error>> {
         self.response.body_mut().next().await
     }
 
