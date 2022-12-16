@@ -616,6 +616,10 @@ expression: "&schema"
               },
               "nullable": true
             },
+            "timeout": {
+              "default": null,
+              "type": "string"
+            },
             "url": {
               "type": "string"
             }
