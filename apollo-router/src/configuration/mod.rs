@@ -643,6 +643,7 @@ impl Default for Sandbox {
 pub(crate) struct Homepage {
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
+    pub(crate) graph_ref: Option<String>,
 }
 
 fn default_homepage() -> bool {
@@ -655,6 +656,7 @@ impl Homepage {
     pub(crate) fn new(enabled: Option<bool>) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_homepage),
+            graph_ref: None,
         }
     }
 }
@@ -666,6 +668,7 @@ impl Homepage {
     pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_homepage),
+            graph_ref: None,
         }
     }
 }
