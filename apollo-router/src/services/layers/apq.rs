@@ -43,13 +43,6 @@ impl APQLayer {
     pub(crate) fn with_cache(cache: DeduplicatingCache<String, String>) -> Self {
         Self { cache }
     }
-
-    pub(crate) async fn apq_request(
-        &self,
-        request: SupergraphRequest,
-    ) -> Result<SupergraphRequest, SupergraphResponse> {
-        apq_request(&self.cache, request).await
-    }
 }
 
 impl<S> Layer<S> for APQLayer

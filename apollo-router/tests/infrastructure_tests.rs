@@ -4,7 +4,7 @@ async fn test_starstuff_supergraph_is_valid() {
     let schema = include_str!("../../examples/graphql/supergraph.graphql");
     apollo_router::TestHarness::builder()
         .schema(schema)
-        .build()
+        .build_router()
         .await
         .expect(
             r#"Couldn't parse the supergraph example.

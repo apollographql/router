@@ -1,11 +1,11 @@
 [package]
 name = "apollo-router"
-version = "1.5.0"
+version = "1.6.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://www.apollographql.com/docs/router/"
 description = "A configurable, high-performance routing runtime for Apollo Federation 🚀"
-license = "LicenseRef-ELv2"
+license = "Elastic-2.0"
 
 # renovate-automation: rustc version
 rust-version = "1.65.0"
@@ -42,6 +42,7 @@ access-json = "0.1.0"
 anyhow = "1.0.66"
 ansi_term = "0.12"
 apollo-parser = "0.4.0"
+arc-swap = "1.5.1"
 async-compression = { version = "0.3.15", features = [
     "tokio",
     "brotli",
@@ -52,17 +53,17 @@ async-trait = "0.1.59"
 atty = "0.2.14"
 axum = { version = "0.5.17", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.66"
-base64 = "0.13.1"
+base64 = "0.20.0"
 buildstructor = "0.5.1"
 bytes = "1.3.0"
-clap = { version = "3.2.23", default-features = false, features = [
+clap = { version = "4.0.29", default-features = false, features = [
     "env",
     "derive",
     "std",
+    "help",
 ] }
 console-subscriber = { version = "0.1.8", optional = true }
 dashmap = { version = "5.4.0", features = ["serde"] }
-deadpool = { version = "0.9.5", features = ["rt_tokio_1"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
@@ -89,11 +90,12 @@ jsonschema = { version = "0.16.1", default-features = false }
 lazy_static = "1.4.0"
 libc = "0.2.138"
 linkme = "0.3.6"
-lru = "0.7.8"
+lru = "0.8.1"
 mediatype = "0.19.11"
 mockall = "0.11.3"
 miette = { version = "5.5.0", features = ["fancy"] }
 mime = "0.3.16"
+multer = "2.0.4"
 multimap = "0.8.3"
 # To avoid tokio issues
 notify = { version = "5.0.0", default-features = false, features=["macos_kqueue"] }
@@ -110,42 +112,40 @@ once_cell = "1.16.0"
 # groups `^tracing` and `^opentelemetry*` dependencies together as of
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
-opentelemetry = { version = "0.17.0", features = [
+opentelemetry = { version = "0.18.0", features = [
     "rt-tokio",
-    "serialize",
     "metrics",
 ] }
-opentelemetry-datadog = { version = "0.5.0", features = ["reqwest-client"] }
-opentelemetry-http = "0.6.0"
-opentelemetry-jaeger = { version = "0.16.0", features = [
+opentelemetry-datadog = { version = "0.6.0", features = ["reqwest-client"] }
+opentelemetry-http = "0.7.0"
+opentelemetry-jaeger = { version = "0.17.0", features = [
     "collector_client",
     "reqwest_collector_client",
     "rt-tokio",
 ] }
-opentelemetry-otlp = { version = "0.10.0", default-features = false, features = [
+opentelemetry-otlp = { version = "0.11.0", default-features = false, features = [
+    "grpc-tonic",
     "tonic",
-    "tonic-build",
-    "prost",
     "tls",
     "http-proto",
     "metrics",
     "reqwest-client",
 ] }
-opentelemetry-semantic-conventions = "0.9.0"
-opentelemetry-zipkin = { version = "0.15.0", default-features = false, features = [
+opentelemetry-semantic-conventions = "0.10.0"
+opentelemetry-zipkin = { version = "0.16.0", default-features = false, features = [
     "reqwest-client",
     "reqwest-rustls",
 ] }
-opentelemetry-prometheus = "0.10.0"
-paste = "1.0.9"
+opentelemetry-prometheus = "0.11.0"
+paste = "1.0.10"
 pin-project-lite = "0.2.9"
 prometheus = "0.13"
-prost = "0.9.0"
-prost-types = "0.9.0"
+prost = "0.11.3"
+prost-types = "0.11.0"
 proteus = "0.5.0"
 rand = "0.8.5"
 rhai = { version = "1.11.0", features = ["sync", "serde", "internals"] }
-redis = { version = "0.21.6", optional = true, features = ["cluster", "tokio-comp"] }
+redis = { version = "0.22.1", optional = true, features = ["cluster", "tokio-comp"] }
 redis_cluster_async =  { version = "0.7.0", optional = true }
 regex = "1.7.0"
 reqwest = { version = "0.11.13", default-features = false, features = [
@@ -153,12 +153,12 @@ reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.11"
+router-bridge = "0.1.12"
 rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
-shellexpand = "2.1.2"
+shellexpand = "3.0.0"
 sha2 = "0.10.6"
-serde = { version = "1.0.149", features = ["derive", "rc"] }
+serde = { version = "1.0.150", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.89", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
@@ -169,9 +169,10 @@ thiserror = "1.0.37"
 tokio = { version = "1.23.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
 tokio-util = { version = "0.7.4", features = ["net", "codec"] }
-tonic = { version = "0.6.2", features = ["transport", "tls", "tls-roots"] }
+tonic = { version = "0.8.2", features = ["transport", "tls", "tls-roots", "gzip"] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.3.5", features = [
+    "add-extension",
     "trace",
     "cors",
     "compression-br",
@@ -183,17 +184,18 @@ tower-http = { version = "0.3.5", features = [
     "timeout",
 ] }
 tower-service = "0.3.2"
-tracing = "0.1.35"
-tracing-core = "0.1.28"
+tracing = "0.1.37"
+tracing-core = "0.1.30"
 tracing-futures = { version = "0.2.5", features = ["futures-03"] }
-tracing-opentelemetry = "0.17.4"
-tracing-subscriber = { version = "0.3.14", features = ["env-filter", "json"] }
-
+tracing-opentelemetry = "0.18.0"
+tracing-subscriber = { version = "0.3.11", features = ["env-filter", "json"] }
 url = { version = "2.3.1", features = ["serde"] }
 urlencoding = "2.1.2"
 uuid = { version = "1.2.2", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
 askama = "0.11.1"
+heck = "0.4.0"
+apollo-encoder = "0.4.0"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
@@ -202,8 +204,8 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.22.0", features = ["json", "redactions", "yaml"] }
-introspector-gadget = "0.1.0"
+insta = { version = "1.23.0", features = ["json", "redactions", "yaml"] }
+introspector-gadget = "0.2.0"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
 mockall = "0.11.3"
@@ -229,7 +231,7 @@ tracing-test = "0.2.2"
 walkdir = "2.3.2"
 
 [build-dependencies]
-tonic-build = "0.6.2"
+tonic-build = "0.8.2"
 
 
 [[test]]

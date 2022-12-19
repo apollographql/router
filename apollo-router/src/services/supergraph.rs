@@ -8,6 +8,7 @@ use http::method::Method;
 use http::HeaderValue;
 use http::StatusCode;
 use http::Uri;
+use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
@@ -46,6 +47,15 @@ impl From<http::Request<graphql::Request>> for Request {
             supergraph_request,
             context: Context::new(),
         }
+    }
+}
+
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Request")
+            // .field("supergraph_request", &self.supergraph_request)
+            .field("context", &self.context)
+            .finish()
     }
 }
 
@@ -105,7 +115,7 @@ impl Request {
         // Avoid testing requests getting blocked by the CSRF-prevention plugin
         headers
             .entry(http::header::CONTENT_TYPE.into())
-            .or_insert(HeaderValue::from_static("application/json").into());
+            .or_insert(HeaderValue::from_static(APPLICATION_JSON.essence_str()).into());
         Request::new(
             query,
             operation_name,
@@ -114,7 +124,7 @@ impl Request {
             context.unwrap_or_default(),
             headers,
             Uri::from_static("http://default"),
-            method.unwrap_or(Method::GET),
+            method.unwrap_or(Method::POST),
         )
     }
 

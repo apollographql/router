@@ -28,20 +28,18 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
-### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
+### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
 
-Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
+In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
 
-Example use from rhai as:
-
-```
-  response.headers["set-cookie"] = [
-    "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
-    "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
-  ];
+```bash
+        --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>
+            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_TIMEOUT=] [default: 30s]
 ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
+It defaults to 30 seconds.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
 ## 🐛 Fixes
 
@@ -51,43 +49,38 @@ Set the log level for this specific log to `debug`.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
 
-### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
+### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
 
-[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
-mandate that a deferred response should not be sent if its path points to an element of the response that was nullified
-in a previous payload.
+Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
+Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
 
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277
 
-### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
+### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
 
-When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
+We noticed that we kept receiving issues about hot reload. We tried to fix this a while back by moving from HotWatch to Notify, but there are still issues. The problem appears to be caused by having different mechanisms on different platforms. Switching to the PollWatcher, which offers less sophisticated functionality but is the same on all platforms, should solve these issues at the expense of slightly worse reactiveness.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2276
+
+### Keep the error path when redacting subgraph errors ([Issue #1818](https://github.com/apollographql/router/issues/1818))
+
+Error redaction was erasing the error's path, which made it impossible to affect the errors to deferred responses. Now the redacted errors keep the path. Since the response shape for the primary and deferred responses are defined from the API schema, there is no possibility of leaking internal schema information here.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
 
 ## 🛠 Maintenance
 
-### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
+### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
 
-This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
+Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
 
-### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
+## 🥼 Experimental
 
-This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
+### Introduce a `router_service` ([Issue #1496](https://github.com/apollographql/router/issues/1496))
 
-### Update to Rust 1.65 ([Issue #2220](https://github.com/apollographql/router/issues/2220))
+A `router_service` is now part of our service stack, which allows plugin developers to process raw http requests and raw http responses, that wrap the already available `supergraph_service`
 
-Rust MSRV incremented to 1.65.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221
-
-## 📚 Documentation
-### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
-
-Added some yaml design guidance to help us create consistent yaml config for new and existing features.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2159
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2170

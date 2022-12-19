@@ -12,6 +12,7 @@ use super::AgentDefault;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
@@ -21,6 +22,9 @@ pub(crate) struct Config {
     #[schemars(with = "String", default = "default_agent_endpoint")]
     #[serde(deserialize_with = "deser_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
+
+    #[serde(default)]
+    pub(crate) batch_processor: BatchProcessorConfig,
 }
 
 const fn default_agent_endpoint() -> &'static str {
@@ -49,7 +53,7 @@ where
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::debug!("configuring Zipkin tracing");
+        tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let collector_endpoint = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(url) => Some(url),
@@ -65,6 +69,7 @@ impl TracingConfigurator for Config {
 
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+                .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
         ))
