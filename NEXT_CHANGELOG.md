@@ -26,6 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## ❗ BREAKING ❗
 ## 🚀 Features
 
 ### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
@@ -42,6 +43,26 @@ It defaults to 30 seconds.
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
 ## 🐛 Fixes
+
+### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
+
+If you have duplicated keys in your yaml configuration like this:
+
+```yaml
+telemetry:
+  tracing:
+    propagation:
+      jaeger: true
+  tracing:
+    propagation:
+      jaeger: false
+```
+
+It will now throw an error on router startup:
+
+`ERROR duplicated keys detected in your yaml configuration: 'telemetry.tracing'`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2270
 
 ### Return root `__typename` in first chunk of defer response when first response is empty ([Issue #1922](https://github.com/apollographql/router/issues/1922))
 
