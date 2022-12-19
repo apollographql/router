@@ -326,6 +326,7 @@ impl Plugin for ExternalPlugin {
 
     fn subgraph_http_service(
         &self,
+        // TODO: send  the subgraph name
         name: &str,
         service: subgraph_http::BoxService,
     ) -> subgraph_http::BoxService {
