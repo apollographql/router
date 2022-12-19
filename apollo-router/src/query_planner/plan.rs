@@ -487,7 +487,7 @@ impl DeferredNode {
         let DeferredNode{
             depends,
             label,
-            path,
+            query_path,
             subselection,
             node: option
         } = &self.clone();
@@ -496,7 +496,7 @@ impl DeferredNode {
             return Some(DeferredNode{
                 depends: depends.clone(),
                 label: label.clone(),
-                path: path.clone(),
+                query_path: query_path.clone(),
                 subselection: subselection.clone(),
                 node: Some(Arc::new(node.add_apq_hash())),
             });

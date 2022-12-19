@@ -184,7 +184,7 @@ async fn call_http(
         })?;
 
     let mut request = http::request::Request::from_parts(parts, compressed_body.into());
-    let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON_HEADER_VALUE);
+    let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON.essence_str());
     let app_graphql_json: HeaderValue =
         HeaderValue::from_static(GRAPHQL_JSON_RESPONSE_HEADER_VALUE);
     request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
@@ -240,38 +240,6 @@ async fn call_http(
             }
         })?;
 
-    // Keep our parts, we'll need them later
-    let (parts, body) = response.into_parts();
-
-    if display_headers {
-        tracing::info!(
-            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-        );
-    }
-    if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
-        if let Ok(content_type_str) = content_type.to_str() {
-            // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
-            if !content_type_str.contains(APPLICATION_JSON_HEADER_VALUE)
-                && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
-            {
-                return if !parts.status.is_success() {
-                    Err(BoxError::from(FetchError::SubrequestHttpError {
-                        service: service_name.clone(),
-                        reason: format!(
-                            "{}: {}",
-                            parts.status.as_str(),
-                            parts.status.canonical_reason().unwrap_or("Unknown")
-                        ),
-                    }))
-                } else {
-                    Err(BoxError::from(FetchError::SubrequestHttpError {
-                        service: service_name.clone(),
-                        reason: format!("subgraph didn't return JSON (expected content-type: {APPLICATION_JSON_HEADER_VALUE} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})"),
-                    }))
-                };
-            }
-        }
-    }
     // Keep our parts, we'll need them later
     let (parts, body) = response.into_parts();
     if display_headers {
