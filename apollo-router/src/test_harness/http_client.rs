@@ -8,9 +8,11 @@ use futures::stream::poll_fn;
 use futures::Future;
 use futures::Stream;
 use futures::StreamExt;
+use http::HeaderValue;
 use http_body::Body;
 use mediatype::MediaType;
 use mediatype::ReadParams;
+use mime::APPLICATION_JSON;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio_util::io::StreamReader;
@@ -248,9 +250,10 @@ where
 {
     ServiceBuilder::new()
         .map_request(|mut request: http::Request<serde_json::Value>| {
-            request
-                .headers_mut()
-                .insert("content-type", "application/json".try_into().unwrap());
+            request.headers_mut().insert(
+                "content-type",
+                HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+            );
             request.map(|body| serde_json::to_vec(&body).unwrap().into())
         })
         .map_response(|response: http::Response<MaybeMultipart<Vec<u8>>>| {
@@ -259,7 +262,7 @@ where
                 MaybeMultipart::NotMultipart(bytes) => {
                     assert_eq!(
                         parts.headers.get("content-type").unwrap(),
-                        "application/json"
+                        APPLICATION_JSON.essence_str()
                     );
                     MaybeMultipart::NotMultipart(serde_json::from_slice(&bytes).unwrap())
                 }

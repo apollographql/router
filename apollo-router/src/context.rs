@@ -9,6 +9,7 @@ use std::time::Instant;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
+use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -27,12 +28,14 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// provide [`crate::SubgraphRequest`] or [`crate::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
     /// Creation time
+    #[serde(skip)]
+    #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
 }
 

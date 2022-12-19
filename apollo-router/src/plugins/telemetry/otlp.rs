@@ -35,7 +35,8 @@ pub(crate) struct Config {
     pub(crate) grpc: Option<GrpcExporter>,
     pub(crate) http: Option<HttpExporter>,
 
-    pub(crate) batch_processor: Option<BatchProcessorConfig>,
+    #[serde(default)]
+    pub(crate) batch_processor: BatchProcessorConfig,
 }
 
 impl Config {
