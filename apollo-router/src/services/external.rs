@@ -1,5 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
 #![allow(missing_docs)] // FIXME
-                        // With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::collections::HashMap;
 use std::fmt::Debug;
