@@ -508,13 +508,18 @@ expression: "&schema"
     "homepage": {
       "description": "Configuration options pertaining to the home page.",
       "default": {
-        "enabled": true
+        "enabled": true,
+        "graph_ref": null
       },
       "type": "object",
       "properties": {
         "enabled": {
           "default": true,
           "type": "boolean"
+        },
+        "graph_ref": {
+          "type": "string",
+          "nullable": true
         }
       },
       "additionalProperties": false
