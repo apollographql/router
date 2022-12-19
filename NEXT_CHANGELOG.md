@@ -84,9 +84,35 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🥼 Experimental
 
-
 ### Introduce a `router_service` ([Issue #1496](https://github.com/apollographql/router/issues/1496))
 
 A `router_service` is now part of our service stack, which allows plugin developers to process raw http requests and raw http responses, that wrap the already available `supergraph_service`
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2170
+
+### Introduce an externalization mechanism based on `router_service` ([Issue #1916](https://github.com/apollographql/router/issues/1916))
+
+If external extensibility is configured, then a block of data is transmitted (encoded as JSON) to an endpoint via an HTTP POST request. The router will process the response to the POST request before resuming execution.
+
+Conceptually, an external co-processor performs the same functionality as you may provide via a rust plugin or a rhai script within the router. The difference is the protocol which governs the interaction between the router and the co-processor.
+
+Sample configuration:
+
+```yaml
+plugins:
+  experimental.external:
+    url: http://127.0.0.1:8081 # mandatory URL which is the address of the co-processor
+    timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
+    stages: # In future, multiple stages may be configurable
+      router: # Currently, the only valid value is router
+        request: # What data should we transmit to the co-processor from the router request?
+          headers: true # All of these data content attributes are optional and false by default.
+          context: true
+          body: true
+          sdl: true
+        response: # What data should we transmit to the co-processor from the router response?
+          headers: true
+          context: true
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2229

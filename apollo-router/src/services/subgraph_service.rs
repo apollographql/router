@@ -65,6 +65,9 @@ impl Display for Compression {
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub(crate) struct SubgraphService {
+    // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
+    // in the hot path. We use reqwest elsewhere because it's convenient and some of the
+    // opentelemetry crate require reqwest clients to work correctly (at time of writing).
     client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
 }
