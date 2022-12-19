@@ -122,8 +122,7 @@ struct HomepageTemplate {
 
 pub(crate) fn home_page_content(homepage_config: Homepage) -> String {
     let template = HomepageTemplate {
-        graph_ref: homepage_config.graph_ref.unwrap_or("".to_string()),
+        graph_ref: homepage_config.graph_ref.unwrap_or_default(),
     };
-    println!("template: {}", template.render().expect("cannot fail"));
     template.render().expect("cannot fail")
 }
