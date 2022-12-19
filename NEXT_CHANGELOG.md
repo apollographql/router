@@ -100,6 +100,12 @@ Error redaction was erasing the error's path, which made it impossible to affect
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
 
+### Wrong urldecoding for variables in get requests ([Issue #2248](https://github.com/apollographql/router/issues/2248))
+
+Using APQs, any '+' characters would be replaced by spaces in variables, breaking for instance datetimes with timezone info.
+
+By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
+
 ## 🛠 Maintenance
 
 ### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
