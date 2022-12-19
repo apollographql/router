@@ -273,6 +273,10 @@ commands:
       cargo_test_args:
         type: string
         default: "--"
+      # additional cache key to have a cache for test_updated
+      cache_key:
+        type: string
+        default: ""
     steps:
       - run:
           name: Start jaeger
@@ -281,8 +285,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
@@ -397,6 +401,7 @@ jobs:
           # schema_generation test skipped because schemars changed its representation of enums:
           # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
           cargo_test_args: --no-fail-fast -- --skip schema_generation
+          cache_key: .test_updated
 
   build_release:
     parameters:
