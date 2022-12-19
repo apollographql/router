@@ -1,8 +1,3 @@
-plugins:
-  # this plugin has one piece of configuration,
-  # the name of the entity you'd like to say hello to
-  example.echo_co_processor:
-    port: 8080
 cors:
   allow_any_origin: true
 supergraph:
@@ -14,3 +9,20 @@ homepage:
   enabled: false
 include_subgraph_errors:
   all: true # Propagate errors from all subraphs
+
+plugins:
+  # this plugin has one piece of configuration,
+  # the name of the entity you'd like to say hello to
+  example.echo_co_processor:
+    port: 8080
+
+  experimental.external:
+    url: http://127.0.0.1:8080/ # mandatory URL which is the address of the co-processor
+    timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
+    stages:
+      subgraph_http: # router or subgraph_http
+        request: # What data should we transmit to the co-processor from the router request?
+          headers: true # All of these data content attributes are optional and false by default.
+          context: true
+          body: true
+          sdl: false
