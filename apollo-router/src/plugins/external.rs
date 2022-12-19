@@ -12,6 +12,7 @@ use bytes::Bytes;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::Uri;
 use hyper::body;
 use hyper::Body;
 use schemars::JsonSchema;
@@ -158,6 +159,7 @@ impl Plugin for ExternalPlugin {
                             payload,
                             context,
                             sdl,
+                            None,
                         )
                         .await?;
 
@@ -273,6 +275,7 @@ impl Plugin for ExternalPlugin {
                         payload,
                         context,
                         sdl,
+                        None,
                     )
                     .await?;
 
@@ -326,8 +329,7 @@ impl Plugin for ExternalPlugin {
 
     fn subgraph_http_service(
         &self,
-        // TODO: send  the subgraph name
-        name: &str,
+        _name: &str,
         service: subgraph_http::BoxService,
     ) -> subgraph_http::BoxService {
         let request_sdl = self.sdl.clone();
@@ -382,6 +384,7 @@ impl Plugin for ExternalPlugin {
                             payload,
                             context,
                             sdl,
+                            Some(&parts.uri),
                         )
                         .await?;
 
@@ -435,6 +438,10 @@ impl Plugin for ExternalPlugin {
                         if let Some(headers) = co_processor_output.headers {
                             *request.subgraph_request.headers_mut() =
                                 internalize_header_map(headers)?;
+                        }
+
+                        if let Some(uri) = co_processor_output.uri {
+                            *request.subgraph_request.uri_mut() = uri.parse()?;
                         }
 
                         Ok(ControlFlow::Continue(request))
@@ -493,6 +500,7 @@ impl Plugin for ExternalPlugin {
                         payload,
                         context,
                         sdl,
+                        None,
                     )
                     .await?;
 
@@ -591,6 +599,7 @@ async fn call_external<T>(
     payload: Option<T>,
     context: Option<Context>,
     sdl: Option<String>,
+    uri: Option<&Uri>,
 ) -> Result<Externalizable<T>, BoxError>
 where
     T: fmt::Debug + DeserializeOwned + Serialize + Send + Sync + 'static,
@@ -599,7 +608,14 @@ where
     if let Some(hdrs) = headers {
         converted_headers = Some(externalize_header_map(hdrs)?);
     };
-    let output = Externalizable::new(stage, converted_headers, payload, context, sdl);
+    let output = Externalizable::new(
+        stage,
+        converted_headers,
+        payload,
+        context,
+        sdl,
+        uri.map(std::string::ToString::to_string),
+    );
     tracing::debug!(?output, "externalized output");
     output.call(&url, timeout).await
 }

@@ -9,6 +9,7 @@ use std::time::Duration;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::StatusCode;
+use http::Uri;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
@@ -85,6 +86,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) body: Option<T>,
     pub(crate) context: Option<Context>,
     pub(crate) sdl: Option<String>,
+    pub(crate) uri: Option<String>,
 }
 
 impl<T> Externalizable<T>
@@ -97,6 +99,7 @@ where
         body: Option<T>,
         context: Option<Context>,
         sdl: Option<String>,
+        uri: Option<String>,
     ) -> Self {
         Self {
             version: EXTERNALIZABLE_VERSION,
@@ -107,6 +110,7 @@ where
             body,
             context,
             sdl,
+            uri,
         }
     }
 

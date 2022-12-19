@@ -3,3 +3,12 @@ plugins:
   # the name of the entity you'd like to say hello to
   example.hello_world:
     name: "Bob"
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs

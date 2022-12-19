@@ -130,6 +130,11 @@ impl Service<router::Request> for EchoServer {
                 });
             };
 
+            // let's mess up the uri
+            // json_body
+            //     .as_object_mut()
+            //     .map(|body| body.insert("uri".to_string(), json! { "http://localhost:4001"}));
+
             tracing::info!("modified payload:");
             tracing::info!("{}", serde_json::to_string_pretty(&json_body).unwrap());
 
