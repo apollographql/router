@@ -373,41 +373,45 @@ register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 mod test {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use tower::util::BoxCloneService;
     use tower::Service;
 
     use super::*;
-    use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::router_factory::create_plugins;
+    use crate::services::router;
+    use crate::services::router_service::RouterCreator;
     use crate::Configuration;
     use crate::PluggableSupergraphServiceBuilder;
     use crate::Schema;
     use crate::SupergraphRequest;
     use crate::SupergraphResponse;
 
-    static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
+    static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
     async fn execute_router_test(
         query: &str,
-        body: &Response,
-        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
+        body: &Bytes,
+        mut router_service: router::BoxService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
-            .expect("expecting valid request");
+            .expect("expecting valid request")
+            .try_into()
+            .unwrap();
 
         let response = router_service
             .ready()
@@ -418,13 +422,15 @@ mod test {
             .unwrap()
             .next_response()
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(response, *body);
+
+        assert_eq!(response, body);
     }
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
+    ) -> router::BoxService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -470,16 +476,34 @@ mod test {
         )
         .unwrap();
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone())
-            .with_configuration(Arc::new(config));
+        let config = Arc::new(config);
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone())
+            .with_configuration(config.clone());
+
+        for (name, plugin) in create_plugins(
+            &config,
+            &schema,
+            Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
+        )
+        .await
+        .expect("create plugins should work")
+        .into_iter()
+        {
+            builder = builder.with_dyn_plugin(name, plugin);
+        }
 
         let builder = builder
-            .with_dyn_plugin(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        builder.build().await.expect("should build").test_service()
+        RouterCreator::new(
+            Arc::new(builder.build().await.expect("should build")),
+            &Configuration::default(),
+        )
+        .make()
+        .boxed()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {

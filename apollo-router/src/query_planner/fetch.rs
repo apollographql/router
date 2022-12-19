@@ -276,7 +276,7 @@ impl FetchNode {
 
         let service = parameters
             .service_factory
-            .new_service(service_name)
+            .create(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -390,6 +390,7 @@ impl FetchNode {
                         "Subgraph response from '{}' was missing key `_entities`",
                         self.service_name
                     ))
+                    .extension_code("PARSE_ERROR")
                     .build(),
             );
 

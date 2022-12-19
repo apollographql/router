@@ -3,6 +3,7 @@ use std::sync::Mutex;
 
 use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
+use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use tower::ServiceExt;
 use tracing::field;
@@ -63,7 +64,7 @@ async fn setup_router(
     config: serde_json::Value,
     logging_config: serde_json::Value,
     subscriber: TestLogSubscriber,
-) -> supergraph::BoxCloneService {
+) -> router::BoxCloneService {
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
             "tracing": {},
@@ -83,22 +84,28 @@ async fn setup_router(
         .unwrap()
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(telemetry)
-        .build()
+        .build_router()
         .await
         .unwrap()
 }
 
 async fn query_with_router(
-    router: supergraph::BoxCloneService,
+    router: router::BoxCloneService,
     request: supergraph::Request,
 ) -> graphql::Response {
-    router
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap()
+    serde_json::from_slice(
+        router
+            .oneshot(request.try_into().unwrap())
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap()
 }
 
 #[derive(Default, Clone, PartialEq, Debug)]

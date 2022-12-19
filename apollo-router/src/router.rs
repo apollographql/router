@@ -36,49 +36,42 @@ use self::Event::UpdateSchema;
 use crate::axum_factory::make_axum_router;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::axum_factory::ListenAddrAndRouter;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::plugin::DynPlugin;
-use crate::router_factory::SupergraphServiceConfigurator;
-use crate::router_factory::SupergraphServiceFactory;
-use crate::router_factory::YamlSupergraphServiceFactory;
-use crate::services::layers::apq::APQLayer;
-use crate::services::transport;
+use crate::router_factory::RouterFactory;
+use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::router;
 use crate::spec::Schema;
 use crate::state_machine::StateMachine;
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
 // For now this is unused:
+// TODO: Check with simon once the refactor is complete
 #[allow(unused)]
 // Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
 // see https://github.com/apollographql/router/issues/1496.
 // In the meantime keeping this function helps make sure it still compiles.
-async fn make_transport_service<RF>(
+async fn make_router_service<RF>(
     schema: &str,
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-) -> Result<transport::BoxCloneService, BoxError> {
+) -> Result<router::BoxCloneService, BoxError> {
     let schema = Arc::new(Schema::parse(schema, &configuration)?);
-    let service_factory = YamlSupergraphServiceFactory
+    let service_factory = YamlRouterFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
-
-    let apq = APQLayer::with_cache(
-        DeduplicatingCache::from_configuration(
-            &configuration.supergraph.apq.experimental_cache,
-            "APQ",
-        )
-        .await,
-    );
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
-    // FIXME: how should
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
     let ListenAddrAndRouter(_listener, router) = routers.main;
+
     Ok(router
-        .map_response(|response| {
-            response.map(|body| {
+        .map_request(|req: router::Request| req.router_request)
+        .map_err(|error| match error {})
+        .map_response(|res| {
+            res.map(|body| {
                 // Axum makes this `body` have type:
                 // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
                 let mut body = Box::pin(body);
@@ -93,8 +86,8 @@ async fn make_transport_service<RF>(
                 // If we want to use trailers, we may need remove this convertion to `hyper::Body`
                 // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
             })
+            .into()
         })
-        .map_err(|error| match error {})
         .boxed_clone())
 }
 
@@ -168,6 +161,9 @@ pub enum SchemaSource {
 
         /// The duration between polling
         poll_interval: Duration,
+
+        /// The HTTP client timeout for each poll
+        timeout: Duration,
     },
 }
 
@@ -227,20 +223,27 @@ impl SchemaSource {
                 apollo_graph_ref,
                 urls,
                 poll_interval,
+                timeout,
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
-                        })
+                crate::uplink::stream_supergraph(
+                    apollo_key,
+                    apollo_graph_ref,
+                    urls,
+                    poll_interval,
+                    timeout,
+                )
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
+                        Err(e) => {
+                            tracing::error!("{}", e);
+                            None
+                        }
                     })
-                    .boxed()
+                })
+                .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
@@ -543,7 +546,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlSupergraphServiceFactory::default();
+        let router_factory = YamlRouterFactory::default();
         let state_machine = StateMachine::new(server_factory, router_factory);
         let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
         let graphql_listen_address = state_machine.graphql_listen_address.clone();
@@ -734,8 +737,10 @@ mod tests {
             UpdateConfiguration(_)
         ));
 
+        // Need different contents, since we won't get an event if content is the same
+        let contents_datadog = include_str!("testdata/datadog.router.yaml");
         // Modify the file and try again
-        write_and_flush(&mut file, contents).await;
+        write_and_flush(&mut file, contents_datadog).await;
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
@@ -843,15 +848,17 @@ mod tests {
         // First update is guaranteed
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
 
+        // Need different contents, since we won't get an event if content is the same
+        let schema_minimal = include_str!("testdata/minimal_supergraph.graphql");
         // Modify the file and try again
-        write_and_flush(&mut file, schema).await;
+        write_and_flush(&mut file, schema_minimal).await;
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
     }
 
     #[test(tokio::test)]
     async fn schema_by_file_missing() {
         let mut stream = SchemaSource::File {
-            path: temp_dir().join("does_not_exit"),
+            path: temp_dir().join("does_not_exist"),
             watch: true,
             delay: None,
         }
