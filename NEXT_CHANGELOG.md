@@ -42,6 +42,13 @@ It defaults to 30 seconds.
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
 ## 🐛 Fixes
+
+### Change log level when we can't get the schema from GCP ([Issue #2004](https://github.com/apollographql/router/issues/2004))
+
+Set the log level for this specific log to `debug`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
+
 ### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
 
 Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
