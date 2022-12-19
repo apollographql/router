@@ -400,12 +400,9 @@ jobs:
       - checkout
       - linux_amd_install_baseline
       - run:
-          name: Use latest Rust Nightly and update all Rust dependencies
+          name: Update all Rust dependencies
           command: |
-            sed -i '/channel/d' rust-toolchain.toml
-            echo 'channel = "nightly"' >> rust-toolchain.toml
             rm Cargo.lock
-            cargo fetch
       - test_workspace:
           os: linux_amd
           # schema_generation test skipped because schemars changed its representation of enums:
