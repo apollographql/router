@@ -51,7 +51,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
@@ -228,12 +228,17 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
-      - run: cargo xtask lint
+      - run:
+        name: Install xtask
+        command: |
+            set -e -o pipefail
+            xtask help || cd xtask && cargo install --path . && cd ..
+      - run: xtask lint
       - save_cache:
           name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
           paths:
             - ~/.cargo
 
@@ -245,7 +250,7 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
