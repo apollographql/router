@@ -231,10 +231,10 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - run:
-        name: Install xtask
-        command: |
-            set -e -o pipefail
-            xtask help || cd xtask && cargo install --path . && cd ..
+          name: Install xtask
+          command: |
+              set -e -o pipefail
+              xtask help || cd xtask && cargo install --path . && cd ..
       - run: xtask lint
       - save_cache:
           name: Save .cargo
