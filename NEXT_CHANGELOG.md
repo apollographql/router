@@ -77,7 +77,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
 Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277 and https://github.com/apollographql/router/pull/2286
 
 ### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
 

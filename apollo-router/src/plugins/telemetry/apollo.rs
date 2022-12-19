@@ -226,7 +226,7 @@ impl AddAssign<SingleReport> for Report {
 
 impl AddAssign<TracesReport> for Report {
     fn add_assign(&mut self, report: TracesReport) {
-        self.operation_count += report.traces.len() as u64;
+        // Note that operation count is dealt with in metrics so we don't increment this.
         for (operation_signature, trace) in report.traces {
             self.traces_per_query
                 .entry(operation_signature)
