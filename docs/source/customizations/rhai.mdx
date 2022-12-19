@@ -48,6 +48,17 @@ To use Rhai scripts with the Apollo Router, you must do the following:
     * By default, the Apollo Router looks for `main.rhai` in your Rhai script directory.
     * You can override this default with the `main` key (see above).
 
+## Hot reloading
+
+The router will "watch" your "rhai.scripts" directory for changes and prompt an interpreter re-load if changes are detected. Changes are defined as:
+
+ * creating a new file with a ".rhai" suffix
+ * modifying or removing an existing file with a ".rhai" suffix
+
+The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
+
+The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
+
 ## The main file
 
 Your Rhai script's main file defines whichever combination of supported entry point hooks you want to use. Here's a skeleton `main.rhai` file that includes all available hooks and also registers all available [callbacks](#service-callbacks):

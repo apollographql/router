@@ -19,11 +19,12 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use super::new_service::NewService;
+use super::new_service::ServiceFactory;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
+use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
@@ -128,6 +129,10 @@ where
                                 response.has_next = Some(has_next);
                             }
 
+                            response.errors.retain(|error| match &error.path {
+                                    None => true,
+                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
+                                });
                             ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the
@@ -157,6 +162,9 @@ where
                                 }
                             });
 
+                            let query = query.clone();
+                            let operation_name = operation_name.clone();
+
                             let incremental = sub_responses
                                 .into_iter()
                                 .filter_map(move |(path, data)| {
@@ -166,17 +174,59 @@ where
                                         .iter()
                                         .filter(|error| match &error.path {
                                             None => false,
-                                            Some(err_path) => err_path.starts_with(&path),
+                                            Some(error_path) =>query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+
                                         })
                                         .cloned()
                                         .collect::<Vec<_>>();
+
+                                        let extensions: Object = response
+                                        .extensions
+                                        .iter()
+                                        .map(|(key, value)| {
+                                            if key.as_str() == "valueCompletion" {
+                                                let value = match value.as_array() {
+                                                    None => Value::Null,
+                                                    Some(v) => Value::Array(
+                                                        v.iter()
+                                                            .filter(|ext| {
+                                                                match ext
+                                                                    .as_object()
+                                                                    .as_ref()
+                                                                    .and_then(|ext| {
+                                                                        ext.get("path")
+                                                                    })
+                                                                    .and_then(|v| {
+                                                                        let p:Option<Path> = serde_json_bytes::from_value(v.clone()).ok();
+                                                                        p
+                                                                    }) {
+                                                                    None => false,
+                                                                    Some(ext_path) => {
+                                                                        ext_path
+                                                                            .starts_with(
+                                                                                &path,
+                                                                            )
+                                                                    }
+                                                                }
+                                                            })
+                                                            .cloned()
+                                                            .collect(),
+                                                    ),
+                                                };
+
+                                                (key.clone(), value)
+                                            } else {
+                                                (key.clone(), value.clone())
+                                            }
+                                        })
+                                        .collect();
 
                                     // an empty response should not be sent
                                     // still, if there's an error or extension to show, we should
                                     // send it
                                     if !data.is_null()
                                         || !errors.is_empty()
-                                        || !response.extensions.is_empty()
+                                        || !extensions.is_empty()
                                     {
                                         Some(
                                             IncrementalResponse::builder()
@@ -184,7 +234,7 @@ where
                                                 .data(data)
                                                 .path(path)
                                                 .errors(errors)
-                                                .extensions(response.extensions.clone())
+                                                .extensions(extensions)
                                                 .build(),
                                         )
                                     } else {
@@ -199,6 +249,7 @@ where
                                     .incremental(incremental)
                                     .build(),
                             ))
+
                         }
                     }
                 })
@@ -275,7 +326,7 @@ async fn consume_responses(
 }
 
 pub(crate) trait ExecutionServiceFactory:
-    NewService<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
+    ServiceFactory<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
 {
     type ExecutionService: Service<
             ExecutionRequest,
@@ -293,13 +344,13 @@ pub(crate) struct ExecutionCreator<SF: SubgraphServiceFactory> {
     pub(crate) subgraph_creator: Arc<SF>,
 }
 
-impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
+impl<SF> ServiceFactory<ExecutionRequest> for ExecutionCreator<SF>
 where
     SF: SubgraphServiceFactory,
 {
     type Service = execution::BoxService;
 
-    fn new_service(&self) -> Self::Service {
+    fn create(&self) -> Self::Service {
         ServiceBuilder::new()
             .layer(AllowOnlyHttpPostMutationsLayer::default())
             .service(
@@ -318,7 +369,8 @@ where
 
 impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
     type ExecutionService = execution::BoxService;
-    type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
-        ExecutionRequest,
-    >>::Future;
+    type Future =
+        <<ExecutionCreator<SF> as ServiceFactory<ExecutionRequest>>::Service as Service<
+            ExecutionRequest,
+        >>::Future;
 }

@@ -7,8 +7,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
-use crate::plugins::telemetry::apollo_exporter::proto::ReferencedFieldsForType;
-use crate::plugins::telemetry::apollo_exporter::proto::StatsContext;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {
@@ -212,7 +212,7 @@ impl AddAssign<SingleFieldStat> for FieldStat {
 }
 
 impl From<ContextualizedStats>
-    for crate::plugins::telemetry::apollo_exporter::proto::ContextualizedStats
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::ContextualizedStats
 {
     fn from(stats: ContextualizedStats) -> Self {
         Self {
@@ -228,7 +228,7 @@ impl From<ContextualizedStats>
 }
 
 impl From<QueryLatencyStats>
-    for crate::plugins::telemetry::apollo_exporter::proto::QueryLatencyStats
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::QueryLatencyStats
 {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
@@ -249,7 +249,9 @@ impl From<QueryLatencyStats>
     }
 }
 
-impl From<PathErrorStats> for crate::plugins::telemetry::apollo_exporter::proto::PathErrorStats {
+impl From<PathErrorStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::PathErrorStats
+{
     fn from(stats: PathErrorStats) -> Self {
         Self {
             children: stats
@@ -263,7 +265,7 @@ impl From<PathErrorStats> for crate::plugins::telemetry::apollo_exporter::proto:
     }
 }
 
-impl From<TypeStat> for crate::plugins::telemetry::apollo_exporter::proto::TypeStat {
+impl From<TypeStat> for crate::plugins::telemetry::apollo_exporter::proto::reports::TypeStat {
     fn from(stat: TypeStat) -> Self {
         Self {
             per_field_stat: stat
@@ -275,7 +277,7 @@ impl From<TypeStat> for crate::plugins::telemetry::apollo_exporter::proto::TypeS
     }
 }
 
-impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::FieldStat {
+impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::reports::FieldStat {
     fn from(stat: FieldStat) -> Self {
         Self {
             return_type: stat.return_type,

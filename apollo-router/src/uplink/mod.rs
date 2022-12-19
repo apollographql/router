@@ -56,6 +56,7 @@ pub(crate) fn stream_supergraph(
     graph_ref: String,
     urls: Option<Vec<Url>>,
     mut interval: Duration,
+    timeout: Duration,
 ) -> impl Stream<Item = Result<Schema, String>> {
     let (sender, receiver) = channel(2);
     let _ = tokio::task::spawn(async move {
@@ -68,6 +69,7 @@ pub(crate) fn stream_supergraph(
                 graph_ref.to_string(),
                 composition_id.clone(),
                 urls.as_ref().map(|u| &u[current_url_idx]),
+                timeout
             )
             .await
             {
@@ -141,6 +143,7 @@ pub(crate) async fn fetch_supergraph(
     graph_ref: String,
     composition_id: Option<String>,
     url: Option<&Url>,
+    timeout: Duration,
 ) -> Result<supergraph_sdl::ResponseData, Error> {
     let variables = supergraph_sdl::Variables {
         api_key,
@@ -150,12 +153,12 @@ pub(crate) async fn fetch_supergraph(
     let request_body = SupergraphSdl::build_query(variables);
 
     let response = match url {
-        Some(url) => http_request(url.as_str(), &request_body).await?,
-        None => match http_request(GCP_URL, &request_body).await {
+        Some(url) => http_request(url.as_str(), &request_body, timeout).await?,
+        None => match http_request(GCP_URL, &request_body, timeout).await {
             Ok(response) => response,
             Err(e) => {
                 tracing::error!("could not get schema from GCP, trying AWS: {:?}", e);
-                http_request(AWS_URL, &request_body).await?
+                http_request(AWS_URL, &request_body, timeout).await?
             }
         },
     };
@@ -169,8 +172,9 @@ pub(crate) async fn fetch_supergraph(
 async fn http_request(
     url: &str,
     request_body: &QueryBody<supergraph_sdl::Variables>,
+    timeout: Duration,
 ) -> Result<Response<supergraph_sdl::ResponseData>, reqwest::Error> {
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder().timeout(timeout).build()?;
 
     let res = client.post(url).json(request_body).send().await?;
     let response_body: Response<supergraph_sdl::ResponseData> = res.json().await?;
@@ -189,8 +193,7 @@ fn test_uplink_schema_is_up_to_date() {
     let client = GraphQLClient::new(
         "https://uplink.api.apollographql.com/",
         reqwest::blocking::Client::new(),
-    )
-    .unwrap();
+    );
 
     let should_retry = true;
     let introspection_response = introspect::run(

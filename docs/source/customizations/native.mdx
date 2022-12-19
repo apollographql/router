@@ -88,6 +88,13 @@ impl Plugin for HelloWorld {
 
     // Only define the hooks you need to modify. Each default hook
     // implementation returns its associated service with no changes.
+    fn router_service(
+        &mut self,
+        service: router::BoxService,
+    ) -> router::BoxService {
+        service
+    }
+
     fn supergraph_service(
         &mut self,
         service: router::BoxService,

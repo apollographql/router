@@ -106,7 +106,7 @@ impl Query {
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
         if let Some(Value::Object(mut input)) = data {
-            let operation = self.operation(operation_name);
+            let original_operation = self.operation(operation_name);
             if is_deferred {
                 if let Some(subselection) = &response.subselection {
                     // Get subselection from hashmap
@@ -123,6 +123,19 @@ impl Query {
                                 errors: Vec::new(),
                                 nullified: Vec::new(),
                             };
+                            // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                            // cf https://github.com/apollographql/router/issues/1677
+                            let operation_kind_if_root_typename =
+                                original_operation.and_then(|op| {
+                                    op.selection_set
+                                        .iter()
+                                        .any(|f| f.is_typename_field())
+                                        .then(|| *op.kind())
+                                });
+                            if let Some(operation_kind) = operation_kind_if_root_typename {
+                                output.insert(TYPENAME, operation_kind.as_str().into());
+                            }
+
                             response.data = Some(
                                 match self.apply_root_selection_set(
                                     operation,
@@ -151,7 +164,7 @@ impl Query {
                     response.data = Some(Value::Object(Object::default()));
                     return vec![];
                 }
-            } else if let Some(operation) = operation {
+            } else if let Some(operation) = original_operation {
                 let mut output = Object::default();
 
                 let all_variables = if operation.variables.is_empty() {
@@ -211,9 +224,8 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        let string = query.into();
-
-        let parser = apollo_parser::Parser::new(string.as_str())
+        let query = query.into();
+        let parser = apollo_parser::Parser::new(query.as_str())
             .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let tree = parser.parse();
 
@@ -248,7 +260,7 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
-            string,
+            string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -956,6 +968,35 @@ impl Query {
             None => self.operations.get(0),
         }
     }
+
+    pub(crate) fn contains_error_path(
+        &self,
+        operation_name: Option<&str>,
+        subselection: Option<&str>,
+        response_path: Option<&Path>,
+        path: &Path,
+    ) -> bool {
+        let operation = if let Some(subselection) = subselection {
+            // Get subselection from hashmap
+            match self.subselections.get(&SubSelection {
+                path: response_path.cloned().unwrap_or_default(),
+                subselection: subselection.to_string(),
+            }) {
+                Some(subselection_query) => &subselection_query.operations[0],
+                None => return false,
+            }
+        } else {
+            match self.operation(operation_name) {
+                None => return false,
+                Some(op) => op,
+            }
+        };
+
+        operation
+            .selection_set
+            .iter()
+            .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+    }
 }
 
 /// Intermediate structure for arguments passed through the entire formatting
@@ -1066,7 +1107,7 @@ impl Operation {
             && self
                 .selection_set
                 .get(0)
-                .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
+                .map(|s| s.is_typename_field())
                 .unwrap_or_default()
     }
 

@@ -44,7 +44,7 @@ allow = [
     "LicenseRef-ring",
     "MIT",
     "MPL-2.0",
-    "LicenseRef-ELv2",
+    "Elastic-2.0",
     "Unicode-DFS-2016"
 ]
 copyleft = "warn"
