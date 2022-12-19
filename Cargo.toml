@@ -19,6 +19,7 @@ members = [
     "examples/error-response-mutate/rhai",
     "examples/subgraph-request-log/rhai",
     "examples/subgraph-http-test",
+    "examples/yml-subgraph-http-test",
     "examples/surrogate-cache-key/rhai",
     "examples/supergraph-sdl/rust",
     "examples/jwt-auth/rust",

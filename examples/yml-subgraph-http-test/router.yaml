@@ -1,0 +1,16 @@
+plugins:
+  # this plugin has one piece of configuration,
+  # the name of the entity you'd like to say hello to
+  example.echo_co_processor:
+    port: 8080
+cors:
+  allow_any_origin: true
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs
