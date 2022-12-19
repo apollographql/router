@@ -4,6 +4,7 @@
 
 pub(crate) mod csrf;
 mod expose_query_plan;
+mod external;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;

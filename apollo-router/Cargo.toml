@@ -164,6 +164,7 @@ serde_json = { version = "1.0.89", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
+strum_macros = "0.24.3"
 sys-info = "0.9.1"
 thiserror = "1.0.37"
 tokio = { version = "1.23.0", features = ["full"] }

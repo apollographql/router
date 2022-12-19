@@ -163,7 +163,8 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        if report.operation_count == 0 {
+        // We may be sending traces but with no operation count
+        if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return Ok(());
         }
         tracing::debug!("submitting report: {:?}", report);
