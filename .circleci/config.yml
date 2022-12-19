@@ -231,7 +231,7 @@ commands:
             - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
             - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - run: cargo xtask lint
-       - save_cache:
+      - save_cache:
           name: Save .cargo
           key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
           paths:
