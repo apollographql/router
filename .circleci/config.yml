@@ -403,6 +403,7 @@ jobs:
           name: Update all Rust dependencies
           command: |
             rm Cargo.lock
+            cargo fetch
       - test_workspace:
           os: linux_amd
           # schema_generation test skipped because schemars changed its representation of enums:
