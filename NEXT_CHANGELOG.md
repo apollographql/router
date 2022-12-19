@@ -99,6 +99,12 @@ By [@neominik](https://github.com/neominik) in https://github.com/apollographql/
 
 ## 🛠 Maintenance
 
+### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
+
+Add attribute named `http.url` containing the subgraph URL in span `subgraph_request`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2291
+
 ### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
 
 Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
