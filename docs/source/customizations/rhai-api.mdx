@@ -165,6 +165,14 @@ fn supergraph_service(service) {
 }
 ```
 
+### Headers with multiple values
+
+The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
+
+If you wish to get multiple values for a header key, then you must use the `values()` fn, NOT the indexed accessor. If you do use the indexed accessor, it will only return the first value (as a string) associated with the key.
+
+Look at the examples to see how this works in practice.
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
@@ -250,6 +258,15 @@ request.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-
 print(`${request.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
 // Rhai also supports extended dot notation for indexed variables, so this is equivalent
 request.headers.x-my-new-header = 42.to_string();
+// You can also set an header value from an array. Useful with the "set-cookie" header,
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+request.headers["set-cookie"] = [
+  "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+];
+// You can also get multiple header values for a header using the values() fn
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+print(`${request.headers.values("set-cookie")}`);
 ```
 
 ### `request.body.query`

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use axum::response::IntoResponse;
 use http::StatusCode;
 use multimap::MultiMap;
+use once_cell::sync::Lazy;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
@@ -16,6 +17,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
+use crate::plugin::PluginFactory;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::services::new_service::NewService;
@@ -127,7 +129,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
-                .and_then(|plugin| (&*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
                 Some(shaping) => {
                     Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
@@ -184,7 +186,7 @@ async fn create_plugins(
     ];
 
     let mut errors = Vec::new();
-    let plugin_registry = crate::plugin::plugins();
+    let plugin_registry: Vec<&'static Lazy<PluginFactory>> = crate::plugin::plugins().collect();
     let mut plugin_instances = Vec::new();
     let extra = extra_plugins.unwrap_or_default();
 
@@ -194,7 +196,7 @@ async fn create_plugins(
             continue;
         }
 
-        match plugin_registry.get(name.as_str()) {
+        match plugin_registry.iter().find(|factory| factory.name == name) {
             Some(factory) => {
                 tracing::debug!(
                     "creating plugin: '{}' with configuration:\n{:#}",
@@ -204,7 +206,6 @@ async fn create_plugins(
                 if name == "apollo.telemetry" {
                     inject_schema_id(schema, &mut configuration);
                 }
-                // expand any env variables in the config before processing.
                 match factory
                     .create_instance(&configuration, schema.as_string().clone())
                     .await
@@ -241,7 +242,10 @@ async fn create_plugins(
             }
             None => {
                 // Didn't find it, insert
-                match plugin_registry.get(*name) {
+                match plugin_registry
+                    .iter()
+                    .find(|factory| factory.name == **name)
+                {
                     // Create an instance
                     Some(factory) => {
                         // Create default (empty) config
@@ -290,13 +294,10 @@ async fn create_plugins(
             tracing::error!("{:#}", error);
         }
 
-        Err(BoxError::from(
-            errors
-                .into_iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<String>>()
-                .join("\n"),
-        ))
+        Err(BoxError::from(format!(
+            "there were {} configuration errors",
+            errors.len()
+        )))
     } else {
         Ok(plugin_instances)
     }
@@ -308,7 +309,6 @@ fn inject_schema_id(schema: &Schema, configuration: &mut Value) {
             telemetry.insert("apollo".to_string(), Value::Object(Default::default()));
         }
     }
-
     if let (Some(schema_id), Some(apollo)) = (
         &schema.api_schema().schema_id,
         configuration.get_mut("apollo"),

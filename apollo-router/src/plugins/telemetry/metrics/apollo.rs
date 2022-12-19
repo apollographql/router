@@ -24,7 +24,7 @@ impl MetricsConfigurator for Config {
         static ENABLED: AtomicBool = AtomicBool::new(false);
         Ok(match self {
             Config {
-                endpoint: Some(endpoint),
+                endpoint,
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
@@ -36,9 +36,7 @@ impl MetricsConfigurator for Config {
                 tracing::debug!("creating metrics exporter");
                 let exporter = ApolloExporter::new(endpoint, key, reference, schema_id)?;
 
-                builder
-                    .with_apollo_metrics_collector(exporter.provider())
-                    .with_exporter(exporter)
+                builder.with_apollo_metrics_collector(exporter.start())
             }
             _ => {
                 ENABLED.swap(false, Ordering::Relaxed);
@@ -56,6 +54,7 @@ mod test {
     use futures::stream::StreamExt;
     use http::header::HeaderName;
     use tower::ServiceExt;
+    use url::Url;
 
     use super::super::super::config;
     use super::studio::SingleStatsReport;
@@ -64,6 +63,7 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::plugins::telemetry::apollo;
     use crate::plugins::telemetry::apollo::default_buffer_size;
+    use crate::plugins::telemetry::apollo::ENDPOINT_DEFAULT;
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
@@ -74,7 +74,7 @@ mod test {
     #[tokio::test]
     async fn apollo_metrics_disabled() -> Result<(), BoxError> {
         let plugin = create_plugin_with_apollo_config(super::super::apollo::Config {
-            endpoint: None,
+            endpoint: Url::parse("http://example.com")?,
             apollo_key: None,
             apollo_graph_ref: None,
             client_name_header: HeaderName::from_static("name_header"),
@@ -91,7 +91,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apollo_metrics_enabled() -> Result<(), BoxError> {
         let plugin = create_plugin().await?;
-        assert!(matches!(plugin.apollo_metrics_sender, Sender::Spaceport(_)));
+        assert!(matches!(plugin.apollo_metrics_sender, Sender::Apollo(_)));
         Ok(())
     }
 
@@ -184,7 +184,7 @@ mod test {
         let mut plugin = create_plugin().await?;
         // Replace the apollo metrics sender so we can test metrics collection.
         let (tx, rx) = futures::channel::mpsc::channel(100);
-        plugin.apollo_metrics_sender = Sender::Spaceport(tx);
+        plugin.apollo_metrics_sender = Sender::Apollo(tx);
         TestHarness::builder()
             .extra_plugin(plugin)
             .build()
@@ -224,7 +224,7 @@ mod test {
 
     fn create_plugin() -> impl Future<Output = Result<Telemetry, BoxError>> {
         create_plugin_with_apollo_config(apollo::Config {
-            endpoint: None,
+            endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint must be parseable"),
             apollo_key: Some("key".to_string()),
             apollo_graph_ref: Some("ref".to_string()),
             client_name_header: HeaderName::from_static("name_header"),

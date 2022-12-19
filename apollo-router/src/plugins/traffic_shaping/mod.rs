@@ -485,7 +485,7 @@ mod test {
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a traffic shaping plugin
         crate::plugin::plugins()
-            .get(APOLLO_TRAFFIC_SHAPING)
+            .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -503,7 +503,7 @@ mod test {
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+        execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -579,7 +579,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_subgraph_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
@@ -587,7 +587,7 @@ mod test {
             test:
                 global_rate_limit:
                     capacity: 1
-                    interval: 300ms
+                    interval: 100ms
                 timeout: 500ms
         "#,
         )
@@ -636,7 +636,7 @@ mod test {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_router_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"

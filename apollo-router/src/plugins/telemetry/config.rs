@@ -1,5 +1,4 @@
 //! Configuration for the telemetry plugin.
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use axum::headers::HeaderName;
@@ -323,7 +322,7 @@ impl From<AttributeValue> for opentelemetry::Value {
             AttributeValue::Bool(v) => Value::Bool(v),
             AttributeValue::I64(v) => Value::I64(v),
             AttributeValue::F64(v) => Value::F64(v),
-            AttributeValue::String(v) => Value::String(Cow::from(v)),
+            AttributeValue::String(v) => Value::String(v.into()),
             AttributeValue::Array(v) => Value::Array(v.into()),
         }
     }
@@ -339,7 +338,7 @@ pub(crate) enum AttributeArray {
     /// Array of floats
     F64(Vec<f64>),
     /// Array of strings
-    String(Vec<Cow<'static, str>>),
+    String(Vec<String>),
 }
 
 impl From<AttributeArray> for opentelemetry::Array {
@@ -348,7 +347,7 @@ impl From<AttributeArray> for opentelemetry::Array {
             AttributeArray::Bool(v) => Array::Bool(v),
             AttributeArray::I64(v) => Array::I64(v),
             AttributeArray::F64(v) => Array::F64(v),
-            AttributeArray::String(v) => Array::String(v),
+            AttributeArray::String(v) => Array::String(v.into_iter().map(|v| v.into()).collect()),
         }
     }
 }

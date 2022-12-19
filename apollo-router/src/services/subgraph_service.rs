@@ -22,7 +22,6 @@ use hyper::Client;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use opentelemetry::global;
-use opentelemetry::trace::SpanKind;
 use schemars::JsonSchema;
 use serde_json_bytes::{ByteString, Value};
 use tokio::io::AsyncWriteExt;
@@ -232,14 +231,29 @@ async fn call_http(
             "apollo.subgraph.name" = %service_name
         ))
         .await
-        .map_err(|err| {
+        .map_err(async |err| {
             tracing::error!(fetch_error = format!("{:?}", err).as_str());
+            let path = schema_uri.path().to_string();
+            let response = client
+                .call(request)
+                .instrument(tracing::info_span!("subgraph_request",
+                    "otel.kind" = "CLIENT",
+                    "net.peer.name" = &display(host),
+                    "net.peer.port" = &display(port),
+                    "http.route" = &display(path),
+                    "net.transport" = "ip_tcp",
+                    "apollo.subgraph.name" = %service_name
+                ))
+                .await
+                .map_err(|err| {
+                    tracing::error!(fetch_error = format!("{:?}", err).as_str());
 
-            FetchError::SubrequestHttpError {
-                service: service_name.clone(),
-                reason: err.to_string(),
-            }
-        })?;
+                    FetchError::SubrequestHttpError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }
+                })?;
+        })
     // Keep our parts, we'll need them later
     let (parts, body) = response.into_parts();
 
@@ -266,7 +280,7 @@ async fn call_http(
                 } else {
                     Err(BoxError::from(FetchError::SubrequestHttpError {
                         service: service_name.clone(),
-                        reason: format!("subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: {content_type:?})"),
+                        reason: format!("subgraph didn't return JSON (expected content-type: {APPLICATION_JSON_HEADER_VALUE} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})"),
                     }))
                 };
             }
@@ -611,7 +625,7 @@ mod tests {
             .unwrap_err();
         assert_eq!(
             err.to_string(),
-            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql+json; found content-type: \"text/html\")"
+            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: \"text/html\")"
         );
     }
 
