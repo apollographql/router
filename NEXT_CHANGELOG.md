@@ -66,6 +66,19 @@ You will receive the first response chunk:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2274
 
+### Change log level when we can't get the schema from GCP ([Issue #2004](https://github.com/apollographql/router/issues/2004))
+
+Set the log level for this specific log to `debug`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
+
+### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
+
+Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
+Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277
+
 ### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
 
 We noticed that we kept receiving issues about hot reload. We tried to fix this a while back by moving from HotWatch to Notify, but there are still issues. The problem appears to be caused by having different mechanisms on different platforms. Switching to the PollWatcher, which offers less sophisticated functionality but is the same on all platforms, should solve these issues at the expense of slightly worse reactiveness.
@@ -77,6 +90,12 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 Error redaction was erasing the error's path, which made it impossible to affect the errors to deferred responses. Now the redacted errors keep the path. Since the response shape for the primary and deferred responses are defined from the API schema, there is no possibility of leaking internal schema information here.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
+
+### Wrong urldecoding for variables in get requests ([Issue #2248](https://github.com/apollographql/router/issues/2248))
+
+Using APQs, any '+' characters would be replaced by spaces in variables, breaking for instance datetimes with timezone info.
+
+By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
 
 ## 🛠 Maintenance
 
