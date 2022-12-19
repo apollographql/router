@@ -12,7 +12,7 @@ use anyhow::Result;
 // you can use the plugin by adding it to `router.yml`
 mod echo_co_processor;
 
-// `cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml`
+// `APOLLO_KEY="YOUR_APOLLO_KEY" APOLLO_GRAPH_REF="YOUR APOLLO GRAPH REF" cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml`
 fn main() -> Result<()> {
     apollo_router::main()
 }

@@ -8,9 +8,11 @@ use apollo_router::Endpoint;
 use apollo_router::ListenAddr;
 use futures::future::BoxFuture;
 use http::StatusCode;
+use hyper::body::Bytes;
 use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json::json;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceExt;
@@ -79,17 +81,42 @@ impl Service<router::Request> for EchoServer {
         tracing::info!("{}", serde_json::to_string_pretty(&req.context).unwrap());
 
         let fut = async move {
-            let (_, body) = req.router_request.into_parts();
+            let body = req.router_request.into_body();
 
             let body = hyper::body::to_bytes(body).await.unwrap();
 
+            let mut json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
             tracing::info!("got payload:");
-            tracing::info!("{}", std::str::from_utf8(&body).unwrap());
+            tracing::info!("{}", serde_json::to_string_pretty(&json_body).unwrap());
 
-            // return the raw payload
+            // let's add an arbitrary header to the request
+            if let Some(headers) = json_body.get_mut("headers") {
+                headers.as_object_mut().map(|headers| {
+                    headers.insert(
+                        "x-my-subgraph-api-key".to_string(),
+                        json! {["ThisIsATestApiKey"]}, // header values are arrays
+                    );
+                });
+            } else {
+                json_body.as_object_mut().map(|body| {
+                    body.insert(
+                        "headers".to_string(),
+                        json! {{
+                            "x-my-subgraph-api-key": ["ThisIsATestApiKey"] // header values are arrays
+                        }},
+                    )
+                });
+            };
+
+            tracing::info!("modified payload:");
+            tracing::info!("{}", serde_json::to_string_pretty(&json_body).unwrap());
+
+            // return the modified payload
             let http_response = http::Response::builder()
                 .status(StatusCode::OK)
-                .body(hyper::Body::from(body))
+                .body(hyper::Body::from(Bytes::from(
+                    serde_json::to_vec(&json_body).unwrap(),
+                )))
                 .unwrap();
             let mut router_response = router::Response::from(http_response);
             router_response.context = req.context;
