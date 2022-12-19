@@ -253,7 +253,7 @@ async fn call_http(
                         reason: err.to_string(),
                     }
                 })?;
-        })
+        });
     // Keep our parts, we'll need them later
     let (parts, body) = response.into_parts();
 
