@@ -108,6 +108,28 @@ impl Service<router::Request> for EchoServer {
                 });
             };
 
+            // let's add a context key so that the subgraph_http_service displays the headers it's about to send!
+            if let Some(context) = json_body.get_mut("context") {
+                let context = context.get_mut("entries").unwrap(); // context always has entries.
+                context.as_object_mut().map(|context| {
+                    context.insert(
+                        "apollo_telemetry::logging::display_headers".to_string(),
+                        json! { true },
+                    );
+                });
+            } else {
+                json_body.as_object_mut().map(|body| {
+                    body.insert(
+                        "context".to_string(),
+                        json! {{
+                            "entries": {
+                                "apollo_telemetry::logging::display_headers": true
+                            }
+                        }},
+                    )
+                });
+            };
+
             tracing::info!("modified payload:");
             tracing::info!("{}", serde_json::to_string_pretty(&json_body).unwrap());
 
