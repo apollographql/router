@@ -8,7 +8,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use futures::future::ready;
@@ -23,12 +22,8 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
-use notify::event::DataChange;
-use notify::event::MetadataKind;
 use notify::event::ModifyKind;
-use notify::Config;
 use notify::EventKind;
-use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
 use rhai::module_resolvers::FileModuleResolver;
@@ -450,11 +445,8 @@ impl Plugin for Rhai {
 
         let watcher_handle = std::thread::spawn(move || {
             let watching_path = watched_path.clone();
-            let config = Config::default()
-                .with_poll_interval(Duration::from_secs(3))
-                .with_compare_contents(true);
-            let mut watcher = PollWatcher::new(
-                move |res: Result<notify::Event, notify::Error>| {
+            let mut watcher =
+                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
                             // Let's limit the events we are interested in to:
@@ -463,8 +455,7 @@ impl Plugin for Rhai {
                             //  - with suffix "rhai"
                             if matches!(
                                 event.kind,
-                                EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
-                                    | EventKind::Modify(ModifyKind::Data(DataChange::Any))
+                                EventKind::Modify(ModifyKind::Data(_))
                                     | EventKind::Create(_)
                                     | EventKind::Remove(_)
                             ) {
@@ -498,10 +489,8 @@ impl Plugin for Rhai {
                         }
                         Err(e) => tracing::error!("rhai watching event error: {:?}", e),
                     }
-                },
-                config,
-            )
-            .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
+                })
+                .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
             watcher
                 .watch(&watched_path, RecursiveMode::Recursive)
                 .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
