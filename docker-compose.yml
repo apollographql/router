@@ -2,8 +2,7 @@ version: "3.9"
 services:
   services:
     build:
-      context: ./dockerfiles
-      dockerfile: Dockerfile.federation-demo
+      dockerfile: dockerfiles/Dockerfile.federation-demo
     ports:
       - 4100:4000
       - 4001:4001
@@ -11,3 +10,15 @@ services:
       - 4003:4003
       - 4004:4004
     command: ./node_modules/.bin/concurrently 'npm:start-services' 'sleep 2; npm run start-gateway'
+    environment:
+      - JAEGER_HOST=jaeger
+    depends_on:
+      - jaeger
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - 6831:6831/udp
+      - 6832:6832/udp
+      - 16686:16686
+      - 14268:14268
