@@ -285,20 +285,48 @@ pub(crate) struct PropagationRequestTraceId {
     pub(crate) header_name: HeaderName,
 }
 
-#[derive(Default, Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct Trace {
     pub(crate) service_name: Option<String>,
     pub(crate) service_namespace: Option<String>,
-    pub(crate) sampler: Option<SamplerOption>,
-    pub(crate) parent_based_sampler: Option<bool>,
+    #[serde(default = "default_sampler")]
+    pub(crate) sampler: SamplerOption,
+    #[serde(default = "default_parent_based_sampler")]
+    pub(crate) parent_based_sampler: bool,
     pub(crate) max_events_per_span: Option<u32>,
     pub(crate) max_attributes_per_span: Option<u32>,
     pub(crate) max_links_per_span: Option<u32>,
     pub(crate) max_attributes_per_event: Option<u32>,
     pub(crate) max_attributes_per_link: Option<u32>,
-    pub(crate) attributes: Option<BTreeMap<String, AttributeValue>>,
+    #[serde(default)]
+    pub(crate) attributes: BTreeMap<String, AttributeValue>,
+}
+
+fn default_parent_based_sampler() -> bool {
+    true
+}
+
+fn default_sampler() -> SamplerOption {
+    SamplerOption::Always(Sampler::AlwaysOn)
+}
+
+impl Default for Trace {
+    fn default() -> Self {
+        Self {
+            service_name: None,
+            service_namespace: None,
+            sampler: default_sampler(),
+            parent_based_sampler: default_parent_based_sampler(),
+            max_events_per_span: None,
+            max_attributes_per_span: None,
+            max_links_per_span: None,
+            max_attributes_per_event: None,
+            max_attributes_per_link: None,
+            attributes: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -369,34 +397,36 @@ pub(crate) enum Sampler {
     AlwaysOff,
 }
 
+impl From<Sampler> for opentelemetry::sdk::trace::Sampler {
+    fn from(s: Sampler) -> Self {
+        match s {
+            Sampler::AlwaysOn => opentelemetry::sdk::trace::Sampler::AlwaysOn,
+            Sampler::AlwaysOff => opentelemetry::sdk::trace::Sampler::AlwaysOff,
+        }
+    }
+}
+
+impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
+    fn from(s: SamplerOption) -> Self {
+        match s {
+            SamplerOption::Always(s) => s.into(),
+            SamplerOption::TraceIdRatioBased(ratio) => {
+                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
+            }
+        }
+    }
+}
+
 impl From<&Trace> for opentelemetry::sdk::trace::Config {
     fn from(config: &Trace) -> Self {
         let mut trace_config = opentelemetry::sdk::trace::config();
 
-        let sampler = match (&config.sampler, &config.parent_based_sampler) {
-            (Some(SamplerOption::Always(Sampler::AlwaysOn)), Some(true)) => {
-                Some(parent_based(opentelemetry::sdk::trace::Sampler::AlwaysOn))
-            }
-            (Some(SamplerOption::Always(Sampler::AlwaysOff)), Some(true)) => {
-                Some(parent_based(opentelemetry::sdk::trace::Sampler::AlwaysOff))
-            }
-            (Some(SamplerOption::TraceIdRatioBased(ratio)), Some(true)) => Some(parent_based(
-                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(*ratio),
-            )),
-            (Some(SamplerOption::Always(Sampler::AlwaysOn)), _) => {
-                Some(opentelemetry::sdk::trace::Sampler::AlwaysOn)
-            }
-            (Some(SamplerOption::Always(Sampler::AlwaysOff)), _) => {
-                Some(opentelemetry::sdk::trace::Sampler::AlwaysOff)
-            }
-            (Some(SamplerOption::TraceIdRatioBased(ratio)), _) => Some(
-                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(*ratio),
-            ),
-            (_, _) => None,
-        };
-        if let Some(sampler) = sampler {
-            trace_config = trace_config.with_sampler(sampler);
+        let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
+        if config.parent_based_sampler {
+            sampler = parent_based(sampler);
         }
+
+        trace_config = trace_config.with_sampler(sampler);
         if let Some(n) = config.max_events_per_span {
             trace_config = trace_config.with_max_events_per_span(n);
         }
@@ -449,8 +479,6 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
         let resource = Resource::new(resource_defaults).merge(&mut Resource::new(
             config
                 .attributes
-                .clone()
-                .unwrap_or_default()
                 .iter()
                 .map(|(k, v)| {
                     KeyValue::new(
@@ -487,35 +515,35 @@ impl Conf {
             ) {
                 // Error conditions
                 (
-                    Some(SamplerOption::TraceIdRatioBased(global_ratio)),
-                    Some(SamplerOption::TraceIdRatioBased(field_ratio)),
+                    SamplerOption::TraceIdRatioBased(global_ratio),
+                    SamplerOption::TraceIdRatioBased(field_ratio),
                 ) if field_ratio > global_ratio => {
                     Err(Error::InvalidFieldLevelInstrumentationSampler)?
                 }
                 (
-                    Some(SamplerOption::Always(Sampler::AlwaysOff)),
-                    Some(SamplerOption::Always(Sampler::AlwaysOn)),
+                    SamplerOption::Always(Sampler::AlwaysOff),
+                    SamplerOption::Always(Sampler::AlwaysOn),
                 ) => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
                 (
-                    Some(SamplerOption::Always(Sampler::AlwaysOff)),
-                    Some(SamplerOption::TraceIdRatioBased(ratio)),
+                    SamplerOption::Always(Sampler::AlwaysOff),
+                    SamplerOption::TraceIdRatioBased(ratio),
                 ) if ratio != 0.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
                 (
-                    Some(SamplerOption::TraceIdRatioBased(ratio)),
-                    Some(SamplerOption::Always(Sampler::AlwaysOn)),
+                    SamplerOption::TraceIdRatioBased(ratio),
+                    SamplerOption::Always(Sampler::AlwaysOn),
                 ) if ratio != 1.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
 
                 // Happy paths
-                (_, Some(SamplerOption::TraceIdRatioBased(ratio))) if ratio == 0.0 => 0.0,
-                (Some(SamplerOption::TraceIdRatioBased(ratio)), _) if ratio == 0.0 => 0.0,
-                (_, Some(SamplerOption::Always(Sampler::AlwaysOn))) => 1.0,
+                (_, SamplerOption::TraceIdRatioBased(ratio)) if ratio == 0.0 => 0.0,
+                (SamplerOption::TraceIdRatioBased(ratio), _) if ratio == 0.0 => 0.0,
+                (_, SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
                 (
-                    Some(SamplerOption::TraceIdRatioBased(global_ratio)),
-                    Some(SamplerOption::TraceIdRatioBased(field_ratio)),
+                    SamplerOption::TraceIdRatioBased(global_ratio),
+                    SamplerOption::TraceIdRatioBased(field_ratio),
                 ) => field_ratio / global_ratio,
                 (
-                    Some(SamplerOption::Always(Sampler::AlwaysOn)),
-                    Some(SamplerOption::TraceIdRatioBased(field_ratio)),
+                    SamplerOption::Always(Sampler::AlwaysOn),
+                    SamplerOption::TraceIdRatioBased(field_ratio),
                 ) => field_ratio,
                 (_, _) => 0.0,
             },

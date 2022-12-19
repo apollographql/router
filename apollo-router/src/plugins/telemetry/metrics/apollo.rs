@@ -28,13 +28,21 @@ impl MetricsConfigurator for Config {
                 apollo_key: Some(key),
                 apollo_graph_ref: Some(reference),
                 schema_id,
+                batch_processor,
                 ..
             } => {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
                     tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
                 }
+                let batch_processor_config = batch_processor;
                 tracing::debug!("creating metrics exporter");
-                let exporter = ApolloExporter::new(endpoint, key, reference, schema_id)?;
+                let exporter = ApolloExporter::new(
+                    endpoint,
+                    batch_processor_config,
+                    key,
+                    reference,
+                    schema_id,
+                )?;
 
                 builder.with_apollo_metrics_collector(exporter.start())
             }

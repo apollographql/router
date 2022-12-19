@@ -42,6 +42,12 @@ It defaults to 30 seconds.
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
 ## 🐛 Fixes
+### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
+
+Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
+Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277
 
 ### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
 
@@ -54,6 +60,12 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 Error redaction was erasing the error's path, which made it impossible to affect the errors to deferred responses. Now the redacted errors keep the path. Since the response shape for the primary and deferred responses are defined from the API schema, there is no possibility of leaking internal schema information here.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
+
+### Wrong urldecoding for variables in get requests ([Issue #2248](https://github.com/apollographql/router/issues/2248))
+
+Using APQs, any '+' characters would be replaced by spaces in variables, breaking for instance datetimes with timezone info.
+
+By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
 
 ## 🛠 Maintenance
 
