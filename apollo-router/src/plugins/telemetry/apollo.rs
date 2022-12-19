@@ -25,6 +25,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 
 pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
@@ -94,28 +96,6 @@ pub(crate) struct Config {
 
 fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
-}
-
-#[cfg(test)]
-fn apollo_key() -> Option<String> {
-    // During tests we don't want env variables to affect defaults
-    None
-}
-
-#[cfg(not(test))]
-fn apollo_key() -> Option<String> {
-    std::env::var("APOLLO_KEY").ok()
-}
-
-#[cfg(test)]
-fn apollo_graph_reference() -> Option<String> {
-    // During tests we don't want env variables to affect defaults
-    None
-}
-
-#[cfg(not(test))]
-fn apollo_graph_reference() -> Option<String> {
-    std::env::var("APOLLO_GRAPH_REF").ok()
 }
 
 fn endpoint_default() -> Url {
@@ -246,7 +226,7 @@ impl AddAssign<SingleReport> for Report {
 
 impl AddAssign<TracesReport> for Report {
     fn add_assign(&mut self, report: TracesReport) {
-        self.operation_count += report.traces.len() as u64;
+        // Note that operation count is dealt with in metrics so we don't increment this.
         for (operation_signature, trace) in report.traces {
             self.traces_per_query
                 .entry(operation_signature)

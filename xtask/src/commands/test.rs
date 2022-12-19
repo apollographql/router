@@ -33,7 +33,6 @@ impl Test {
             !(self.no_demo && self.with_demo),
             "--no-demo and --with-demo are mutually exclusive",
         );
-
         let _guard: Box<dyn std::any::Any> = if self.no_demo {
             eprintln!("Flag --no-demo is the default now. Not running federation-demo.");
             Box::new(())

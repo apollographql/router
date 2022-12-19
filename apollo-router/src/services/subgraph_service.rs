@@ -65,6 +65,9 @@ impl Display for Compression {
 /// Client for interacting with subgraphs.
 #[derive(Clone)]
 pub(crate) struct SubgraphService {
+    // Note: We use hyper::Client here in preference to reqwest to avoid expensive URL translation
+    // in the hot path. We use reqwest elsewhere because it's convenient and some of the
+    // opentelemetry crate require reqwest clients to work correctly (at time of writing).
     client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
 }
@@ -145,7 +148,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 );
             });
 
-            let schema_uri = request.uri();
+            let schema_uri = request.uri().clone();
             let host = schema_uri.host().map(String::from).unwrap_or_default();
             let port = schema_uri.port_u16().unwrap_or_else(|| {
                 let scheme = schema_uri.scheme_str();
@@ -174,6 +177,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     "net.peer.name" = &display(host),
                     "net.peer.port" = &display(port),
                     "http.route" = &display(path),
+                    "http.url" = &display(schema_uri),
                     "net.transport" = "ip_tcp",
                     "apollo.subgraph.name" = %service_name
                 ))
