@@ -1099,7 +1099,7 @@ mod tests {
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 "query { __typename ... @defer { currentUser { activeOrganization { id  suborga { id name } } } } }",
             )
