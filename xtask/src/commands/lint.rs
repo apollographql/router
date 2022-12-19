@@ -52,7 +52,6 @@ impl Lint {
             "--",
             "--config",
             &RUSTFMT_CONFIG.join(","),
-            "-v",
         ]);
         Ok(command)
     }
