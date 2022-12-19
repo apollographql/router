@@ -234,7 +234,7 @@ commands:
           name: Install xtask
           command: |
               set -e -o pipefail
-              xtask help || cd xtask && cargo install --path . && cd ..
+              xtask help || { cd xtask && cargo install --path . && cd ..; }
       - run: xtask lint
       - save_cache:
           name: Save .cargo
