@@ -163,6 +163,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
     }
 }
 
+// call_http makes http calls with modified subgraph request
+// with or without the query to use APQ.
 async fn call_http(
     parts: Parts,
     body: graphql::Request,
