@@ -228,9 +228,14 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - run: cargo xtask lint
+       - save_cache:
+          name: Save .cargo
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+          paths:
+            - ~/.cargo
 
   xtask_check_compliance:
     parameters:
@@ -240,8 +245,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
