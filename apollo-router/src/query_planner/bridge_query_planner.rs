@@ -123,7 +123,6 @@ impl BridgeQueryPlanner {
             } => {
                 let subselections = node.parse_subselections(&self.schema)?;
                 selections.subselections = subselections;
-
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(query_planner::QueryPlan {
                         usage_reporting,
@@ -173,11 +172,10 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
-                Ok(query_planner_content) => { Ok(QueryPlannerResponse::builder()
+                Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                         .content(query_planner_content)
                         .context(req.context)
-                        .build())
-                },
+                        .build()),
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
