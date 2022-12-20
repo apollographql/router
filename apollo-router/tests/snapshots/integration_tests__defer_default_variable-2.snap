@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-expression: second
+expression: stream.next().await.unwrap().unwrap()
 ---
 {
   "hasNext": false,

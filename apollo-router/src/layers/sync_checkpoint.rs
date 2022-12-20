@@ -188,9 +188,10 @@ mod checkpoint_tests {
         execution_service
             .expect_call()
             .times(1)
-            .returning(move |_req: crate::ExecutionRequest| {
+            .returning(move |req: crate::ExecutionRequest| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
+                    .context(req.context)
                     .build()
                     .unwrap())
             });
