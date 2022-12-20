@@ -612,6 +612,59 @@ expression: "&schema"
                     }
                   },
                   "nullable": true
+                },
+                "subgraph_http": {
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "context": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "headers": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "sdl": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "nullable": true
+                    },
+                    "response": {
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "context": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "headers": {
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "sdl": {
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "nullable": true
                 }
               },
               "nullable": true

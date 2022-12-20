@@ -357,6 +357,13 @@ impl PluggableSupergraphServiceBuilder {
         let mut all_subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)> = self
             .schema
             .subgraphs()
+            // Only create a subgraph service if none has been added manually
+            .filter(|(name, _)| {
+                !self
+                    .subgraph_services
+                    .iter()
+                    .any(|(subgraph_service_name, _)| name == &subgraph_service_name)
+            })
             .map(|(name, _)| {
                 let service = match plugins
                     .iter()
