@@ -397,6 +397,10 @@ expression: get_spans()
                                         "/"
                                       ],
                                       [
+                                        "http.url",
+                                        "https://products.demo.starstuff.dev/"
+                                      ],
+                                      [
                                         "net.transport",
                                         "ip_tcp"
                                       ],
@@ -416,6 +420,7 @@ expression: get_spans()
                                           "net.peer.name",
                                           "net.peer.port",
                                           "http.route",
+                                          "http.url",
                                           "net.transport",
                                           "apollo.subgraph.name"
                                         ]
@@ -626,6 +631,10 @@ expression: get_spans()
                                             "/"
                                           ],
                                           [
+                                            "http.url",
+                                            "https://reviews.demo.starstuff.dev/"
+                                          ],
+                                          [
                                             "net.transport",
                                             "ip_tcp"
                                           ],
@@ -645,6 +654,7 @@ expression: get_spans()
                                               "net.peer.name",
                                               "net.peer.port",
                                               "http.route",
+                                              "http.url",
                                               "net.transport",
                                               "apollo.subgraph.name"
                                             ]
@@ -879,6 +889,10 @@ expression: get_spans()
                                                 "/"
                                               ],
                                               [
+                                                "http.url",
+                                                "https://products.demo.starstuff.dev/"
+                                              ],
+                                              [
                                                 "net.transport",
                                                 "ip_tcp"
                                               ],
@@ -898,6 +912,7 @@ expression: get_spans()
                                                   "net.peer.name",
                                                   "net.peer.port",
                                                   "http.route",
+                                                  "http.url",
                                                   "net.transport",
                                                   "apollo.subgraph.name"
                                                 ]
@@ -1110,6 +1125,10 @@ expression: get_spans()
                                                 "/"
                                               ],
                                               [
+                                                "http.url",
+                                                "https://accounts.demo.starstuff.dev/"
+                                              ],
+                                              [
                                                 "net.transport",
                                                 "ip_tcp"
                                               ],
@@ -1129,6 +1148,7 @@ expression: get_spans()
                                                   "net.peer.name",
                                                   "net.peer.port",
                                                   "http.route",
+                                                  "http.url",
                                                   "net.transport",
                                                   "apollo.subgraph.name"
                                                 ]
