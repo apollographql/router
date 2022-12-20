@@ -366,11 +366,12 @@ impl Plugin for ExternalPlugin {
                         // external call. Use our configuration to figure out which data to send.
 
                         let (parts, body) = request.subgraph_request.into_parts();
+                        let bytes = hyper::body::to_bytes(body).await?;
 
                         let (headers, payload, context, sdl) = prepare_external_params(
                             &request_config,
                             &parts.headers,
-                            &body,
+                            &bytes,
                             &request.context,
                             my_sdl,
                         )?;
@@ -425,8 +426,8 @@ impl Plugin for ExternalPlugin {
                         // are present in our co_processor_output.
 
                         let new_body = match co_processor_output.body {
-                            Some(bytes) => Bytes::from(serde_json::to_vec(&bytes)?),
-                            None => Bytes::from(body),
+                            Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+                            None => Body::from(bytes),
                         };
 
                         request.subgraph_request = http::Request::from_parts(parts, new_body);

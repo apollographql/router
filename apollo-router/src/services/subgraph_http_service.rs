@@ -1,6 +1,3 @@
-//! Tower fetcher for subgraphs.
-
-use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
 use std::task::Poll;
@@ -119,7 +116,9 @@ impl tower::Service<crate::SubgraphHTTPRequest> for SubgraphHTTPService {
         Box::pin(async move {
             let (parts, body) = subgraph_request.into_parts();
 
-            let compressed_body = compress(body, &parts.headers)
+            let bytes = hyper::body::to_bytes(body).await?;
+
+            let compressed_body = compress(bytes, &parts.headers)
                 .instrument(tracing::debug_span!("body_compression"))
                 .await
                 .map_err(|err| {

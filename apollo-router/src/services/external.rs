@@ -9,7 +9,6 @@ use std::time::Duration;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::StatusCode;
-use http::Uri;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;

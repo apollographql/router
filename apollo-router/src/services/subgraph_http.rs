@@ -1,6 +1,5 @@
 #![allow(missing_docs)] // FIXME
 
-use bytes::Bytes;
 use http::StatusCode;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
@@ -17,11 +16,12 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
+pub type Body = hyper::Body;
 
 assert_impl_all!(Request: Send);
 #[non_exhaustive]
 pub struct Request {
-    pub subgraph_request: http::Request<Bytes>,
+    pub subgraph_request: http::Request<Body>,
     pub context: Context,
 }
 
@@ -31,7 +31,7 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a Request.
     #[builder(visibility = "pub")]
-    fn new(subgraph_request: http::Request<Bytes>, context: Context) -> Request {
+    fn new(subgraph_request: http::Request<Body>, context: Context) -> Request {
         Self {
             subgraph_request,
             context,
@@ -45,7 +45,7 @@ impl Request {
     /// difficult to construct and not required for the pusposes of the test.
     #[builder(visibility = "pub")]
     fn fake_new(
-        subgraph_request: Option<http::Request<Bytes>>,
+        subgraph_request: Option<http::Request<Body>>,
         context: Option<Context>,
     ) -> Request {
         Request::new(
@@ -55,38 +55,11 @@ impl Request {
     }
 }
 
-impl Clone for Request {
-    fn clone(&self) -> Self {
-        // http::Request is not clonable so we have to rebuild a new one
-        // we don't use the extensions field for now
-        let mut builder = http::Request::builder()
-            .method(self.subgraph_request.method())
-            .version(self.subgraph_request.version())
-            .uri(self.subgraph_request.uri());
-
-        {
-            let headers = builder.headers_mut().unwrap();
-            headers.extend(
-                self.subgraph_request
-                    .headers()
-                    .iter()
-                    .map(|(name, value)| (name.clone(), value.clone())),
-            );
-        }
-        let subgraph_request = builder.body(self.subgraph_request.body().clone()).unwrap();
-
-        Self {
-            subgraph_request,
-            context: self.context.clone(),
-        }
-    }
-}
-
 assert_impl_all!(Response: Send);
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct Response {
-    pub response: http::Response<hyper::Body>,
+    pub response: http::Response<Body>,
 
     pub context: Context,
 }

@@ -21,7 +21,6 @@ use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
 use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
-use super::subgraph_http_service::MakeSubgraphHTTPService;
 use super::subgraph_http_service::SubgraphHTTPCreator;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
@@ -280,7 +279,6 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
-    subgraph_http_services: Vec<(String, Arc<dyn MakeSubgraphHTTPService>)>,
     configuration: Option<Arc<Configuration>>,
 }
 
@@ -290,7 +288,6 @@ impl PluggableSupergraphServiceBuilder {
             schema,
             plugins: Default::default(),
             subgraph_services: Default::default(),
-            subgraph_http_services: Default::default(),
             configuration: None,
         }
     }
@@ -301,32 +298,6 @@ impl PluggableSupergraphServiceBuilder {
         plugin: Box<dyn DynPlugin>,
     ) -> PluggableSupergraphServiceBuilder {
         self.plugins.insert(plugin_name, plugin);
-        self
-    }
-
-    pub(crate) fn with_subgraph_service<S>(
-        mut self,
-        name: &str,
-        service_maker: S,
-    ) -> PluggableSupergraphServiceBuilder
-    where
-        S: MakeSubgraphService,
-    {
-        self.subgraph_services
-            .push((name.to_string(), Arc::new(service_maker)));
-        self
-    }
-
-    pub(crate) fn with_subgraph_http_service<S>(
-        mut self,
-        name: &str,
-        service_maker: S,
-    ) -> PluggableSupergraphServiceBuilder
-    where
-        S: MakeSubgraphHTTPService,
-    {
-        self.subgraph_http_services
-            .push((name.to_string(), Arc::new(service_maker)));
         self
     }
 

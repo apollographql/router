@@ -6,22 +6,16 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use ::serde::Deserialize;
-use async_compression::tokio::write::BrotliEncoder;
-use async_compression::tokio::write::GzipEncoder;
-use async_compression::tokio::write::ZlibEncoder;
-use bytes::Bytes;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
-use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
-use http::HeaderMap;
 use http::HeaderValue;
+use hyper::Body;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use schemars::JsonSchema;
-use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
 use tower::Service;
@@ -32,9 +26,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::subgraph_http;
-use super::subgraph_http_service::MakeSubgraphHTTPService;
 use super::subgraph_http_service::SubgraphHTTPCreator;
-use super::subgraph_http_service::SubgraphHTTPService;
 use super::subgraph_http_service::SubgraphHTTPServiceFactory;
 use super::Plugins;
 use crate::error::FetchError;
@@ -101,7 +93,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         Box::pin(async move {
             let (parts, body) = subgraph_request.into_parts();
             let body = serde_json::to_vec(&body).expect("JSON serialization should not fail");
-            let mut request = http::request::Request::from_parts(parts, Bytes::from(body));
+            let mut request = http::request::Request::from_parts(parts, Body::from(body));
 
             let app_json: HeaderValue = HeaderValue::from_static(APPLICATION_JSON.essence_str());
             let app_graphql_json: HeaderValue =
@@ -229,44 +221,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             Ok(crate::SubgraphResponse::new_from_response(resp, context))
         })
-    }
-}
-
-pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
-    let content_encoding = headers.get(&CONTENT_ENCODING);
-    match content_encoding {
-        Some(content_encoding) => match content_encoding.to_str()? {
-            "br" => {
-                let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(body.as_bytes()).await?;
-                br_encoder.shutdown().await?;
-
-                Ok(br_encoder.into_inner())
-            }
-            "gzip" => {
-                let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(body.as_bytes()).await?;
-                gzip_encoder.shutdown().await?;
-
-                Ok(gzip_encoder.into_inner())
-            }
-            "deflate" => {
-                let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(body.as_bytes()).await?;
-                df_encoder.shutdown().await?;
-
-                Ok(df_encoder.into_inner())
-            }
-            "identity" => Ok(body.into_bytes()),
-            unknown => {
-                tracing::error!("unknown content-encoding value '{:?}'", unknown);
-                Err(BoxError::from(format!(
-                    "unknown content-encoding value '{:?}'",
-                    unknown
-                )))
-            }
-        },
-        None => Ok(body.into_bytes()),
     }
 }
 
