@@ -132,6 +132,13 @@ Change some of our errors we returned by following [this specs](https://www.apol
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
 
+### Move APQ and EnsureQueryPresence in the router service ([PR #2296](https://github.com/apollographql/router/pull/2296))
+
+Moving APQ from the axum level to the supergraph service reintroduced a `Buffer` in the service pipeline.
+Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296
+
 ## 🥼 Experimental
 
 ### Introduce a `router_service` ([Issue #1496](https://github.com/apollographql/router/issues/1496))
