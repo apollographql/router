@@ -385,7 +385,6 @@ impl PluggableSupergraphServiceBuilder {
 
         let subgraph_creator = Arc::new(SubgraphCreator::new(
             all_subgraph_services.into_iter().collect(),
-            SubgraphHTTPCreator::new(plugins.clone()),
             plugins.clone(),
         ));
 

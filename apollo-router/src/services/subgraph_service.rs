@@ -240,7 +240,6 @@ pub(crate) trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCreator {
-    pub(crate) http_creator: SubgraphHTTPCreator,
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
     pub(crate) plugins: Arc<Plugins>,
 }
@@ -248,12 +247,10 @@ pub(crate) struct SubgraphCreator {
 impl SubgraphCreator {
     pub(crate) fn new(
         services: HashMap<String, Arc<dyn MakeSubgraphService>>,
-        http_creator: SubgraphHTTPCreator,
         plugins: Arc<Plugins>,
     ) -> Self {
         SubgraphCreator {
             services: Arc::new(services),
-            http_creator,
             plugins,
         }
     }
@@ -288,8 +285,8 @@ impl SubgraphServiceFactory for SubgraphCreator {
         >>::Future;
 
     fn create(&self, name: &str) -> Option<Self::SubgraphService> {
-        self.services.get(name).map(|_s| {
-            let service = SubgraphService::new(name, self.http_creator.clone()).boxed();
+        self.services.get(name).map(|service| {
+            let service = service.make();
             self.plugins
                 .iter()
                 .rev()

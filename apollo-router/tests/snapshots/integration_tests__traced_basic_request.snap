@@ -338,22 +338,6 @@ expression: get_spans()
                             }
                           },
                           "children": {
-                            "apollo_router::services::subgraph_service::body_compression": {
-                              "name": "apollo_router::services::subgraph_service::body_compression",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "body_compression",
-                                  "target": "apollo_router::services::subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::services::subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
                             "apollo_router::services::subgraph_service::subgraph_request": {
                               "name": "apollo_router::services::subgraph_service::subgraph_request",
                               "record": {
@@ -405,7 +389,88 @@ expression: get_spans()
                                   }
                                 }
                               },
-                              "children": {}
+                              "children": {
+                                "apollo_router::services::subgraph_http_service::body_compression": {
+                                  "name": "apollo_router::services::subgraph_http_service::body_compression",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "body_compression",
+                                      "target": "apollo_router::services::subgraph_http_service",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::services::subgraph_http_service",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                },
+                                "apollo_router::services::subgraph_http_service::subgraph_request": {
+                                  "name": "apollo_router::services::subgraph_http_service::subgraph_request",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "otel.kind",
+                                        "CLIENT"
+                                      ],
+                                      [
+                                        "net.peer.name",
+                                        "products.demo.starstuff.dev"
+                                      ],
+                                      [
+                                        "net.peer.port",
+                                        "443"
+                                      ],
+                                      [
+                                        "http.route",
+                                        "/"
+                                      ],
+                                      [
+                                        "net.transport",
+                                        "ip_tcp"
+                                      ],
+                                      [
+                                        "apollo.subgraph.name",
+                                        "products"
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "subgraph_request",
+                                      "target": "apollo_router::services::subgraph_http_service",
+                                      "level": "INFO",
+                                      "module_path": "apollo_router::services::subgraph_http_service",
+                                      "fields": {
+                                        "names": [
+                                          "otel.kind",
+                                          "net.peer.name",
+                                          "net.peer.port",
+                                          "http.route",
+                                          "net.transport",
+                                          "apollo.subgraph.name"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                },
+                                "apollo_router::services::subgraph_http_service::aggregate_response_data": {
+                                  "name": "apollo_router::services::subgraph_http_service::aggregate_response_data",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "aggregate_response_data",
+                                      "target": "apollo_router::services::subgraph_http_service",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::services::subgraph_http_service",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                }
+                              }
                             },
                             "apollo_router::services::subgraph_service::aggregate_response_data": {
                               "name": "apollo_router::services::subgraph_service::aggregate_response_data",
