@@ -355,18 +355,9 @@ impl PluggableSupergraphServiceBuilder {
             plugins.clone(),
         ));
 
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
-            )
-            .await,
-        );
-
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_creator,
-            apq_layer,
             schema: self.schema,
             plugins,
         })
@@ -400,7 +391,6 @@ pub(crate) trait SupergraphFactory:
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_creator: Arc<SubgraphCreator>,
-    apq_layer: APQLayer,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
@@ -452,9 +442,7 @@ impl SupergraphCreator {
         };
 
         ServiceBuilder::new()
-            .layer(self.apq_layer.clone())
             .layer(content_negociation::SupergraphLayer::default())
-            .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins
                     .iter()

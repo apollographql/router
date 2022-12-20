@@ -163,10 +163,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // We're good to go with the new service.
         let supergraph_creator = builder.build().await?;
 
-        Ok(Self::RouterFactory::new(
-            Arc::new(supergraph_creator),
-            &configuration,
-        ))
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), &configuration).await)
     }
 }
 
