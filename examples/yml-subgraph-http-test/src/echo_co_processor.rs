@@ -91,12 +91,12 @@ impl Service<router::Request> for EchoServer {
 
             // let's add an arbitrary header to the request
             if let Some(headers) = json_body.get_mut("headers") {
-                headers.as_object_mut().map(|headers| {
+                if let Some(headers) = headers.as_object_mut() {
                     headers.insert(
                         "x-my-subgraph-api-key".to_string(),
                         json! {["ThisIsATestApiKey"]}, // header values are arrays
                     );
-                });
+                }
             } else {
                 json_body.as_object_mut().map(|body| {
                     body.insert(
@@ -111,12 +111,12 @@ impl Service<router::Request> for EchoServer {
             // let's add a context key so that the subgraph_http_service displays the headers it's about to send!
             if let Some(context) = json_body.get_mut("context") {
                 let context = context.get_mut("entries").unwrap(); // context always has entries.
-                context.as_object_mut().map(|context| {
+                if let Some(context) = context.as_object_mut() {
                     context.insert(
                         "apollo_telemetry::logging::display_headers".to_string(),
                         json! { true },
                     );
-                });
+                }
             } else {
                 json_body.as_object_mut().map(|body| {
                     body.insert(

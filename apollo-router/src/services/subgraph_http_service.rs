@@ -225,21 +225,21 @@ pub(crate) async fn compress(body: Bytes, headers: &HeaderMap) -> Result<Bytes, 
         Some(content_encoding) => match content_encoding.to_str()? {
             "br" => {
                 let mut br_encoder = BrotliEncoder::new(Vec::new());
-                br_encoder.write_all(&body.to_vec()).await?;
+                br_encoder.write_all(&body).await?;
                 br_encoder.shutdown().await?;
 
                 br_encoder.into_inner()
             }
             "gzip" => {
                 let mut gzip_encoder = GzipEncoder::new(Vec::new());
-                gzip_encoder.write_all(&body.to_vec()).await?;
+                gzip_encoder.write_all(&body).await?;
                 gzip_encoder.shutdown().await?;
 
                 gzip_encoder.into_inner()
             }
             "deflate" => {
                 let mut df_encoder = ZlibEncoder::new(Vec::new());
-                df_encoder.write_all(&body.to_vec()).await?;
+                df_encoder.write_all(&body).await?;
                 df_encoder.shutdown().await?;
 
                 df_encoder.into_inner()

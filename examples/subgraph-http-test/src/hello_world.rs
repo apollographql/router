@@ -1,3 +1,6 @@
+use std::ops::ControlFlow;
+use std::sync::Arc;
+
 use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
@@ -6,8 +9,6 @@ use apollo_router::services::subgraph_http;
 use reqwest::header::HeaderValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::ops::ControlFlow;
-use std::sync::Arc;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;

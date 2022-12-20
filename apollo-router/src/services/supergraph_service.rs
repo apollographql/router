@@ -301,6 +301,20 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_subgraph_service<S>(
+        mut self,
+        name: &str,
+        service_maker: S,
+    ) -> PluggableSupergraphServiceBuilder
+    where
+        S: MakeSubgraphService,
+    {
+        self.subgraph_services
+            .push((name.to_string(), Arc::new(service_maker)));
+        self
+    }
+
     pub(crate) fn with_configuration(
         mut self,
         configuration: Arc<Configuration>,

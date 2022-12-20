@@ -592,6 +592,7 @@ fn prepare_external_params<'a>(
     Ok((headers_opt, payload_opt, context_opt, sdl_opt))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn call_external<T>(
     url: String,
     timeout: Option<Duration>,
