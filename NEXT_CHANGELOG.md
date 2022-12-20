@@ -26,6 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 # [x.x.x] (unreleased) - 2022-mm-dd
 
+## ❗ BREAKING ❗
 ## 🚀 Features
 
 ### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
@@ -43,6 +44,49 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🐛 Fixes
 
+### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
+
+If you have duplicated keys in your yaml configuration like this:
+
+```yaml
+telemetry:
+  tracing:
+    propagation:
+      jaeger: true
+  tracing:
+    propagation:
+      jaeger: false
+```
+
+It will now throw an error on router startup:
+
+`ERROR duplicated keys detected in your yaml configuration: 'telemetry.tracing'`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2270
+
+### Return root `__typename` in first chunk of defer response when first response is empty ([Issue #1922](https://github.com/apollographql/router/issues/1922))
+
+With this query:
+
+```graphql
+{
+  __typename
+  ...deferedFragment @defer
+}
+
+fragment deferedFragment on Query {
+  slow
+}
+```
+
+You will receive the first response chunk:
+
+```json
+{"data":{"__typename": "Query"},"hasNext":true}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2274
+
 ### Change log level when we can't get the schema from GCP ([Issue #2004](https://github.com/apollographql/router/issues/2004))
 
 Set the log level for this specific log to `debug`.
@@ -54,7 +98,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
 Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277 and https://github.com/apollographql/router/pull/2286
 
 ### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
 
@@ -75,6 +119,12 @@ Using APQs, any '+' characters would be replaced by spaces in variables, breakin
 By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
 
 ## 🛠 Maintenance
+
+### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
+
+Add attribute named `http.url` containing the subgraph URL in span `subgraph_request`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2291
 
 ### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
 
