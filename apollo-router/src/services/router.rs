@@ -217,7 +217,7 @@ impl Response {
                 .headers()
                 .get(CONTENT_TYPE)
                 .iter()
-                .any(|value| *value == &HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
+                .any(|value| *value == HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
             {
                 let multipart = Multipart::new(self.response.into_body(), "graphql");
 

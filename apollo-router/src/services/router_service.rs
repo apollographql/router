@@ -598,7 +598,7 @@ mod tests {
     async fn it_fails_on_empty_query() {
         let expected_error = "Must provide query string.";
 
-        let router_service = from_supergraph_mock_callback(move |req| unreachable!()).await;
+        let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
 
         let request = SupergraphRequest::fake_builder()
             .query("".to_string())
@@ -627,7 +627,7 @@ mod tests {
     async fn it_fails_on_no_query() {
         let expected_error = "Must provide query string.";
 
-        let router_service = from_supergraph_mock_callback(move |req| unreachable!()).await;
+        let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
 
         let request = SupergraphRequest::fake_builder()
             .build()

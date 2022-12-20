@@ -5,14 +5,15 @@
 
 // This entire file is license key functionality
 
-use crate::cache::DeduplicatingCache;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use sha2::Digest;
 use sha2::Sha256;
+
+use crate::cache::DeduplicatingCache;
+use crate::SupergraphRequest;
+use crate::SupergraphResponse;
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
