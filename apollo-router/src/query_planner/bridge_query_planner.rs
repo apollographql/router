@@ -173,8 +173,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .get((req.query.clone(), req.operation_name.to_owned()))
                 .await
             {
-                Ok(query_planner_content) => {
-                    Ok(QueryPlannerResponse::builder()
+                Ok(query_planner_content) => { Ok(QueryPlannerResponse::builder()
                         .content(query_planner_content)
                         .context(req.context)
                         .build())

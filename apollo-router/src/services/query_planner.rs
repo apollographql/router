@@ -69,4 +69,3 @@ impl Response {
         }
     }
 }
-
