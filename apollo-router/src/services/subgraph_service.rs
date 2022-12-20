@@ -17,15 +17,13 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use http::request::Parts;
 use hyper::Client;
 use hyper::client::HttpConnector;
 use hyper_rustls::HttpsConnector;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use schemars::JsonSchema;
-use serde_json::Number as JSONNumber;
-use serde_json_bytes::{ByteString, Map, Value};
+use serde_json_bytes::{ByteString, Value};
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -42,17 +40,23 @@ use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
 use crate::{Context, graphql};
-use crate::json_ext::Object;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::services::layers::apq;
 
-const APQ_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
+const PERSISTED_QUERY_NOT_FOUND_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
+const PERSISTED_QUERY_NOT_SUPPORTED_ERR_STRING: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
 const CODE_STRING: &str = "code";
 const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
-const HASH_VERSION_VALUE: i32 = 1;
+const HASH_VERSION_VALUE: &str = "1";
 const HASH_KEY: &str = "sha256Hash";
+
+enum APQError {
+    PersistedQueryNotSupported,
+    PersistedQueryNotFound,
+    Other
+}
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -80,6 +84,9 @@ impl Display for Compression {
 pub(crate) struct SubgraphService {
     client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
+    // apq_supported is whether APQ [Automatic Persisted Queries]
+    // is supported by the service
+    apq_supported: bool,
 }
 
 impl SubgraphService {
@@ -100,6 +107,10 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
+            // If subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
+            // https://www.apollographql.com/docs/apollo-server/v2/data/errors/#persisted_query_not_supported
+            // apq_supported is set to false
+            apq_supported: true,
         }
     }
 }
@@ -119,62 +130,95 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let clone = self.client.clone();
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
+        let mut apq_supported = self.apq_supported.clone();
 
         let make_calls = async move {
-            // Try the subgraph_request (body) without query first
+            if apq_supported {
+                let crate::SubgraphRequest {
+                    subgraph_request,
+                    context,
+                    ..
+                } = request.clone();
+
+                let (_, graphql::Request{
+                    query,
+                    operation_name,
+                    variables,
+                    extensions
+                }) = subgraph_request.into_parts();
+
+                let hash_value = apq::calculate_hash_for_query(query.clone().unwrap_or_default());
+
+                let persisted_query= serde_json_bytes::json!({
+                    HASH_VERSION_KEY: HASH_VERSION_VALUE,
+                    HASH_KEY: hash_value
+                });
+
+                let mut extensions_with_apq = extensions.clone();
+                extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
+
+                let mut apq_body = graphql::Request{
+                    query: None,
+                    operation_name: operation_name.clone(),
+                    variables: variables.clone(),
+                    extensions: extensions_with_apq,
+                };
+
+                let response = call_http(
+                    request.clone(),
+                    apq_body.clone(),
+                    context.clone(),
+                    client.clone(),
+                    service_name.to_owned()
+                ).await;
+
+                let http_response = response.as_ref();
+                if !http_response.is_ok() {
+                    // TODO handle panic in unwrap
+                    match get_apq_error(http_response.unwrap().response.body().clone()) {
+                        APQError::PersistedQueryNotSupported => {
+                            apq_supported = false;
+                            apq_body.query = query.clone();
+                            apq_body.extensions = extensions;
+                            return call_http(
+                                request.clone(),
+                                apq_body.clone(),
+                                context,
+                                client,
+                                service_name.to_owned()
+                            ).await;
+                        }
+                        APQError::PersistedQueryNotFound => {
+                            apq_body.query = query;
+                            return call_http(
+                                request,
+                                apq_body,
+                                context,
+                                client,
+                                service_name.to_owned()
+                            ).await;
+                        }
+                        _ => {
+                            return response
+                        }
+                    }
+                }
+                return response
+            }
+            // If APQ is not enables, simple make the graphql call
+            // with the same request body.
             let crate::SubgraphRequest {
                 subgraph_request,
                 context,
                 ..
             } = request.clone();
-
-            let (parts, body) = subgraph_request.into_parts();
-            match body.clone() {
-                graphql::Request { query, operation_name, variables, mut extensions } => {
-                    let hash = apq::calculate_hash_for_query(query.unwrap_or_default());
-
-                    let mut persisted_query: Object = Map::new();
-                    persisted_query.insert(HASH_VERSION_KEY, Value::Number(JSONNumber::from(HASH_VERSION_VALUE)));
-                    persisted_query.insert(HASH_KEY, Value::String(ByteString::from(hash)));
-
-                    extensions.insert(PERSISTED_QUERY_KEY, Value::Object(persisted_query));
-
-                    let body_without_query = graphql::Request::builder()
-                        .and_operation_name(operation_name.clone())
-                        .variables(variables)
-                        .extensions(extensions.clone())
-                        .build();
-
-                    let response = call_http(
-                        parts,
-                        body_without_query,
-                        context.clone(),
-                        client.clone(),
-                        service_name.to_owned()
-                    ).await;
-
-                    // Check if PERSISTED_QUERY_NOT_FOUND error is recieved
-                    let http_response = response.as_ref();
-                    if  http_response.is_ok() {
-                        // TODO handle panic in unwrap
-                        if !check_persisted_query_not_found_error(http_response.unwrap().response.body().clone()) {
-                            return response;
-                        }
-                    }
-                }
-            }
-
-            // If PersistedQueryNotFound response is recieved, send the whole query
-            let crate::SubgraphRequest {
-                subgraph_request,
-                ..
-            } = request;
-
-            let (parts, body_with_query) = subgraph_request.into_parts();
-
-            call_http(parts, body_with_query, context, client, service_name).await
+            let (_, body) = subgraph_request.into_parts();
+            call_http(request, body, context, client, service_name).await
         };
-
+        // If PERSISTED_QUERY_NOT_SUPPORTED error is recieved, apq_supported
+        // is flipped to false and we stop sending persisted queries with hash.
+        self.apq_supported = apq_supported;
+        println!("self.apq_support flipped to {}",apq_supported);
         Box::pin(make_calls)
     }
 }
@@ -182,12 +226,17 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 // call_http makes http calls with modified subgraph request
 // with or without the query to use APQ.
 async fn call_http(
-    parts: Parts,
+    request: crate::SubgraphRequest,
     body: graphql::Request,
     context: Context,
     mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
     service_name: String,
 ) -> Result<crate::SubgraphResponse, BoxError> {
+    let crate::SubgraphRequest {
+        subgraph_request,
+        ..
+    } = request;
+    let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
     println!("-----------------REQUEST--------------------\n{:?}",body.clone());
     let compressed_body = compress(body, &parts.headers)
@@ -325,14 +374,24 @@ async fn call_http(
     Ok(crate::SubgraphResponse::new_from_response(resp, context))
 }
 
-fn check_persisted_query_not_found_error(response: graphql::Response) -> bool {
+fn get_apq_error(response: graphql::Response) -> APQError {
+    let not_found_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_FOUND_ERR_STRING));
+    let not_supported_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_SUPPORTED_ERR_STRING));
     for error in response.errors {
-        let value = error.extensions.get(&ByteString::from(CODE_STRING));
-        if value != None && value.unwrap() == &Value::String(ByteString::from(APQ_ERR_STRING)) {
-            return true;
+        match error.extensions.get(&ByteString::from(CODE_STRING)) {
+            Some(value) => {
+                if value == not_found_byte_string {
+                    return APQError::PersistedQueryNotSupported;
+                } else if value == not_supported_byte_string {
+                    return APQError::PersistedQueryNotFound;
+                }
+            }
+            _ => {
+                return APQError::Other;
+            }
         }
     }
-    false
+    APQError::Other
 }
 
 pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8>, BoxError> {
