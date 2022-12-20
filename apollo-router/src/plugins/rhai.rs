@@ -63,6 +63,7 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::subgraph_http;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ExecutionRequest;
@@ -231,6 +232,13 @@ mod router_plugin_mod {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    #[rhai_fn(get = "headers", pure, return_raw)]
+    pub(crate) fn get_originating_headers_subgraph_http_response(
+        obj: &mut SharedMut<subgraph_http::Response>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
+    }
+
     #[rhai_fn(get = "body", pure, return_raw)]
     pub(crate) fn get_originating_body_supergraph_response(
         obj: &mut SharedMut<supergraph::Response>,
@@ -303,6 +311,15 @@ mod router_plugin_mod {
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_subgraph_response(
         obj: &mut SharedMut<subgraph::Response>,
+        headers: HeaderMap,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
+        Ok(())
+    }
+
+    #[rhai_fn(set = "headers", return_raw)]
+    pub(crate) fn set_originating_headers_subgraph_http_response(
+        obj: &mut SharedMut<subgraph_http::Response>,
         headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| *response.response.headers_mut() = headers);
@@ -574,6 +591,28 @@ impl Plugin for Rhai {
         }
         shared_service.take_unwrap()
     }
+
+    fn subgraph_http_service(
+        &self,
+        name: &str,
+        service: subgraph_http::BoxService,
+    ) -> subgraph_http::BoxService {
+        const FUNCTION_NAME_SERVICE: &str = "subgraph_http_service";
+        if !self.ast_has_function(FUNCTION_NAME_SERVICE) {
+            return service;
+        }
+        tracing::debug!("subgraph_http_service function found");
+        let shared_service = Arc::new(Mutex::new(Some(service)));
+        if let Err(error) = self.run_rhai_service(
+            FUNCTION_NAME_SERVICE,
+            Some(name),
+            ServiceStep::SubgraphHTTP(shared_service.clone()),
+            self.block.load().scope.clone(),
+        ) {
+            tracing::error!("service callback failed: {error}");
+        }
+        shared_service.take_unwrap()
+    }
 }
 
 impl Drop for Rhai {
@@ -591,6 +630,7 @@ pub(crate) enum ServiceStep {
     Supergraph(SharedMut<supergraph::BoxService>),
     Execution(SharedMut<execution::BoxService>),
     Subgraph(SharedMut<subgraph::BoxService>),
+    SubgraphHTTP(SharedMut<subgraph_http::BoxService>),
 }
 
 // Actually use the checkpoint function so that we can shortcut requests which fail
@@ -1045,6 +1085,9 @@ impl ServiceStep {
             ServiceStep::Subgraph(service) => {
                 gen_map_request!(subgraph, service, rhai_service, callback);
             }
+            ServiceStep::SubgraphHTTP(service) => {
+                gen_map_request!(subgraph_http, service, rhai_service, callback);
+            }
         }
     }
 
@@ -1072,6 +1115,9 @@ impl ServiceStep {
             }
             ServiceStep::Subgraph(service) => {
                 gen_map_response!(subgraph, service, rhai_service, callback);
+            }
+            ServiceStep::SubgraphHTTP(service) => {
+                gen_map_response!(subgraph_http, service, rhai_service, callback);
             }
         }
     }
