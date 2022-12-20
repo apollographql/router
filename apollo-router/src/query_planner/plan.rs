@@ -327,63 +327,6 @@ impl PlanNode {
             },
         }
     }
-
-    pub(crate) fn add_apq_hash(&self) -> PlanNode {
-        tracing::trace!("calculating hash for plan:\n{:#?}", self);
-        match self {
-            PlanNode::Sequence {nodes} => {
-                let mut nodes_with_apq = Vec::new();
-                for node in nodes {
-                    nodes_with_apq.push(node.add_apq_hash());
-                }
-                PlanNode::Sequence { nodes: nodes_with_apq}
-            }
-            PlanNode::Parallel { nodes } => {
-                let mut nodes_with_apq = Vec::new();
-                for node in nodes {
-                    nodes_with_apq.push(node.add_apq_hash());
-                }
-                PlanNode::Parallel { nodes: nodes_with_apq}
-            }
-            PlanNode::Flatten(FlattenNode { node, path}) => {
-                let node_with_apq = Box::new(node.add_apq_hash());
-                PlanNode::Flatten(FlattenNode{ path: path.clone(), node: node_with_apq})
-            }
-            PlanNode::Fetch(fetch_node) => {
-                PlanNode::Fetch(fetch_node.add_apq_hash())
-            }
-            PlanNode::Defer {
-                primary: Primary {
-                    path,
-                    subselection,
-                    node,
-                },
-                deferred,
-            } => {
-                let mut deferred_with_apq = Vec::new();
-                for deferred_node in deferred {
-                    deferred_with_apq.push(deferred_node.add_apq_hash().unwrap_or(deferred_node.clone()))
-                }
-
-                PlanNode::Defer { primary: Primary {
-                    path: path.clone(),
-                    subselection: subselection.clone(),
-                    node: add_apq_hash_to_option_box(node),
-                }, deferred: deferred_with_apq }
-            }
-            PlanNode::Condition {
-                if_clause,
-                else_clause,
-                condition,
-            } => {
-                PlanNode::Condition {
-                    condition: condition.clone(),
-                    if_clause: add_apq_hash_to_option_box(if_clause),
-                    else_clause: add_apq_hash_to_option_box(else_clause),
-                }
-            }
-        }
-    }
 }
 
 fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str) -> String {
@@ -414,13 +357,6 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
     query.push_str(&" }".repeat(len));
 
     query
-}
-
-fn add_apq_hash_to_option_box(option: &Option<Box<PlanNode>>) -> Option<Box<PlanNode>> {
-    if let Some(node) = option {
-        return Some(Box::new(node.add_apq_hash()));
-    }
-    None
 }
 
 /// A flatten node.
@@ -481,28 +417,6 @@ impl DeferredNode {
                 _ => None,
             })
         })
-    }
-    
-    pub(crate) fn add_apq_hash(&self) -> Option<DeferredNode> {
-        let DeferredNode{
-            depends,
-            label,
-            query_path,
-            subselection,
-            node: option
-        } = &self.clone();
-
-        if let Some(node) = option {
-            return Some(DeferredNode{
-                depends: depends.clone(),
-                label: label.clone(),
-                query_path: query_path.clone(),
-                subselection: subselection.clone(),
-                node: Some(Arc::new(node.add_apq_hash())),
-            });
-        }
-        
-        None
     }
 }
 

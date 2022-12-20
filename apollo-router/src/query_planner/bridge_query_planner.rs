@@ -174,11 +174,8 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .await
             {
                 Ok(query_planner_content) => {
-                    // Traverse the QueryPlan tree and calculate sha256 hash
-                    // values for subgraph queries in all Fetch Nodes
-                    let query_planner_content_with_apq = query_planner_content.add_apq_hash();
                     Ok(QueryPlannerResponse::builder()
-                        .content(query_planner_content_with_apq.unwrap_or(query_planner_content))
+                        .content(query_planner_content)
                         .context(req.context)
                         .build())
                 },

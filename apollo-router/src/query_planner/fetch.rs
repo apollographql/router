@@ -5,8 +5,6 @@ use std::sync::Arc;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::Number as JSONNumber;
-use serde_json_bytes::{Map, ByteString};
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -21,14 +19,8 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::services::layers::apq;
 use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::*;
-
-const PERSISTED_QUERY_KEY: &str = "persistedQuery";
-const HASH_VERSION_KEY: &str = "version";
-const HASH_VERSION_VALUE: i32 = 1;
-const HASH_KEY: &str = "sha256Hash";
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -79,12 +71,6 @@ pub(crate) struct FetchNode {
 
     /// The GraphQL subquery that is used for the fetch.
     pub(crate) operation: String,
-
-    /// The sha256hash of the GraphQL subgraph query that is used for the fetch.
-    /// This is used to for supporting Automatic persisted queries.
-    /// [APQ]: https://www.apollographql.com/docs/apollo-server/performance/apq/
-    #[serde(skip)]
-    pub(crate) operation_hash: String,
 
     /// The GraphQL subquery operation name.
     pub(crate) operation_name: Option<String>,
@@ -209,7 +195,6 @@ impl FetchNode {
     {
         let FetchNode {
             operation,
-            operation_hash,
             operation_kind,
             operation_name,
             service_name,
@@ -234,13 +219,6 @@ impl FetchNode {
             }
         };
 
-        let mut persisted_query: Object = Map::new();
-        persisted_query.insert(HASH_VERSION_KEY, Value::Number(JSONNumber::from(HASH_VERSION_VALUE)));
-        persisted_query.insert(HASH_KEY, Value::String(ByteString::from(operation_hash.to_string())));
-
-        let mut extensions: Object = Map::new();
-        extensions.insert(PERSISTED_QUERY_KEY, Value::Object(persisted_query));
-
         let subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
@@ -264,7 +242,6 @@ impl FetchNode {
                             .query(operation)
                             .and_operation_name(operation_name.clone())
                             .variables(variables.clone())
-                            .extensions(extensions)
                             .build(),
                     )
                     .build()
@@ -432,31 +409,5 @@ impl FetchNode {
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
-    }
-
-    pub(crate) fn add_apq_hash(&self) -> FetchNode {
-        let FetchNode{
-            service_name,
-            requires,
-            variable_usages,
-            operation,
-            operation_name,
-            operation_kind,
-            id ,
-            ..
-        } = &self;
-
-        let hash_string = apq::calculate_hash_for_query(operation.clone());
-
-        FetchNode{
-            service_name: service_name.clone(),
-            requires: requires.clone(),
-            variable_usages: variable_usages.clone(),
-            operation: operation.clone(),
-            operation_hash: hash_string.to_string(),
-            operation_name: operation_name.clone(),
-            operation_kind: operation_kind.clone(),
-            id: id.clone(),
-        }
     }
 }

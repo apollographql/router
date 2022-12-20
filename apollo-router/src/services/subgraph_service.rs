@@ -24,7 +24,8 @@ use hyper_rustls::HttpsConnector;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use schemars::JsonSchema;
-use serde_json_bytes::{ByteString, Value};
+use serde_json::Number as JSONNumber;
+use serde_json_bytes::{ByteString, Map, Value};
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -41,11 +42,17 @@ use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
 use crate::{Context, graphql};
+use crate::json_ext::Object;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::services::layers::apq;
 
 const APQ_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
 const CODE_STRING: &str = "code";
+const PERSISTED_QUERY_KEY: &str = "persistedQuery";
+const HASH_VERSION_KEY: &str = "version";
+const HASH_VERSION_VALUE: i32 = 1;
+const HASH_KEY: &str = "sha256Hash";
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -123,7 +130,15 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             let (parts, body) = subgraph_request.into_parts();
             match body.clone() {
-                graphql::Request { operation_name, variables, extensions, .. } => {
+                graphql::Request { query, operation_name, variables, mut extensions } => {
+                    let hash = apq::calculate_hash_for_query(query.unwrap_or_default());
+
+                    let mut persisted_query: Object = Map::new();
+                    persisted_query.insert(HASH_VERSION_KEY, Value::Number(JSONNumber::from(HASH_VERSION_VALUE)));
+                    persisted_query.insert(HASH_KEY, Value::String(ByteString::from(hash)));
+
+                    extensions.insert(PERSISTED_QUERY_KEY, Value::Object(persisted_query));
+
                     let body_without_query = graphql::Request::builder()
                         .and_operation_name(operation_name.clone())
                         .variables(variables)
@@ -141,6 +156,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     // Check if PERSISTED_QUERY_NOT_FOUND error is recieved
                     let http_response = response.as_ref();
                     if  http_response.is_ok() {
+                        // TODO handle panic in unwrap
                         if !check_persisted_query_not_found_error(http_response.unwrap().response.body().clone()) {
                             return response;
                         }
@@ -173,6 +189,7 @@ async fn call_http(
     service_name: String,
 ) -> Result<crate::SubgraphResponse, BoxError> {
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
+    println!("-----------------REQUEST--------------------\n{:?}",body.clone());
     let compressed_body = compress(body, &parts.headers)
         .instrument(tracing::debug_span!("body_compression"))
         .await
@@ -302,6 +319,7 @@ async fn call_http(
             })
         })?;
 
+    println!("-----------------RESPONSE--------------------\n{:?}",graphql.clone());
     let resp = http::Response::from_parts(parts, graphql);
 
     Ok(crate::SubgraphResponse::new_from_response(resp, context))
