@@ -123,6 +123,7 @@ mod apq_tests {
 
     use futures::StreamExt;
     use serde_json_bytes::json;
+    use tower::Service;
 
     use super::*;
     use crate::error::Error;

@@ -16,17 +16,14 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
-use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
-use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
