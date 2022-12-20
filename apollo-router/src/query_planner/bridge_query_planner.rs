@@ -173,9 +173,9 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 .await
             {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
-                        .content(query_planner_content)
-                        .context(req.context)
-                        .build()),
+                    .content(query_planner_content)
+                    .context(req.context)
+                    .build()),
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
