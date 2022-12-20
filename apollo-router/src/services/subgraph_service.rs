@@ -133,6 +133,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let mut apq_supported = self.apq_supported.clone();
 
         let make_calls = async move {
+            // If apq is supported by the subgraph service,
+            // Calculate the hash for query and try the request with
+            // a persistedQuery instead of the whole query.
             if apq_supported {
                 let crate::SubgraphRequest {
                     subgraph_request,
@@ -169,11 +172,14 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     apq_body.clone(),
                     context.clone(),
                     client.clone(),
-                    service_name.to_owned()
+                    service_name.clone()
                 ).await;
 
-                let http_response = response.as_ref();
-                if !http_response.is_ok() {
+                // Check the error for the request with only persistedQuery.
+                // If PersistedQueryNotSupported, stop trying apq for this subgraph service
+                // If PersistedQueryNotFound, add the whole query to the request and retry.
+                // Else, return the response like before.
+                if !response.as_ref().is_ok() {
                     // TODO handle panic in unwrap
                     match get_apq_error(http_response.unwrap().response.body().clone()) {
                         APQError::PersistedQueryNotSupported => {
@@ -181,11 +187,11 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                             apq_body.query = query.clone();
                             apq_body.extensions = extensions;
                             return call_http(
-                                request.clone(),
-                                apq_body.clone(),
+                                request,
+                                apq_body,
                                 context,
                                 client,
-                                service_name.to_owned()
+                                service_name
                             ).await;
                         }
                         APQError::PersistedQueryNotFound => {
@@ -195,7 +201,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                                 apq_body,
                                 context,
                                 client,
-                                service_name.to_owned()
+                                service_name
                             ).await;
                         }
                         _ => {
@@ -205,7 +211,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 }
                 return response
             }
-            // If APQ is not enables, simple make the graphql call
+
+            // If APQ is not enabled, simply make the graphql call
             // with the same request body.
             let crate::SubgraphRequest {
                 subgraph_request,
@@ -215,6 +222,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             let (_, body) = subgraph_request.into_parts();
             call_http(request, body, context, client, service_name).await
         };
+
         // If PERSISTED_QUERY_NOT_SUPPORTED error is recieved, apq_supported
         // is flipped to false and we stop sending persisted queries with hash.
         self.apq_supported = apq_supported;
