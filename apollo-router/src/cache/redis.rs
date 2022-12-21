@@ -25,9 +25,14 @@ pub(crate) struct RedisValue<V>(pub(crate) V)
 where
     V: ValueType;
 
+enum RedisConnection {
+    Single(redis::aio::Connection),
+    Cluster(Connection),
+}
+
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
-    inner: Arc<Mutex<Connection>>,
+    inner: Arc<Mutex<RedisConnection>>,
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -110,9 +115,17 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(urls: Vec<String>) -> Result<Self, redis::RedisError> {
-        let client = Client::open(urls)?;
-        let connection = client.get_connection().await?;
+    pub(crate) async fn new(mut urls: Vec<String>) -> Result<Self, redis::RedisError> {
+        let connection = if urls.len() == 1 {
+            let client =
+                redis::Client::open(urls.pop().expect("urls contains only one url; qed")).unwrap();
+            let connection = client.get_async_connection().await?;
+            RedisConnection::Single(connection)
+        } else {
+            let client = Client::open(urls)?;
+            let connection = client.get_connection().await?;
+            RedisConnection::Cluster(connection)
+        };
 
         tracing::trace!("redis connection established");
         Ok(Self {
@@ -126,7 +139,10 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         tracing::trace!("getting from redis: {:?}", key);
         let mut guard = self.inner.lock().await;
-        guard.get(key).await.ok()
+        match &mut *guard {
+            RedisConnection::Single(conn) => conn.get(key).await.ok(),
+            RedisConnection::Cluster(conn) => conn.get(key).await.ok(),
+        }
     }
 
     pub(crate) async fn insert<K: KeyType, V: ValueType>(
@@ -136,9 +152,16 @@ impl RedisCacheStorage {
     ) {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
         let mut guard = self.inner.lock().await;
-        let r = guard
-            .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
-            .await;
+        let r = match &mut *guard {
+            RedisConnection::Single(conn) => {
+                conn.set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+                    .await
+            }
+            RedisConnection::Cluster(conn) => {
+                conn.set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+                    .await
+            }
+        };
         tracing::trace!("insert result {:?}", r);
     }
 }
