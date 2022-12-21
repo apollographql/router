@@ -106,7 +106,7 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let service_stack = ForbidMutations::new(PluginInit::fake_builder().config(false).build())
+        let service_stack = ForbidMutations::new(PluginInit::fake_builder().config(true).build())
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(MockExecutionService::new().boxed());
