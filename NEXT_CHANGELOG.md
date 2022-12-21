@@ -44,6 +44,12 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 🐛 Fixes
 
+### Propagate errors across inline fragments
+
+GraphQL errors now correctly propagate across inline fragments.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2304
+
 ### Only rebuild protos if proto source changes
 
 By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2283
