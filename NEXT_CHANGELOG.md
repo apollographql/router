@@ -130,6 +130,21 @@ By [@neominik](https://github.com/neominik) in https://github.com/apollographql/
 
 ## 🛠 Maintenance
 
+### Add more details when GraphQL request is invalid ([Issue #2301](https://github.com/apollographql/router/issues/2301))
+
+Add more context to the error we're throwing if your GraphQL request is invalid, here is an exemple if you pass `"variables": "null"` in your JSON payload.
+```json
+{
+  "message": "Invalid GraphQL request",
+  "extensions": {
+    "details": "failed to deserialize the request body into JSON: invalid type: string \"null\", expected a map at line 1 column 100",
+    "code": "INVALID_GRAPHQL_REQUEST"
+  }
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2306
+
 ### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
 
 Add attribute named `http.url` containing the subgraph URL in span `subgraph_request`.
