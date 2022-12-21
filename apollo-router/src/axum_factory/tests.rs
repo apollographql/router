@@ -894,7 +894,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .cors(Cors::builder().build())
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql/*"))
+                .path(String::from("/graphql"))
                 .build(),
         )
         .build()
@@ -910,7 +910,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .request(
             Method::OPTIONS,
             &format!(
-                "{}/graphql/",
+                "{}/graphql",
                 server.graphql_listen_address().as_ref().unwrap()
             ),
         )
