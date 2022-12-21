@@ -82,42 +82,55 @@ where
             let context = request.context.clone();
             let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
-                let res = qp.delegate.ready().await?.call(request).await;
-                match res {
-                    Ok(QueryPlannerResponse {
-                        content,
-                        context,
-                        errors,
-                    }) => {
-                        if let Some(content) = &content {
-                            entry.insert(Ok(content.clone())).await;
-                        }
+                // some clients might timeout and cancel the request before query planning is finished,
+                // so we execute it in a task that can continue even after the request was canceled and
+                // the join handle was dropped. That way, the next similar query will use the cache instead
+                // of restarting the query planner until another timeout
+                tokio::task::spawn(async move {
+                    let res = qp.delegate.ready().await?.call(request).await;
 
-                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                            match (plan.usage_reporting).serialize(Serializer) {
-                                Ok(v) => {
-                                    context.insert_json_value(USAGE_REPORTING, v);
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        e
-                                    );
-                                }
-                            }
-                        }
+                    match res {
                         Ok(QueryPlannerResponse {
                             content,
                             context,
                             errors,
-                        })
+                        }) => {
+                            if let Some(content) = &content {
+                                entry.insert(Ok(content.clone())).await;
+                            }
+
+                            if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                                match (plan.usage_reporting).serialize(Serializer) {
+                                    Ok(v) => {
+                                        context.insert_json_value(USAGE_REPORTING, v);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(
+                                            "usage reporting was not serializable to context, {}",
+                                            e
+                                        );
+                                    }
+                                }
+                            }
+                            Ok(QueryPlannerResponse {
+                                content,
+                                context,
+                                errors,
+                            })
+                        }
+                        Err(error) => {
+                            let e = Arc::new(error);
+                            entry.insert(Err(e.clone())).await;
+                            Err(CacheResolverError::RetrievalError(e))
+                        }
                     }
-                    Err(error) => {
-                        let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
-                        Err(CacheResolverError::RetrievalError(e))
-                    }
-                }
+                })
+                .await
+                .map_err(|e| {
+                    CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
+                        e.to_string(),
+                    )))
+                })?
             } else {
                 let res = entry
                     .get()
