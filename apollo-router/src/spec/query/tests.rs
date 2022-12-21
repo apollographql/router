@@ -5086,3 +5086,119 @@ fn query_operation_nullification() {
         .expected(Value::Null)
         .test();
 }
+
+#[test]
+fn test_error_path_works_across_inline_fragments() {
+    let schema = Schema::parse(
+        r#"
+    schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.2", for: EXECUTION)
+    {
+        query: Query
+    }
+
+    directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+    scalar link__Import
+    scalar join__FieldSet
+    enum link__Purpose {
+        SECURITY
+        EXECUTION
+    }
+    enum join__Graph {
+        TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+    }
+
+    type Query {
+        rootType: RootType
+    }
+
+    union RootType
+    @join__type(graph: TEST)
+    = MyFragment
+
+    type MyFragment
+    @join__type(graph: TEST)
+    {
+        edges: [MyFragmentEdge]
+    }
+
+    type MyFragmentEdge
+    @join__type(graph: TEST)
+    {
+      node: MyType
+    }
+
+    type MyType
+    @join__type(graph: TEST)
+    {
+        id: ID!
+        subType: MySubtype
+    }
+
+
+    type MySubtype
+    @join__type(graph: TEST)
+    {
+        edges: [MySubtypeEdge]
+    }
+
+    type MySubtypeEdge
+    @join__type(graph: TEST)
+    {
+      node: MyLeafType
+    }
+
+    type MyLeafType
+    @join__type(graph: TEST)
+    {
+        id: ID!
+        myField: String!
+    }
+"#,
+        &Default::default(),
+    )
+    .unwrap();
+
+    let query = Query::parse(
+        r#"query MyQueryThatContainsFragments {
+                rootType {
+                  ... on MyFragment {
+                    edges {
+                      node {
+                        id
+                        subType {
+                          __typename
+                          edges {
+                            __typename
+                            node {
+                              __typename
+                              id
+                              myField
+                            }
+                          }
+                        }
+                      }
+                      __typename
+                    }
+                    __typename
+                  }
+                }
+              }"#,
+        &schema,
+        &Default::default(),
+    )
+    .unwrap();
+
+    assert!(query.contains_error_path(
+        None,
+        None,
+        None,
+        &Path::from("rootType/edges/0/node/subType/edges/0/node/myField")
+    ));
+}
