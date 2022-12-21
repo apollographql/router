@@ -124,6 +124,12 @@ By [@neominik](https://github.com/neominik) in https://github.com/apollographql/
 
 ## 🛠 Maintenance
 
+### Upgrade axum to `0.6.1` ([PR #2303](https://github.com/apollographql/router/pull/2303))
+
+For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
+
 ### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
 
 Add attribute named `http.url` containing the subgraph URL in span `subgraph_request`.
