@@ -49,7 +49,7 @@ const PERSISTED_QUERY_NOT_SUPPORTED_ERR_STRING: &str = "PERSISTED_QUERY_NOT_SUPP
 const CODE_STRING: &str = "code";
 const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
-const HASH_VERSION_VALUE: &str = "1";
+const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
 
 enum APQError {
@@ -132,10 +132,13 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             context,
             ..
         } = request.clone();
+
         let (_, body) = subgraph_request.into_parts();
+
         let clone = self.client.clone();
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
+
         let mut apq_supported = self.apq_supported.clone();
 
         let make_calls = async move {
@@ -180,8 +183,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 // If PersistedQueryNotFound, add the whole query to the request and retry.
                 // Else, return the response like before.
                 let http_response = response.as_ref();
-                if !http_response.is_ok() {
-                    // TODO handle panic in unwrap
+                // http_response with APQ error returns a 200 OK http response.
+                // The errors are contained in graphql Response.
+                if http_response.is_ok() {
                     match get_apq_error(http_response.unwrap().response.body().clone()) {
                         APQError::PersistedQueryNotSupported => {
                             apq_supported = false;
@@ -221,7 +225,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         // If PERSISTED_QUERY_NOT_SUPPORTED error is recieved, apq_supported
         // is flipped to false and we stop sending persisted queries with hash.
         self.apq_supported = apq_supported;
-        println!("self.apq_support flipped to {}",apq_supported);
+
         Box::pin(make_calls)
     }
 }
@@ -239,9 +243,10 @@ async fn call_http(
         subgraph_request,
         ..
     } = request;
+
     let (parts, _) = subgraph_request.into_parts();
+
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
-    println!("-----------------REQUEST--------------------\n{:?}",body.clone());
     let compressed_body = compress(body, &parts.headers)
         .instrument(tracing::debug_span!("body_compression"))
         .await
@@ -371,7 +376,6 @@ async fn call_http(
             })
         })?;
 
-    println!("-----------------RESPONSE--------------------\n{:?}",graphql.clone());
     let resp = http::Response::from_parts(parts, graphql);
 
     Ok(crate::SubgraphResponse::new_from_response(resp, context))
@@ -384,9 +388,9 @@ fn get_apq_error(response: graphql::Response) -> APQError {
         match error.extensions.get(&ByteString::from(CODE_STRING)) {
             Some(value) => {
                 if value == not_found_byte_string {
-                    return APQError::PersistedQueryNotSupported;
-                } else if value == not_supported_byte_string {
                     return APQError::PersistedQueryNotFound;
+                } else if value == not_supported_byte_string {
+                    return APQError::PersistedQueryNotSupported;
                 }
             }
             _ => {
