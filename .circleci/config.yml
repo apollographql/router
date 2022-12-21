@@ -51,7 +51,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
@@ -228,9 +228,19 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - run: cargo xtask lint
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+      - run:
+          name: Install xtask
+          command: |
+              set -e -o pipefail
+              xtask help || { cd xtask && cargo install --path . && cd ..; }
+      - run: xtask lint
+      - save_cache:
+          name: Save .cargo
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+          paths:
+            - ~/.cargo
 
   xtask_check_compliance:
     parameters:
@@ -240,8 +250,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
@@ -273,6 +283,10 @@ commands:
       cargo_test_args:
         type: string
         default: "--"
+      # additional cache key to have a cache for test_updated
+      cache_key:
+        type: string
+        default: ""
     steps:
       - run:
           name: Start jaeger
@@ -281,8 +295,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
@@ -386,10 +400,8 @@ jobs:
       - checkout
       - linux_amd_install_baseline
       - run:
-          name: Use latest Rust Nightly and update all Rust dependencies
+          name: Update all Rust dependencies
           command: |
-            sed -i '/channel/d' rust-toolchain.toml
-            echo 'channel = "nightly"' >> rust-toolchain.toml
             rm Cargo.lock
             cargo fetch
       - test_workspace:
@@ -397,6 +409,7 @@ jobs:
           # schema_generation test skipped because schemars changed its representation of enums:
           # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
           cargo_test_args: --no-fail-fast -- --skip schema_generation
+          cache_key: .test_updated
 
   build_release:
     parameters:
