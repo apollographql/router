@@ -390,7 +390,7 @@ impl Selection {
             (Some(PathElement::Key(_)), Selection::InlineFragment { selection_set, .. }) => {
                 selection_set
                     .iter()
-                    .any(|selection| selection.contains_error_path(&path, fragments))
+                    .any(|selection| selection.contains_error_path(path, fragments))
             }
             (Some(PathElement::Fragment(_)), Selection::Field { .. }) => false,
         }
