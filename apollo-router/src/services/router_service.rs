@@ -166,18 +166,25 @@ where
 
         let supergraph_service = self.supergraph_creator.create();
         let fut = async move {
-            let graphql_request: Result<graphql::Request, &str> = if parts.method == Method::GET {
+            let graphql_request: Result<graphql::Request, String> = if parts.method == Method::GET {
                 parts
                     .uri
                     .query()
-                    .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-                    .ok_or("missing query string")
+                    .map(|q| {
+                        graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
+                            format!("failed to decode a valid GraphQL request from path {}", e)
+                        })
+                    })
+                    .unwrap_or_else(|| Err("missing query string".to_string()))
             } else {
                 hyper::body::to_bytes(body)
                     .await
-                    .map_err(|_| ())
-                    .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
-                    .map_err(|_| "failed to parse the request body as JSON")
+                    .map_err(|e| format!("failed to get the request body: {}", e))
+                    .and_then(|bytes| {
+                        serde_json::from_reader(bytes.reader()).map_err(|err| {
+                            format!("failed to deserialize the request body into JSON: {}", err)
+                        })
+                    })
             };
 
             match graphql_request {
@@ -324,7 +331,16 @@ where
                     Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::from("Invalid GraphQL request"))
+                            .body(Body::from(
+                                serde_json::to_string(
+                                    &graphql::Error::builder()
+                                        .message(String::from("Invalid GraphQL request"))
+                                        .extension_code("INVALID_GRAPHQL_REQUEST")
+                                        .extension("details", error)
+                                        .build(),
+                                )
+                                .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
+                            ))
                             .expect("cannot fail"),
                         context,
                     })
