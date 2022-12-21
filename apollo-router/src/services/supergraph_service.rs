@@ -465,6 +465,16 @@ impl SupergraphCreator {
             )
     }
 
+    pub(crate) async fn cache_keys(&self) -> Vec<(String, Option<String>)> {
+        self.query_planner_service.cache_keys().await
+    }
+    pub(crate) async fn warm_up_query_planner(
+        &mut self,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
+        self.query_planner_service.warm_up(cache_keys).await
+    }
+
     /// Create a test service.
     #[cfg(test)]
     pub(crate) async fn for_tests(

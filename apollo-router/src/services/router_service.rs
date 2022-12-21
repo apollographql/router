@@ -430,6 +430,12 @@ where
     }
 }
 
+impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
+    pub(crate) async fn cache_keys(&self) -> Vec<(String, Option<String>)> {
+        self.supergraph_creator.cache_keys().await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use http::Uri;

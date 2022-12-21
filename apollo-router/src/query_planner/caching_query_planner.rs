@@ -32,7 +32,11 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
 where
-    T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse>,
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = QueryPlannerError,
+    >,
 {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(
@@ -49,6 +53,57 @@ where
             delegate,
             schema_id,
         }
+    }
+
+    pub(crate) async fn cache_keys(&self) -> Vec<(String, Option<String>)> {
+        let keys = self.cache.in_memory_keys().await;
+        keys.into_iter()
+            .map(|key| (key.query, key.operation))
+            .collect()
+    }
+
+    pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
+        let schema_id = self.schema_id.clone();
+
+        let mut count = 0usize;
+        for (query, operation) in cache_keys {
+            let caching_key = CachingQueryKey {
+                schema_id: schema_id.clone(),
+                query: query.clone(),
+                operation: operation.to_owned(),
+            };
+            let context = Context::new();
+
+            let entry = self.cache.get(&caching_key).await;
+            if entry.is_first() {
+                let request = QueryPlannerRequest {
+                    query,
+                    operation_name: operation,
+                    context: context.clone(),
+                };
+
+                let res = match self.delegate.ready().await {
+                    Ok(service) => service.call(request).await,
+                    Err(_) => break,
+                };
+
+                match res {
+                    Ok(QueryPlannerResponse { content, .. }) => {
+                        if let Some(content) = &content {
+                            count += 1;
+                            entry.insert(Ok(content.clone())).await;
+                        }
+                    }
+                    Err(error) => {
+                        count += 1;
+                        let e = Arc::new(error);
+                        entry.insert(Err(e.clone())).await;
+                    }
+                }
+            }
+        }
+
+        tracing::debug!("warmed up the query planner cache with {count} queries");
     }
 }
 

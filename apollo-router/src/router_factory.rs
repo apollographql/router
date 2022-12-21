@@ -133,7 +133,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterFactory>,
+        previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
         // Process the plugins.
@@ -161,7 +161,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         // We're good to go with the new service.
-        let supergraph_creator = builder.build().await?;
+        let mut supergraph_creator = builder.build().await?;
+
+        if let Some(router) = previous_router {
+            let cache_keys = router.cache_keys().await;
+            supergraph_creator.warm_up_query_planner(cache_keys).await;
+        }
 
         Ok(Self::RouterFactory::new(
             Arc::new(supergraph_creator),
