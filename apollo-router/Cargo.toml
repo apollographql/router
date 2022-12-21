@@ -39,7 +39,7 @@ features = ["docs_rs"]
 
 [dependencies]
 access-json = "0.1.0"
-anyhow = "1.0.66"
+anyhow = "1.0.68"
 ansi_term = "0.12"
 apollo-parser = "0.4.0"
 arc-swap = "1.5.1"
@@ -137,7 +137,7 @@ opentelemetry-zipkin = { version = "0.16.0", default-features = false, features 
     "reqwest-rustls",
 ] }
 opentelemetry-prometheus = "0.11.0"
-paste = "1.0.10"
+paste = "1.0.11"
 pin-project-lite = "0.2.9"
 prometheus = "0.13"
 prost = "0.11.3"
@@ -145,7 +145,7 @@ prost-types = "0.11.0"
 proteus = "0.5.0"
 rand = "0.8.5"
 rhai = { version = "1.11.0", features = ["sync", "serde", "internals"] }
-redis = { version = "0.22.1", optional = true, features = ["cluster", "tokio-comp"] }
+redis = { version = "0.21.7", optional = true, features = ["cluster", "tokio-comp"] }
 redis_cluster_async =  { version = "0.7.0", optional = true }
 regex = "1.7.0"
 reqwest = { version = "0.11.13", default-features = false, features = [
@@ -158,14 +158,15 @@ rust-embed="6.4.2"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "3.0.0"
 sha2 = "0.10.6"
-serde = { version = "1.0.150", features = ["derive", "rc"] }
+serde = { version = "1.0.151", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
-serde_json = { version = "1.0.89", features = ["preserve_order"] }
+serde_json = { version = "1.0.91", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
+strum_macros = "0.24.3"
 sys-info = "0.9.1"
-thiserror = "1.0.37"
+thiserror = "1.0.38"
 tokio = { version = "1.23.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
 tokio-util = { version = "0.7.4", features = ["net", "codec"] }

@@ -135,20 +135,9 @@ impl Request {
     /// An error will be produced in the event that the query string parameters
     /// cannot be turned into a valid GraphQL `Request`.
     pub fn from_urlencoded_query(url_encoded_query: String) -> Result<Request, serde_json::Error> {
-        // As explained in the form content types specification https://www.w3.org/TR/html4/interact/forms.html#h-17.13.4.1
-        // `Forms submitted with this content type must be encoded as follows:`
-        //
-        // Space characters are replaced by `+', and then reserved characters are escaped as described in [RFC1738], section 2.2
-        // The real percent encoding uses `%20` while form data in URLs uses `+`.
-        // This can be seen empirically by running a CURL request with a --data-urlencoded that contains spaces.
-        // however, quoting the urlencoding docs https://docs.rs/urlencoding/latest/urlencoding/fn.decode_binary.html
-        // `Unencoded `+` is preserved literally, and _not_ changed to a space.`
-        //
-        // We will thus replace '+' by "%20" below so we comply with the percent encoding specification, before decoding the parameters.
-        let query = url_encoded_query.replace('+', "%20");
-        let decoded_string = urlencoding::decode_binary(query.as_bytes());
         let urldecoded: serde_json::Value =
-            serde_urlencoded::from_bytes(&decoded_string).map_err(serde_json::Error::custom)?;
+            serde_urlencoded::from_bytes(url_encoded_query.as_bytes())
+                .map_err(serde_json::Error::custom)?;
 
         let operation_name = if let Some(serde_json::Value::String(operation_name)) =
             urldecoded.get("operationName")
@@ -280,6 +269,31 @@ mod tests {
             json!(
             {
               "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "extensions": {
+                  "persistedQuery": {
+                      "version": 1,
+                      "sha256Hash": "20a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f"
+                  }
+                }
+            })
+            .to_string()
+            .as_str(),
+        ).unwrap();
+
+        let req = Request::from_urlencoded_query(query_string).unwrap();
+
+        assert_eq!(expected_result, req);
+    }
+
+    #[test]
+    fn from_urlencoded_query_with_variables_works() {
+        let query_string = "query=%7B+topProducts+%7B+upc+name+reviews+%7B+id+product+%7B+name+%7D+author+%7B+id+name+%7D+%7D+%7D+%7D&variables=%7B%22date%22%3A%222022-01-01T00%3A00%3A00%2B00%3A00%22%7D&extensions=%7B+%22persistedQuery%22+%3A+%7B+%22version%22+%3A+1%2C+%22sha256Hash%22+%3A+%2220a101de18d4a9331bfc4ccdfef33cc735876a689490433570f17bdd4c0bad3f%22+%7D+%7D".to_string();
+
+        let expected_result = serde_json::from_str::<Request>(
+            json!(
+            {
+              "query": "{ topProducts { upc name reviews { id product { name } author { id name } } } }",
+              "variables": {"date": "2022-01-01T00:00:00+00:00"},
               "extensions": {
                   "persistedQuery": {
                       "version": 1,
