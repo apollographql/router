@@ -591,6 +591,6 @@ traces_per_query:
     referenced_fields_by_type: {}
     internal_traces_contributing_to_stats: []
 end_time: "[end_time]"
-operation_count: 1
-traces_pre_aggregated: false
+operation_count: 0
+traces_pre_aggregated: true
 

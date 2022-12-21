@@ -734,16 +734,11 @@ impl Telemetry {
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
                 apollo_private.operation_signature = field::Empty,
-                apollo_private.graphql.variables = field::Empty,
-            );
-
-            if is_span_sampled() {
-                let variable_values = Self::filter_variables_values(
+                apollo_private.graphql.variables = Self::filter_variables_values(
                     &request.supergraph_request.body().variables,
                     &config.send_variable_values,
-                );
-                span.record("apollo_private.graphql.variables", variable_values.as_str());
-            }
+                ),
+            );
 
             span
         }
@@ -1221,10 +1216,6 @@ impl Telemetry {
         has_errors: bool,
         duration: Duration,
     ) {
-        if is_span_sampled() {
-            ::tracing::trace!("span is sampled then skip the apollo metrics");
-            return;
-        }
         let metrics = if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
             .unwrap_or_default()
@@ -1332,11 +1323,6 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
     }
 }
 
-#[inline]
-pub(crate) fn is_span_sampled() -> bool {
-    Span::current().context().span().span_context().is_sampled()
-}
-
 register_plugin!("apollo", "telemetry", Telemetry);
 
 /// This enum is a partial cleanup of the telemetry plugin logic.
@@ -1350,7 +1336,7 @@ enum ApolloFtv1Handler {
 impl ApolloFtv1Handler {
     fn request_ftv1(&self, mut req: SubgraphRequest) -> SubgraphRequest {
         if let ApolloFtv1Handler::Enabled = self {
-            if is_span_sampled() {
+            if Span::current().context().span().span_context().is_sampled() {
                 req.subgraph_request.headers_mut().insert(
                     "apollo-federation-include-trace",
                     HeaderValue::from_static("ftv1"),
