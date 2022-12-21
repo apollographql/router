@@ -431,8 +431,8 @@ where
 }
 
 impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
-    pub(crate) async fn cache_keys(&self) -> Vec<(String, Option<String>)> {
-        self.supergraph_creator.cache_keys().await
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.supergraph_creator.cache_keys(count).await
     }
 }
 

@@ -465,8 +465,8 @@ impl SupergraphCreator {
             )
     }
 
-    pub(crate) async fn cache_keys(&self) -> Vec<(String, Option<String>)> {
-        self.query_planner_service.cache_keys().await
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.query_planner_service.cache_keys(count).await
     }
     pub(crate) async fn warm_up_query_planner(
         &mut self,

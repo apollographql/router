@@ -55,9 +55,10 @@ where
         }
     }
 
-    pub(crate) async fn cache_keys(&self) -> Vec<(String, Option<String>)> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         let keys = self.cache.in_memory_keys().await;
         keys.into_iter()
+            .take(count)
             .map(|key| (key.query, key.operation))
             .collect()
     }

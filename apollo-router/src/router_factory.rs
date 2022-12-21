@@ -164,8 +164,20 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let mut supergraph_creator = builder.build().await?;
 
         if let Some(router) = previous_router {
-            let cache_keys = router.cache_keys().await;
-            supergraph_creator.warm_up_query_planner(cache_keys).await;
+            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
+                let cache_keys = router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                if !cache_keys.is_empty() {
+                    tracing::info!(
+                        "warming up the query plan cache with {} queries, this might take a while",
+                        cache_keys.len()
+                    );
+
+                    supergraph_creator.warm_up_query_planner(cache_keys).await;
+                }
+            }
         }
 
         Ok(Self::RouterFactory::new(
