@@ -191,7 +191,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 if http_response.is_ok() {
                     match get_apq_error(http_response.unwrap().response.body().clone()) {
                         APQError::PersistedQueryNotSupported => {
-                            // TODO flip SubgraphService.apq_supported to false
+                            // TODO need to flip self.apq_supported to false here
                             // Currently not possible since this is happening asyncly
                             return call_http(request, body, context, client, service_name).await;
                         }
@@ -204,7 +204,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         }
                     }
                 }
-                return call_http(request, body, context, client, service_name).await;
+                return response;
             } else {
                 // If APQ is not enabled, simply make the graphql call
                 // with the same request body.
