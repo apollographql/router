@@ -20,6 +20,7 @@
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
 
+extern crate core;
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
         tracing::debug!($($tokens)+);

@@ -265,9 +265,11 @@ impl FetchNode {
             // when errors have been redacted in the include_subgraph_errors module.
             // Unfortunately, not easy to fix here, because at this point we don't
             // know if we should be redacting errors for this subgraph...
-            .map_err(|e| FetchError::SubrequestHttpError {
-                service: service_name.to_string(),
-                reason: e.to_string(),
+            .map_err(|e| {
+                FetchError::SubrequestHttpError {
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                }
             })?
             .response
             .into_parts();
