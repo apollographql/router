@@ -93,6 +93,10 @@ pub struct Configuration {
 
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
+
+    #[serde(default)]
+    pub(crate) subgraph: Subgraph,
+
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -128,6 +132,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             supergraph: Supergraph,
             #[serde(default)]
+            subgraph: Subgraph,
+            #[serde(default)]
             cors: Cors,
             #[serde(default)]
             plugins: UserPlugins,
@@ -143,6 +149,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .sandbox(ad_hoc.sandbox)
             .homepage(ad_hoc.homepage)
             .supergraph(ad_hoc.supergraph)
+            .subgraph(ad_hoc.subgraph)
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
@@ -170,6 +177,7 @@ impl Configuration {
     pub(crate) fn new(
         server: Option<Server>,
         supergraph: Option<Supergraph>,
+        subgraph: Option<Subgraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         homepage: Option<Homepage>,
@@ -181,6 +189,7 @@ impl Configuration {
         let mut conf = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
+            subgraph: subgraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
@@ -297,6 +306,7 @@ impl Configuration {
     pub(crate) fn fake_new(
         server: Option<Server>,
         supergraph: Option<Supergraph>,
+        subgraph: Option<Subgraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
         homepage: Option<Homepage>,
@@ -308,6 +318,7 @@ impl Configuration {
         let mut configuration = Self {
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
+            subgraph: subgraph.unwrap_or_else(|| Subgraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
@@ -596,6 +607,36 @@ impl Default for InMemoryCache {
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+/// Configuration options pertaining to Subgraphs
+pub(crate) struct Subgraph {
+    /// Whether APQ is enabled for subgraph calls (client side)
+    /// defaults to true
+    pub(crate) apq_enabled: bool,
+}
+
+impl Default for Subgraph {
+    fn default() -> Self {
+        Subgraph {
+            apq_enabled: true
+        }
+    }
+}
+
+#[cfg(test)]
+#[buildstructor::buildstructor]
+impl Subgraph {
+    #[builder]
+    pub(crate) fn fake_new(
+        apq_enabled: Option<bool>,
+    ) -> Self {
+        Self {
+            apq_enabled: apq_enabled.unwrap_or_default(),
+        }
+    }
 }
 
 /// Configuration options pertaining to the sandbox page.

@@ -149,9 +149,14 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
                 Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
+                    Either::A(shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(name, configuration.subgraph.apq_enabled),
+                    ))
                 }
-                None => Either::B(SubgraphService::new(name)),
+                None => Either::B(
+                    SubgraphService::new(name, configuration.subgraph.apq_enabled)
+                ),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -182,7 +187,7 @@ impl YamlRouterFactory {
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        builder = builder.with_configuration(configuration);
+        builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
             let subgraph_service = match plugins
@@ -191,9 +196,14 @@ impl YamlRouterFactory {
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
                 Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
+                    Either::A(shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(name, configuration.subgraph.apq_enabled),
+                    ))
                 }
-                None => Either::B(SubgraphService::new(name)),
+                None => Either::B(
+                    SubgraphService::new(name, configuration.subgraph.apq_enabled),
+                ),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }

@@ -17,8 +17,8 @@ use http::header::CONTENT_TYPE;
 use http::header::{self};
 use http::HeaderMap;
 use http::HeaderValue;
-use hyper::Client;
 use hyper::client::HttpConnector;
+use hyper::Client;
 use hyper_rustls::HttpsConnector;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
@@ -39,10 +39,10 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
-use crate::{Context, graphql};
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::services::layers::apq;
+use crate::{graphql, Context};
 
 const PERSISTED_QUERY_NOT_FOUND_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_ERR_STRING: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -55,7 +55,7 @@ const HASH_KEY: &str = "sha256Hash";
 enum APQError {
     PersistedQueryNotSupported,
     PersistedQueryNotFound,
-    Other
+    Other,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
@@ -87,13 +87,21 @@ pub(crate) struct SubgraphService {
     // opentelemetry crate require reqwest clients to work correctly (at time of writing).
     client: Decompression<hyper::Client<HttpsConnector<HttpConnector>>>,
     service: Arc<String>,
-    // apq_supported is whether APQ [Automatic Persisted Queries]
-    // is supported by the service
+
+    /// Whether apq is enabled in the router for subgraph calls
+    /// This is enabled by default can be configured as
+    /// subgraph:
+    ///      apq_enabled: <bool>
+    apq_enabled: bool,
+
+    /// apq_supported is whether APQ is supported by the subgraph.
+    /// If subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
+    /// apq_supported is set to false
     apq_supported: bool,
 }
 
 impl SubgraphService {
-    pub(crate) fn new(service: impl Into<String>) -> Self {
+    pub(crate) fn new(service: impl Into<String>, apq_enabled: bool) -> Self {
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -110,9 +118,7 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            // If subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
-            // https://www.apollographql.com/docs/apollo-server/v2/data/errors/#persisted_query_not_supported
-            // apq_supported is set to false
+            apq_enabled: apq_enabled,
             apq_supported: true,
         }
     }
@@ -142,23 +148,24 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-        let apq_supported = self.apq_supported.clone();
+        let apq_supported = self.apq_supported;
+        let apq_enabled = self.apq_enabled;
 
         let make_calls = async move {
             // If apq is supported by the subgraph service,
             // Calculate the hash for query and try the request with
             // a persistedQuery instead of the whole query.
-            if apq_supported {
-                let graphql::Request{
+            if apq_enabled && apq_supported {
+                let graphql::Request {
                     query,
                     operation_name,
                     variables,
-                    extensions
+                    extensions,
                 } = body.clone();
 
                 let hash_value = apq::calculate_hash_for_query(query.clone().unwrap_or_default());
 
-                let persisted_query= serde_json_bytes::json!({
+                let persisted_query = serde_json_bytes::json!({
                     HASH_VERSION_KEY: HASH_VERSION_VALUE,
                     HASH_KEY: hash_value
                 });
@@ -166,7 +173,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 let mut extensions_with_apq = extensions.clone();
                 extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
 
-                let mut apq_body = graphql::Request{
+                let mut apq_body = graphql::Request {
                     query: None,
                     operation_name: operation_name,
                     variables: variables,
@@ -178,8 +185,9 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     apq_body.clone(),
                     context.clone(),
                     client.clone(),
-                    service_name.clone()
-                ).await;
+                    service_name.clone(),
+                )
+                .await;
 
                 // Check the error for the request with only persistedQuery.
                 // If PersistedQueryNotSupported, stop trying apq for this subgraph service
@@ -199,9 +207,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                             apq_body.query = query;
                             return call_http(request, apq_body, context, client, service_name).await;
                         }
-                        _ => {
-                            return response
-                        }
+                        _ => return response
                     }
                 }
                 return response;
@@ -225,10 +231,8 @@ async fn call_http(
     mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
     service_name: String,
 ) -> Result<crate::SubgraphResponse, BoxError> {
-
     let crate::SubgraphRequest {
-        subgraph_request,
-        ..
+        subgraph_request, ..
     } = request;
 
     let (parts, _) = subgraph_request.into_parts();
@@ -353,8 +357,8 @@ async fn call_http(
         );
     }
 
-    let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
-        .in_scope(|| {
+    let graphql: graphql::Response =
+        tracing::debug_span!("parse_subgraph_response").in_scope(|| {
             graphql::Response::from_bytes(&service_name, body).map_err(|error| {
                 FetchError::SubrequestMalformedResponse {
                     service: service_name.clone(),
@@ -629,7 +633,7 @@ mod tests {
     // starts a local server emulating a subgraph returning PERSISTED_QUERY_NOT_SUPPORTED error response
     async fn emulate_persisted_query_not_supported_response(socket_addr: SocketAddr) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            let (_ ,body) = request.into_parts();
+            let (_, body) = request.into_parts();
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
                 .map_err(|_| ())
@@ -650,8 +654,8 @@ mod tests {
                                         .build()],
                                     ..Response::default()
                                 })
-                                    .expect("always valid")
-                                    .into(),
+                                .expect("always valid")
+                                .into(),
                             )
                             .unwrap());
                     }
@@ -664,10 +668,10 @@ mod tests {
                                 data: Some(Value::String(ByteString::from("test"))),
                                 ..Response::default()
                             })
-                                .expect("always valid")
-                                .into(),
+                            .expect("always valid")
+                            .into(),
                         )
-                        .unwrap())
+                        .unwrap());
                 }
                 Err(_) => {
                     panic!("invalid graphql request recieved")
@@ -685,7 +689,7 @@ mod tests {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let mut apq_hash_store = HashMap::new();
 
-            let (_ ,body) = request.into_parts();
+            let (_, body) = request.into_parts();
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
                 .map_err(|_| ())
@@ -697,12 +701,13 @@ mod tests {
                     if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
                         panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
-                    let value = request.extensions.get(&ByteString::from(PERSISTED_QUERY_KEY)).unwrap();
+                    let value = request
+                        .extensions
+                        .get(&ByteString::from(PERSISTED_QUERY_KEY))
+                        .unwrap();
                     let hash;
                     match value {
-                        Object(map) => {
-                            hash = map.get(HASH_KEY)
-                        }
+                        Object(map) => hash = map.get(HASH_KEY),
                         _ => {
                             panic!("value should have been a map")
                         }
@@ -760,7 +765,7 @@ mod tests {
     async fn test_bad_status_code_should_not_fail() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2626").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
-        let subgraph_service = SubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test", true);
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let response = subgraph_service
@@ -793,7 +798,7 @@ mod tests {
     async fn test_bad_content_type() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2525").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_response_format(socket_addr));
-        let subgraph_service = SubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test", true);
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
@@ -826,7 +831,7 @@ mod tests {
     async fn test_compressed_request_response_body() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2727").unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(socket_addr));
-        let subgraph_service = SubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test", false);
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
@@ -863,7 +868,7 @@ mod tests {
     async fn test_unauthorized() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2828").unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(socket_addr));
-        let subgraph_service = SubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test", true);
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let err = subgraph_service
@@ -896,7 +901,7 @@ mod tests {
     async fn test_persisted_query_not_supported() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2929").unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_response(socket_addr));
-        let subgraph_service = SubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test", true);
 
         assert_eq!(subgraph_service.clone().apq_supported, true);
 
@@ -937,7 +942,7 @@ mod tests {
     async fn test_persisted_query_not_found() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3030").unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_response(socket_addr));
-        let subgraph_service = SubgraphService::new("test");
+        let subgraph_service = SubgraphService::new("test", true);
 
         assert_eq!(subgraph_service.clone().apq_supported, true);
 
