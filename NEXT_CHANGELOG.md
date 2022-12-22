@@ -29,6 +29,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Scaffold: Add a Dockerfile and document it ([#2295](https://github.com/apollographql/router/issues/2295))
+
+Projects you create via scaffold will now have a Dockerfile so you can build and ship a custom router container.
+The docs have been updated with links and steps to build your custom router with plugins.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2307
+
 ### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
 
 In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
