@@ -152,71 +152,73 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let apq_enabled = self.apq_enabled;
 
         let make_calls = async move {
-            // If apq is enabled and supported by the subgraph,
+            // If APQ is not enabled or supported, simply make the graphql call
+            // with the same request body.
+            if !apq_enabled || !apq_supported {
+                return call_http(request, body, context, client, service_name).await;
+            }
+
+            // Else, if apq is enabled and supported by the subgraph,
             // Calculate the hash for query and try the request with
             // a persistedQuery instead of the whole query.
-            if apq_enabled && apq_supported {
-                let graphql::Request {
-                    query,
-                    operation_name,
-                    variables,
-                    extensions,
-                } = body.clone();
+            let graphql::Request {
+                query,
+                operation_name,
+                variables,
+                extensions,
+            } = body.clone();
 
-                let hash_value = apq::calculate_hash_for_query(query.clone().unwrap_or_default());
+            let hash_value = apq::calculate_hash_for_query(query.clone().unwrap_or_default());
 
-                let persisted_query = serde_json_bytes::json!({
-                    HASH_VERSION_KEY: HASH_VERSION_VALUE,
-                    HASH_KEY: hash_value
-                });
+            let persisted_query = serde_json_bytes::json!({
+                HASH_VERSION_KEY: HASH_VERSION_VALUE,
+                HASH_KEY: hash_value
+            });
 
-                let mut extensions_with_apq = extensions.clone();
-                extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
+            let mut extensions_with_apq = extensions.clone();
+            extensions_with_apq.insert(PERSISTED_QUERY_KEY, persisted_query);
 
-                let mut apq_body = graphql::Request {
-                    query: None,
-                    operation_name: operation_name,
-                    variables: variables,
-                    extensions: extensions_with_apq,
-                };
+            let mut apq_body = graphql::Request {
+                query: None,
+                operation_name: operation_name,
+                variables: variables,
+                extensions: extensions_with_apq,
+            };
 
-                let response = call_http(
-                    request.clone(),
-                    apq_body.clone(),
-                    context.clone(),
-                    client.clone(),
-                    service_name.clone(),
-                )
-                .await;
+            let response = call_http(
+                request.clone(),
+                apq_body.clone(),
+                context.clone(),
+                client.clone(),
+                service_name.clone(),
+            )
+            .await;
 
-                // Check the error for the request with only persistedQuery.
-                // If PersistedQueryNotSupported, stop trying apq for this subgraph service
-                // If PersistedQueryNotFound, add the whole query to the request and retry.
-                // Else, return the response like before.
-                let http_response = response.as_ref();
-                // http_response with APQ error returns a 200 OK http response.
-                // The errors are contained in graphql Response.
-                if http_response.is_ok() {
-                    let gql_resp = http_response.unwrap().response.body().clone();
-                    match get_apq_error(gql_resp) {
-                        APQError::PersistedQueryNotSupported => {
-                            // TODO need to flip self.apq_supported to false here
-                            // Currently not possible since this is happening asyncly
-                            // self.apq_supported = false;
-                            return call_http(request, body, context, client, service_name).await
-                        }
-                        APQError::PersistedQueryNotFound => {
-                            apq_body.query = query;
-                            return call_http(request, apq_body, context, client, service_name).await;
-                        }
-                        _ => return response
-                    }
+            // Check the error for the request with only persistedQuery.
+            // If PersistedQueryNotSupported, stop trying apq for this subgraph service
+            // If PersistedQueryNotFound, add the whole query to the request and retry.
+            // Else, return the response like before.
+            let http_response = response.as_ref();
+
+            // http_response with APQ error returns a 200 OK http response.
+            // The errors are contained in graphql Response.
+            if http_response.is_err() {
+                return response
+            }
+
+            let gql_resp = http_response.unwrap().response.body().clone();
+            match get_apq_error(gql_resp) {
+                APQError::PersistedQueryNotSupported => {
+                    // TODO need to flip self.apq_supported to false here
+                    // Currently not possible since this is happening asyncly
+                    // self.apq_supported = false;
+                    return call_http(request, body, context, client, service_name).await
                 }
-                return response;
-            } else {
-                // If APQ is not enabled or supported, simply make the graphql call
-                // with the same request body.
-                call_http(request, body, context, client, service_name).await
+                APQError::PersistedQueryNotFound => {
+                    apq_body.query = query;
+                    return call_http(request, apq_body, context, client, service_name).await
+                }
+                _ => return response
             }
         };
 
