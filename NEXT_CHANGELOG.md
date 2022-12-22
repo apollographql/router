@@ -49,6 +49,30 @@ It defaults to 30 seconds.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
+### Warm up the query plan cache on schema updates ([Issue #2302](https://github.com/apollographql/router/issues/2302), [Issue #2308](https://github.com/apollographql/router/issues/2308))
+
+When the schema changes, queries have to go through the query planner again to get the plan cached, which creates latency
+instabilities. There is now an option to select the most used queries from the query plan cache and run them again through
+the query planner before switching the router to the new schema. This slows down the switch but the most used queries will
+immediately use the cache.
+
+This can be configured as follows:
+
+```yaml
+supergraph:
+  query_planning:
+    # runs the 100 most used queries through the query planner on schema changes
+    warmed_up_queries: 100 # The default is 0, which means do not warm up.
+    experimental_cache:
+      in_memory:
+        # sets the limit on the number of entries in the in memory query plan cache
+        limit: 512
+```
+
+Query planning was also updated to finish executing and setting up the cache even if the client timeouts and cancels the request.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2309
+
 ## 🐛 Fixes
 
 ### Propagate errors across inline fragments
