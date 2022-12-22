@@ -55,7 +55,7 @@ This can be configured as follows:
 supergraph:
   query_planning:
     # runs the 100 most used queries through the query planner on schema changes
-    warmed_up_queries: 100
+    warmed_up_queries: 100 # The default is 0, which means do not warm up.
     experimental_cache:
       in_memory:
         # sets the limit on the number of entries in the in memory query plan cache
