@@ -115,6 +115,15 @@ where
         }
     }
 
+    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+        self.inner
+            .lock()
+            .await
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
+
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
         self.inner.lock().await.len()

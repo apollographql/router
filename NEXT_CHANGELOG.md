@@ -29,6 +29,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Scaffold: Add a Dockerfile and document it ([#2295](https://github.com/apollographql/router/issues/2295))
+
+Projects you create via scaffold will now have a Dockerfile so you can build and ship a custom router container.
+The docs have been updated with links and steps to build your custom router with plugins.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2307
+
 ### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
 
 In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
@@ -42,6 +49,30 @@ It defaults to 30 seconds.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
 
+### Warm up the query plan cache on schema updates ([Issue #2302](https://github.com/apollographql/router/issues/2302), [Issue #2308](https://github.com/apollographql/router/issues/2308))
+
+When the schema changes, queries have to go through the query planner again to get the plan cached, which creates latency
+instabilities. There is now an option to select the most used queries from the query plan cache and run them again through
+the query planner before switching the router to the new schema. This slows down the switch but the most used queries will
+immediately use the cache.
+
+This can be configured as follows:
+
+```yaml
+supergraph:
+  query_planning:
+    # runs the 100 most used queries through the query planner on schema changes
+    warmed_up_queries: 100 # The default is 0, which means do not warm up.
+    experimental_cache:
+      in_memory:
+        # sets the limit on the number of entries in the in memory query plan cache
+        limit: 512
+```
+
+Query planning was also updated to finish executing and setting up the cache even if the client timeouts and cancels the request.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2309
+
 ### Apollo Router landing page ([PR #2282](https://github.com/apollographql/router/pull/2282))
 
 We've added a `graph_ref` option to the `homepage` configuration, this will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
@@ -49,6 +80,16 @@ We've added a `graph_ref` option to the `homepage` configuration, this will allo
 By [@flyboarder](https://github.com/flyboarder) in https://github.com/apollographql/router/pull/2282
 
 ## 🐛 Fixes
+
+### Propagate errors across inline fragments
+
+GraphQL errors now correctly propagate across inline fragments.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2304
+
+### Only rebuild protos if proto source changes
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2283
 
 ### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
 
@@ -125,6 +166,25 @@ Using APQs, any '+' characters would be replaced by spaces in variables, breakin
 By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
 
 ## 🛠 Maintenance
+
+### Add more details when GraphQL request is invalid ([Issue #2301](https://github.com/apollographql/router/issues/2301))
+
+Add more context to the error we're throwing if your GraphQL request is invalid, here is an exemple response if you pass `"variables": "null"` in your JSON payload.
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "failed to deserialize the request body into JSON: invalid type: string \"null\", expected a map at line 1 column 100",
+        "code": "INVALID_GRAPHQL_REQUEST"
+      }
+    }
+  ]
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2306
 
 ### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
 

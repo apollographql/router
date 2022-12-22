@@ -698,7 +698,8 @@ expression: "&schema"
             "in_memory": {
               "limit": 512
             }
-          }
+          },
+          "warmed_up_queries": 0
         }
       },
       "type": "object",
@@ -780,7 +781,8 @@ expression: "&schema"
               "in_memory": {
                 "limit": 512
               }
-            }
+            },
+            "warmed_up_queries": 0
           },
           "type": "object",
           "required": [
@@ -811,6 +813,13 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false
+            },
+            "warmed_up_queries": {
+              "description": "Warm up the cache on reloads by running the query plan over a list of the most used queries Defaults to 0 (do not warm up the cache)",
+              "default": 0,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
             }
           },
           "additionalProperties": false
