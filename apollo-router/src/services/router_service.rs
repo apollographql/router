@@ -166,23 +166,41 @@ where
 
         let supergraph_service = self.supergraph_creator.create();
         let fut = async move {
-            let graphql_request: Result<graphql::Request, String> = if parts.method == Method::GET {
+            let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
+                == Method::GET
+            {
                 parts
                     .uri
                     .query()
                     .map(|q| {
                         graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
-                            format!("failed to decode a valid GraphQL request from path {}", e)
+                            (
+                                "failed to decode a valid GraphQL request from path",
+                                format!("failed to decode a valid GraphQL request from path {}", e),
+                            )
                         })
                     })
-                    .unwrap_or_else(|| Err("missing query string".to_string()))
+                    .unwrap_or_else(|| {
+                        Err(("missing query string", "missing query string".to_string()))
+                    })
             } else {
                 hyper::body::to_bytes(body)
                     .await
-                    .map_err(|e| format!("failed to get the request body: {}", e))
+                    .map_err(|e| {
+                        (
+                            "failed to get the request body",
+                            format!("failed to get the request body: {}", e),
+                        )
+                    })
                     .and_then(|bytes| {
                         serde_json::from_reader(bytes.reader()).map_err(|err| {
-                            format!("failed to deserialize the request body into JSON: {}", err)
+                            (
+                                "failed to deserialize the request body into JSON",
+                                format!(
+                                    "failed to deserialize the request body into JSON: {}",
+                                    err
+                                ),
+                            )
                         })
                     })
             };
@@ -320,7 +338,7 @@ where
                         }
                     }
                 }
-                Err(error) => {
+                Err((error, extension_details)) => {
                     // BAD REQUEST
                     ::tracing::error!(
                         monotonic_counter.apollo_router_http_requests_total = 1u64,
@@ -336,7 +354,7 @@ where
                                     &graphql::Error::builder()
                                         .message(String::from("Invalid GraphQL request"))
                                         .extension_code("INVALID_GRAPHQL_REQUEST")
-                                        .extension("details", error)
+                                        .extension("details", extension_details)
                                         .build(),
                                 )
                                 .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
