@@ -29,6 +29,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 ## ❗ BREAKING ❗
 ## 🚀 Features
 
+### Scaffold: Add a Dockerfile and document it ([#2295](https://github.com/apollographql/router/issues/2295))
+
+Projects you create via scaffold will now have a Dockerfile so you can build and ship a custom router container.
+The docs have been updated with links and steps to build your custom router with plugins.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2307
+
 ### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
 
 In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
@@ -153,6 +160,25 @@ Using APQs, any '+' characters would be replaced by spaces in variables, breakin
 By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
 
 ## 🛠 Maintenance
+
+### Add more details when GraphQL request is invalid ([Issue #2301](https://github.com/apollographql/router/issues/2301))
+
+Add more context to the error we're throwing if your GraphQL request is invalid, here is an exemple response if you pass `"variables": "null"` in your JSON payload.
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "failed to deserialize the request body into JSON: invalid type: string \"null\", expected a map at line 1 column 100",
+        "code": "INVALID_GRAPHQL_REQUEST"
+      }
+    }
+  ]
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2306
 
 ### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
 
