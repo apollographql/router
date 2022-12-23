@@ -571,6 +571,11 @@ pub(crate) struct Apq {
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
     pub(crate) experimental_cache: Cache,
+    /// Warm up the cache on reloads by running the query plan over
+    /// a list of the most used queries
+    /// Defaults to 0 (do not warm up the cache)
+    #[serde(default)]
+    pub(crate) warmed_up_queries: usize,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
