@@ -10,6 +10,7 @@ use serde_json::Value;
 use tower::service_fn;
 use tower::util::Either;
 use tower::BoxError;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
@@ -20,12 +21,12 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
-use crate::services::new_service::NewService;
-use crate::services::RouterCreator;
+use crate::services::new_service::ServiceFactory;
+use crate::services::router;
+use crate::services::router_service::RouterCreator;
+use crate::services::transport;
 use crate::services::SubgraphService;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
-use crate::transport;
+use crate::services::SupergraphCreator;
 use crate::ListenAddr;
 use crate::PluggableSupergraphServiceBuilder;
 use crate::Schema;
@@ -49,7 +50,22 @@ impl std::fmt::Debug for Endpoint {
 
 impl Endpoint {
     /// Creates an Endpoint given a path and a Boxed Service
+    #[deprecated = "use `from_router_service` instead"]
+    #[allow(deprecated)]
     pub fn new(path: String, handler: transport::BoxService) -> Self {
+        let router_service = ServiceBuilder::new()
+            .map_request(|request: router::Request| request.router_request)
+            .map_response(|response: transport::Response| response.into())
+            .service(handler)
+            .boxed();
+        Self {
+            path,
+            handler: Handler::new(router_service),
+        }
+    }
+
+    /// Creates an Endpoint given a path and a Boxed Service
+    pub fn from_router_service(path: String, handler: router::BoxService) -> Self {
         Self {
             path,
             handler: Handler::new(handler),
@@ -60,8 +76,9 @@ impl Endpoint {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
-                    .oneshot(req)
+                    .oneshot(req.into())
                     .await
+                    .map(|res| res.response)
                     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
                     .into_response())
             }
@@ -69,16 +86,16 @@ impl Endpoint {
         axum::Router::new().route(self.path.as_str(), service_fn(handler))
     }
 }
-/// Factory for creating a SupergraphService
+/// Factory for creating a RouterService
 ///
 /// Instances of this traits are used by the HTTP server to generate a new
-/// SupergraphService on each request
-pub(crate) trait SupergraphServiceFactory:
-    NewService<SupergraphRequest, Service = Self::SupergraphService> + Clone + Send + Sync + 'static
+/// RouterService on each request
+pub(crate) trait RouterFactory:
+    ServiceFactory<router::Request, Service = Self::RouterService> + Clone + Send + Sync + 'static
 {
-    type SupergraphService: Service<
-            SupergraphRequest,
-            Response = SupergraphResponse,
+    type RouterService: Service<
+            router::Request,
+            Response = router::Response,
             Error = BoxError,
             Future = Self::Future,
         > + Send;
@@ -87,38 +104,97 @@ pub(crate) trait SupergraphServiceFactory:
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 }
 
-/// Factory for creating a SupergraphServiceFactory
+/// Factory for creating a RouterFactory
 ///
 /// Instances of this traits are used by the StateMachine to generate a new
-/// SupergraphServiceFactory from configuration when it changes
+/// RouterFactory from configuration when it changes
 #[async_trait::async_trait]
-pub(crate) trait SupergraphServiceConfigurator: Send + Sync + 'static {
-    type SupergraphServiceFactory: SupergraphServiceFactory;
+pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
+    type RouterFactory: RouterFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<crate::Schema>,
-        previous_router: Option<&'a Self::SupergraphServiceFactory>,
+        previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<Self::SupergraphServiceFactory, BoxError>;
+    ) -> Result<Self::RouterFactory, BoxError>;
 }
 
 /// Main implementation of the SupergraphService factory, supporting the extensions system
 #[derive(Default)]
-pub(crate) struct YamlSupergraphServiceFactory;
+pub(crate) struct YamlRouterFactory;
 
 #[async_trait::async_trait]
-impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
-    type SupergraphServiceFactory = RouterCreator;
+impl RouterSuperServiceFactory for YamlRouterFactory {
+    type RouterFactory = RouterCreator<SupergraphCreator>;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::SupergraphServiceFactory>,
+        previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
-    ) -> Result<Self::SupergraphServiceFactory, BoxError> {
+    ) -> Result<Self::RouterFactory, BoxError> {
+        // Process the plugins.
+        let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        builder = builder.with_configuration(configuration.clone());
+
+        for (name, _) in schema.subgraphs() {
+            let subgraph_service = match plugins
+                .iter()
+                .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+                .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+            {
+                Some(shaping) => {
+                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
+                }
+                None => Either::B(SubgraphService::new(name)),
+            };
+            builder = builder.with_subgraph_service(name, subgraph_service);
+        }
+
+        for (plugin_name, plugin) in plugins {
+            builder = builder.with_dyn_plugin(plugin_name, plugin);
+        }
+
+        // We're good to go with the new service.
+        let mut supergraph_creator = builder.build().await?;
+
+        if let Some(router) = previous_router {
+            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
+                let cache_keys = router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                if !cache_keys.is_empty() {
+                    tracing::info!(
+                        "warming up the query plan cache with {} queries, this might take a while",
+                        cache_keys.len()
+                    );
+
+                    supergraph_creator.warm_up_query_planner(cache_keys).await;
+                }
+            }
+        }
+
+        Ok(Self::RouterFactory::new(
+            Arc::new(supergraph_creator),
+            &configuration,
+        ))
+    }
+}
+
+impl YamlRouterFactory {
+    pub(crate) async fn create_supergraph<'a>(
+        &'a mut self,
+        configuration: Arc<Configuration>,
+        schema: Arc<Schema>,
+        _previous_router: Option<&'a SupergraphCreator>,
+        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+    ) -> Result<SupergraphCreator, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
@@ -143,10 +219,7 @@ impl SupergraphServiceConfigurator for YamlSupergraphServiceFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service.
-        let pluggable_router_service = builder.build().await?;
-
-        Ok(pluggable_router_service)
+        builder.build().await.map_err(BoxError::from)
     }
 }
 
@@ -158,7 +231,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
 
     let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
 
-    let service = YamlSupergraphServiceFactory::default()
+    let service = YamlRouterFactory::default()
         .create(Arc::new(config), Arc::new(schema), None, None)
         .await;
     assert_eq!(
@@ -173,7 +246,7 @@ caused by
     );
 }
 
-async fn create_plugins(
+pub(crate) async fn create_plugins(
     configuration: &Configuration,
     schema: &Schema,
     extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
@@ -262,8 +335,10 @@ async fn create_plugins(
                             .await
                         {
                             Ok(plugin) => {
-                                plugin_instances
-                                    .insert(desired_position, (name.to_string(), plugin));
+                                plugin_instances.insert(
+                                    desired_position.min(plugin_instances.len()),
+                                    (name.to_string(), plugin),
+                                );
                             }
                             Err(err) => errors.push(ConfigurationError::PluginConfiguration {
                                 plugin: name.to_string(),
@@ -338,8 +413,8 @@ mod test {
     use crate::plugin::PluginInit;
     use crate::register_plugin;
     use crate::router_factory::inject_schema_id;
-    use crate::router_factory::SupergraphServiceConfigurator;
-    use crate::router_factory::YamlSupergraphServiceFactory;
+    use crate::router_factory::RouterSuperServiceFactory;
+    use crate::router_factory::YamlRouterFactory;
     use crate::Schema;
 
     #[derive(Debug)]
@@ -455,7 +530,7 @@ mod test {
         let schema = include_str!("testdata/supergraph.graphql");
         let schema = Schema::parse(schema, &config).unwrap();
 
-        let service = YamlSupergraphServiceFactory::default()
+        let service = YamlRouterFactory::default()
             .create(Arc::new(config), Arc::new(schema), None, None)
             .await;
         service.map(|_| ())

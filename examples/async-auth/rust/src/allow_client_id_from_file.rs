@@ -69,6 +69,7 @@ impl Plugin for AllowClientIdFromFile {
                         .error(
                             graphql::Error::builder()
                                 .message(format!("Missing '{header_key}' header"))
+                                .extension_code("AUTH_ERROR")
                                 .build(),
                         )
                         .status_code(StatusCode::UNAUTHORIZED)
@@ -104,6 +105,7 @@ impl Plugin for AllowClientIdFromFile {
                                     .error(
                                         graphql::Error::builder()
                                             .message("client-id is not allowed")
+                                            .extension_code("UNAUTHORIZED_CLIENT_ID")
                                             .build(),
                                     )
                                     .status_code(StatusCode::FORBIDDEN)
@@ -120,6 +122,7 @@ impl Plugin for AllowClientIdFromFile {
                                 .error(
                                     graphql::Error::builder()
                                         .message(format!("'{header_key}' value is not a string"))
+                                        .extension_code("BAD_CLIENT_ID")
                                         .build(),
                                 )
                                 .status_code(StatusCode::BAD_REQUEST)
@@ -204,7 +207,7 @@ mod tests {
         TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
     }

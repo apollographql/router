@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::hash::Hash;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use lru::LruCache;
@@ -56,7 +57,7 @@ where
     V: ValueType,
 {
     pub(crate) async fn new(
-        max_capacity: usize,
+        max_capacity: NonZeroUsize,
         _redis_urls: Option<Vec<String>>,
         _caller: &str,
     ) -> Self {
@@ -112,6 +113,15 @@ where
         if let Some(redis) = self.redis.as_ref() {
             redis.insert(RedisKey(key), RedisValue(value)).await;
         }
+    }
+
+    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+        self.inner
+            .lock()
+            .await
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 
     #[cfg(test)]

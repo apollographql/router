@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/axum_factory/tests.rs
-expression: "json!([{\n        \"data\" :\n        {\n            \"topProducts\" :\n            [{ \"upc\" : \"1\", \"name\" : \"Table\", \"reviews\" : null },\n            { \"upc\" : \"2\", \"name\" : \"Couch\", \"reviews\" : null }]\n        }, \"errors\" :\n        [{\n            \"message\" :\n            \"couldn't find mock for query {\\\"query\\\":\\\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\\\",\\\"operationName\\\":\\\"TopProducts__reviews__1\\\",\\\"variables\\\":{\\\"representations\\\":[{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"1\\\"},{\\\"__typename\\\":\\\"Product\\\",\\\"upc\\\":\\\"2\\\"}]}}\"\n        },\n        {\n            \"message\" :\n            \"Subgraph response from 'reviews' was missing key `_entities`\",\n            \"path\" : [\"topProducts\", \"@\"]\n        }], \"hasNext\" : true,\n    }, { \"hasNext\" : false }])"
+expression: parts
 ---
 [
   {
@@ -20,14 +20,20 @@ expression: "json!([{\n        \"data\" :\n        {\n            \"topProducts\
     },
     "errors": [
       {
-        "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}"
+        "message": "couldn't find mock for query {\"query\":\"query TopProducts__reviews__1($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{__typename id product{__typename upc}}}}}\",\"operationName\":\"TopProducts__reviews__1\",\"variables\":{\"representations\":[{\"__typename\":\"Product\",\"upc\":\"1\"},{\"__typename\":\"Product\",\"upc\":\"2\"}]}}",
+        "extensions": {
+          "code": "FETCH_ERROR"
+        }
       },
       {
         "message": "Subgraph response from 'reviews' was missing key `_entities`",
         "path": [
           "topProducts",
           "@"
-        ]
+        ],
+        "extensions": {
+          "code": "PARSE_ERROR"
+        }
       }
     ],
     "hasNext": true

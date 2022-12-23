@@ -12,10 +12,9 @@ mod yaml;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::str::FromStr;
 
-use askama::Template;
-use bytes::Bytes;
 use cors::*;
 use derivative::Derivative;
 use displaydoc::Display;
@@ -561,6 +560,11 @@ pub(crate) struct Apq {
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
     pub(crate) experimental_cache: Cache,
+    /// Warm up the cache on reloads by running the query plan over
+    /// a list of the most used queries
+    /// Defaults to 0 (do not warm up the cache)
+    #[serde(default)]
+    pub(crate) warmed_up_queries: usize,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -579,7 +583,7 @@ pub(crate) struct Cache {
 /// In memory cache configuration
 pub(crate) struct InMemoryCache {
     /// Number of entries in the Least Recently Used cache
-    pub(crate) limit: usize,
+    pub(crate) limit: NonZeroUsize,
 }
 
 impl Default for InMemoryCache {
@@ -638,17 +642,6 @@ impl Default for Sandbox {
     }
 }
 
-#[derive(Template)]
-#[template(path = "sandbox_index.html")]
-struct SandboxTemplate {}
-
-impl Sandbox {
-    pub(crate) fn display_page() -> Bytes {
-        let template = SandboxTemplate {};
-        template.render().unwrap().into()
-    }
-}
-
 /// Configuration options pertaining to the home page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -685,17 +678,6 @@ impl Homepage {
 impl Default for Homepage {
     fn default() -> Self {
         Self::builder().build()
-    }
-}
-
-#[derive(Template)]
-#[template(path = "homepage_index.html")]
-struct HomepageTemplate {}
-
-impl Homepage {
-    pub(crate) fn display_page() -> Bytes {
-        let template = HomepageTemplate {};
-        template.render().unwrap().into()
     }
 }
 

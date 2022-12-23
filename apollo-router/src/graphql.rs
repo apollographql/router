@@ -4,6 +4,7 @@ use std::fmt;
 use std::pin::Pin;
 
 use futures::Stream;
+use heck::ToShoutySnakeCase;
 pub use router_bridge::planner::Location;
 use router_bridge::planner::PlanError;
 use router_bridge::planner::PlanErrorExtensions;
@@ -59,6 +60,7 @@ pub struct Error {
     #[serde(default, skip_serializing_if = "Object::is_empty")]
     pub extensions: Object,
 }
+// Implement getter and getter_mut to not use pub field directly
 
 #[buildstructor::buildstructor]
 impl Error {
@@ -93,13 +95,17 @@ impl Error {
     /// * `.build()`
     ///   Finishes the builder and returns a GraphQL [`Error`].
     #[builder(visibility = "pub")]
-    fn new(
+    fn new<T: Into<String>>(
         message: String,
         locations: Vec<Location>,
         path: Option<Path>,
+        extension_code: T,
         // Skip the `Object` type alias in order to use buildstructor’s map special-casing
-        extensions: JsonMap<ByteString, Value>,
+        mut extensions: JsonMap<ByteString, Value>,
     ) -> Self {
+        extensions
+            .entry("code")
+            .or_insert_with(|| extension_code.into().into());
         Self {
             message,
             locations,
@@ -169,15 +175,54 @@ where
     fn into_graphql_errors(self) -> Result<Vec<Error>, Self>;
 }
 
+/// Trait used to get extension type from an error
+pub(crate) trait ErrorExtension
+where
+    Self: Sized,
+{
+    fn extension_code(&self) -> String {
+        std::any::type_name::<Self>().to_shouty_snake_case()
+    }
+
+    fn custom_extension_details(&self) -> Option<Object> {
+        None
+    }
+}
+
+impl ErrorExtension for PlanError {}
+
 impl From<PlanError> for Error {
     fn from(err: PlanError) -> Self {
+        let extension_code = err.extension_code();
+        let extensions = err
+            .extensions
+            .map(convert_extensions_to_map)
+            .unwrap_or_else(move || {
+                let mut object = Object::new();
+                object.insert("code", extension_code.into());
+                object
+            });
         Self {
             message: err.message.unwrap_or_else(|| String::from("plan error")),
-            extensions: err
-                .extensions
-                .map(convert_extensions_to_map)
-                .unwrap_or_default(),
+            extensions,
             ..Default::default()
+        }
+    }
+}
+
+impl ErrorExtension for PlannerError {
+    fn extension_code(&self) -> String {
+        match self {
+            PlannerError::WorkerGraphQLError(worker_graphql_error) => worker_graphql_error
+                .extensions
+                .as_ref()
+                .map(|ext| ext.code.clone())
+                .unwrap_or_else(|| worker_graphql_error.extension_code()),
+            PlannerError::WorkerError(worker_error) => worker_error
+                .extensions
+                .as_ref()
+                .map(|ext| ext.code.clone())
+                .unwrap_or_else(|| worker_error.extension_code()),
         }
     }
 }
@@ -191,29 +236,40 @@ impl From<PlannerError> for Error {
     }
 }
 
+impl ErrorExtension for WorkerError {}
+
 impl From<WorkerError> for Error {
     fn from(err: WorkerError) -> Self {
+        let extension_code = err.extension_code();
+        let mut extensions = err
+            .extensions
+            .map(convert_extensions_to_map)
+            .unwrap_or_default();
+        extensions.insert("code", extension_code.into());
+
         Self {
             message: err.message.unwrap_or_else(|| String::from("worker error")),
             locations: err.locations.into_iter().map(Location::from).collect(),
-            extensions: err
-                .extensions
-                .map(convert_extensions_to_map)
-                .unwrap_or_default(),
+            extensions,
             ..Default::default()
         }
     }
 }
 
+impl ErrorExtension for WorkerGraphQLError {}
+
 impl From<WorkerGraphQLError> for Error {
     fn from(err: WorkerGraphQLError) -> Self {
+        let extension_code = err.extension_code();
+        let mut extensions = err
+            .extensions
+            .map(convert_extensions_to_map)
+            .unwrap_or_default();
+        extensions.insert("code", extension_code.into());
         Self {
             message: err.message,
             locations: err.locations.into_iter().map(Location::from).collect(),
-            extensions: err
-                .extensions
-                .map(convert_extensions_to_map)
-                .unwrap_or_default(),
+            extensions,
             ..Default::default()
         }
     }

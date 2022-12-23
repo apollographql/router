@@ -1,5 +1,6 @@
 #[cfg(test)]
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 
 use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
@@ -10,7 +11,8 @@ use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
 use crate::Configuration;
 
-const DEFAULT_INTROSPECTION_CACHE_CAPACITY: usize = 5;
+const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
+    unsafe { NonZeroUsize::new_unchecked(5) };
 
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
@@ -19,7 +21,10 @@ pub(crate) struct Introspection {
 }
 
 impl Introspection {
-    pub(crate) async fn with_capacity(configuration: &Configuration, capacity: usize) -> Self {
+    pub(crate) async fn with_capacity(
+        configuration: &Configuration,
+        capacity: NonZeroUsize,
+    ) -> Self {
         Self {
             cache: CacheStorage::new(capacity, None, "introspection").await,
             defer_support: configuration.supergraph.preview_defer_support,
@@ -35,7 +40,7 @@ impl Introspection {
         configuration: &Configuration,
         cache: HashMap<String, Response>,
     ) -> Self {
-        let this = Self::with_capacity(configuration, cache.len()).await;
+        let this = Self::with_capacity(configuration, cache.len().try_into().unwrap()).await;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;

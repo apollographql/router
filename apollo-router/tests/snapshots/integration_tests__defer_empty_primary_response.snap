@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/integration_tests.rs
-expression: first
+expression: stream.next().await.unwrap().unwrap()
 ---
 {
   "data": {},
