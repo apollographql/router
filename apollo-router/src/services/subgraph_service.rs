@@ -94,12 +94,9 @@ pub(crate) struct SubgraphService {
     /// This is enabled by default can be configured as
     /// subgraph:
     ///      apq_enabled: <bool>
-    apq_enabled: bool,
-
-    /// apq_supported is whether APQ is supported by the subgraph.
-    /// If subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
-    /// apq_supported is set to false
-    apq_supported: Arc<AtomicBool>,
+    /// If a subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
+    /// apq_enabled is set to false
+    apq_enabled: Arc<AtomicBool>,
 }
 
 impl SubgraphService {
@@ -120,8 +117,7 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            apq_enabled: apq_enabled,
-            apq_supported: Arc::new(<AtomicBool>::new(true)),
+            apq_enabled:  Arc::new(<AtomicBool>::new(apq_enabled)),
         }
     }
 }
@@ -150,18 +146,17 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-        let arc_apq_supported = self.apq_supported.clone();
-        let apq_enabled = self.apq_enabled;
+        let arc_apq_enabled = self.apq_enabled.clone();
 
         let make_calls = async move {
-            // If APQ is not enabled or supported, simply make the graphql call
+            // If APQ is not enabled, simply make the graphql call
             // with the same request body.
-            let apq_supported = arc_apq_supported.as_ref();
-            if !apq_enabled || !apq_supported.load(Relaxed) {
+            let apq_enabled = arc_apq_enabled.as_ref();
+            if !apq_enabled.load(Relaxed) {
                 return call_http(request, body, context, client, service_name).await;
             }
 
-            // Else, if apq is enabled and supported by the subgraph,
+            // Else, if apq is enabled,
             // Calculate the hash for query and try the request with
             // a persistedQuery instead of the whole query.
             let graphql::Request {
@@ -212,7 +207,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             let gql_resp = http_response.unwrap().response.body().clone();
             match get_apq_error(gql_resp) {
                 APQError::PersistedQueryNotSupported => {
-                    apq_supported.store(false, Relaxed);
+                    apq_enabled.store(false, Relaxed);
                     return call_http(request, body, context, client, service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
@@ -227,8 +222,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
     }
 }
 
-/// call_http makes http calls with modified subgraph request
-/// with or without the query to use APQ.
+/// call_http makes http calls with modified graphql::Request (body)
+/// with or without the query and hash acc. to APQ need.
 async fn call_http(
     request: crate::SubgraphRequest,
     body: graphql::Request,
@@ -990,7 +985,7 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_response(socket_addr));
         let subgraph_service = SubgraphService::new("test", true);
 
-        assert_eq!(subgraph_service.clone().apq_supported.as_ref().load(Relaxed), true);
+        assert_eq!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed), true);
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
@@ -1021,7 +1016,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert_eq!(subgraph_service.apq_supported.as_ref().load(Relaxed), false);
+        assert_eq!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
     }
 
     #[tokio::test(flavor = "multi_thread")]
