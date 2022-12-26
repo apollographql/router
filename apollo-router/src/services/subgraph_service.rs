@@ -46,8 +46,10 @@ use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::services::layers::apq;
 use crate::{graphql, Context};
 
-const PERSISTED_QUERY_NOT_FOUND_ERR_STRING: &str = "PERSISTED_QUERY_NOT_FOUND";
-const PERSISTED_QUERY_NOT_SUPPORTED_ERR_STRING: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
+const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
+const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
+const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
+const PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE: &str = "PersistedQueryNotSupported";
 const CODE_STRING: &str = "code";
 const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
@@ -373,8 +375,8 @@ async fn call_http(
 }
 
 fn get_apq_error(response: graphql::Response) -> APQError {
-    let not_found_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_FOUND_ERR_STRING));
-    let not_supported_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_SUPPORTED_ERR_STRING));
+    let not_found_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE));
+    let not_supported_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE));
     for error in response.errors {
         match error.extensions.get(&ByteString::from(CODE_STRING)) {
             Some(value) => {
@@ -384,9 +386,16 @@ fn get_apq_error(response: graphql::Response) -> APQError {
                     return APQError::PersistedQueryNotSupported;
                 }
             }
-            _ => {
-                return APQError::Other;
+            None => {}
+        }
+        match error.message.as_str() {
+            PERSISTED_QUERY_NOT_FOUND_MESSAGE => {
+                return APQError::PersistedQueryNotFound;
             }
+            PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE => {
+                return APQError::PersistedQueryNotSupported;
+            }
+            _ => {}
         }
     }
     APQError::Other
@@ -516,7 +525,6 @@ mod tests {
     use hyper::Body;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use serde_json_bytes::Value::Object;
     use tower::service_fn;
     use tower::ServiceExt;
 
@@ -630,8 +638,9 @@ mod tests {
         server.await.unwrap();
     }
 
-    // starts a local server emulating a subgraph returning PERSISTED_QUERY_NOT_SUPPORTED error response
-    async fn emulate_persisted_query_not_supported_response(socket_addr: SocketAddr) {
+    // starts a local server emulating a subgraph returning response with
+    // "errors" : {["message": "PersistedQueryNotSupported",...],...}
+    async fn emulate_persisted_query_not_supported_message(socket_addr: SocketAddr) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
@@ -649,8 +658,8 @@ mod tests {
                                 serde_json::to_string(&Response {
                                     data: Some(Value::String(ByteString::from("test"))),
                                     errors: vec![Error::builder()
-                                        .message("PersistedQueryNotSupported")
-                                        .extension_code("PERSISTED_QUERY_NOT_SUPPORTED")
+                                        .message(PERSISTED_QUERY_NOT_SUPPORTED_MESSAGE)
+                                        .extension_code("Random code")
                                         .build()],
                                     ..Response::default()
                                 })
@@ -684,11 +693,65 @@ mod tests {
         server.await.unwrap();
     }
 
-    // starts a local server emulating a subgraph returning PERSISTED_QUERY_NOT_FOUND error response
-    async fn emulate_persisted_query_not_found_response(socket_addr: SocketAddr) {
+    // starts a local server emulating a subgraph returning response with
+    // "errors" : {[..., "extensions": {"code": "PERSISTED_QUERY_NOT_SUPPORTED"}],...}
+    async fn emulate_persisted_query_not_supported_extension_code(socket_addr: SocketAddr) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-            let mut apq_hash_store = HashMap::new();
+            let (_, body) = request.into_parts();
+            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+                .await
+                .map_err(|_| ())
+                .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
+                .map_err(|_| "failed to parse the request body as JSON");
+            match graphql_request {
+                Ok(request) => {
+                    if request.extensions.contains_key(PERSISTED_QUERY_KEY) {
+                        return Ok(http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body(
+                                serde_json::to_string(&Response {
+                                    data: Some(Value::String(ByteString::from("test"))),
+                                    errors: vec![Error::builder()
+                                        .message("Random message")
+                                        .extension_code(PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE)
+                                        .build()],
+                                    ..Response::default()
+                                })
+                                    .expect("always valid")
+                                    .into(),
+                            )
+                            .unwrap());
+                    }
 
+                    return Ok(http::Response::builder()
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .status(StatusCode::OK)
+                        .body(
+                            serde_json::to_string(&Response {
+                                data: Some(Value::String(ByteString::from("test"))),
+                                ..Response::default()
+                            })
+                                .expect("always valid")
+                                .into(),
+                        )
+                        .unwrap());
+                }
+                Err(_) => {
+                    panic!("invalid graphql request recieved")
+                }
+            }
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        server.await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning response with
+    // "errors" : {["message": "PersistedQueryNotFound",...],...}
+    async fn emulate_persisted_query_not_found_message(socket_addr: SocketAddr) {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
             let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
                 .await
@@ -701,20 +764,65 @@ mod tests {
                     if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
                         panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
-                    let value = request
-                        .extensions
-                        .get(&ByteString::from(PERSISTED_QUERY_KEY))
-                        .unwrap();
-                    let hash;
-                    match value {
-                        Object(map) => hash = map.get(HASH_KEY),
-                        _ => {
-                            panic!("value should have been a map")
-                        }
+
+                    if request.query == None {
+                        return Ok(http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body(
+                                serde_json::to_string(&Response {
+                                    data: Some(Value::String(ByteString::from("test"))),
+                                    errors: vec![Error::builder()
+                                        .message(PERSISTED_QUERY_NOT_FOUND_MESSAGE)
+                                        .extension_code("Random Code")
+                                        .build()],
+                                    ..Response::default()
+                                })
+                                .expect("always valid")
+                                .into(),
+                            )
+                            .unwrap());
+                    } else {
+                        return Ok(http::Response::builder()
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                            .status(StatusCode::OK)
+                            .body(
+                                serde_json::to_string(&Response {
+                                    data: Some(Value::String(ByteString::from("test"))),
+                                    ..Response::default()
+                                })
+                                .expect("always valid")
+                                .into(),
+                            )
+                            .unwrap());
                     }
-                    if apq_hash_store.contains_key(&hash) {
-                        panic!("Should not have recieved a request whose hash \
-                        is already known to server in this test")
+                }
+                Err(_) => {
+                    panic!("invalid graphql request recieved")
+                }
+            }
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::bind(&socket_addr).serve(make_svc);
+        server.await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning response with
+    // "errors" : {[..., "extensions": {"code": "PERSISTED_QUERY_NOT_FOUND"}],...}
+    async fn emulate_persisted_query_not_found_extension_code(socket_addr: SocketAddr) {
+        async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            let (_, body) = request.into_parts();
+            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+                .await
+                .map_err(|_| ())
+                .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
+                .map_err(|_| "failed to parse the request body as JSON");
+
+            match graphql_request {
+                Ok(request) => {
+                    if !request.extensions.contains_key(PERSISTED_QUERY_KEY) {
+                        panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
 
                     if request.query == None {
@@ -725,17 +833,16 @@ mod tests {
                                 serde_json::to_string(&Response {
                                     data: Some(Value::String(ByteString::from("test"))),
                                     errors: vec![Error::builder()
-                                        .message("PersistedQueryNotFound")
-                                        .extension_code("PERSISTED_QUERY_NOT_FOUND")
+                                        .message("Random message")
+                                        .extension_code(PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE)
                                         .build()],
                                     ..Response::default()
                                 })
-                                .expect("always valid")
-                                .into(),
+                                    .expect("always valid")
+                                    .into(),
                             )
                             .unwrap());
                     } else {
-                        apq_hash_store.insert(hash, request.query);
                         return Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
@@ -744,8 +851,8 @@ mod tests {
                                     data: Some(Value::String(ByteString::from("test"))),
                                     ..Response::default()
                                 })
-                                .expect("always valid")
-                                .into(),
+                                    .expect("always valid")
+                                    .into(),
                             )
                             .unwrap());
                     }
@@ -980,9 +1087,9 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_persisted_query_not_supported() {
+    async fn test_persisted_query_not_supported_message() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2929").unwrap();
-        tokio::task::spawn(emulate_persisted_query_not_supported_response(socket_addr));
+        tokio::task::spawn(emulate_persisted_query_not_supported_message(socket_addr));
         let subgraph_service = SubgraphService::new("test", true);
 
         assert_eq!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed), true);
@@ -1020,9 +1127,86 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_persisted_query_not_found() {
+    async fn test_persisted_query_not_supported_extension_code() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3030").unwrap();
-        tokio::task::spawn(emulate_persisted_query_not_found_response(socket_addr));
+        tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(socket_addr));
+        let subgraph_service = SubgraphService::new("test", true);
+
+        assert_eq!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed), true);
+
+        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let resp = subgraph_service
+            .clone()
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        let expected_resp = Response {
+            data: Some(Value::String(ByteString::from("test"))),
+            ..Response::default()
+        };
+
+        assert_eq!(resp.response.body(), &expected_resp);
+        assert_eq!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_persisted_query_not_found_message() {
+        let socket_addr = SocketAddr::from_str("127.0.0.1:3131").unwrap();
+        tokio::task::spawn(emulate_persisted_query_not_found_message(socket_addr));
+        let subgraph_service = SubgraphService::new("test", true);
+
+        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let resp = subgraph_service
+            .clone()
+            .oneshot(SubgraphRequest {
+                supergraph_request: Arc::new(
+                    http::Request::builder()
+                        .header(HOST, "host")
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(Request::builder().query("query").build())
+                        .expect("expecting valid request"),
+                ),
+                subgraph_request: http::Request::builder()
+                    .header(HOST, "rhost")
+                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                    .uri(url)
+                    .body(Request::builder().query("query").build())
+                    .expect("expecting valid request"),
+                operation_kind: OperationKind::Query,
+                context: Context::new(),
+            })
+            .await
+            .unwrap();
+
+        let expected_resp = Response {
+            data: Some(Value::String(ByteString::from("test"))),
+            ..Response::default()
+        };
+
+        assert_eq!(resp.response.body(), &expected_resp);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_persisted_query_not_found_extension_code() {
+        let socket_addr = SocketAddr::from_str("127.0.0.1:3232").unwrap();
+        tokio::task::spawn(emulate_persisted_query_not_found_extension_code(socket_addr));
         let subgraph_service = SubgraphService::new("test", true);
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
@@ -1058,7 +1242,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_apq_enabled_subgraph_configuration() {
-        let socket_addr = SocketAddr::from_str("127.0.0.1:3131").unwrap();
+        let socket_addr = SocketAddr::from_str("127.0.0.1:3333").unwrap();
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(socket_addr));
         let subgraph_service = SubgraphService::new("test", true);
 
@@ -1095,7 +1279,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_apq_disabled_subgraph_configuration() {
-        let socket_addr = SocketAddr::from_str("127.0.0.1:3232").unwrap();
+        let socket_addr = SocketAddr::from_str("127.0.0.1:3434").unwrap();
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(socket_addr));
         let subgraph_service = SubgraphService::new("test", false);
 
