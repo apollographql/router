@@ -81,3 +81,40 @@ Your release binary is now located in `target/release/router`
    cargo router plugin remove hello_world
    ```
 
+# Docker
+
+You can use the provided Dockerfile to build a release container.
+
+Make sure your router is configured to listen to `0.0.0.0` so you can query it from outside the container:
+
+```yml
+ supergraph:
+   listen: 0.0.0.0:4000
+```
+
+Use your `APOLLO_KEY` and `APOLLO_GRAPH_REF` environment variables to run the router in managed federation.
+
+   ```bash
+      docker build -t my_custom_router .
+      docker run -e APOLLO_KEY="your apollo key" -e APOLLO_GRAPH_REF="your apollo graph ref" -p 4000:4000 my_custom_router
+   ```
+
+Otherwise add a `COPY` step to the Dockerfile, and edit the entrypoint:
+
+```Dockerfile
+# Copy configuration for docker image
+COPY router.yaml /dist/config.yaml
+# Copy supergraph for docker image
+COPY my_supergraph.graphql /dist/supergraph.graphql
+
+# [...] and change the entrypoint
+
+# Default executable is the router
+ENTRYPOINT ["/dist/router", "-s", "/dist/supergraph.graphql"]
+```
+
+You can now build and run your custom router:
+   ```bash
+      docker build -t my_custom_router .
+      docker run -p 4000:4000 my_custom_router
+   ```

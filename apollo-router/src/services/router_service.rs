@@ -166,18 +166,43 @@ where
 
         let supergraph_service = self.supergraph_creator.create();
         let fut = async move {
-            let graphql_request: Result<graphql::Request, &str> = if parts.method == Method::GET {
+            let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
+                == Method::GET
+            {
                 parts
                     .uri
                     .query()
-                    .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-                    .ok_or("missing query string")
+                    .map(|q| {
+                        graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
+                            (
+                                "failed to decode a valid GraphQL request from path",
+                                format!("failed to decode a valid GraphQL request from path {}", e),
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        Err(("missing query string", "missing query string".to_string()))
+                    })
             } else {
                 hyper::body::to_bytes(body)
                     .await
-                    .map_err(|_| ())
-                    .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
-                    .map_err(|_| "failed to parse the request body as JSON")
+                    .map_err(|e| {
+                        (
+                            "failed to get the request body",
+                            format!("failed to get the request body: {}", e),
+                        )
+                    })
+                    .and_then(|bytes| {
+                        serde_json::from_reader(bytes.reader()).map_err(|err| {
+                            (
+                                "failed to deserialize the request body into JSON",
+                                format!(
+                                    "failed to deserialize the request body into JSON: {}",
+                                    err
+                                ),
+                            )
+                        })
+                    })
             };
 
             match graphql_request {
@@ -313,7 +338,7 @@ where
                         }
                     }
                 }
-                Err(error) => {
+                Err((error, extension_details)) => {
                     // BAD REQUEST
                     ::tracing::error!(
                         monotonic_counter.apollo_router_http_requests_total = 1u64,
@@ -324,7 +349,16 @@ where
                     Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::from("Invalid GraphQL request"))
+                            .body(Body::from(
+                                serde_json::to_string(
+                                    &graphql::Error::builder()
+                                        .message(String::from("Invalid GraphQL request"))
+                                        .extension_code("INVALID_GRAPHQL_REQUEST")
+                                        .extension("details", extension_details)
+                                        .build(),
+                                )
+                                .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
+                            ))
                             .expect("cannot fail"),
                         context,
                     })
@@ -427,6 +461,12 @@ where
                     .rev()
                     .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
             )
+    }
+}
+
+impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.supergraph_creator.cache_keys(count).await
     }
 }
 
