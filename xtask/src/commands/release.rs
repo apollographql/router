@@ -542,26 +542,33 @@ impl Prepare {
         println!("finalizing changelog");
         let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex =
-            regex::Regex::new(r"(?ms)(.*# \[x.x.x\] \(unreleased\) - ....-mm-dd\n)(.*)")?;
+        let changes_regex = regex::Regex::new(r"(?ms)(^<!--.*?^(?:# .*)^-->\s+)(.*)?")?;
         let captures = changes_regex
             .captures(&next_changelog)
             .expect("changelog format was unexpected");
-        let template = captures
-            .get(1)
-            .expect("changelog format was unexpected")
-            .as_str();
         let changes = captures
             .get(2)
             .expect("changelog format was unexpected")
             .as_str();
 
-        let update_regex = regex::Regex::new(
-            r"(?ms)This project adheres to \[Semantic Versioning v2.0.0\]\(https://semver.org/spec/v2.0.0.html\).\n",
-        )?;
-        let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", version, chrono::Utc::now().date_naive(), changes));
+        let new_next_changelog = changes_regex.replace(&next_changelog, "$1");
+
+        let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).";
+
+        let update_regex =
+            regex::Regex::new(format!("(?ms){}\n", regex::escape(semver_heading)).as_str())?;
+        let updated = update_regex.replace(
+            &changelog,
+            format!(
+                "{}\n\n# [{}] - {}\n\n{}\n",
+                semver_heading,
+                version,
+                chrono::Utc::now().date_naive(),
+                changes
+            ),
+        );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;
-        std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
+        std::fs::write("./NEXT_CHANGELOG.md", new_next_changelog.to_string())?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
