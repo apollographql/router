@@ -98,6 +98,7 @@ impl Prepare {
 
     async fn prepare_release(&self) -> Result<(), Error> {
         self.ensure_pristine_checkout()?;
+        self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
         let github = octorust::Client::new(
             "router-release".to_string(),
@@ -133,6 +134,35 @@ impl Prepare {
                 "git workspace was not clean and requires 'git stash' before releasing"
             ));
         }
+        Ok(())
+    }
+
+    fn ensure_prereqs(&self) -> Result<()> {
+        if which::which("git").is_err() {
+            return Err(anyhow!(
+                "the 'git' executable could not be found in your PATH"
+            ));
+        }
+
+        if which::which("helm").is_err() {
+            return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+        }
+
+        if which::which("helm-docs").is_err() {
+            return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+        }
+
+        if which::which("cargo-about").is_err() {
+            return Err(anyhow!("the 'cargo-about' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-about"));
+        }
+
+        if which::which("cargo-deny").is_err() {
+            return Err(anyhow!("the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"));
+        }
+
+        // if std::env::var("GITHUB_TOKEN").is_err() {
+        //     return Err(anyhow!("it is required to set GITHUB_TOKEN in your"))
+        // }
         Ok(())
     }
 
