@@ -93,13 +93,7 @@ impl Prepare {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(async {
-                let result = self.prepare_release().await;
-                if self.dry_run {
-                    git!("reset", "--hard");
-                }
-                result
-            })
+            .block_on(async { self.prepare_release().await })
     }
 
     async fn prepare_release(&self) -> Result<(), Error> {
