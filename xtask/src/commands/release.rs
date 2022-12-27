@@ -110,8 +110,8 @@ impl Prepare {
         }
         self.assign_issues_to_milestone(&github, &version).await?;
         self.update_install_script(&version)?;
-        self.update_docs(&version)?;
         self.update_helm_charts(&version)?;
+        self.update_docs(&version)?;
         self.docker_files(&version)?;
         self.finalize_changelog(&version)?;
         self.update_lock()?;
@@ -467,6 +467,12 @@ impl Prepare {
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm charts");
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "appVersion: \"v\\d+.\\d+.\\d+\"",
+            format!("appVersion: \"v{}\"", version)
+        );
+
         if !std::process::Command::new(which::which("helm-docs")?)
             .current_dir("./helm/chart")
             .args(["helm-docs", "router"])
@@ -475,12 +481,6 @@ impl Prepare {
         {
             return Err(anyhow!("failed to generate helm docs"));
         }
-
-        replace_in_file!(
-            "./helm/chart/router/Chart.yaml",
-            "appVersion: \"v\\d+.\\d+.\\d+\"",
-            format!("appVersion: \"v{}\"", version)
-        );
 
         Ok(())
     }
