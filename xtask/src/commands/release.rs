@@ -97,6 +97,7 @@ impl Prepare {
     }
 
     async fn prepare_release(&self) -> Result<(), Error> {
+        self.ensure_pristine_checkout()?;
         let version = self.update_cargo_tomls(&self.version)?;
         let github = octorust::Client::new(
             "router-release".to_string(),
@@ -117,6 +118,20 @@ impl Prepare {
         self.check_compliance()?;
         if !self.dry_run {
             self.create_release_pr(&github, &version).await?;
+        }
+        Ok(())
+    }
+
+    fn ensure_pristine_checkout(&self) -> Result<(), anyhow::Error> {
+        let git = which::which("git")?;
+        let output = std::process::Command::new(git)
+            .args(["status", "--untracked-files=no", "--porcelain"])
+            .output()?;
+
+        if !output.stdout.is_empty() {
+            return Err(anyhow!(
+                "git workspace was not clean and requires 'git stash' before releasing"
+            ));
         }
         Ok(())
     }
