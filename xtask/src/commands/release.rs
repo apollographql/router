@@ -425,13 +425,13 @@ impl Prepare {
         }
         replace_in_file!(
             "./apollo-router-scaffold/templates/base/Cargo.toml",
-            "^apollo-router\\s*=\\s*\"\\d+.\\d+.\\d+\"",
+            "^apollo-router\\s*=\\s*\"[^\"]+\"",
             format!("apollo-router = \"{}\"", version)
         );
         replace_in_file!(
             "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
-            "^apollo-router-scaffold = \\{ git=\"https://github.com/apollographql/router.git\", tag\\s*=\\s*\"v\\d+.\\d+.\\d+\"\\s*\\}",
-            format!("apollo-router-scaffold = {{ git=\"https://github.com/apollographql/router.git\", tag = \"v{}\" }}", version)
+            r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
+            format!(r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#, version)
         );
 
         Ok(version)
@@ -458,13 +458,13 @@ impl Prepare {
         println!("updating docs");
         replace_in_file!(
             "./docs/source/containerization/docker.mdx",
-            "with your chosen version. e.g.: `v\\d+.\\d+.\\d+`",
+            "with your chosen version. e.g.: `v[^`]+`",
             format!("with your chosen version. e.g.: `v{}`", version)
         );
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
-            "router/tree/v\\d+.\\d+.\\d+",
-            format!("router/tree/v{}", version)
+            "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
+            format!("https://github.com/apollographql/router/tree/v{}/helm/chart/router", version)
         );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
@@ -499,7 +499,7 @@ impl Prepare {
         println!("updating helm charts");
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
-            "appVersion: \"v\\d+.\\d+.\\d+\"",
+            "appVersion: \"v[^\"]+\"",
             format!("appVersion: \"v{}\"", version)
         );
 
@@ -526,8 +526,8 @@ impl Prepare {
             {
                 replace_in_file!(
                     entry.path(),
-                    r"ghcr.io/apollographql/router:v\d+.\d+.\d+",
-                    format!("ghcr.io/apollographql/router:v{}", version)
+                    r#"^(?P<indentation>\s+)image:\s*ghcr.io/apollographql/router:v.*$"#,
+                    format!("${{indentation}}image: ghcr.io/apollographql/router:v{}", version)
                 );
             }
         }
