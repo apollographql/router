@@ -474,9 +474,9 @@ impl Prepare {
                     "--set",
                     "router.configuration.telemetry.metrics.prometheus.enabled=true",
                     "--set",
-                    "managedFederation.apiKey=\"REDACTED\"",
+                    "managedFederation.apiKey=REDACTED",
                     "--set",
-                    "managedFederation.graphRef=\"REDACTED\"",
+                    "managedFederation.graphRef=REDACTED",
                     "--debug",
                     ".",
                 ])
