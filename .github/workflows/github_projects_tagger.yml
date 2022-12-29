@@ -8,7 +8,7 @@ jobs:
   tag:
     runs-on: ubuntu-latest
     steps:
-      - uses: abernix/github-issue-pull-api-hook@v1.0.0
+      - uses: abernix/github-issue-pull-api-hook@v2.0.1
         with:
           # These are both set in Org level secrets and work on a safe-listed
           # set of repositories that affect the Polaris team.  This allows them to
