@@ -24,7 +24,13 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [x.x.x] (unreleased) - 2022-mm-dd
+## 🚀 Features
+
+### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
+
+For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
 ## 🛠 Maintenance
 
