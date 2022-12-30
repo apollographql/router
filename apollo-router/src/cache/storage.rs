@@ -1,6 +1,7 @@
 // This entire file is license key functionality
 
-use std::fmt;
+use std::fmt::Display;
+use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -9,6 +10,9 @@ use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
+// Allow because it's lazily called by the tracing macro
+#[allow(unused_imports)]
+use tracing::field::display;
 
 #[cfg(feature = "experimental_cache")]
 use super::redis::*;
@@ -46,6 +50,7 @@ where
 // a suitable implementation.
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
+    caller: String,
     inner: Arc<Mutex<LruCache<K, V>>>,
     #[cfg(feature = "experimental_cache")]
     redis: Option<RedisCacheStorage>,
@@ -59,9 +64,10 @@ where
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
         _redis_urls: Option<Vec<String>>,
-        _caller: &str,
+        caller: &str,
     ) -> Self {
         Self {
+            caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             #[cfg(feature = "experimental_cache")]
             redis: if let Some(urls) = _redis_urls {
@@ -69,7 +75,7 @@ where
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
-                            _caller,
+                            caller,
                             e
                         );
                         None
@@ -85,7 +91,14 @@ where
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
         let mut guard = self.inner.lock().await;
         match guard.get(key) {
-            Some(v) => Some(v.clone()),
+            Some(v) => {
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_hit = 1u64,
+                    kind = %self.caller,
+                    storage = &display(CacheStorageName::Memory),
+                );
+                Some(v.clone())
+            }
             #[cfg(feature = "experimental_cache")]
             None => {
                 if let Some(redis) = self.redis.as_ref() {
@@ -93,16 +106,41 @@ where
                     match redis.get::<K, V>(inner_key).await {
                         Some(v) => {
                             guard.put(key.clone(), v.0.clone());
+                            tracing::info!(
+                                monotonic_counter.apollo_router_cache_hit = 1u64,
+                                kind = %self.caller,
+                                storage = &display(CacheStorageName::Redis),
+                            );
                             Some(v.0)
                         }
-                        None => None,
+                        None => {
+                            tracing::info!(
+                                monotonic_counter.apollo_router_cache_miss = 1u64,
+                                kind = %self.caller,
+                                storage = &display(CacheStorageName::Redis),
+                            );
+                            None
+                        }
                     }
                 } else {
+                    tracing::info!(
+                        monotonic_counter.apollo_router_cache_miss = 1u64,
+                        kind = %self.caller,
+                        storage = &display(CacheStorageName::Redis),
+                    );
                     None
                 }
             }
             #[cfg(not(feature = "experimental_cache"))]
-            None => None,
+            None => {
+                // Cache miss
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss = 1u64,
+                    kind = %self.caller,
+                    storage = &display(CacheStorageName::Memory),
+                );
+                None
+            }
         }
     }
 
@@ -127,5 +165,21 @@ where
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
         self.inner.lock().await.len()
+    }
+}
+
+enum CacheStorageName {
+    #[cfg(feature = "experimental_cache")]
+    Redis,
+    Memory,
+}
+
+impl Display for CacheStorageName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            #[cfg(feature = "experimental_cache")]
+            CacheStorageName::Redis => write!(f, "redis"),
+            CacheStorageName::Memory => write!(f, "memory"),
+        }
     }
 }
