@@ -93,7 +93,6 @@ pub struct Configuration {
 
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
-
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -129,8 +128,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             supergraph: Supergraph,
             #[serde(default)]
-            subgraph: Subgraph,
-            #[serde(default)]
             cors: Cors,
             #[serde(default)]
             plugins: UserPlugins,
@@ -146,7 +143,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .sandbox(ad_hoc.sandbox)
             .homepage(ad_hoc.homepage)
             .supergraph(ad_hoc.supergraph)
-            .subgraph(ad_hoc.subgraph)
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
