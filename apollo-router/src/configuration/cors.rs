@@ -156,7 +156,6 @@ impl Cors {
                         .ok()
                 },
             )));
-        
         let cors = if let Some(max_age) = self.max_age {
             cors.max_age(Duration::from_secs(max_age))
         } else {
