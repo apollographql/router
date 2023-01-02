@@ -204,7 +204,7 @@ impl YamlRouterFactory {
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        builder = builder.with_configuration(configuration.clone());
+        builder = builder.with_configuration(configuration);
 
         for (name, _) in schema.subgraphs() {
             let subgraph_service = match plugins
