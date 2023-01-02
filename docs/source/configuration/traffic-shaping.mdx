@@ -12,6 +12,7 @@ The Apollo Router supports the following types of traffic shaping between itself
   - The router currently supports `gzip`, `br`, and `deflate`.
 - **Global rate limiting** - If you want to rate limit requests to subgraphs or to the router itself.
 - **Timeout**: - Set a timeout to subgraphs and router requests.
+- **APQ Enabled**: - Whether to use Automatic Persisted Queries (APQ) in subgraph calls.
 - **Request Retry**: - retry subgraph requests if they fail due to network errors. This implements Finagle's retry buckets mechanism. **Experimental feature**: retry configuration might change in the future.
 
 Each of these optimizations can reduce network bandwidth and CPU usage for your subgraphs.
@@ -39,6 +40,7 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
+      apq_enabled: false # Do not use automatic persisted queries for http calls to 'products' subgraph. (true by default)
       experimental_retry:
         min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
         ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
