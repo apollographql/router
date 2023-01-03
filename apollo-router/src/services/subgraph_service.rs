@@ -2,9 +2,9 @@
 
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
+use std::sync::Arc;
 use std::task::Poll;
 
 use ::serde::Deserialize;
@@ -40,10 +40,11 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
+use crate::graphql;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::services::layers::apq;
-use crate::{graphql, Context};
+use crate::Context;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
@@ -118,7 +119,7 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            apq_enabled:  Arc::new(<AtomicBool>::new(apq_enabled.unwrap_or(true))),
+            apq_enabled: Arc::new(<AtomicBool>::new(apq_enabled.unwrap_or(true))),
         }
     }
 }
@@ -201,13 +202,13 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    return call_http(request, body, context, client, service_name).await
+                    return call_http(request, body, context, client, service_name).await;
                 }
                 APQError::PersistedQueryNotFound => {
                     apq_body.query = query;
-                    return call_http(request, apq_body, context, client, service_name).await
+                    return call_http(request, apq_body, context, client, service_name).await;
                 }
-                _ => return Ok(response)
+                _ => return Ok(response),
             }
         };
 
@@ -704,12 +705,14 @@ mod tests {
                                     data: Some(Value::String(ByteString::from("test"))),
                                     errors: vec![Error::builder()
                                         .message("Random message")
-                                        .extension_code(PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE)
+                                        .extension_code(
+                                            PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE
+                                        )
                                         .build()],
                                     ..Response::default()
                                 })
-                                    .expect("always valid")
-                                    .into(),
+                                .expect("always valid")
+                                .into(),
                             )
                             .unwrap());
                     }
@@ -722,8 +725,8 @@ mod tests {
                                 data: Some(Value::String(ByteString::from("test"))),
                                 ..Response::default()
                             })
-                                .expect("always valid")
-                                .into(),
+                            .expect("always valid")
+                            .into(),
                         )
                         .unwrap());
                 }
@@ -828,8 +831,8 @@ mod tests {
                                         .build()],
                                     ..Response::default()
                                 })
-                                    .expect("always valid")
-                                    .into(),
+                                .expect("always valid")
+                                .into(),
                             )
                             .unwrap());
                     } else {
@@ -841,8 +844,8 @@ mod tests {
                                     data: Some(Value::String(ByteString::from("test"))),
                                     ..Response::default()
                                 })
-                                    .expect("always valid")
-                                    .into(),
+                                .expect("always valid")
+                                .into(),
                             )
                             .unwrap());
                     }
@@ -924,8 +927,8 @@ mod tests {
                                 data: Some(Value::String(ByteString::from("test"))),
                                 ..Response::default()
                             })
-                                .expect("always valid")
-                                .into(),
+                            .expect("always valid")
+                            .into(),
                         )
                         .unwrap());
                 }
@@ -1082,7 +1085,10 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_message(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert_eq!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed), true);
+        assert_eq!(
+            subgraph_service.clone().apq_enabled.as_ref().load(Relaxed),
+            true
+        );
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
@@ -1119,7 +1125,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_supported_extension_code() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3030").unwrap();
-        tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(socket_addr));
+        tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
+            socket_addr
+        ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
         assert_eq!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed), true);
@@ -1196,7 +1204,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_persisted_query_not_found_extension_code() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3232").unwrap();
-        tokio::task::spawn(emulate_persisted_query_not_found_extension_code(socket_addr));
+        tokio::task::spawn(emulate_persisted_query_not_found_extension_code(
+            socket_addr
+        ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();

@@ -148,15 +148,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(
+                Some(shaping) => Either::A(shaping.subgraph_service_internal(
                         name,
                         SubgraphService::new(name, shaping.get_apq_enabled(name)),
-                    ))
-                }
-                None => Either::B(
-                    SubgraphService::new(name, None)
-                ),
+                    )),
+                None => Either::B(SubgraphService::new(name, None)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -212,15 +208,11 @@ impl YamlRouterFactory {
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(
+                Some(shaping) => Either::A(shaping.subgraph_service_internal(
                         name,
                         SubgraphService::new(name, shaping.get_apq_enabled(name)),
-                    ))
-                }
-                None => Either::B(
-                    SubgraphService::new(name, None),
-                ),
+                    )),
+                None => Either::B(SubgraphService::new(name, None)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
