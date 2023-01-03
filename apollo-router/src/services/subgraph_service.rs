@@ -158,7 +158,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             }
 
             // Else, if APQ is enabled,
-            // Calculate the hash for query and try the request with
+            // Calculate the query hash and try the request with
             // a persistedQuery instead of the whole query.
             let graphql::Request {
                 query,
@@ -194,7 +194,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             .await?;
 
             // Check the error for the request with only persistedQuery.
-            // If PersistedQueryNotSupported, stop disable APQ for this subgraph
+            // If PersistedQueryNotSupported, disable APQ for this subgraph
             // If PersistedQueryNotFound, add the original query to the request and retry.
             // Else, return the response like before.
             let gql_response = response.response.body();
@@ -216,7 +216,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 }
 
 /// call_http makes http calls with modified graphql::Request (body)
-/// with or without the query and hash acc. to APQ need.
 async fn call_http(
     request: crate::SubgraphRequest,
     body: graphql::Request,
@@ -366,7 +365,7 @@ async fn call_http(
 }
 
 fn get_apq_error(gql_response: &graphql::Response) -> APQError {
-    for error in gql_response.errors.clone() {
+    for error in &gql_response.errors {
         // Check if error message is an APQ error
         match error.message.as_str() {
             PERSISTED_QUERY_NOT_FOUND_MESSAGE => {
