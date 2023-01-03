@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 
 use redis::AsyncCommands;
 use redis::FromRedisValue;
@@ -11,6 +12,7 @@ use redis::ToRedisArgs;
 use redis_cluster_async::Client;
 use redis_cluster_async::Connection;
 use tokio::sync::Mutex;
+use tokio::time::timeout;
 
 use super::KeyType;
 use super::ValueType;
@@ -117,8 +119,7 @@ where
 impl RedisCacheStorage {
     pub(crate) async fn new(mut urls: Vec<String>) -> Result<Self, redis::RedisError> {
         let connection = if urls.len() == 1 {
-            let client =
-                redis::Client::open(urls.pop().expect("urls contains only one url; qed")).unwrap();
+            let client = redis::Client::open(urls.pop().expect("urls contains only one url; qed"))?;
             let connection = client.get_async_connection().await?;
             RedisConnection::Single(connection)
         } else {
