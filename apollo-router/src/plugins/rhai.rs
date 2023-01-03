@@ -1765,7 +1765,7 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str().replace('\n', " ").replace('\'', ""),
-            "rhai execution error: 'Runtime error: An error occured (line 30, position 5) in call to function execution_request'"
+            "rhai execution error: Runtime error: An error occured (line 30, position 5) in call to function execution_request"
         );
         Ok(())
     }
@@ -2147,7 +2147,7 @@ mod tests {
         if let Err(error) = base_process_function("process_subgraph_response_string").await {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-            assert_eq!(processed_error.message.replace('\n', " ").replace('\'', ""), "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
+            assert_eq!(processed_error.message.replace('\n', " ").replace('\'', ""), "rhai execution error: Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string");
         } else {
             // Test failed
             panic!("error processed incorrectly");
@@ -2173,7 +2173,7 @@ mod tests {
         {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(processed_error.message.replace('\n', " ").replace('\'', ""), "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
+            assert_eq!(processed_error.message.replace('\n', " ").replace('\'', ""), "rhai execution error: Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message");
         } else {
             // Test failed
             panic!("error processed incorrectly");
