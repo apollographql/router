@@ -367,10 +367,10 @@ mod router_plugin_mod {
     }
 }
 
-struct EngineBlock {
-    ast: AST,
-    engine: Arc<Engine>,
-    scope: Arc<Mutex<Scope<'static>>>,
+pub(crate) struct EngineBlock {
+    pub(crate) ast: AST,
+    pub(crate) engine: Arc<Engine>,
+    pub(crate) scope: Arc<Mutex<Scope<'static>>>,
 }
 
 impl EngineBlock {
@@ -402,8 +402,8 @@ impl EngineBlock {
 /// the engine block will be infrequent in relation to the accesses of it.
 /// We'd love to use AtomicArc if such a thing existed, but since it doesn't
 /// we'll use ArcSwap to accomplish our goal.
-struct Rhai {
-    block: Arc<ArcSwap<EngineBlock>>,
+pub(crate) struct Rhai {
+    pub(crate) block: Arc<ArcSwap<EngineBlock>>,
     park_flag: Arc<AtomicBool>,
     watcher_handle: Option<std::thread::JoinHandle<()>>,
 }

@@ -65,6 +65,7 @@ mod request;
 mod response;
 mod router;
 mod router_factory;
+mod router_rhai;
 pub mod services;
 pub(crate) mod spec;
 mod state_machine;

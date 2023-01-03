@@ -274,7 +274,11 @@ pub fn main() -> Result<()> {
         builder.worker_threads(nb);
     }
     let runtime = builder.build()?;
-    runtime.block_on(Executable::builder().start())
+    if std::env::current_exe()?.ends_with("router") {
+        runtime.block_on(Executable::builder().start())
+    } else {
+        runtime.block_on(Executable::builder_rhai().start_rhai())
+    }
 }
 
 /// Entry point into creating a router executable with more customization than [`main`].
@@ -395,6 +399,20 @@ impl Executable {
                     .await
             }
         }
+    }
+
+    #[builder(entry = "builder_rhai", exit = "start_rhai", visibility = "pub")]
+    async fn start_rhai(
+        _shutdown: Option<ShutdownSource>,
+        _schema: Option<SchemaSource>,
+        _config: Option<ConfigurationSource>,
+    ) -> Result<()> {
+        use crate::router_rhai;
+
+        let args: Vec<String> = std::env::args().collect();
+        router_rhai::base_process_function(&args[1])
+            .await
+            .map_err(|e| anyhow::Error::new(e))
     }
 
     async fn inner_start(
