@@ -105,125 +105,113 @@ pub(crate) fn validate_yaml_configuration(
     }
     log_used_experimental_conf(&yaml);
     let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
-
+    let parsed_yaml = super::yaml::parse(raw_yaml)?;
     if let Err(errors) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
         // We have to reparse the yaml to get the line number information for each error.
-        match super::yaml::parse(raw_yaml) {
-            Ok(yaml) => {
-                let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
+        let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-                let errors = errors
-                    .enumerate()
-                    .filter_map(|(idx, mut e)| {
-                        if let Some(element) = yaml.get_element(&e.instance_path) {
-                            const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
-                            match element {
-                                yaml::Value::String(value, marker) => {
-                                    let lines = yaml_split_by_lines[0.max(
-                                        marker
-                                            .line()
-                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                                    )
-                                        ..marker.line()]
-                                        .iter()
-                                        .join("\n");
+        let errors = errors
+            .enumerate()
+            .filter_map(|(idx, mut e)| {
+                if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
+                    const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
+                    match element {
+                        yaml::Value::String(value, marker) => {
+                            let lines = yaml_split_by_lines[0.max(
+                                marker
+                                    .line()
+                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                            )
+                                ..marker.line()]
+                                .iter()
+                                .join("\n");
 
-                                    // Replace the value in the error message with the one from the raw config.
-                                    // This guarantees that if the env variable contained a secret it won't be leaked.
-                                    e.instance = Cow::Owned(coerce(value));
+                            // Replace the value in the error message with the one from the raw config.
+                            // This guarantees that if the env variable contained a secret it won't be leaked.
+                            e.instance = Cow::Owned(coerce(value));
 
-                                    Some(format!(
-                                        "{}. {}\n\n{}\n{}^----- {}",
-                                        idx + 1,
-                                        e.instance_path,
-                                        lines,
-                                        " ".repeat(0.max(marker.col())),
-                                        e
-                                    ))
-                                }
-                                seq_element @ yaml::Value::Sequence(_, m) => {
-                                    let (start_marker, end_marker) = (m, seq_element.end_marker());
-
-                                    let offset = 0.max(
-                                        start_marker
-                                            .line()
-                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                                    );
-                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(idx, line)| {
-                                            let real_line = idx + offset;
-                                            match real_line.cmp(&start_marker.line()) {
-                                                Ordering::Equal => format!("┌ {line}"),
-                                                Ordering::Greater => format!("| {line}"),
-                                                Ordering::Less => line.to_string(),
-                                            }
-                                        })
-                                        .join("\n");
-
-                                    Some(format!(
-                                        "{}. {}\n\n{}\n└-----> {}",
-                                        idx + 1,
-                                        e.instance_path,
-                                        lines,
-                                        e
-                                    ))
-                                }
-                                map_value
-                                @ yaml::Value::Mapping(current_label, _value, _marker) => {
-                                    let (start_marker, end_marker) = (
-                                        current_label.as_ref()?.marker.as_ref()?,
-                                        map_value.end_marker(),
-                                    );
-                                    let offset = 0.max(
-                                        start_marker
-                                            .line()
-                                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                                    );
-                                    let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                        .iter()
-                                        .enumerate()
-                                        .map(|(idx, line)| {
-                                            let real_line = idx + offset;
-                                            match real_line.cmp(&start_marker.line()) {
-                                                Ordering::Equal => format!("┌ {line}"),
-                                                Ordering::Greater => format!("| {line}"),
-                                                Ordering::Less => line.to_string(),
-                                            }
-                                        })
-                                        .join("\n");
-
-                                    Some(format!(
-                                        "{}. {}\n\n{}\n└-----> {}",
-                                        idx + 1,
-                                        e.instance_path,
-                                        lines,
-                                        e
-                                    ))
-                                }
-                            }
-                        } else {
-                            None
+                            Some(format!(
+                                "{}. {}\n\n{}\n{}^----- {}",
+                                idx + 1,
+                                e.instance_path,
+                                lines,
+                                " ".repeat(0.max(marker.col())),
+                                e
+                            ))
                         }
-                    })
-                    .join("\n\n");
+                        seq_element @ yaml::Value::Sequence(_, m) => {
+                            let (start_marker, end_marker) = (m, seq_element.end_marker());
 
-                if !errors.is_empty() {
-                    return Err(ConfigurationError::InvalidConfiguration {
-                        message: "configuration had errors",
-                        error: format!("\n{}", errors),
-                    });
+                            let offset = 0.max(
+                                start_marker
+                                    .line()
+                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                            );
+                            let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, line)| {
+                                    let real_line = idx + offset;
+                                    match real_line.cmp(&start_marker.line()) {
+                                        Ordering::Equal => format!("┌ {line}"),
+                                        Ordering::Greater => format!("| {line}"),
+                                        Ordering::Less => line.to_string(),
+                                    }
+                                })
+                                .join("\n");
+
+                            Some(format!(
+                                "{}. {}\n\n{}\n└-----> {}",
+                                idx + 1,
+                                e.instance_path,
+                                lines,
+                                e
+                            ))
+                        }
+                        map_value @ yaml::Value::Mapping(current_label, _value, _marker) => {
+                            let (start_marker, end_marker) = (
+                                current_label.as_ref()?.marker.as_ref()?,
+                                map_value.end_marker(),
+                            );
+                            let offset = 0.max(
+                                start_marker
+                                    .line()
+                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                            );
+                            let lines = yaml_split_by_lines[offset..end_marker.line()]
+                                .iter()
+                                .enumerate()
+                                .map(|(idx, line)| {
+                                    let real_line = idx + offset;
+                                    match real_line.cmp(&start_marker.line()) {
+                                        Ordering::Equal => format!("┌ {line}"),
+                                        Ordering::Greater => format!("| {line}"),
+                                        Ordering::Less => line.to_string(),
+                                    }
+                                })
+                                .join("\n");
+
+                            Some(format!(
+                                "{}. {}\n\n{}\n└-----> {}",
+                                idx + 1,
+                                e.instance_path,
+                                lines,
+                                e
+                            ))
+                        }
+                    }
+                } else {
+                    None
                 }
-            }
-            Err(e) => {
-                // the yaml failed to parse. Just let serde do it's thing.
-                tracing::warn!(
-                    "failed to parse yaml using marked parser: {}. Falling back to serde validation",
-                    e
-                );
-            }
+            })
+            .join("\n\n");
+
+        if !errors.is_empty() {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "configuration had errors",
+                error: format!("\n{}", errors),
+            });
         }
     }
 

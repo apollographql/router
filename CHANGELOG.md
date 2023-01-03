@@ -4,6 +4,225 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.7.0] - 2022-12-22
+
+## 🚀 Features
+
+### Newly scaffolded projects now include a `Dockerfile` ([Issue #2295](https://github.com/apollographql/router/issues/2295))
+
+Custom Router binary projects created using our [scaffolding tooling](https://www.apollographql.com/docs/router/customizations/custom-binary/) will now have a `Dockerfile` emitted to facilitate building custom Docker containers.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2307
+
+### Apollo Uplink communication timeout is configurable ([PR #2271](https://github.com/apollographql/router/pull/2271))
+
+The amount of time which can elapse before timing out when communicating with Apollo Uplink is now configurable via the `APOLLO_UPLINK_TIMEOUT` environment variable and the `--apollo-uplink-timeout` CLI flag, in a similar fashion to how the interval can be configured.  It still defaults to 30 seconds.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
+
+### Query plan cache is pre-warmed using existing operations when the supergraph changes ([Issue #2302](https://github.com/apollographql/router/issues/2302), [Issue #2308](https://github.com/apollographql/router/issues/2308))
+
+A new `warmed_up_queries` configuration option has been introduced to pre-warm the query plan cache when the supergraph changes.
+
+Under normal operation, query plans are cached to avoid the recomputation cost.  However, when the supergraph changes, previously-planned queries must be re-planned to account for implementation changes in the supergraph, even though the query itself may not have changed.  Under load, this re-planning can cause performance variations due to the extra computation work.  To reduce the impact, it is now possible to pre-warm the query plan cache for the incoming supergraph, prior to changing over to the new supergraph.  Pre-warming slightly delays the roll-over to the incoming supergraph, but allows the most-requested operations to not be impacted by the additional computation work.
+
+To enable pre-warming, the following configuration can be introduced which sets `warmed_up_queries`:
+
+```yaml
+supergraph:
+  query_planning:
+    # Pre-plan the 100 most used operations when the supergraph changes.  (Default is "0", disabled.)
+    warmed_up_queries: 100
+    experimental_cache:
+      in_memory:
+        # Sets the limit of entries in the query plan cache
+        limit: 512
+```
+
+Query planning was also updated to finish executing and setting up the cache, even if the response couldn't be returned to the client which is important to avoid throwing away computationally-expensive work.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2309
+
+## 🐛 Fixes
+
+### Propagate errors across inline fragments ([PR #2304](https://github.com/apollographql/router/pull/2304))
+
+GraphQL errors are now correctly propagated across inline fragments.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2304
+
+### Only rebuild `protos` if `reports.proto` source changes
+
+Apollo Studio accepts traces and metrics from Apollo Router via the Protobuf specification which lives in the `reports.proto` file in the repository.  With this contribution, we only re-build from the `reports.proto` file when the file has actually changed, as opposed to doing it on every build which was occurring previously.  This change saves build time for developers.
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2283
+
+### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
+
+Repeat usage of the same keys in Router YAML can be hard to notice but indicate a misconfiguration which can cause unexpected behavior since only one of the values can be in effect.  With this improvement, the following YAML configuration will raise an error at Router startup to alert the user of the misconfiguration:
+
+```yaml
+telemetry:
+  tracing:
+    propagation:
+      jaeger: true
+  tracing:
+    propagation:
+      jaeger: false
+```
+
+In this particular example, the error produced would be:
+
+```
+ERROR duplicated keys detected in your yaml configuration: 'telemetry.tracing'
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2270
+
+### Return requested `__typename` in initial chunk of a deferred response ([Issue #1922](https://github.com/apollographql/router/issues/1922))
+
+The special-case `__typename` field is no longer being treated incorrectly when requested at the root level on an operation which used `@defer`.  For example, the following query:
+
+```graphql
+{
+  __typename
+  ...deferedFragment @defer
+}
+
+fragment deferedFragment on Query {
+  slow
+}
+```
+
+The Router now exhibits the correct behavior for this query with `__typename` being returned as soon as possible in the initial chunk, as follows: 
+
+```json
+{"data":{"__typename": "Query"},"hasNext":true}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2274
+
+### Log retriable Apollo Uplink failures at the `debug` level ([Issue #2004](https://github.com/apollographql/router/issues/2004))
+
+The log levels for messages pertaining to Apollo Uplink schema fetch failures are now emitted at `debug` level to reduce noise since such failures do not indicate an actual error since they can be and are retried immediately. 
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
+
+### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
+
+Metrics are now correctly measured comprehensively and traces will obey the trace sampling configuration.  Previously, if a request was sampled out of tracing it would not always contribute to metrics correctly.  This was particularly problematic for users which had configured high sampling rates for their traces.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277 and https://github.com/apollographql/router/pull/2286
+
+### Replace default `notify` watcher mechanism with `PollWatcher` ([Issue #2245](https://github.com/apollographql/router/issues/2245))
+
+We have replaced the default mechanism used by our underlying file-system notification library, [`notify`](https://crates.io/crates/notify), to use [`PollWatcher`](https://docs.rs/notify/4.0.17/notify/poll/struct.PollWatcher.html).  This more aggressive change has been taken on account of continued reports of failed hot-reloading and follows up our previous replacement of [`hotwatch`](https://crates.io/crates/hotwatch).  We don't have very demanding file watching requirements, so while `PollWatcher` offers less sophisticated functionality and _slightly_ slower reactivity, it is at least consistent on all platforms and should provide the best developer experience.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2276
+
+### Preserve subgraph error's `path` property when redacting subgraph errors ([Issue #1818](https://github.com/apollographql/router/issues/1818))
+
+The `path` property in errors is now preserved.  Previously, error redaction was removing the error's `path` property, which made debugging difficult but also made it impossible to correctly match errors from deferred responses to the appropriate fields in the requested operation.  Since the response shape for the primary and deferred responses are defined from the client-facing "API schema", rather than the supergraph, this change will not result in leaking internal supergraph implementation details to clients and the result will be consistent, even if the subgraph which provides a particular field changes over time.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
+
+### Use correct URL decoding for `variables` in HTTP `GET` requests ([Issue #2248](https://github.com/apollographql/router/issues/2248))
+
+The correct URL decoding will now be applied when making a `GET` request that passes in the `variables` query string parameter.  Previously, _all_ '+' characters were being replaced with spaces which broke cases where the `+` symbol was not merely an encoding symbol (e.g., ISO8601 date time values with timezone information).
+
+By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
+
+## 🛠 Maintenance
+
+### Return additional details to client for invalid GraphQL requests ([Issue #2301](https://github.com/apollographql/router/issues/2301))
+
+Additional context will be returned to clients in the error indicating the source of the error when an invalid GraphQL request is made.  For example, passing a string instead of an object for the `variables` property will now inform the client of the mistake, providing a better developer experience:
+
+```json
+{
+  "errors": [
+    {
+      "message": "Invalid GraphQL request",
+      "extensions": {
+        "details": "failed to deserialize the request body into JSON: invalid type: string \"null\", expected a map at line 1 column 100",
+        "code": "INVALID_GRAPHQL_REQUEST"
+      }
+    }
+  ]
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2306
+
+### OpenTelemetry spans to subgraphs now include the request URL ([Issue #2280](https://github.com/apollographql/router/issues/2280))
+
+A new `http.url` attribute has been attached to `subgraph_request` OpenTelemetry trace spans which specifies the URL which the particular request was made to.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2292
+
+### Errors returned to clients are now more consistently formed ([Issue #2101](https://github.com/apollographql/router/issues/2101))
+
+We now return errors in a more consistent shape to those which were returned by Apollo Gateway and Apollo Server, and seen in the [documentation](https://www.apollographql.com/docs/apollo-server/data/errors/).  In particular, when available, a stable `code` field will be included in the error's `extensions`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
+
+## 🧪 Experimental
+
+> **Note**
+>
+> These features are subject to change slightly (usually, in terms of naming or interfaces) before graduating to general availability.
+>
+> [Read more about how we treat experimental features](https://www.apollographql.com/docs/resources/product-launch-stages/#experimental-features).
+
+### Introduce a `router_service` layer ([Issue #1496](https://github.com/apollographql/router/issues/1496))
+
+A `router_service` layer is now part of our service stack and allows plugin developers to process raw HTTP requests and responses from clients prior to those requests reaching the GraphQL processing within the `supergraph_service` layer.  This will become a stable part of our API as we receive feedback from its early adopters.  Please open a discussion with any feedback you might have!
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2170
+
+### Request pipeline customization via HTTP ([Issue #1916](https://github.com/apollographql/router/issues/1916))
+
+We now offer the ability to configure some aspects of the Router via the response to an HTTP `POST` request to an external endpoint.  Initially, we are only offering this option to customize the newly introduced `router_service` (above, in these release notes), but our intention is to introduce customization of [existing service layers](https://www.apollographql.com/docs/router/customizations/overview/#how-customizations-work) as well (e.g., `supergraph_service, `subgraph_service`, etc.).  Conceptually, this addition allows similar customizations that are possible with Rhai or Rust plugin by sending the operation's context as of a particular phase of the request pipeline "over the wire" as of a particular to an external HTTP service which has the ability to process its properties and return a (potentially) modified response to the Router.  This will become a stable part of our API as we receive feedback from its early adopters.  Please open a discussion with any feedback you might have!
+
+When this experimental option is enabled, contextual data will be transmitted as a JSON payload to an HTTP endpoint as a `POST` request.  The response to such a request will be processed by the Router and any changes made by the external service will effect the remaining layers in the request pipeline.  This allows external services to customize the  Router behavior, but requires intentionally blocking Router's normal request pipeline.  Therefore, any latency of a configured external service will have a direct impact on the performance of the Router and external services should be as performant as possible. 
+
+To experiement with this behavior, consider adopting a configuration similar to the following which communicates with a service running on `http://127.0.0.1:8081` for the `router` service layer:
+
+```yaml
+plugins:
+  experimental.external:
+    # A URL which will be called for each request for any configured stage.
+    url: http://127.0.0.1:8081
+
+    # A human-readable interval specifying the maximum allowed time. (Defaults to "1s", or one second)
+    timeout: 2s
+
+    # A "stage" represents a phase of the request pipeline in which the external service will be invoked.
+    # They sit request pipeline as our Service Layers for Rust/Rhai, seen in our docs:
+    #   https://www.apollographql.com/docs/router/customizations/overview/#how-customizations-work
+    stages:
+    
+      # Currently, the only supported value is "router".
+      router:
+      
+        # Define which properties of the request should be transmitted in the payload.
+	# Choosing the least amount of data will reduce the size of the payload.
+	# By default, all values are false and, when false, their presence in this map is optional.
+        request: 
+          headers: true
+          context: true
+          body: true
+          sdl: true
+	
+	# Similar to "request", but which properties of the response should be sent.
+	# Again, all values are false by default and only must be specified if they are enabled.
+        response:
+          headers: true
+          context: true
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2229
+
 # [1.6.0] - 2022-12-13
 
 ## ❗ BREAKING ❗
