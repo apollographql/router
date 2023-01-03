@@ -25,7 +25,6 @@ use hyper_rustls::HttpsConnector;
 use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use schemars::JsonSchema;
-use serde_json_bytes::{ByteString, Value};
 use tokio::io::AsyncWriteExt;
 use tower::util::BoxService;
 use tower::BoxError;
@@ -158,7 +157,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 return call_http(request, body, context, client, service_name).await;
             }
 
-            // Else, if apq is enabled,
+            // Else, if APQ is enabled,
             // Calculate the hash for query and try the request with
             // a persistedQuery instead of the whole query.
             let graphql::Request {
@@ -168,7 +167,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 extensions,
             } = body.clone();
 
-            let hash_value = apq::calculate_hash_for_query(query.clone().unwrap_or_default());
+            let hash_value = apq::calculate_hash_for_query(query.as_deref().unwrap_or_default());
 
             let persisted_query = serde_json_bytes::json!({
                 HASH_VERSION_KEY: HASH_VERSION_VALUE,
@@ -192,22 +191,14 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                 client.clone(),
                 service_name.clone(),
             )
-            .await;
+            .await?;
 
             // Check the error for the request with only persistedQuery.
-            // If PersistedQueryNotSupported, stop trying apq for this subgraph service
-            // If PersistedQueryNotFound, add the whole query to the request and retry.
+            // If PersistedQueryNotSupported, stop disable APQ for this subgraph
+            // If PersistedQueryNotFound, add the original query to the request and retry.
             // Else, return the response like before.
-            let http_response = response.as_ref();
-
-            // http_response with APQ error returns a 200 OK http response.
-            // The errors are contained in graphql Response.
-            if http_response.is_err() {
-                return response
-            }
-
-            let gql_resp = http_response.unwrap().response.body().clone();
-            match get_apq_error(gql_resp) {
+            let gql_response = response.response.body();
+            match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
                     return call_http(request, body, context, client, service_name).await
@@ -216,7 +207,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     apq_body.query = query;
                     return call_http(request, apq_body, context, client, service_name).await
                 }
-                _ => return response
+                _ => return Ok(response)
             }
         };
 
@@ -374,20 +365,9 @@ async fn call_http(
     Ok(crate::SubgraphResponse::new_from_response(resp, context))
 }
 
-fn get_apq_error(response: graphql::Response) -> APQError {
-    let not_found_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE));
-    let not_supported_byte_string = &Value::String(ByteString::from(PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE));
-    for error in response.errors {
-        match error.extensions.get(&ByteString::from(CODE_STRING)) {
-            Some(value) => {
-                if value == not_found_byte_string {
-                    return APQError::PersistedQueryNotFound;
-                } else if value == not_supported_byte_string {
-                    return APQError::PersistedQueryNotSupported;
-                }
-            }
-            None => {}
-        }
+fn get_apq_error(gql_response: &graphql::Response) -> APQError {
+    for error in gql_response.errors.clone() {
+        // Check if error message is an APQ error
         match error.message.as_str() {
             PERSISTED_QUERY_NOT_FOUND_MESSAGE => {
                 return APQError::PersistedQueryNotFound;
@@ -396,6 +376,17 @@ fn get_apq_error(response: graphql::Response) -> APQError {
                 return APQError::PersistedQueryNotSupported;
             }
             _ => {}
+        }
+        // Check if extensions contains the APQ error in "code"
+        match error.extensions.get(CODE_STRING) {
+            Some(value) => {
+                if value == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
+                    return APQError::PersistedQueryNotFound;
+                } else if value == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
+                    return APQError::PersistedQueryNotSupported;
+                }
+            }
+            None => {}
         }
     }
     APQError::Other
