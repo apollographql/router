@@ -127,6 +127,10 @@ where
         let _ = locked_wait_map.remove(key);
         let _ = sender.send(value);
     }
+
+    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+        self.storage.in_memory_keys().await
+    }
 }
 
 pub(crate) struct Entry<K: KeyType, V: ValueType> {
