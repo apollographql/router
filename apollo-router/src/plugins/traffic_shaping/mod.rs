@@ -361,11 +361,7 @@ impl TrafficShaping {
     }
 
     pub(crate) fn get_apq_enabled(&self, name: &str) -> Option<bool> {
-        if let Some(config) = self.config.subgraphs.get(name) {
-            return config.apq_enabled;
-        } else {
-            None
-        }
+        self.config.subgraphs.get(name)?.apq_enabled
     }
 }
 
