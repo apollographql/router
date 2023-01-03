@@ -2,7 +2,8 @@
 use std::collections::BTreeMap;
 
 use axum::headers::HeaderName;
-use opentelemetry::sdk::resource::{EnvResourceDetector, ResourceDetector};
+use opentelemetry::sdk::resource::EnvResourceDetector;
+use opentelemetry::sdk::resource::ResourceDetector;
 use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;

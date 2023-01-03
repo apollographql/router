@@ -12,7 +12,9 @@ use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use tonic::metadata::MetadataMap;
-use tonic::transport::{Certificate, ClientTlsConfig, Identity};
+use tonic::transport::Certificate;
+use tonic::transport::ClientTlsConfig;
+use tonic::transport::Identity;
 use tower::BoxError;
 use url::Url;
 
