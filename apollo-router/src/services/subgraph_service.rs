@@ -1126,11 +1126,14 @@ mod tests {
     async fn test_persisted_query_not_supported_extension_code() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3030").unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
-            socket_addr
+            socket_addr,
         ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert_eq!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed), true);
+        assert_eq!(
+            subgraph_service.clone().apq_enabled.as_ref().load(Relaxed),
+            true
+        );
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
         let resp = subgraph_service
@@ -1205,7 +1208,7 @@ mod tests {
     async fn test_persisted_query_not_found_extension_code() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3232").unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_extension_code(
-            socket_addr
+            socket_addr,
         ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
