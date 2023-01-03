@@ -33,3 +33,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
+
+### Apollo Router landing page ([PR #2282](https://github.com/apollographql/router/pull/2282))
+
+We've added a `graph_ref` option to the `homepage` configuration, this will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
+
+By [@flyboarder](https://github.com/flyboarder) in https://github.com/apollographql/router/pull/2282
