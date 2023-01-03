@@ -24,7 +24,7 @@ mod tests {
         // Let's set up our mock to make sure it will be called once
         mock_service
             .expect_clone()
-            .return_once(move || test::MockSupergraphService::new());
+            .return_once(test::MockSupergraphService::new);
 
         let config = serde_json::json!({
             "rhai": {
