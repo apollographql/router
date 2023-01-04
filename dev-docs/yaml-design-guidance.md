@@ -135,7 +135,7 @@ Using option significantly complicates consuming code as it has to deal with the
 #[serde(deny_unknown_fields)]
 struct Export {
     #[serde(default="default_url_fn")
-    url: Option<Url>
+    url: Url
 }
 ```
 ```rust
