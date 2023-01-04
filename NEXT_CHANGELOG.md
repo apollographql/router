@@ -24,7 +24,13 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [x.x.x] (unreleased) - 2022-mm-dd
+## 🚀 Features
+
+### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
+
+For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
 ## 🛠 Maintenance
 
@@ -33,3 +39,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
+
+### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
+
+When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
