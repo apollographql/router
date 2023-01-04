@@ -97,6 +97,10 @@ expression: get_spans()
               [
                 "otel.status_code",
                 "Ok"
+              ],
+              [
+                "message",
+                "dropping telemetry..."
               ]
             ],
             "metadata": {
@@ -233,10 +237,6 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
-                      ],
-                      [
-                        "message",
-                        "dropping telemetry..."
                       ]
                     ],
                     "metadata": {

@@ -45,3 +45,10 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
+
+### Move APQ and EnsureQueryPresence in the router service ([PR #2296](https://github.com/apollographql/router/pull/2296))
+
+Moving APQ from the axum level to the supergraph service reintroduced a `Buffer` in the service pipeline.
+Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296

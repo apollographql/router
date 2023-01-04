@@ -180,10 +180,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         }
 
-        Ok(Self::RouterFactory::new(
-            Arc::new(supergraph_creator),
-            &configuration,
-        ))
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), &configuration).await)
     }
 }
 
