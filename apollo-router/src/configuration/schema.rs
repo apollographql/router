@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::fmt::Write;
 
 use itertools::Itertools;
 use jsonschema::Draft;
@@ -109,79 +110,82 @@ pub(crate) fn validate_yaml_configuration(
     log_used_experimental_conf(&yaml);
     let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
-    if let Err(errors) = schema.validate(&expanded_yaml) {
+    if let Err(errors_it) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
         // We have to reparse the yaml to get the line number information for each error.
         let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-        let errors = errors
-            .enumerate()
-            .filter_map(|(idx, mut e)| {
-                if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
-                    match element {
-                        yaml::Value::String(value, marker) => {
-                            let start_marker = marker;
-                            let end_marker = marker;
-                            let offset = 0.max(
-                                start_marker
-                                    .line()
-                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            );
+        let mut errors = String::new();
 
-                            let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                .iter()
-                                .join("\n");
+        for (idx, mut e) in errors_it.enumerate() {
+            if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
+                match element {
+                    yaml::Value::String(value, marker) => {
+                        let start_marker = marker;
+                        let end_marker = marker;
+                        let offset = 0.max(
+                            start_marker
+                                .line()
+                                .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+                        );
 
-                            // Replace the value in the error message with the one from the raw config.
-                            // This guarantees that if the env variable contained a secret it won't be leaked.
-                            e.instance = Cow::Owned(coerce(value));
+                        let lines = yaml_split_by_lines[offset..end_marker.line()]
+                            .iter()
+                            .join("\n");
 
-                            Some(format!(
-                                "{}. {}\n\n{}\n{}^----- {}",
-                                idx + 1,
-                                e.instance_path,
-                                lines,
-                                " ".repeat(0.max(marker.col())),
-                                e
-                            ))
-                        }
-                        seq_element @ yaml::Value::Sequence(_, m) => {
-                            let (start_marker, end_marker) = (m, seq_element.end_marker());
+                        // Replace the value in the error message with the one from the raw config.
+                        // This guarantees that if the env variable contained a secret it won't be leaked.
+                        e.instance = Cow::Owned(coerce(value));
 
-                            let lines =
-                                context_lines(&yaml_split_by_lines, start_marker, end_marker);
-
-                            Some(format!(
-                                "{}. {}\n\n{}\n└-----> {}",
-                                idx + 1,
-                                e.instance_path,
-                                lines,
-                                e
-                            ))
-                        }
-                        map_value @ yaml::Value::Mapping(current_label, _value, _marker) => {
-                            let (start_marker, end_marker) = (
-                                current_label.as_ref()?.marker.as_ref()?,
-                                map_value.end_marker(),
-                            );
-
-                            let lines =
-                                context_lines(&yaml_split_by_lines, start_marker, end_marker);
-
-                            Some(format!(
-                                "{}. {}\n\n{}\n└-----> {}",
-                                idx + 1,
-                                e.instance_path,
-                                lines,
-                                e
-                            ))
-                        }
+                        write!(
+                            &mut errors,
+                            "{}. {}\n\n{}\n{}^----- {}\n\n",
+                            idx + 1,
+                            e.instance_path,
+                            lines,
+                            " ".repeat(0.max(marker.col())),
+                            e
+                        );
                     }
-                } else {
-                    None
+                    seq_element @ yaml::Value::Sequence(_, m) => {
+                        let (start_marker, end_marker) = (m, seq_element.end_marker());
+
+                        let lines = context_lines(&yaml_split_by_lines, start_marker, end_marker);
+
+                        write!(
+                            &mut errors,
+                            "{}. {}\n\n{}\n└-----> {}\n\n",
+                            idx + 1,
+                            e.instance_path,
+                            lines,
+                            e
+                        );
+                    }
+                    map_value @ yaml::Value::Mapping(current_label, _value, marker) => {
+                        let (start_marker, end_marker) = (
+                            current_label
+                                .as_ref()
+                                .and_then(|label| label.marker.as_ref())
+                                .unwrap_or(marker),
+                            map_value.end_marker(),
+                        );
+
+                        let lines = context_lines(&yaml_split_by_lines, start_marker, end_marker);
+
+                        write!(
+                            &mut errors,
+                            "{}. {}\n\n{}\n└-----> {}\n\n",
+                            idx + 1,
+                            e.instance_path,
+                            lines,
+                            e
+                        );
+                    }
                 }
-            })
-            .join("\n\n");
+            } else {
+                //None
+            }
+        }
 
         if !errors.is_empty() {
             return Err(ConfigurationError::InvalidConfiguration {
