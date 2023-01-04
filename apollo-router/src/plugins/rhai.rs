@@ -8,6 +8,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use futures::future::ready;
@@ -22,8 +23,12 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
 use notify::event::ModifyKind;
+use notify::Config;
 use notify::EventKind;
+use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
 use rhai::module_resolvers::FileModuleResolver;
@@ -445,8 +450,11 @@ impl Plugin for Rhai {
 
         let watcher_handle = std::thread::spawn(move || {
             let watching_path = watched_path.clone();
-            let mut watcher =
-                notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
+            let config = Config::default()
+                .with_poll_interval(Duration::from_secs(3))
+                .with_compare_contents(true);
+            let mut watcher = PollWatcher::new(
+                move |res: Result<notify::Event, notify::Error>| {
                     match res {
                         Ok(event) => {
                             // Let's limit the events we are interested in to:
@@ -455,7 +463,8 @@ impl Plugin for Rhai {
                             //  - with suffix "rhai"
                             if matches!(
                                 event.kind,
-                                EventKind::Modify(ModifyKind::Data(_))
+                                EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
+                                    | EventKind::Modify(ModifyKind::Data(DataChange::Any))
                                     | EventKind::Create(_)
                                     | EventKind::Remove(_)
                             ) {
@@ -489,8 +498,10 @@ impl Plugin for Rhai {
                         }
                         Err(e) => tracing::error!("rhai watching event error: {:?}", e),
                     }
-                })
-                .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
+                },
+                config,
+            )
+            .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
             watcher
                 .watch(&watched_path, RecursiveMode::Recursive)
                 .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
@@ -1070,6 +1081,7 @@ struct ErrorDetails {
     status: StatusCode,
     message: String,
     position: Option<Position>,
+    // Add support for extension_code ?
 }
 
 impl fmt::Display for ErrorDetails {
@@ -1347,7 +1359,7 @@ impl Rhai {
                 },
             )
             .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
-                x.insert(key, value)
+                let _= x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
@@ -1753,7 +1765,7 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str(),
-            "rhai execution error: 'Runtime error: An error occured (line 30, position 5) in call to function execution_request'"
+            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)\nin call to function 'execution_request''"
         );
         Ok(())
     }
@@ -2135,7 +2147,7 @@ mod tests {
         if let Err(error) = base_process_function("process_subgraph_response_string").await {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5)\nin call to function 'process_subgraph_response_string''");
         } else {
             // Test failed
             panic!("error processed incorrectly");
@@ -2161,7 +2173,7 @@ mod tests {
         {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5)\nin call to function 'process_subgraph_response_om_missing_message''");
         } else {
             // Test failed
             panic!("error processed incorrectly");

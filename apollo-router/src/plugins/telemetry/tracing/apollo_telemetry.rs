@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::Mutex;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
@@ -27,32 +26,30 @@ use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry;
-use crate::plugins::telemetry::apollo::Report;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::http::Values;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ConditionNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferNodePrimary;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferredNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::DeferredNodeDepends;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::FetchNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::FlattenNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::Node;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ParallelNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::ResponsePathElement;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::SequenceNode;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::Details;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::Http;
-use crate::plugins::telemetry::apollo_exporter::proto::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::ApolloExportError;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ConditionNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferNodePrimary;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferredNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::DeferredNodeDepends;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::FetchNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::FlattenNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::Node;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ParallelNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ResponsePathElement;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
-use crate::plugins::telemetry::config;
-use crate::plugins::telemetry::config::ExposeTraceId;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
@@ -73,6 +70,8 @@ const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
     Key::from_static_str("apollo_private.graphql.variables");
 const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
     Key::from_static_str("apollo_private.http.request_headers");
+const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
+    Key::from_static_str("apollo_private.http.response_headers");
 pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
 const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
@@ -84,7 +83,6 @@ const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
-pub(crate) const DEFAULT_TRACE_ID_HEADER_NAME: &str = "apollo-trace-id";
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -111,19 +109,21 @@ pub(crate) enum Error {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
-    expose_trace_id_config: config::ExposeTraceId,
     spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     #[derivative(Debug = "ignore")]
-    report_exporter: ReportExporter,
+    report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
 }
 
 enum TreeData {
-    Request(Result<Box<proto::Trace>, Error>),
-    Supergraph {
+    Request(Result<Box<proto::reports::Trace>, Error>),
+    Router {
         http: Box<Http>,
         client_name: Option<String>,
         client_version: Option<String>,
+        duration_ns: u64,
+    },
+    Supergraph {
         operation_signature: String,
         operation_name: String,
         variables_json: HashMap<String, String>,
@@ -133,36 +133,35 @@ enum TreeData {
     DeferDeferred(DeferredNode),
     ConditionIf(Option<QueryPlanNode>),
     ConditionElse(Option<QueryPlanNode>),
-    Trace(Option<Result<Box<proto::Trace>, Error>>),
+    Trace(Option<Result<Box<proto::reports::Trace>, Error>>),
 }
 
 #[buildstructor::buildstructor]
 impl Exporter {
     #[builder]
     pub(crate) fn new(
-        expose_trace_id_config: config::ExposeTraceId,
         endpoint: Url,
         apollo_key: String,
         apollo_graph_ref: String,
         schema_id: String,
-        buffer_size: usize,
-        field_execution_sampler: Option<SamplerOption>,
+        buffer_size: NonZeroUsize,
+        field_execution_sampler: SamplerOption,
+        batch_config: BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
         Ok(Self {
-            expose_trace_id_config,
             spans_by_parent_id: LruCache::new(buffer_size),
-            report_exporter: ReportExporter::Apollo(Arc::new(ApolloExporter::new(
+            report_exporter: Arc::new(ApolloExporter::new(
                 &endpoint,
+                &batch_config,
                 &apollo_key,
                 &apollo_graph_ref,
                 &schema_id,
-            )?)),
+            )?),
             field_execution_weight: match field_execution_sampler {
-                Some(SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
-                Some(SamplerOption::Always(Sampler::AlwaysOff)) => 0.0,
-                Some(SamplerOption::TraceIdRatioBased(ratio)) => 1.0 / ratio,
-                None => 0.0,
+                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+                SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
         })
     }
@@ -171,17 +170,12 @@ impl Exporter {
         &mut self,
         span: &SpanData,
         child_nodes: Vec<TreeData>,
-    ) -> Result<Box<proto::Trace>, Error> {
-        let http = extract_http_data(span, &self.expose_trace_id_config);
-        let mut root_trace = proto::Trace {
+    ) -> Result<Box<proto::reports::Trace>, Error> {
+        let http = extract_http_data(span);
+        let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
             end_time: Some(span.end_time.into()),
-            duration_ns: span
-                .attributes
-                .get(&APOLLO_PRIVATE_DURATION_NS)
-                .and_then(extract_i64)
-                .map(|e| e as u64)
-                .unwrap_or_default(),
+            duration_ns: 0,
             root: None,
             details: None,
             http: Some(http),
@@ -193,21 +187,27 @@ impl Exporter {
                 TreeData::QueryPlanNode(query_plan) => {
                     root_trace.query_plan = Some(Box::new(query_plan))
                 }
-                TreeData::Supergraph {
+                TreeData::Router {
                     http,
                     client_name,
                     client_version,
+                    duration_ns,
+                } => {
+                    let root_http = root_trace
+                        .http
+                        .as_mut()
+                        .expect("http was extracted earlier, qed");
+                    root_http.request_headers = http.request_headers;
+                    root_http.response_headers = http.response_headers;
+                    root_trace.client_name = client_name.unwrap_or_default();
+                    root_trace.client_version = client_version.unwrap_or_default();
+                    root_trace.duration_ns = duration_ns;
+                }
+                TreeData::Supergraph {
                     operation_signature,
                     operation_name,
                     variables_json,
                 } => {
-                    root_trace
-                        .http
-                        .as_mut()
-                        .expect("http was extracted earlier, qed")
-                        .request_headers = http.request_headers;
-                    root_trace.client_name = client_name.unwrap_or_default();
-                    root_trace.client_version = client_version.unwrap_or_default();
                     root_trace.field_execution_weight = self.field_execution_weight;
                     root_trace.signature = operation_signature;
                     root_trace.details = Some(Details {
@@ -222,7 +222,7 @@ impl Exporter {
         Ok(Box::new(root_trace))
     }
 
-    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::Trace>, Error> {
+    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::reports::Trace>, Error> {
         self.extract_data_from_spans(&span)?
             .pop()
             .and_then(|node| {
@@ -256,14 +256,14 @@ impl Exporter {
 
         Ok(match span.name.as_ref() {
             PARALLEL_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
-                node: Some(proto::trace::query_plan_node::Node::Parallel(
+                node: Some(proto::reports::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
                 )),
             })],
             SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
-                node: Some(proto::trace::query_plan_node::Node::Sequence(
+                node: Some(proto::reports::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
@@ -283,8 +283,8 @@ impl Exporter {
                     .as_str())
                 .to_string();
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
-                    node: Some(proto::trace::query_plan_node::Node::Fetch(Box::new(
-                        FetchNode {
+                    node: Some(proto::reports::trace::query_plan_node::Node::Fetch(
+                        Box::new(FetchNode {
                             service_name,
                             trace_parsing_failed,
                             trace,
@@ -296,22 +296,22 @@ impl Exporter {
                                 .unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
                             received_time: Some(span.end_time.into()),
-                        },
-                    ))),
+                        }),
+                    )),
                 })]
             }
             FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
-                    node: Some(proto::trace::query_plan_node::Node::Flatten(Box::new(
-                        FlattenNode {
+                    node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
+                        Box::new(FlattenNode {
                             response_path: span
                                 .attributes
                                 .get(&PATH)
                                 .map(extract_path)
                                 .unwrap_or_default(),
                             node: child_nodes.remove_first_query_plan_node().map(Box::new),
-                        },
-                    ))),
+                        }),
+                    )),
                 })]
             }
             SUBGRAPH_SPAN_NAME => {
@@ -324,12 +324,6 @@ impl Exporter {
             SUPERGRAPH_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
-                    http: Box::new(extract_http_data(span, &self.expose_trace_id_config)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
-                    client_version: span
-                        .attributes
-                        .get(&CLIENT_VERSION)
-                        .and_then(extract_string),
                     operation_signature: span
                         .attributes
                         .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
@@ -352,6 +346,23 @@ impl Exporter {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
+            }
+            ROUTER_SPAN_NAME => {
+                child_nodes.push(TreeData::Router {
+                    http: Box::new(extract_http_data(span)),
+                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION)
+                        .and_then(extract_string),
+                    duration_ns: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_DURATION_NS)
+                        .and_then(extract_i64)
+                        .map(|e| e as u64)
+                        .unwrap_or_default(),
+                });
+                child_nodes
             }
             DEFER_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
@@ -446,7 +457,7 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
                     if let Ok(index) = v.parse::<u32>() {
                         ResponsePathElement {
                             id: Some(
-                                proto::trace::query_plan_node::response_path_element::Id::Index(
+                                proto::reports::trace::query_plan_node::response_path_element::Id::Index(
                                     index,
                                 ),
                             ),
@@ -454,7 +465,7 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
                     } else {
                         ResponsePathElement {
                             id: Some(
-                                proto::trace::query_plan_node::response_path_element::Id::FieldName(
+                                proto::reports::trace::query_plan_node::response_path_element::Id::FieldName(
                                     v.to_string(),
                                 ),
                             ),
@@ -474,10 +485,10 @@ fn extract_i64(v: &Value) -> Option<i64> {
     }
 }
 
-fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::Trace>, Error>> {
+fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::reports::Trace>, Error>> {
     if let Some(v) = extract_string(v) {
         if let Ok(v) = base64::decode(v) {
-            if let Ok(t) = proto::Trace::decode(Cursor::new(v)) {
+            if let Ok(t) = proto::reports::Trace::decode(Cursor::new(v)) {
                 return Some(Ok(Box::new(t)));
             }
         }
@@ -487,7 +498,7 @@ fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::Trace>, Error>> {
     None
 }
 
-fn extract_http_data(span: &SpanData, expose_trace_id_config: &ExposeTraceId) -> Http {
+fn extract_http_data(span: &SpanData) -> Http {
     let method = match span
         .attributes
         .get(&HTTP_METHOD)
@@ -495,16 +506,16 @@ fn extract_http_data(span: &SpanData, expose_trace_id_config: &ExposeTraceId) ->
         .unwrap_or_default()
         .as_ref()
     {
-        "OPTIONS" => proto::trace::http::Method::Options,
-        "GET" => proto::trace::http::Method::Get,
-        "HEAD" => proto::trace::http::Method::Head,
-        "POST" => proto::trace::http::Method::Post,
-        "PUT" => proto::trace::http::Method::Put,
-        "DELETE" => proto::trace::http::Method::Delete,
-        "TRACE" => proto::trace::http::Method::Trace,
-        "CONNECT" => proto::trace::http::Method::Connect,
-        "PATCH" => proto::trace::http::Method::Patch,
-        _ => proto::trace::http::Method::Unknown,
+        "OPTIONS" => proto::reports::trace::http::Method::Options,
+        "GET" => proto::reports::trace::http::Method::Get,
+        "HEAD" => proto::reports::trace::http::Method::Head,
+        "POST" => proto::reports::trace::http::Method::Post,
+        "PUT" => proto::reports::trace::http::Method::Put,
+        "DELETE" => proto::reports::trace::http::Method::Delete,
+        "TRACE" => proto::reports::trace::http::Method::Trace,
+        "CONNECT" => proto::reports::trace::http::Method::Connect,
+        "PATCH" => proto::reports::trace::http::Method::Patch,
+        _ => proto::reports::trace::http::Method::Unknown,
     };
     let request_headers = span
         .attributes
@@ -514,24 +525,14 @@ fn extract_http_data(span: &SpanData, expose_trace_id_config: &ExposeTraceId) ->
         .into_iter()
         .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
         .collect();
-    // For now, only trace_id
-    let response_headers = if expose_trace_id_config.enabled {
-        let mut res = HashMap::with_capacity(1);
-        res.insert(
-            expose_trace_id_config
-                .header_name
-                .as_ref()
-                .map(|h| h.to_string())
-                .unwrap_or_else(|| DEFAULT_TRACE_ID_HEADER_NAME.to_string()),
-            Values {
-                value: vec![span.span_context.trace_id().to_string()],
-            },
-        );
-
-        res
-    } else {
-        HashMap::new()
-    };
+    let response_headers = span
+        .attributes
+        .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
+        .and_then(extract_json::<HashMap<String, Vec<String>>>)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+        .collect();
 
     Http {
         method: method.into(),
@@ -548,22 +549,9 @@ impl SpanExporter for Exporter {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
-
-        // Note that apollo-tracing won't really work with defer/stream/live queries. In this situation it's difficult to know when a request has actually finished.
-        let mut traces: Vec<(String, proto::Trace)> = Vec::new();
+        let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
             if span.name == REQUEST_SPAN_NAME {
-                // Write spans for testing
-                // You can obtain new span data by uncommenting the following code and executing a query.
-                // In general this isn't something we'll want to do often, we are just verifying that the exporter constructs a correct report.
-                // let mut c = self
-                //     .spans_by_parent_id
-                //     .iter()
-                //     .flat_map(|(_, s)| s.iter())
-                //     .collect::<Vec<_>>();
-                // c.push(&span);
-                // std::fs::write("spandata.yaml", serde_yaml::to_string(&c).unwrap()).unwrap();
-
                 match self.extract_trace(span) {
                     Ok(mut trace) => {
                         let mut operation_signature = Default::default();
@@ -695,239 +683,16 @@ impl ChildNodes for Vec<TreeData> {
     }
 }
 
-#[derive(Clone)]
-enum ReportExporter {
-    Apollo(Arc<ApolloExporter>),
-    #[cfg(test)]
-    InMemory(Arc<Mutex<Vec<Report>>>),
-}
-
-impl ReportExporter {
-    async fn submit_report(self, report: Report) -> Result<(), ApolloExportError> {
-        match self {
-            ReportExporter::Apollo(apollo) => apollo.submit_report(report).await,
-            #[cfg(test)]
-            ReportExporter::InMemory(store) => {
-                store.lock().expect("poisoned").push(report);
-                Ok(())
-            }
-        }
-    }
-}
-
-#[buildstructor::buildstructor]
-#[cfg(test)]
-impl Exporter {
-    #[builder]
-    pub(crate) fn test_new(expose_trace_id_config: Option<config::ExposeTraceId>) -> Self {
-        Exporter {
-            expose_trace_id_config: expose_trace_id_config.unwrap_or_default(),
-            spans_by_parent_id: LruCache::unbounded(),
-            report_exporter: ReportExporter::InMemory(Default::default()),
-            field_execution_weight: 1.0,
-        }
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use http::header::HeaderName;
-    use opentelemetry::sdk::export::trace::{SpanData, SpanExporter};
-    use opentelemetry::sdk::trace::{EvictedHashMap, EvictedQueue};
-    use opentelemetry::trace::{SpanContext, SpanId, SpanKind, TraceId};
-    use opentelemetry::{Key, KeyValue, Value};
+    use opentelemetry::Value;
     use prost::Message;
     use serde_json::json;
-    use std::str::FromStr;
-    use std::time::SystemTime;
-
-    use crate::plugins::telemetry::apollo::{Report};
-    use crate::plugins::telemetry::apollo_exporter::proto::Trace;
-    use crate::plugins::telemetry::apollo_exporter::proto::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
-    use crate::plugins::telemetry::apollo_exporter::proto::trace::QueryPlanNode;
-    use crate::plugins::telemetry::config::ExposeTraceId;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::proto::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, Exporter, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, ReportExporter, TreeData};
-
-    fn load_span_data(spandata: &str) -> Vec<SpanData> {
-        // Serde support was removed from otel 0.18
-        let value: Vec<serde_yaml::Value> =
-            serde_yaml::from_str(spandata).expect("test spans must be parsable");
-        value
-            .iter()
-            .map(|v| {
-                let span_data = v.as_mapping().expect("expected mapping");
-                let span_context = span_data
-                    .get(&serde_yaml::Value::String("span_context".into()))
-                    .expect("expected span_context")
-                    .as_mapping()
-                    .expect("expected mapping");
-                let mut attributes = EvictedHashMap::new(256, 256);
-                for (key, value) in span_data
-                    .get(&serde_yaml::Value::String("attributes".into()))
-                    .expect("expected attributes")
-                    .as_mapping()
-                    .expect("expected mapping")
-                    .get(&serde_yaml::Value::String("map".into()))
-                    .expect("expected map")
-                    .as_mapping()
-                    .expect("expected mapping")
-                {
-                    let value: Value = match value
-                        .as_mapping()
-                        .expect("expected mapping")
-                        .iter()
-                        .map(|(k, v)| (k.as_str().expect("expected str"), v))
-                        .next()
-                        .expect("expected value")
-                    {
-                        ("Bool", serde_yaml::Value::Bool(b)) => Value::Bool(*b),
-                        ("I64", serde_yaml::Value::Number(n)) if n.is_i64() => {
-                            Value::I64(n.as_i64().expect("qed"))
-                        }
-                        ("F64", serde_yaml::Value::Number(n)) if n.is_f64() => {
-                            Value::F64(n.as_f64().expect("qed"))
-                        }
-                        ("String", serde_yaml::Value::String(s)) => s.clone().into(),
-                        _ => panic!("unexpected value type {:?}", value),
-                    };
-                    attributes.insert(KeyValue::new(
-                        Key::from(key.as_str().expect("expected str").to_string()),
-                        value,
-                    ));
-                }
-                SpanData {
-                    span_context: SpanContext::new(
-                        TraceId::from_bytes(
-                            u128::from_str(
-                                span_context
-                                    .get(&serde_yaml::Value::String("trace_id".into()))
-                                    .expect("expected trace_id")
-                                    .as_str()
-                                    .expect("expected str"),
-                            )
-                            .expect("expected u128 parse")
-                            .to_be_bytes(),
-                        ),
-                        SpanId::from_bytes(
-                            span_context
-                                .get(&serde_yaml::Value::String("span_id".into()))
-                                .expect("expected span_id")
-                                .as_u64()
-                                .expect("expected u64")
-                                .to_be_bytes(),
-                        ),
-                        Default::default(),
-                        false,
-                        Default::default(),
-                    ),
-                    parent_span_id: SpanId::from_bytes(
-                        span_data
-                            .get(&serde_yaml::Value::String("parent_span_id".into()))
-                            .cloned()
-                            .unwrap_or_else(|| serde_yaml::Value::Number(0.into()))
-                            .as_u64()
-                            .expect("expected u64")
-                            .to_be_bytes(),
-                    ),
-                    span_kind: SpanKind::Client,
-                    name: span_data
-                        .get(&serde_yaml::Value::String("name".into()))
-                        .expect("name")
-                        .as_str()
-                        .expect("expected str")
-                        .to_string()
-                        .into(),
-                    start_time: SystemTime::now(),
-                    end_time: SystemTime::now(),
-                    attributes,
-                    events: EvictedQueue::new(100),
-                    links: EvictedQueue::new(100),
-                    status: Default::default(),
-                    resource: Default::default(),
-                    instrumentation_lib: Default::default(),
-                }
-            })
-            .collect()
-    }
-
-    async fn report(mut exporter: Exporter, spandata: &str) -> Report {
-        let spandata = load_span_data(spandata);
-
-        exporter
-            .export(spandata)
-            .await
-            .expect("span export must succeed");
-        assert!(matches!(
-            exporter.report_exporter,
-            ReportExporter::InMemory(_)
-        ));
-        if let ReportExporter::InMemory(storage) = exporter.report_exporter {
-            return storage
-                .lock()
-                .expect("lock poisoned")
-                .pop()
-                .expect("must have a report");
-        }
-        panic!("cannot happen");
-    }
-
-    macro_rules! assert_report {
-        ($report: expr)=> {
-            insta::with_settings!({sort_maps => true}, {
-                    insta::assert_yaml_snapshot!($report, {
-                        ".**.seconds" => "[seconds]",
-                        ".**.nanos" => "[nanos]",
-                        ".**.duration_ns" => "[duration_ns]",
-                        ".**.child[].start_time" => "[start_time]",
-                        ".**.child[].end_time" => "[end_time]",
-                        ".**.trace_id.value[]" => "[trace_id]",
-                        ".**.sent_time_offset" => "[sent_time_offset]"
-                    });
-                });
-        }
-    }
-
-    #[tokio::test]
-    async fn test_condition_if() {
-        // The following curl request was used to generate this span data
-        // curl --request POST \
-        //     --header 'content-type: application/json' \
-        //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
-        //     --url http://localhost:4000/ \
-        //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":true}}'
-        let spandata = include_str!("testdata/condition_if_spandata.yaml");
-        let exporter = Exporter::test_builder().build();
-        let report = report(exporter, spandata).await;
-        assert_report!(report);
-    }
-
-    #[tokio::test]
-    async fn test_condition_else() {
-        // The following curl request was used to generate this span data
-        // curl --request POST \
-        //     --header 'content-type: application/json' \
-        //     --header 'accept: multipart/mixed; deferSpec=20220824, application/json' \
-        //     --url http://localhost:4000/ \
-        //     --data '{"query":"query($if: Boolean!) {\n  topProducts {\n    name\n      ... @defer(if: $if) {\n    reviews {\n      author {\n        name\n      }\n    }\n    reviews {\n      author {\n        name\n      }\n    }\n      }\n  }\n}","variables":{"if":false}}'
-        let spandata = include_str!("testdata/condition_else_spandata.yaml");
-        let exporter = Exporter::test_builder().build();
-        let report = report(exporter, spandata).await;
-        assert_report!(report);
-    }
-
-    #[tokio::test]
-    async fn test_trace_id() {
-        let spandata = include_str!("testdata/condition_if_spandata.yaml");
-        let exporter = Exporter::test_builder()
-            .expose_trace_id_config(ExposeTraceId {
-                enabled: true,
-                header_name: Some(HeaderName::from_static("trace_id")),
-            })
-            .build();
-        let report = report(exporter, spandata).await;
-        assert_report!(report);
-    }
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
+    use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -941,6 +706,7 @@ mod test {
                 TreeData::ConditionIf(_) => elements.push("condition_if"),
                 TreeData::ConditionElse(_) => elements.push("condition_else"),
                 TreeData::Trace(_) => elements.push("trace"),
+                TreeData::Router { .. } => elements.push("router"),
             }
         }
         elements

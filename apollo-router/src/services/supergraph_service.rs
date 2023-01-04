@@ -9,7 +9,6 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
-use tower::util::BoxService;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -17,28 +16,30 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
-use super::new_service::NewService;
+use super::layers::content_negociation;
+use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
+use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::axum_factory::utils::accepts_multipart;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::introspection::Introspection;
+#[cfg(test)]
+use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::router_factory::Endpoint;
-use crate::router_factory::SupergraphServiceFactory;
-use crate::services::layers::ensure_query_presence::EnsureQueryPresence;
+use crate::supergraph;
 use crate::Configuration;
 use crate::Context;
+use crate::Endpoint;
 use crate::ExecutionRequest;
 use crate::ExecutionResponse;
 use crate::ListenAddr;
@@ -96,7 +97,7 @@ where
         let clone = self.query_planner_service.clone();
 
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
-        let execution = self.execution_service_factory.new_service();
+        let execution = self.execution_service_factory.create();
 
         let schema = self.schema.clone();
 
@@ -176,6 +177,7 @@ where
                 graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("introspection has been disabled"))
+                        .extension_code("INTROSPECTION_DISABLED")
                         .build()])
                     .build(),
                 context,
@@ -187,10 +189,17 @@ where
         Some(QueryPlannerContent::Plan { plan }) => {
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
-            if is_deferred && !accepts_multipart(req.supergraph_request.headers()) {
+
+            let accepts_multipart: bool = context
+                .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
+                .unwrap_or_default()
+                .unwrap_or_default();
+
+            if is_deferred && !accepts_multipart {
                 let mut response = SupergraphResponse::new_from_graphql_response(graphql::Response::builder()
                     .errors(vec![crate::error::Error::builder()
                         .message(String::from("the router received a query with the @defer directive but the client does not accept multipart/mixed HTTP responses. To enable @defer support, add the HTTP header 'Accept: multipart/mixed; deferSpec=20220824'"))
+                        .extension_code("DEFER_BAD_HEADER")
                         .build()])
                     .build(), context);
                 *response.response.status_mut() = StatusCode::NOT_ACCEPTABLE;
@@ -216,10 +225,7 @@ where
 
                 Ok(SupergraphResponse {
                     context,
-                    response: http::Response::from_parts(
-                        parts,
-                        response_stream.in_current_span().boxed(),
-                    ),
+                    response: http::Response::from_parts(parts, response_stream.boxed()),
                 })
             }
         }
@@ -311,7 +317,7 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) async fn build(self) -> Result<RouterCreator, crate::error::ServiceBuildError> {
+    pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         // Note: The plugins are always applied in reverse, so that the
         // fold is applied in the correct sequence. We could reverse
         // the list of plugins, but we want them back in the original
@@ -346,7 +352,7 @@ impl PluggableSupergraphServiceBuilder {
             plugins.clone(),
         ));
 
-        Ok(RouterCreator {
+        Ok(SupergraphCreator {
             query_planner_service,
             subgraph_creator,
             schema: self.schema,
@@ -355,46 +361,62 @@ impl PluggableSupergraphServiceBuilder {
     }
 }
 
+/// Factory for creating a RouterService
+///
+/// Instances of this traits are used by the HTTP server to generate a new
+/// RouterService on each request
+pub(crate) trait SupergraphFactory:
+    ServiceFactory<supergraph::Request, Service = Self::SupergraphService>
+    + Clone
+    + Send
+    + Sync
+    + 'static
+{
+    type SupergraphService: Service<
+            supergraph::Request,
+            Response = supergraph::Response,
+            Error = BoxError,
+            Future = Self::Future,
+        > + Send;
+    type Future: Send;
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+}
+
 /// A collection of services and data which may be used to create a "router".
 #[derive(Clone)]
-pub(crate) struct RouterCreator {
+pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
 
-impl NewService<SupergraphRequest> for RouterCreator {
-    type Service = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
-    fn new_service(&self) -> Self::Service {
+pub(crate) trait HasPlugins {
+    fn plugins(&self) -> Arc<Plugins>;
+}
+
+impl HasPlugins for SupergraphCreator {
+    fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
+    }
+}
+
+impl ServiceFactory<supergraph::Request> for SupergraphCreator {
+    type Service = supergraph::BoxService;
+    fn create(&self) -> Self::Service {
         self.make().boxed()
     }
 }
 
-impl SupergraphServiceFactory for RouterCreator {
-    type SupergraphService = BoxService<SupergraphRequest, SupergraphResponse, BoxError>;
-
-    type Future = <<RouterCreator as NewService<SupergraphRequest>>::Service as Service<
-        SupergraphRequest,
-    >>::Future;
-
-    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-        let mut mm = MultiMap::new();
-        self.plugins
-            .values()
-            .for_each(|p| mm.extend(p.web_endpoints()));
-        mm
-    }
-}
-
-impl RouterCreator {
+impl SupergraphCreator {
     pub(crate) fn make(
         &self,
     ) -> impl Service<
-        SupergraphRequest,
-        Response = SupergraphResponse,
+        supergraph::Request,
+        Response = supergraph::Response,
         Error = BoxError,
-        Future = BoxFuture<'static, Result<SupergraphResponse, BoxError>>,
+        Future = BoxFuture<'static, supergraph::ServiceResult>,
     > + Send {
         let supergraph_service = SupergraphService::builder()
             .query_planner_service(self.query_planner_service.clone())
@@ -417,30 +439,85 @@ impl RouterCreator {
         };
 
         ServiceBuilder::new()
-            .layer(EnsureQueryPresence::default())
+            .layer(content_negociation::SupergraphLayer::default())
             .service(
                 self.plugins
                     .iter()
                     .rev()
-                    .fold(BoxService::new(supergraph_service), |acc, (_, e)| {
+                    .fold(supergraph_service.boxed(), |acc, (_, e)| {
                         e.supergraph_service(acc)
                     }),
             )
     }
 
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.query_planner_service.cache_keys(count).await
+    }
+    pub(crate) async fn warm_up_query_planner(
+        &mut self,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
+        self.query_planner_service.warm_up(cache_keys).await
+    }
+
     /// Create a test service.
     #[cfg(test)]
-    pub(crate) fn test_service(
-        &self,
-    ) -> tower::util::BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
-        use tower::buffer::Buffer;
+    pub(crate) async fn for_tests(
+        supergraph_service: MockSupergraphService,
+    ) -> MockSupergraphCreator {
+        MockSupergraphCreator::new(supergraph_service).await
+    }
+}
 
-        Buffer::new(self.make(), 512).boxed_clone()
+#[cfg(test)]
+#[derive(Clone)]
+pub(crate) struct MockSupergraphCreator {
+    supergraph_service: MockSupergraphService,
+    plugins: Arc<Plugins>,
+}
+
+#[cfg(test)]
+impl MockSupergraphCreator {
+    pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
+        let canned_schema = include_str!("../../testing_schema.graphql");
+        let configuration = Configuration::builder().build().unwrap();
+
+        use crate::router_factory::create_plugins;
+        let plugins = create_plugins(
+            &configuration,
+            &Schema::parse(canned_schema, &configuration).unwrap(),
+            None,
+        )
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+
+        Self {
+            supergraph_service,
+            plugins: Arc::new(plugins),
+        }
+    }
+}
+
+#[cfg(test)]
+impl HasPlugins for MockSupergraphCreator {
+    fn plugins(&self) -> Arc<Plugins> {
+        self.plugins.clone()
+    }
+}
+
+#[cfg(test)]
+impl ServiceFactory<supergraph::Request> for MockSupergraphCreator {
+    type Service = supergraph::BoxService;
+    fn create(&self) -> Self::Service {
+        self.supergraph_service.clone().boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::plugin::test::MockSubgraph;
     use crate::services::supergraph;
@@ -461,16 +538,13 @@ mod tests {
    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
    directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
    scalar join__FieldSet
-
    enum join__Graph {
        USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
        ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
    }
-
    type Query {
        currentUser: User @join__field(graph: USER)
    }
-
    type User
    @join__owner(graph: USER)
    @join__type(graph: ORGA, key: "id")
@@ -479,7 +553,6 @@ mod tests {
        name: String
        activeOrganization: Organization
    }
-
    type Organization
    @join__owner(graph: ORGA)
    @join__type(graph: ORGA, key: "id")
@@ -506,12 +579,13 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
             .query("query { currentUser { activeOrganization { id creatorUser { name } } } }")
+            .context(defer_context())
             // Request building here
             .build()
             .unwrap();
@@ -541,11 +615,12 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
+            .context(defer_context())
             .query(
                 "query { currentUser { activeOrganization { nonNullId creatorUser { name } } } }",
             )
@@ -598,12 +673,12 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query("query { currentUser { id  ...@defer { name } } }")
             .build()
             .unwrap();
@@ -694,12 +769,12 @@ mod tests {
             .unwrap()
             .schema(schema)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 r#"query { 
                 computer(id: "Computer1") {   
@@ -784,13 +859,13 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
-            .query(
+        .context(defer_context())
+        .query(
                 "query { currentUser { activeOrganization { id  suborga { id ...@defer { nonNullId } } } } }",
             )
             .build()
@@ -866,13 +941,13 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
-            .query(
+        .context(defer_context())
+        .query(
                 "query { currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
             )
             .build()
@@ -938,12 +1013,12 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 "query { __typename currentUser { activeOrganization { id  suborga { id ...@defer { name } } } } }",
             )
@@ -959,6 +1034,82 @@ mod tests {
         insta::assert_json_snapshot!(res);
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn root_typename_with_defer_and_empty_first_response() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "Organization", "id":"0"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [{ "suborga": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2"},
+                    { "__typename": "Organization", "id": "3"},
+                    ] }]
+                },
+                }}
+        )
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": {
+                    "representations":[
+                        {"__typename": "Organization", "id":"1"},
+                        {"__typename": "Organization", "id":"2"},
+                        {"__typename": "Organization", "id":"3"}
+
+                        ]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2", "name": "A"},
+                    { "__typename": "Organization", "id": "3"},
+                    ]
+                }
+                }}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query { __typename ... @defer { currentUser { activeOrganization { id  suborga { id name } } } } }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(
+            res.data.as_ref().unwrap().get("__typename"),
+            Some(&serde_json_bytes::Value::String("Query".into()))
+        );
+
+        // Must have 2 chunks
+        let _ = stream.next_response().await.unwrap();
     }
 
     #[tokio::test]
@@ -992,12 +1143,12 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 "query { ...@defer { __typename currentUser { activeOrganization { id  suborga { id name } } } } }",
             )
@@ -1093,12 +1244,12 @@ mod tests {
             .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
             .unwrap()
             .schema(schema)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 r#"mutation ($userId: ID!) {
                     makePayment(userId: $userId) {
@@ -1206,7 +1357,7 @@ mod tests {
             .unwrap()
             .schema(SCHEMA)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
@@ -1229,7 +1380,7 @@ mod tests {
                 }
             }"#,
             )
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .build()
             .unwrap();
         let mut response = service.oneshot(request).await.unwrap();
@@ -1357,12 +1508,12 @@ mod tests {
             .unwrap()
             .schema(schema)
             .extra_plugin(subgraphs)
-            .build()
+            .build_supergraph()
             .await
             .unwrap();
 
         let request = supergraph::Request::fake_builder()
-            .header("Accept", "multipart/mixed; deferSpec=20220824")
+            .context(defer_context())
             .query(
                 r#"query {
                     me {
@@ -1388,5 +1539,11 @@ mod tests {
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    fn defer_context() -> Context {
+        let context = Context::new();
+        context.insert(ACCEPTS_MULTIPART_CONTEXT_KEY, true).unwrap();
+        context
     }
 }

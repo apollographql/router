@@ -58,6 +58,7 @@ impl Plugin for ForbidAnonymousOperations {
                         .error(
                             graphql::Error::builder()
                                 .message("Anonymous operations are not allowed")
+                                .extension_code("ANONYMOUS_OPERATION")
                                 .build(),
                         )
                         .status_code(StatusCode::BAD_REQUEST)
@@ -116,7 +117,7 @@ mod tests {
         apollo_router::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
     }

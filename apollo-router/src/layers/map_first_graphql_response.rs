@@ -98,14 +98,17 @@ mod tests {
                 .execution_hook(|service| {
                     service
                         .map_first_graphql_response(|_context, http_parts, mut graphql_response| {
-                            graphql_response
-                                .errors
-                                .push(graphql::Error::builder().message("oh no!").build());
+                            graphql_response.errors.push(
+                                graphql::Error::builder()
+                                    .message("oh no!")
+                                    .extension_code("FOO".to_string())
+                                    .build(),
+                            );
                             (http_parts, graphql_response)
                         })
                         .boxed()
                 })
-                .build()
+                .build_supergraph()
                 .await
                 .unwrap()
                 .oneshot(supergraph::Request::canned_builder().build().unwrap())

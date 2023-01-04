@@ -10,6 +10,7 @@ use std::time::Duration;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use jsonpath_lib::Selector;
+use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
@@ -95,7 +96,7 @@ impl TracingTest {
         for _i in 0..100 {
             let mut request = client
                 .post("http://localhost:4000")
-                .header(CONTENT_TYPE, "application/json")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
                 .json(&json!({"query":"{topProducts{name}}","variables":{}}))

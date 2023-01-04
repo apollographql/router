@@ -36,7 +36,7 @@ impl SubgraphServiceFactory for MockSubgraphFactory {
             SubgraphRequest,
         >>::Future;
 
-    fn new_service(&self, name: &str) -> Option<Self::SubgraphService> {
+    fn create(&self, name: &str) -> Option<Self::SubgraphService> {
         self.subgraphs.get(name).map(|service| {
             self.plugins
                 .iter()
