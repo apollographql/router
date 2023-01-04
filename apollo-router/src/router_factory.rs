@@ -1,4 +1,3 @@
-use std::fs;
 use std::io;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
@@ -146,11 +145,10 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             .tls
             .subgraphs
             .as_ref()
-            .and_then(|subgraphs| subgraphs.certificate_authorities_path.as_ref())
-            .and_then(|path| {
-                println!("will load certificates from {path}");
+            .and_then(|subgraphs| subgraphs.certificate_authorities.as_ref())
+            .and_then(|certificate_authorities| {
                 let mut store = RootCertStore::empty();
-                let certificates = load_certs(path)
+                let certificates = load_certs(certificate_authorities)
                     .map_err(|e| {
                         tracing::error!("could not parse certificate list: {e:?}");
                     })
@@ -234,18 +232,15 @@ impl YamlRouterFactory {
             .tls
             .subgraphs
             .as_ref()
-            .and_then(|subgraphs| subgraphs.certificate_authorities_path.as_ref())
-            .and_then(|path| {
-                println!("will load certificates from {path}");
+            .and_then(|subgraphs| subgraphs.certificate_authorities.as_ref())
+            .and_then(|certificate_authorities| {
                 let mut store = RootCertStore::empty();
-                let certificates = load_certs(path)
+                let certificates = load_certs(certificate_authorities)
                     .map_err(|e| {
                         tracing::error!("could not parse certificate list: {e:?}");
                     })
                     .ok()?;
                 for certificate in certificates {
-                    println!("adding cert: {certificate:?}");
-
                     store
                         .add(&certificate)
                         .map_err(|e| {
@@ -286,20 +281,11 @@ impl YamlRouterFactory {
     }
 }
 
-fn load_certs(filename: &str) -> io::Result<Vec<rustls::Certificate>> {
-    tracing::debug!("loading certificate from {}", filename);
-
-    // Open certificate file.
-    let certfile = fs::File::open(filename).map_err(|e| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            format!("failed to open {}: {}", filename, e),
-        )
-    })?;
-    let mut reader = io::BufReader::new(certfile);
+fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+    tracing::debug!("loading root certificates");
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut reader).map_err(|_| {
+    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
         io::Error::new(
             io::ErrorKind::Other,
             "failed to load certificate".to_string(),

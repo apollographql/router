@@ -2771,8 +2771,8 @@ expression: "&schema"
           "default": null,
           "type": "object",
           "properties": {
-            "certificate_authorities_path": {
-              "description": "Path to a list of certificate authorities in PEM format",
+            "certificate_authorities": {
+              "description": "list of certificate authorities in PEM format",
               "default": null,
               "type": "string",
               "nullable": true

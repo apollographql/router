@@ -639,17 +639,17 @@ impl Default for Tls {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Subgraph {
-    /// Path to a list of certificate authorities in PEM format
+    /// list of certificate authorities in PEM format
     #[serde(default)]
-    pub(crate) certificate_authorities_path: Option<String>,
+    pub(crate) certificate_authorities: Option<String>,
 }
 
 #[buildstructor::buildstructor]
 impl Subgraph {
     #[builder]
-    pub(crate) fn new(certificate_authorities_path: Option<String>) -> Self {
+    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
         Self {
-            certificate_authorities_path,
+            certificate_authorities,
         }
     }
 }

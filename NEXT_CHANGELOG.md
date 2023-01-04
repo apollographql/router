@@ -40,7 +40,7 @@ This adds a configuration option to set the list of certificate authorities for 
 ```yaml
 tls:
   subgraphs:
-    certificate_authorities_path: /path/to/ca.crt
+    certificate_authorities: "${file./path/to/ca.crt}"
 ```
 
 The file is expected to be a list of certificates in PEM format, concatenated (as in Apache configuration).
