@@ -310,7 +310,7 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
-    Router::<hyper::Body>::new().route(
+    Router::new().route(
         &graphql_configuration.path,
         get({
             move |Extension(service): Extension<RF>, request: Request<Body>| {
