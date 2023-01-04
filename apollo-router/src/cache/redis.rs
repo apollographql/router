@@ -26,9 +26,14 @@ pub(crate) struct RedisValue<V>(pub(crate) V)
 where
     V: ValueType;
 
+enum RedisConnection {
+    Single(redis::aio::Connection),
+    Cluster(Connection),
+}
+
 #[derive(Clone)]
 pub(crate) struct RedisCacheStorage {
-    inner: Arc<Mutex<Connection>>,
+    inner: Arc<Mutex<RedisConnection>>,
     ttl: Option<Duration>,
 }
 
@@ -108,11 +113,19 @@ where
 
 impl RedisCacheStorage {
     pub(crate) async fn new(
-        urls: Vec<String>,
+        mut urls: Vec<String>,
         ttl: Option<Duration>,
     ) -> Result<Self, redis::RedisError> {
-        let client = Client::open(urls)?;
-        let connection = client.get_connection().await?;
+        let connection = if urls.len() == 1 {
+            let client =
+                redis::Client::open(urls.pop().expect("urls contains only one url; qed")).unwrap();
+            let connection = client.get_async_connection().await?;
+            RedisConnection::Single(connection)
+        } else {
+            let client = Client::open(urls)?;
+            let connection = client.get_connection().await?;
+            RedisConnection::Cluster(connection)
+        };
 
         tracing::trace!("redis connection established");
         Ok(Self {
@@ -131,9 +144,11 @@ impl RedisCacheStorage {
     ) -> Option<RedisValue<V>> {
         tracing::trace!("getting from redis: {:?}", key);
         let mut guard = self.inner.lock().await;
-        let res = guard.get(&key).await.ok();
 
-        res
+        match &mut *guard {
+            RedisConnection::Single(conn) => conn.get(key).await.ok(),
+            RedisConnection::Cluster(conn) => conn.get(key).await.ok(),
+        }
     }
 
     pub(crate) async fn mget<K: KeyType, V: ValueType>(
@@ -144,24 +159,45 @@ impl RedisCacheStorage {
         let mut guard = self.inner.lock().await;
 
         let res = if keys.len() == 1 {
-            let res = guard
-                .get(keys.first().unwrap())
-                .await
-                .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
-                    e
-                })
-                .ok();
+            let res = match &mut *guard {
+                RedisConnection::Single(conn) => conn
+                    .get(keys.first().unwrap())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("mget error: {}", e);
+                        e
+                    })
+                    .ok(),
+                RedisConnection::Cluster(conn) => conn
+                    .get(keys.first().unwrap())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("mget error: {}", e);
+                        e
+                    })
+                    .ok(),
+            };
+
             Some(vec![res])
         } else {
-            guard
-                .get::<Vec<RedisKey<K>>, Vec<Option<RedisValue<V>>>>(keys.clone())
-                .await
-                .map_err(|e| {
-                    tracing::error!("mget error: {}", e);
-                    e
-                })
-                .ok()
+            match &mut *guard {
+                RedisConnection::Single(conn) => conn
+                    .get::<Vec<RedisKey<K>>, Vec<Option<RedisValue<V>>>>(keys.clone())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("mget error: {}", e);
+                        e
+                    })
+                    .ok(),
+                RedisConnection::Cluster(conn) => conn
+                    .get::<Vec<RedisKey<K>>, Vec<Option<RedisValue<V>>>>(keys.clone())
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("mget error: {}", e);
+                        e
+                    })
+                    .ok(),
+            }
         };
         tracing::trace!("result for '{:?}': {:?}", keys, res);
 
@@ -175,9 +211,16 @@ impl RedisCacheStorage {
     ) {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
         let mut guard = self.inner.lock().await;
-        let r = guard
-            .set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
-            .await;
+        let r = match &mut *guard {
+            RedisConnection::Single(conn) => {
+                conn.set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+                    .await
+            }
+            RedisConnection::Cluster(conn) => {
+                conn.set::<RedisKey<K>, RedisValue<V>, redis::Value>(key, value)
+                    .await
+            }
+        };
         tracing::trace!("insert result {:?}", r);
     }
 
@@ -198,16 +241,31 @@ impl RedisCacheStorage {
 
             let mut guard = self.inner.lock().await;
 
-            let r = pipeline
-                .query_async::<Connection, redis::Value>(&mut *guard)
-                .await;
+            let r = match &mut *guard {
+                RedisConnection::Single(conn) => {
+                    pipeline
+                        .query_async::<redis::aio::Connection, redis::Value>(conn)
+                        .await
+                }
+                RedisConnection::Cluster(conn) => {
+                    pipeline.query_async::<Connection, redis::Value>(conn).await
+                }
+            };
+
             tracing::info!("insert result {:?}", r);
         } else {
             let mut guard = self.inner.lock().await;
 
-            let r = guard
-                .set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
-                .await;
+            let r = match &mut *guard {
+                RedisConnection::Single(conn) => {
+                    conn.set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
+                        .await
+                }
+                RedisConnection::Cluster(conn) => {
+                    conn.set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
+                        .await
+                }
+            };
             tracing::info!("insert result {:?}", r);
         }
     }
