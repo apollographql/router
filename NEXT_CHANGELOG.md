@@ -38,6 +38,6 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
 
-When throwing a `INVALID_GRAPHQL_REQUEST` error, it nows specify the right `content-type` header.
+When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
