@@ -86,7 +86,7 @@ impl Endpoint {
                     .into_response())
             }
         };
-        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
     }
 }
 /// Factory for creating a RouterService

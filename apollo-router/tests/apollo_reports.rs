@@ -7,10 +7,10 @@ use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
+use axum::body::Bytes;
 use axum::routing::post;
 use axum::Extension;
 use axum::Json;
-use bytes::Bytes;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
@@ -142,8 +142,8 @@ pub(crate) mod proto {
 }
 
 async fn report(
-    bytes: Bytes,
     Extension(state): Extension<Arc<Mutex<Vec<Report>>>>,
+    bytes: Bytes,
 ) -> Result<Json<()>, http::StatusCode> {
     let mut gz = GzDecoder::new(&*bytes);
     let mut buf = Vec::new();
