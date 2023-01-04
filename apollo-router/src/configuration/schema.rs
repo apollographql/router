@@ -123,11 +123,9 @@ pub(crate) fn validate_yaml_configuration(
                     yaml::Value::String(value, marker) => {
                         let start_marker = marker;
                         let end_marker = marker;
-                        let offset = 0.max(
-                            start_marker
-                                .line()
-                                .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                        );
+                        let offset = start_marker
+                            .line()
+                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
 
                         let lines = yaml_split_by_lines[offset..end_marker.line()]
                             .iter()
@@ -232,16 +230,15 @@ fn context_lines(
     start_marker: &Marker,
     end_marker: &Marker,
 ) -> String {
-    let offset = 0.max(
-        start_marker
-            .line()
-            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-    );
+    let offset = start_marker
+        .line()
+        .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
+
     yaml_split_by_lines[offset..end_marker.line()]
         .iter()
         .enumerate()
         .map(|(idx, line)| {
-            let real_line = idx + offset;
+            let real_line = idx + offset + 1;
             match real_line.cmp(&start_marker.line()) {
                 Ordering::Equal => format!("┌ {line}"),
                 Ordering::Greater => format!("| {line}"),

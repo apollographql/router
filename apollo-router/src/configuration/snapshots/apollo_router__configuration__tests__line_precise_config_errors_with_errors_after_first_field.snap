@@ -1,15 +1,17 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
 1. /supergraph
 
 
-supergraph:
-┌   # The socket address and port to listen on
+┌ supergraph:
+|   # The socket address and port to listen on
 |   # Defaults to 127.0.0.1:4000
 |   listen: 127.0.0.1:4000
 |   bad: "donotwork"
 |   another_one: true
 └-----> Additional properties are not allowed ('bad', 'another_one' were unexpected)
+
+
