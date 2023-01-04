@@ -17,132 +17,86 @@ expression: get_spans()
     }
   },
   "children": {
-    "apollo_router::plugins::telemetry::supergraph": {
-      "name": "apollo_router::plugins::telemetry::supergraph",
+    "apollo_router::axum_factory::utils::request": {
+      "name": "apollo_router::axum_factory::utils::request",
       "record": {
         "entries": [
           [
-            "graphql.document",
-            "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+            "http.method",
+            "POST"
           ],
           [
-            "graphql.operation.name",
-            ""
+            "http.route",
+            "http://default/"
           ],
           [
-            "client.name",
-            ""
-          ],
-          [
-            "client.version",
-            ""
+            "http.flavor",
+            "HTTP/1.1"
           ],
           [
             "otel.kind",
-            "INTERNAL"
-          ],
-          [
-            "apollo_private.field_level_instrumentation_ratio",
-            0.0
-          ],
-          [
-            "apollo_private.graphql.variables",
-            "{\"reviewsForAuthorAuthorId\":\"\",\"topProductsFirst\":\"\"}"
-          ],
-          [
-            "apollo_private.http.request_headers",
-            "{\"content-type\":[\"\"]}"
-          ],
-          [
-            "apollo_private.operation_signature",
-            "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
+            "SERVER"
           ]
         ],
         "metadata": {
-          "name": "supergraph",
-          "target": "apollo_router::plugins::telemetry",
+          "name": "request",
+          "target": "apollo_router::axum_factory::utils",
           "level": "INFO",
-          "module_path": "apollo_router::plugins::telemetry",
+          "module_path": "apollo_router::axum_factory::utils",
           "fields": {
             "names": [
-              "graphql.document",
-              "graphql.operation.name",
-              "client.name",
-              "client.version",
-              "otel.kind",
-              "apollo_private.field_level_instrumentation_ratio",
-              "apollo_private.operation_signature",
-              "apollo_private.graphql.variables",
-              "apollo_private.http.request_headers"
+              "http.method",
+              "http.route",
+              "http.flavor",
+              "otel.kind"
             ]
           }
         }
       },
       "children": {
-        "apollo_router::services::supergraph_service::query_planning": {
-          "name": "apollo_router::services::supergraph_service::query_planning",
+        "apollo_router::plugins::telemetry::router": {
+          "name": "apollo_router::plugins::telemetry::router",
           "record": {
             "entries": [
               [
-                "graphql.document",
-                "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+                "http.method",
+                "POST"
               ],
               [
-                "graphql.operation.name",
+                "http.route",
+                "http://default/"
+              ],
+              [
+                "http.flavor",
+                "HTTP/1.1"
+              ],
+              [
+                "trace_id",
+                "[REDACTED]"
+              ],
+              [
+                "client.name",
+                ""
+              ],
+              [
+                "client.version",
                 ""
               ],
               [
                 "otel.kind",
                 "INTERNAL"
-              ]
-            ],
-            "metadata": {
-              "name": "query_planning",
-              "target": "apollo_router::services::supergraph_service",
-              "level": "INFO",
-              "module_path": "apollo_router::services::supergraph_service",
-              "fields": {
-                "names": [
-                  "graphql.document",
-                  "graphql.operation.name",
-                  "otel.kind"
-                ]
-              }
-            }
-          },
-          "children": {
-            "apollo_router::query_planner::bridge_query_planner::parse_query": {
-              "name": "apollo_router::query_planner::bridge_query_planner::parse_query",
-              "record": {
-                "entries": [
-                  [
-                    "otel.kind",
-                    "INTERNAL"
-                  ]
-                ],
-                "metadata": {
-                  "name": "parse_query",
-                  "target": "apollo_router::query_planner::bridge_query_planner",
-                  "level": "INFO",
-                  "module_path": "apollo_router::query_planner::bridge_query_planner",
-                  "fields": {
-                    "names": [
-                      "otel.kind"
-                    ]
-                  }
-                }
-              },
-              "children": {}
-            }
-          }
-        },
-        "apollo_router::plugins::telemetry::execution": {
-          "name": "apollo_router::plugins::telemetry::execution",
-          "record": {
-            "entries": [
+              ],
               [
-                "otel.kind",
-                "INTERNAL"
+                "apollo_private.http.request_headers",
+                "{\"content-type\":[\"\"]}"
+              ],
+              [
+                "apollo_private.duration_ns",
+                0
+              ],
+              [
+                "otel.status_code",
+                "Ok"
               ],
               [
                 "message",
@@ -150,249 +104,86 @@ expression: get_spans()
               ]
             ],
             "metadata": {
-              "name": "execution",
+              "name": "router",
               "target": "apollo_router::plugins::telemetry",
               "level": "INFO",
               "module_path": "apollo_router::plugins::telemetry",
               "fields": {
                 "names": [
-                  "otel.kind"
+                  "http.method",
+                  "http.route",
+                  "http.flavor",
+                  "trace_id",
+                  "client.name",
+                  "client.version",
+                  "otel.kind",
+                  "otel.status_code",
+                  "apollo_private.duration_ns",
+                  "apollo_private.http.request_headers",
+                  "apollo_private.http.response_headers"
                 ]
               }
             }
           },
           "children": {
-            "apollo_router::query_planner::execution::sequence": {
-              "name": "apollo_router::query_planner::execution::sequence",
+            "apollo_router::plugins::telemetry::supergraph": {
+              "name": "apollo_router::plugins::telemetry::supergraph",
               "record": {
                 "entries": [
                   [
+                    "graphql.document",
+                    "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
+                  ],
+                  [
+                    "graphql.operation.name",
+                    ""
+                  ],
+                  [
                     "otel.kind",
                     "INTERNAL"
+                  ],
+                  [
+                    "apollo_private.field_level_instrumentation_ratio",
+                    0.01
+                  ],
+                  [
+                    "apollo_private.graphql.variables",
+                    "{\"reviewsForAuthorAuthorId\":\"\",\"topProductsFirst\":\"\"}"
+                  ],
+                  [
+                    "apollo_private.operation_signature",
+                    "# -\n{topProducts{name reviews{author{id name}id product{name}}upc}}"
                   ]
                 ],
                 "metadata": {
-                  "name": "sequence",
-                  "target": "apollo_router::query_planner::execution",
+                  "name": "supergraph",
+                  "target": "apollo_router::plugins::telemetry",
                   "level": "INFO",
-                  "module_path": "apollo_router::query_planner::execution",
+                  "module_path": "apollo_router::plugins::telemetry",
                   "fields": {
                     "names": [
-                      "otel.kind"
+                      "graphql.document",
+                      "graphql.operation.name",
+                      "otel.kind",
+                      "apollo_private.field_level_instrumentation_ratio",
+                      "apollo_private.operation_signature",
+                      "apollo_private.graphql.variables"
                     ]
                   }
                 }
               },
               "children": {
-                "apollo_router::query_planner::execution::fetch": {
-                  "name": "apollo_router::query_planner::execution::fetch",
+                "apollo_router::services::supergraph_service::query_planning": {
+                  "name": "apollo_router::services::supergraph_service::query_planning",
                   "record": {
                     "entries": [
                       [
-                        "otel.kind",
-                        "INTERNAL"
+                        "graphql.document",
+                        "{ topProducts { upc name reviews {id product { name } author { id name } } } }"
                       ],
                       [
-                        "apollo.subgraph.name",
-                        "products"
-                      ],
-                      [
-                        "apollo_private.sent_time_offset",
-                        0
-                      ]
-                    ],
-                    "metadata": {
-                      "name": "fetch",
-                      "target": "apollo_router::query_planner::execution",
-                      "level": "INFO",
-                      "module_path": "apollo_router::query_planner::execution",
-                      "fields": {
-                        "names": [
-                          "otel.kind",
-                          "apollo.subgraph.name",
-                          "apollo_private.sent_time_offset"
-                        ]
-                      }
-                    }
-                  },
-                  "children": {
-                    "apollo_router::query_planner::fetch::make_variables": {
-                      "name": "apollo_router::query_planner::fetch::make_variables",
-                      "record": {
-                        "entries": [],
-                        "metadata": {
-                          "name": "make_variables",
-                          "target": "apollo_router::query_planner::fetch",
-                          "level": "DEBUG",
-                          "module_path": "apollo_router::query_planner::fetch",
-                          "fields": {
-                            "names": []
-                          }
-                        }
-                      },
-                      "children": {}
-                    },
-                    "apollo_router::plugins::telemetry::subgraph": {
-                      "name": "apollo_router::plugins::telemetry::subgraph",
-                      "record": {
-                        "entries": [
-                          [
-                            "apollo.subgraph.name",
-                            "products"
-                          ],
-                          [
-                            "graphql.document",
-                            "{topProducts{__typename upc name}}"
-                          ],
-                          [
-                            "graphql.operation.name",
-                            ""
-                          ],
-                          [
-                            "otel.kind",
-                            "INTERNAL"
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "subgraph",
-                          "target": "apollo_router::plugins::telemetry",
-                          "level": "INFO",
-                          "module_path": "apollo_router::plugins::telemetry",
-                          "fields": {
-                            "names": [
-                              "apollo.subgraph.name",
-                              "graphql.document",
-                              "graphql.operation.name",
-                              "otel.kind",
-                              "apollo_private.ftv1"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {
-                        "apollo_router::services::subgraph_service::body_compression": {
-                          "name": "apollo_router::services::subgraph_service::body_compression",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "body_compression",
-                              "target": "apollo_router::services::subgraph_service",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::services::subgraph_service",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router::services::subgraph_service::subgraph_request": {
-                          "name": "apollo_router::services::subgraph_service::subgraph_request",
-                          "record": {
-                            "entries": [
-                              [
-                                "otel.kind",
-                                "CLIENT"
-                              ],
-                              [
-                                "net.peer.name",
-                                "products.demo.starstuff.dev"
-                              ],
-                              [
-                                "net.peer.port",
-                                "443"
-                              ],
-                              [
-                                "http.route",
-                                "/"
-                              ],
-                              [
-                                "net.transport",
-                                "ip_tcp"
-                              ],
-                              [
-                                "apollo.subgraph.name",
-                                "products"
-                              ]
-                            ],
-                            "metadata": {
-                              "name": "subgraph_request",
-                              "target": "apollo_router::services::subgraph_service",
-                              "level": "INFO",
-                              "module_path": "apollo_router::services::subgraph_service",
-                              "fields": {
-                                "names": [
-                                  "otel.kind",
-                                  "net.peer.name",
-                                  "net.peer.port",
-                                  "http.route",
-                                  "net.transport",
-                                  "apollo.subgraph.name"
-                                ]
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router::services::subgraph_service::aggregate_response_data": {
-                          "name": "apollo_router::services::subgraph_service::aggregate_response_data",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "aggregate_response_data",
-                              "target": "apollo_router::services::subgraph_service",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::services::subgraph_service",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router::services::subgraph_service::parse_subgraph_response": {
-                          "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "parse_subgraph_response",
-                              "target": "apollo_router::services::subgraph_service",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::services::subgraph_service",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        }
-                      }
-                    },
-                    "apollo_router::query_planner::fetch::response_insert": {
-                      "name": "apollo_router::query_planner::fetch::response_insert",
-                      "record": {
-                        "entries": [],
-                        "metadata": {
-                          "name": "response_insert",
-                          "target": "apollo_router::query_planner::fetch",
-                          "level": "DEBUG",
-                          "module_path": "apollo_router::query_planner::fetch",
-                          "fields": {
-                            "names": []
-                          }
-                        }
-                      },
-                      "children": {}
-                    }
-                  }
-                },
-                "apollo_router::query_planner::execution::flatten": {
-                  "name": "apollo_router::query_planner::execution::flatten",
-                  "record": {
-                    "entries": [
-                      [
-                        "graphql.path",
-                        "/topProducts/@"
+                        "graphql.operation.name",
+                        ""
                       ],
                       [
                         "otel.kind",
@@ -400,225 +191,47 @@ expression: get_spans()
                       ]
                     ],
                     "metadata": {
-                      "name": "flatten",
-                      "target": "apollo_router::query_planner::execution",
+                      "name": "query_planning",
+                      "target": "apollo_router::services::supergraph_service",
                       "level": "INFO",
-                      "module_path": "apollo_router::query_planner::execution",
+                      "module_path": "apollo_router::services::supergraph_service",
                       "fields": {
                         "names": [
-                          "graphql.path",
+                          "graphql.document",
+                          "graphql.operation.name",
                           "otel.kind"
                         ]
                       }
                     }
                   },
                   "children": {
-                    "apollo_router::query_planner::execution::fetch": {
-                      "name": "apollo_router::query_planner::execution::fetch",
+                    "apollo_router::query_planner::bridge_query_planner::parse_query": {
+                      "name": "apollo_router::query_planner::bridge_query_planner::parse_query",
                       "record": {
                         "entries": [
                           [
                             "otel.kind",
                             "INTERNAL"
-                          ],
-                          [
-                            "apollo.subgraph.name",
-                            "reviews"
-                          ],
-                          [
-                            "apollo_private.sent_time_offset",
-                            0
                           ]
                         ],
                         "metadata": {
-                          "name": "fetch",
-                          "target": "apollo_router::query_planner::execution",
+                          "name": "parse_query",
+                          "target": "apollo_router::query_planner::bridge_query_planner",
                           "level": "INFO",
-                          "module_path": "apollo_router::query_planner::execution",
+                          "module_path": "apollo_router::query_planner::bridge_query_planner",
                           "fields": {
                             "names": [
-                              "otel.kind",
-                              "apollo.subgraph.name",
-                              "apollo_private.sent_time_offset"
+                              "otel.kind"
                             ]
                           }
                         }
                       },
-                      "children": {
-                        "apollo_router::query_planner::fetch::make_variables": {
-                          "name": "apollo_router::query_planner::fetch::make_variables",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "make_variables",
-                              "target": "apollo_router::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        },
-                        "apollo_router::plugins::telemetry::subgraph": {
-                          "name": "apollo_router::plugins::telemetry::subgraph",
-                          "record": {
-                            "entries": [
-                              [
-                                "apollo.subgraph.name",
-                                "reviews"
-                              ],
-                              [
-                                "graphql.document",
-                                "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}"
-                              ],
-                              [
-                                "graphql.operation.name",
-                                ""
-                              ],
-                              [
-                                "otel.kind",
-                                "INTERNAL"
-                              ]
-                            ],
-                            "metadata": {
-                              "name": "subgraph",
-                              "target": "apollo_router::plugins::telemetry",
-                              "level": "INFO",
-                              "module_path": "apollo_router::plugins::telemetry",
-                              "fields": {
-                                "names": [
-                                  "apollo.subgraph.name",
-                                  "graphql.document",
-                                  "graphql.operation.name",
-                                  "otel.kind",
-                                  "apollo_private.ftv1"
-                                ]
-                              }
-                            }
-                          },
-                          "children": {
-                            "apollo_router::services::subgraph_service::body_compression": {
-                              "name": "apollo_router::services::subgraph_service::body_compression",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "body_compression",
-                                  "target": "apollo_router::services::subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::services::subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::services::subgraph_service::subgraph_request": {
-                              "name": "apollo_router::services::subgraph_service::subgraph_request",
-                              "record": {
-                                "entries": [
-                                  [
-                                    "otel.kind",
-                                    "CLIENT"
-                                  ],
-                                  [
-                                    "net.peer.name",
-                                    "reviews.demo.starstuff.dev"
-                                  ],
-                                  [
-                                    "net.peer.port",
-                                    "443"
-                                  ],
-                                  [
-                                    "http.route",
-                                    "/"
-                                  ],
-                                  [
-                                    "net.transport",
-                                    "ip_tcp"
-                                  ],
-                                  [
-                                    "apollo.subgraph.name",
-                                    "reviews"
-                                  ]
-                                ],
-                                "metadata": {
-                                  "name": "subgraph_request",
-                                  "target": "apollo_router::services::subgraph_service",
-                                  "level": "INFO",
-                                  "module_path": "apollo_router::services::subgraph_service",
-                                  "fields": {
-                                    "names": [
-                                      "otel.kind",
-                                      "net.peer.name",
-                                      "net.peer.port",
-                                      "http.route",
-                                      "net.transport",
-                                      "apollo.subgraph.name"
-                                    ]
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::services::subgraph_service::aggregate_response_data": {
-                              "name": "apollo_router::services::subgraph_service::aggregate_response_data",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "aggregate_response_data",
-                                  "target": "apollo_router::services::subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::services::subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::services::subgraph_service::parse_subgraph_response": {
-                              "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "parse_subgraph_response",
-                                  "target": "apollo_router::services::subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::services::subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            }
-                          }
-                        },
-                        "apollo_router::query_planner::fetch::response_insert": {
-                          "name": "apollo_router::query_planner::fetch::response_insert",
-                          "record": {
-                            "entries": [],
-                            "metadata": {
-                              "name": "response_insert",
-                              "target": "apollo_router::query_planner::fetch",
-                              "level": "DEBUG",
-                              "module_path": "apollo_router::query_planner::fetch",
-                              "fields": {
-                                "names": []
-                              }
-                            }
-                          },
-                          "children": {}
-                        }
-                      }
+                      "children": {}
                     }
                   }
                 },
-                "apollo_router::query_planner::execution::parallel": {
-                  "name": "apollo_router::query_planner::execution::parallel",
+                "apollo_router::plugins::telemetry::execution": {
+                  "name": "apollo_router::plugins::telemetry::execution",
                   "record": {
                     "entries": [
                       [
@@ -627,10 +240,10 @@ expression: get_spans()
                       ]
                     ],
                     "metadata": {
-                      "name": "parallel",
-                      "target": "apollo_router::query_planner::execution",
+                      "name": "execution",
+                      "target": "apollo_router::plugins::telemetry",
                       "level": "INFO",
-                      "module_path": "apollo_router::query_planner::execution",
+                      "module_path": "apollo_router::plugins::telemetry",
                       "fields": {
                         "names": [
                           "otel.kind"
@@ -639,27 +252,22 @@ expression: get_spans()
                     }
                   },
                   "children": {
-                    "apollo_router::query_planner::execution::flatten": {
-                      "name": "apollo_router::query_planner::execution::flatten",
+                    "apollo_router::query_planner::execution::sequence": {
+                      "name": "apollo_router::query_planner::execution::sequence",
                       "record": {
                         "entries": [
-                          [
-                            "graphql.path",
-                            "/topProducts/@/reviews/@/product"
-                          ],
                           [
                             "otel.kind",
                             "INTERNAL"
                           ]
                         ],
                         "metadata": {
-                          "name": "flatten",
+                          "name": "sequence",
                           "target": "apollo_router::query_planner::execution",
                           "level": "INFO",
                           "module_path": "apollo_router::query_planner::execution",
                           "fields": {
                             "names": [
-                              "graphql.path",
                               "otel.kind"
                             ]
                           }
@@ -724,7 +332,7 @@ expression: get_spans()
                                   ],
                                   [
                                     "graphql.document",
-                                    "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}"
+                                    "{topProducts{__typename upc name}}"
                                   ],
                                   [
                                     "graphql.operation.name",
@@ -789,6 +397,10 @@ expression: get_spans()
                                         "/"
                                       ],
                                       [
+                                        "http.url",
+                                        "https://products.demo.starstuff.dev/"
+                                      ],
+                                      [
                                         "net.transport",
                                         "ip_tcp"
                                       ],
@@ -808,29 +420,31 @@ expression: get_spans()
                                           "net.peer.name",
                                           "net.peer.port",
                                           "http.route",
+                                          "http.url",
                                           "net.transport",
                                           "apollo.subgraph.name"
                                         ]
                                       }
                                     }
                                   },
-                                  "children": {}
-                                },
-                                "apollo_router::services::subgraph_service::aggregate_response_data": {
-                                  "name": "apollo_router::services::subgraph_service::aggregate_response_data",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "aggregate_response_data",
-                                      "target": "apollo_router::services::subgraph_service",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router::services::subgraph_service",
-                                      "fields": {
-                                        "names": []
-                                      }
+                                  "children": {
+                                    "apollo_router::services::subgraph_service::aggregate_response_data": {
+                                      "name": "apollo_router::services::subgraph_service::aggregate_response_data",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "aggregate_response_data",
+                                          "target": "apollo_router::services::subgraph_service",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::services::subgraph_service",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
                                     }
-                                  },
-                                  "children": {}
+                                  }
                                 },
                                 "apollo_router::services::subgraph_service::parse_subgraph_response": {
                                   "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
@@ -867,99 +481,273 @@ expression: get_spans()
                               "children": {}
                             }
                           }
-                        }
-                      }
-                    },
-                    "apollo_router::query_planner::execution::flatten": {
-                      "name": "apollo_router::query_planner::execution::flatten",
-                      "record": {
-                        "entries": [
-                          [
-                            "graphql.path",
-                            "/topProducts/@/reviews/@/author"
-                          ],
-                          [
-                            "otel.kind",
-                            "INTERNAL"
-                          ]
-                        ],
-                        "metadata": {
-                          "name": "flatten",
-                          "target": "apollo_router::query_planner::execution",
-                          "level": "INFO",
-                          "module_path": "apollo_router::query_planner::execution",
-                          "fields": {
-                            "names": [
-                              "graphql.path",
-                              "otel.kind"
-                            ]
-                          }
-                        }
-                      },
-                      "children": {
-                        "apollo_router::query_planner::execution::fetch": {
-                          "name": "apollo_router::query_planner::execution::fetch",
+                        },
+                        "apollo_router::query_planner::execution::flatten": {
+                          "name": "apollo_router::query_planner::execution::flatten",
                           "record": {
                             "entries": [
                               [
+                                "graphql.path",
+                                "/topProducts/@"
+                              ],
+                              [
                                 "otel.kind",
                                 "INTERNAL"
-                              ],
-                              [
-                                "apollo.subgraph.name",
-                                "accounts"
-                              ],
-                              [
-                                "apollo_private.sent_time_offset",
-                                0
                               ]
                             ],
                             "metadata": {
-                              "name": "fetch",
+                              "name": "flatten",
                               "target": "apollo_router::query_planner::execution",
                               "level": "INFO",
                               "module_path": "apollo_router::query_planner::execution",
                               "fields": {
                                 "names": [
-                                  "otel.kind",
-                                  "apollo.subgraph.name",
-                                  "apollo_private.sent_time_offset"
+                                  "graphql.path",
+                                  "otel.kind"
                                 ]
                               }
                             }
                           },
                           "children": {
-                            "apollo_router::query_planner::fetch::make_variables": {
-                              "name": "apollo_router::query_planner::fetch::make_variables",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "make_variables",
-                                  "target": "apollo_router::query_planner::fetch",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::query_planner::fetch",
-                                  "fields": {
-                                    "names": []
-                                  }
-                                }
-                              },
-                              "children": {}
-                            },
-                            "apollo_router::plugins::telemetry::subgraph": {
-                              "name": "apollo_router::plugins::telemetry::subgraph",
+                            "apollo_router::query_planner::execution::fetch": {
+                              "name": "apollo_router::query_planner::execution::fetch",
                               "record": {
                                 "entries": [
                                   [
+                                    "otel.kind",
+                                    "INTERNAL"
+                                  ],
+                                  [
                                     "apollo.subgraph.name",
-                                    "accounts"
+                                    "reviews"
                                   ],
                                   [
-                                    "graphql.document",
-                                    "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}"
-                                  ],
+                                    "apollo_private.sent_time_offset",
+                                    0
+                                  ]
+                                ],
+                                "metadata": {
+                                  "name": "fetch",
+                                  "target": "apollo_router::query_planner::execution",
+                                  "level": "INFO",
+                                  "module_path": "apollo_router::query_planner::execution",
+                                  "fields": {
+                                    "names": [
+                                      "otel.kind",
+                                      "apollo.subgraph.name",
+                                      "apollo_private.sent_time_offset"
+                                    ]
+                                  }
+                                }
+                              },
+                              "children": {
+                                "apollo_router::query_planner::fetch::make_variables": {
+                                  "name": "apollo_router::query_planner::fetch::make_variables",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "make_variables",
+                                      "target": "apollo_router::query_planner::fetch",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                },
+                                "apollo_router::plugins::telemetry::subgraph": {
+                                  "name": "apollo_router::plugins::telemetry::subgraph",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "apollo.subgraph.name",
+                                        "reviews"
+                                      ],
+                                      [
+                                        "graphql.document",
+                                        "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{id product{__typename upc}author{__typename id}}}}}"
+                                      ],
+                                      [
+                                        "graphql.operation.name",
+                                        ""
+                                      ],
+                                      [
+                                        "otel.kind",
+                                        "INTERNAL"
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "subgraph",
+                                      "target": "apollo_router::plugins::telemetry",
+                                      "level": "INFO",
+                                      "module_path": "apollo_router::plugins::telemetry",
+                                      "fields": {
+                                        "names": [
+                                          "apollo.subgraph.name",
+                                          "graphql.document",
+                                          "graphql.operation.name",
+                                          "otel.kind",
+                                          "apollo_private.ftv1"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "apollo_router::services::subgraph_service::body_compression": {
+                                      "name": "apollo_router::services::subgraph_service::body_compression",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "body_compression",
+                                          "target": "apollo_router::services::subgraph_service",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::services::subgraph_service",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::services::subgraph_service::subgraph_request": {
+                                      "name": "apollo_router::services::subgraph_service::subgraph_request",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "otel.kind",
+                                            "CLIENT"
+                                          ],
+                                          [
+                                            "net.peer.name",
+                                            "reviews.demo.starstuff.dev"
+                                          ],
+                                          [
+                                            "net.peer.port",
+                                            "443"
+                                          ],
+                                          [
+                                            "http.route",
+                                            "/"
+                                          ],
+                                          [
+                                            "http.url",
+                                            "https://reviews.demo.starstuff.dev/"
+                                          ],
+                                          [
+                                            "net.transport",
+                                            "ip_tcp"
+                                          ],
+                                          [
+                                            "apollo.subgraph.name",
+                                            "reviews"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "subgraph_request",
+                                          "target": "apollo_router::services::subgraph_service",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router::services::subgraph_service",
+                                          "fields": {
+                                            "names": [
+                                              "otel.kind",
+                                              "net.peer.name",
+                                              "net.peer.port",
+                                              "http.route",
+                                              "http.url",
+                                              "net.transport",
+                                              "apollo.subgraph.name"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "apollo_router::services::subgraph_service::aggregate_response_data": {
+                                          "name": "apollo_router::services::subgraph_service::aggregate_response_data",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "aggregate_response_data",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        }
+                                      }
+                                    },
+                                    "apollo_router::services::subgraph_service::parse_subgraph_response": {
+                                      "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "parse_subgraph_response",
+                                          "target": "apollo_router::services::subgraph_service",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::services::subgraph_service",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    }
+                                  }
+                                },
+                                "apollo_router::query_planner::fetch::response_insert": {
+                                  "name": "apollo_router::query_planner::fetch::response_insert",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "response_insert",
+                                      "target": "apollo_router::query_planner::fetch",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::query_planner::fetch",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "apollo_router::query_planner::execution::parallel": {
+                          "name": "apollo_router::query_planner::execution::parallel",
+                          "record": {
+                            "entries": [
+                              [
+                                "otel.kind",
+                                "INTERNAL"
+                              ]
+                            ],
+                            "metadata": {
+                              "name": "parallel",
+                              "target": "apollo_router::query_planner::execution",
+                              "level": "INFO",
+                              "module_path": "apollo_router::query_planner::execution",
+                              "fields": {
+                                "names": [
+                                  "otel.kind"
+                                ]
+                              }
+                            }
+                          },
+                          "children": {
+                            "apollo_router::query_planner::execution::flatten": {
+                              "name": "apollo_router::query_planner::execution::flatten",
+                              "record": {
+                                "entries": [
                                   [
-                                    "graphql.operation.name",
-                                    ""
+                                    "graphql.path",
+                                    "/topProducts/@/reviews/@/product"
                                   ],
                                   [
                                     "otel.kind",
@@ -967,161 +755,491 @@ expression: get_spans()
                                   ]
                                 ],
                                 "metadata": {
-                                  "name": "subgraph",
-                                  "target": "apollo_router::plugins::telemetry",
+                                  "name": "flatten",
+                                  "target": "apollo_router::query_planner::execution",
                                   "level": "INFO",
-                                  "module_path": "apollo_router::plugins::telemetry",
+                                  "module_path": "apollo_router::query_planner::execution",
                                   "fields": {
                                     "names": [
-                                      "apollo.subgraph.name",
-                                      "graphql.document",
-                                      "graphql.operation.name",
-                                      "otel.kind",
-                                      "apollo_private.ftv1"
+                                      "graphql.path",
+                                      "otel.kind"
                                     ]
                                   }
                                 }
                               },
                               "children": {
-                                "apollo_router::services::subgraph_service::body_compression": {
-                                  "name": "apollo_router::services::subgraph_service::body_compression",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "body_compression",
-                                      "target": "apollo_router::services::subgraph_service",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router::services::subgraph_service",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {}
-                                },
-                                "apollo_router::services::subgraph_service::subgraph_request": {
-                                  "name": "apollo_router::services::subgraph_service::subgraph_request",
+                                "apollo_router::query_planner::execution::fetch": {
+                                  "name": "apollo_router::query_planner::execution::fetch",
                                   "record": {
                                     "entries": [
                                       [
                                         "otel.kind",
-                                        "CLIENT"
-                                      ],
-                                      [
-                                        "net.peer.name",
-                                        "accounts.demo.starstuff.dev"
-                                      ],
-                                      [
-                                        "net.peer.port",
-                                        "443"
-                                      ],
-                                      [
-                                        "http.route",
-                                        "/"
-                                      ],
-                                      [
-                                        "net.transport",
-                                        "ip_tcp"
+                                        "INTERNAL"
                                       ],
                                       [
                                         "apollo.subgraph.name",
-                                        "accounts"
+                                        "products"
+                                      ],
+                                      [
+                                        "apollo_private.sent_time_offset",
+                                        0
                                       ]
                                     ],
                                     "metadata": {
-                                      "name": "subgraph_request",
-                                      "target": "apollo_router::services::subgraph_service",
+                                      "name": "fetch",
+                                      "target": "apollo_router::query_planner::execution",
                                       "level": "INFO",
-                                      "module_path": "apollo_router::services::subgraph_service",
+                                      "module_path": "apollo_router::query_planner::execution",
                                       "fields": {
                                         "names": [
                                           "otel.kind",
-                                          "net.peer.name",
-                                          "net.peer.port",
-                                          "http.route",
-                                          "net.transport",
-                                          "apollo.subgraph.name"
+                                          "apollo.subgraph.name",
+                                          "apollo_private.sent_time_offset"
                                         ]
                                       }
                                     }
                                   },
-                                  "children": {}
-                                },
-                                "apollo_router::services::subgraph_service::aggregate_response_data": {
-                                  "name": "apollo_router::services::subgraph_service::aggregate_response_data",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "aggregate_response_data",
-                                      "target": "apollo_router::services::subgraph_service",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router::services::subgraph_service",
-                                      "fields": {
-                                        "names": []
+                                  "children": {
+                                    "apollo_router::query_planner::fetch::make_variables": {
+                                      "name": "apollo_router::query_planner::fetch::make_variables",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "make_variables",
+                                          "target": "apollo_router::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::plugins::telemetry::subgraph": {
+                                      "name": "apollo_router::plugins::telemetry::subgraph",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "apollo.subgraph.name",
+                                            "products"
+                                          ],
+                                          [
+                                            "graphql.document",
+                                            "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}"
+                                          ],
+                                          [
+                                            "graphql.operation.name",
+                                            ""
+                                          ],
+                                          [
+                                            "otel.kind",
+                                            "INTERNAL"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "subgraph",
+                                          "target": "apollo_router::plugins::telemetry",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router::plugins::telemetry",
+                                          "fields": {
+                                            "names": [
+                                              "apollo.subgraph.name",
+                                              "graphql.document",
+                                              "graphql.operation.name",
+                                              "otel.kind",
+                                              "apollo_private.ftv1"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "apollo_router::services::subgraph_service::body_compression": {
+                                          "name": "apollo_router::services::subgraph_service::body_compression",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "body_compression",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        },
+                                        "apollo_router::services::subgraph_service::subgraph_request": {
+                                          "name": "apollo_router::services::subgraph_service::subgraph_request",
+                                          "record": {
+                                            "entries": [
+                                              [
+                                                "otel.kind",
+                                                "CLIENT"
+                                              ],
+                                              [
+                                                "net.peer.name",
+                                                "products.demo.starstuff.dev"
+                                              ],
+                                              [
+                                                "net.peer.port",
+                                                "443"
+                                              ],
+                                              [
+                                                "http.route",
+                                                "/"
+                                              ],
+                                              [
+                                                "http.url",
+                                                "https://products.demo.starstuff.dev/"
+                                              ],
+                                              [
+                                                "net.transport",
+                                                "ip_tcp"
+                                              ],
+                                              [
+                                                "apollo.subgraph.name",
+                                                "products"
+                                              ]
+                                            ],
+                                            "metadata": {
+                                              "name": "subgraph_request",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "INFO",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": [
+                                                  "otel.kind",
+                                                  "net.peer.name",
+                                                  "net.peer.port",
+                                                  "http.route",
+                                                  "http.url",
+                                                  "net.transport",
+                                                  "apollo.subgraph.name"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          "children": {
+                                            "apollo_router::services::subgraph_service::aggregate_response_data": {
+                                              "name": "apollo_router::services::subgraph_service::aggregate_response_data",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "aggregate_response_data",
+                                                  "target": "apollo_router::services::subgraph_service",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router::services::subgraph_service",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            }
+                                          }
+                                        },
+                                        "apollo_router::services::subgraph_service::parse_subgraph_response": {
+                                          "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "parse_subgraph_response",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        }
                                       }
+                                    },
+                                    "apollo_router::query_planner::fetch::response_insert": {
+                                      "name": "apollo_router::query_planner::fetch::response_insert",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "response_insert",
+                                          "target": "apollo_router::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
                                     }
-                                  },
-                                  "children": {}
-                                },
-                                "apollo_router::services::subgraph_service::parse_subgraph_response": {
-                                  "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
-                                  "record": {
-                                    "entries": [],
-                                    "metadata": {
-                                      "name": "parse_subgraph_response",
-                                      "target": "apollo_router::services::subgraph_service",
-                                      "level": "DEBUG",
-                                      "module_path": "apollo_router::services::subgraph_service",
-                                      "fields": {
-                                        "names": []
-                                      }
-                                    }
-                                  },
-                                  "children": {}
+                                  }
                                 }
                               }
                             },
-                            "apollo_router::query_planner::fetch::response_insert": {
-                              "name": "apollo_router::query_planner::fetch::response_insert",
+                            "apollo_router::query_planner::execution::flatten": {
+                              "name": "apollo_router::query_planner::execution::flatten",
                               "record": {
-                                "entries": [],
+                                "entries": [
+                                  [
+                                    "graphql.path",
+                                    "/topProducts/@/reviews/@/author"
+                                  ],
+                                  [
+                                    "otel.kind",
+                                    "INTERNAL"
+                                  ]
+                                ],
                                 "metadata": {
-                                  "name": "response_insert",
-                                  "target": "apollo_router::query_planner::fetch",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::query_planner::fetch",
+                                  "name": "flatten",
+                                  "target": "apollo_router::query_planner::execution",
+                                  "level": "INFO",
+                                  "module_path": "apollo_router::query_planner::execution",
                                   "fields": {
-                                    "names": []
+                                    "names": [
+                                      "graphql.path",
+                                      "otel.kind"
+                                    ]
                                   }
                                 }
                               },
-                              "children": {}
+                              "children": {
+                                "apollo_router::query_planner::execution::fetch": {
+                                  "name": "apollo_router::query_planner::execution::fetch",
+                                  "record": {
+                                    "entries": [
+                                      [
+                                        "otel.kind",
+                                        "INTERNAL"
+                                      ],
+                                      [
+                                        "apollo.subgraph.name",
+                                        "accounts"
+                                      ],
+                                      [
+                                        "apollo_private.sent_time_offset",
+                                        0
+                                      ]
+                                    ],
+                                    "metadata": {
+                                      "name": "fetch",
+                                      "target": "apollo_router::query_planner::execution",
+                                      "level": "INFO",
+                                      "module_path": "apollo_router::query_planner::execution",
+                                      "fields": {
+                                        "names": [
+                                          "otel.kind",
+                                          "apollo.subgraph.name",
+                                          "apollo_private.sent_time_offset"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "children": {
+                                    "apollo_router::query_planner::fetch::make_variables": {
+                                      "name": "apollo_router::query_planner::fetch::make_variables",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "make_variables",
+                                          "target": "apollo_router::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::plugins::telemetry::subgraph": {
+                                      "name": "apollo_router::plugins::telemetry::subgraph",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "apollo.subgraph.name",
+                                            "accounts"
+                                          ],
+                                          [
+                                            "graphql.document",
+                                            "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}"
+                                          ],
+                                          [
+                                            "graphql.operation.name",
+                                            ""
+                                          ],
+                                          [
+                                            "otel.kind",
+                                            "INTERNAL"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "subgraph",
+                                          "target": "apollo_router::plugins::telemetry",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router::plugins::telemetry",
+                                          "fields": {
+                                            "names": [
+                                              "apollo.subgraph.name",
+                                              "graphql.document",
+                                              "graphql.operation.name",
+                                              "otel.kind",
+                                              "apollo_private.ftv1"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "apollo_router::services::subgraph_service::body_compression": {
+                                          "name": "apollo_router::services::subgraph_service::body_compression",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "body_compression",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        },
+                                        "apollo_router::services::subgraph_service::subgraph_request": {
+                                          "name": "apollo_router::services::subgraph_service::subgraph_request",
+                                          "record": {
+                                            "entries": [
+                                              [
+                                                "otel.kind",
+                                                "CLIENT"
+                                              ],
+                                              [
+                                                "net.peer.name",
+                                                "accounts.demo.starstuff.dev"
+                                              ],
+                                              [
+                                                "net.peer.port",
+                                                "443"
+                                              ],
+                                              [
+                                                "http.route",
+                                                "/"
+                                              ],
+                                              [
+                                                "http.url",
+                                                "https://accounts.demo.starstuff.dev/"
+                                              ],
+                                              [
+                                                "net.transport",
+                                                "ip_tcp"
+                                              ],
+                                              [
+                                                "apollo.subgraph.name",
+                                                "accounts"
+                                              ]
+                                            ],
+                                            "metadata": {
+                                              "name": "subgraph_request",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "INFO",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": [
+                                                  "otel.kind",
+                                                  "net.peer.name",
+                                                  "net.peer.port",
+                                                  "http.route",
+                                                  "http.url",
+                                                  "net.transport",
+                                                  "apollo.subgraph.name"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          "children": {
+                                            "apollo_router::services::subgraph_service::aggregate_response_data": {
+                                              "name": "apollo_router::services::subgraph_service::aggregate_response_data",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "aggregate_response_data",
+                                                  "target": "apollo_router::services::subgraph_service",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router::services::subgraph_service",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            }
+                                          }
+                                        },
+                                        "apollo_router::services::subgraph_service::parse_subgraph_response": {
+                                          "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "parse_subgraph_response",
+                                              "target": "apollo_router::services::subgraph_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        }
+                                      }
+                                    },
+                                    "apollo_router::query_planner::fetch::response_insert": {
+                                      "name": "apollo_router::query_planner::fetch::response_insert",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "response_insert",
+                                          "target": "apollo_router::query_planner::fetch",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::query_planner::fetch",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    }
+                                  }
+                                }
+                              }
                             }
                           }
                         }
                       }
                     }
                   }
+                },
+                "apollo_router::services::execution_service::format_response": {
+                  "name": "apollo_router::services::execution_service::format_response",
+                  "record": {
+                    "entries": [],
+                    "metadata": {
+                      "name": "format_response",
+                      "target": "apollo_router::services::execution_service",
+                      "level": "DEBUG",
+                      "module_path": "apollo_router::services::execution_service",
+                      "fields": {
+                        "names": []
+                      }
+                    }
+                  },
+                  "children": {}
                 }
               }
             }
           }
-        },
-        "apollo_router::services::execution_service::format_response": {
-          "name": "apollo_router::services::execution_service::format_response",
-          "record": {
-            "entries": [],
-            "metadata": {
-              "name": "format_response",
-              "target": "apollo_router::services::execution_service",
-              "level": "DEBUG",
-              "module_path": "apollo_router::services::execution_service",
-              "fields": {
-                "names": []
-              }
-            }
-          },
-          "children": {}
         }
       }
     }

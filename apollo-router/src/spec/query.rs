@@ -105,100 +105,141 @@ impl Query {
         schema: &Schema,
     ) -> Vec<Path> {
         let data = std::mem::take(&mut response.data);
-        if let Some(Value::Object(mut input)) = data {
-            let operation = self.operation(operation_name);
-            if is_deferred {
-                if let Some(subselection) = &response.subselection {
-                    // Get subselection from hashmap
-                    match self.subselections.get(&SubSelection {
-                        path: response.path.clone().unwrap_or_default(),
-                        subselection: subselection.clone(),
-                    }) {
-                        Some(subselection_query) => {
-                            let mut output = Object::default();
-                            let operation = &subselection_query.operations[0];
-                            let mut parameters = FormatParameters {
-                                variables: &variables,
-                                schema,
-                                errors: Vec::new(),
-                                nullified: Vec::new(),
-                            };
-                            response.data = Some(
-                                match self.apply_root_selection_set(
-                                    operation,
-                                    &mut parameters,
-                                    &mut input,
-                                    &mut output,
-                                    &mut Path::default(),
-                                ) {
-                                    Ok(()) => output.into(),
-                                    Err(InvalidValue) => Value::Null,
-                                },
-                            );
 
-                            if !parameters.errors.is_empty() {
-                                if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                                    response.extensions.insert("valueCompletion", value);
+        let original_operation = self.operation(operation_name);
+        match data {
+            Some(Value::Object(mut input)) => {
+                if is_deferred {
+                    if let Some(subselection) = &response.subselection {
+                        // Get subselection from hashmap
+                        match self.subselections.get(&SubSelection {
+                            path: response.path.clone().unwrap_or_default(),
+                            subselection: subselection.clone(),
+                        }) {
+                            Some(subselection_query) => {
+                                let mut output = Object::default();
+                                let operation = &subselection_query.operations[0];
+                                let mut parameters = FormatParameters {
+                                    variables: &variables,
+                                    schema,
+                                    errors: Vec::new(),
+                                    nullified: Vec::new(),
+                                };
+                                // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                                // cf https://github.com/apollographql/router/issues/1677
+                                let operation_kind_if_root_typename =
+                                    original_operation.and_then(|op| {
+                                        op.selection_set
+                                            .iter()
+                                            .any(|f| f.is_typename_field())
+                                            .then(|| *op.kind())
+                                    });
+                                if let Some(operation_kind) = operation_kind_if_root_typename {
+                                    output.insert(TYPENAME, operation_kind.as_str().into());
                                 }
+
+                                response.data = Some(
+                                    match self.apply_root_selection_set(
+                                        operation,
+                                        &mut parameters,
+                                        &mut input,
+                                        &mut output,
+                                        &mut Path::default(),
+                                    ) {
+                                        Ok(()) => output.into(),
+                                        Err(InvalidValue) => Value::Null,
+                                    },
+                                );
+
+                                if !parameters.errors.is_empty() {
+                                    if let Ok(value) =
+                                        serde_json_bytes::to_value(&parameters.errors)
+                                    {
+                                        response.extensions.insert("valueCompletion", value);
+                                    }
+                                }
+
+                                return parameters.nullified;
                             }
-
-                            return parameters.nullified;
+                            None => {
+                                failfast_debug!("can't find subselection for {:?}", subselection)
+                            }
                         }
-                        None => failfast_debug!("can't find subselection for {:?}", subselection),
+                    // the primary query was empty, we return an empty object
+                    } else {
+                        response.data = Some(Value::Object(Object::default()));
+                        return vec![];
                     }
-                // the primary query was empty, we return an empty object
-                } else {
-                    response.data = Some(Value::Object(Object::default()));
-                    return vec![];
-                }
-            } else if let Some(operation) = operation {
-                let mut output = Object::default();
+                } else if let Some(operation) = original_operation {
+                    let mut output = Object::default();
 
-                let all_variables = if operation.variables.is_empty() {
-                    variables
-                } else {
-                    operation
-                        .variables
-                        .iter()
-                        .filter_map(|(k, Variable { default_value, .. })| {
-                            default_value.as_ref().map(|v| (k, v))
-                        })
-                        .chain(variables.iter())
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect()
-                };
+                    let all_variables = if operation.variables.is_empty() {
+                        variables
+                    } else {
+                        operation
+                            .variables
+                            .iter()
+                            .filter_map(|(k, Variable { default_value, .. })| {
+                                default_value.as_ref().map(|v| (k, v))
+                            })
+                            .chain(variables.iter())
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect()
+                    };
 
-                let mut parameters = FormatParameters {
-                    variables: &all_variables,
-                    schema,
-                    errors: Vec::new(),
-                    nullified: Vec::new(),
-                };
+                    let mut parameters = FormatParameters {
+                        variables: &all_variables,
+                        schema,
+                        errors: Vec::new(),
+                        nullified: Vec::new(),
+                    };
 
-                response.data = Some(
-                    match self.apply_root_selection_set(
-                        operation,
-                        &mut parameters,
-                        &mut input,
-                        &mut output,
-                        &mut Path::default(),
-                    ) {
-                        Ok(()) => output.into(),
-                        Err(InvalidValue) => Value::Null,
-                    },
-                );
-                if !parameters.errors.is_empty() {
-                    if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
-                        response.extensions.insert("valueCompletion", value);
+                    response.data = Some(
+                        match self.apply_root_selection_set(
+                            operation,
+                            &mut parameters,
+                            &mut input,
+                            &mut output,
+                            &mut Path::default(),
+                        ) {
+                            Ok(()) => output.into(),
+                            Err(InvalidValue) => Value::Null,
+                        },
+                    );
+                    if !parameters.errors.is_empty() {
+                        if let Ok(value) = serde_json_bytes::to_value(&parameters.errors) {
+                            response.extensions.insert("valueCompletion", value);
+                        }
                     }
-                }
 
-                return parameters.nullified;
-            } else {
-                failfast_debug!("can't find operation for {:?}", operation_name);
+                    return parameters.nullified;
+                } else {
+                    failfast_debug!("can't find operation for {:?}", operation_name);
+                }
             }
-        } else {
-            failfast_debug!("invalid type for data in response. data: {:#?}", data);
+            Some(Value::Null) => {
+                // Detect if root __typename is asked in the original query (the qp doesn't put root __typename in subselections)
+                // cf https://github.com/apollographql/router/issues/1677
+                let operation_kind_if_root_typename = original_operation.and_then(|op| {
+                    op.selection_set
+                        .iter()
+                        .any(|f| f.is_typename_field())
+                        .then(|| *op.kind())
+                });
+                response.data = match operation_kind_if_root_typename {
+                    Some(operation_kind) => {
+                        let mut output = Object::default();
+                        output.insert(TYPENAME, operation_kind.as_str().into());
+                        Some(output.into())
+                    }
+                    None => Some(Value::default()),
+                };
+
+                return vec![];
+            }
+            _ => {
+                failfast_debug!("invalid type for data in response. data: {:#?}", data);
+            }
         }
 
         response.data = Some(Value::default());
@@ -211,9 +252,8 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        let string = query.into();
-
-        let parser = apollo_parser::Parser::new(string.as_str())
+        let query = query.into();
+        let parser = apollo_parser::Parser::new(query.as_str())
             .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let tree = parser.parse();
 
@@ -248,7 +288,7 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
-            string,
+            string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -956,6 +996,35 @@ impl Query {
             None => self.operations.get(0),
         }
     }
+
+    pub(crate) fn contains_error_path(
+        &self,
+        operation_name: Option<&str>,
+        subselection: Option<&str>,
+        response_path: Option<&Path>,
+        path: &Path,
+    ) -> bool {
+        let operation = if let Some(subselection) = subselection {
+            // Get subselection from hashmap
+            match self.subselections.get(&SubSelection {
+                path: response_path.cloned().unwrap_or_default(),
+                subselection: subselection.to_string(),
+            }) {
+                Some(subselection_query) => &subselection_query.operations[0],
+                None => return false,
+            }
+        } else {
+            match self.operation(operation_name) {
+                None => return false,
+                Some(op) => op,
+            }
+        };
+
+        operation
+            .selection_set
+            .iter()
+            .any(|selection| selection.contains_error_path(&path.0, &self.fragments))
+    }
 }
 
 /// Intermediate structure for arguments passed through the entire formatting
@@ -1066,7 +1135,7 @@ impl Operation {
             && self
                 .selection_set
                 .get(0)
-                .map(|s| matches!(s, Selection::Field {name, ..} if name.as_str() == TYPENAME))
+                .map(|s| s.is_typename_field())
                 .unwrap_or_default()
     }
 

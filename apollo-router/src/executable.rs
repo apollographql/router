@@ -10,7 +10,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
-use clap::AppSettings;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
@@ -25,6 +24,7 @@ use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
 
+use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
@@ -120,22 +120,21 @@ enum ConfigSubcommand {
     /// Print upgraded configuration.
     Upgrade {
         /// The location of the config to upgrade.
-        #[clap(parse(from_os_str), env = "APOLLO_ROUTER_CONFIG_PATH")]
+        #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
         config_path: PathBuf,
 
         /// Print a diff.
-        #[clap(parse(from_flag), long)]
+        #[clap(action = ArgAction::SetTrue, long)]
         diff: bool,
     },
+    /// List all the available experimental configurations with related GitHub discussion
+    Experimental,
 }
 
 /// Options for the router
 #[derive(Parser, Debug)]
-#[clap(
-    name = "router",
-    about = "Apollo federation router",
-    global_setting(AppSettings::NoAutoVersion)
-)]
+#[clap(name = "router", about = "Apollo federation router")]
+#[command(disable_version_flag(true))]
 pub(crate) struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
@@ -159,7 +158,7 @@ pub(crate) struct Opt {
     #[clap(
         short,
         long = "config",
-        parse(from_os_str),
+        value_parser,
         env = "APOLLO_ROUTER_CONFIG_PATH"
     )]
     config_path: Option<PathBuf>,
@@ -177,7 +176,7 @@ pub(crate) struct Opt {
     #[clap(
         short,
         long = "supergraph",
-        parse(from_os_str),
+        value_parser,
         env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
     )]
     supergraph_path: Option<PathBuf>,
@@ -199,16 +198,20 @@ pub(crate) struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
-    #[clap(long, env, multiple_occurrences(true))]
+    #[clap(long, env, action = ArgAction::Append)]
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
-    #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
+    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_poll_interval: Duration,
 
+    /// The timeout for an http call to Apollo uplink. Defaults to 30s.
+    #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
+    apollo_uplink_timeout: Duration,
+
     /// Display version and exit.
-    #[clap(parse(from_flag), long, short = 'V')]
+    #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
 }
 
@@ -377,6 +380,12 @@ impl Executable {
                 println!("{}", output);
                 Ok(())
             }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Experimental,
+            })) => {
+                configuration::print_all_experimental_conf();
+                Ok(())
+            }
             None => {
                 // The dispatcher we created is passed explicitly here to make sure we display the logs
                 // in the initialization phase and in the state machine code, before a global subscriber
@@ -484,6 +493,7 @@ impl Executable {
                     apollo_graph_ref,
                     urls: uplink_endpoints,
                     poll_interval: opt.apollo_uplink_poll_interval,
+                    timeout: opt.apollo_uplink_timeout
                 }
             }
             _ => {
@@ -565,16 +575,14 @@ fn copy_args_to_env() {
     let matches = Opt::command().get_matches();
     Opt::command().get_arguments().for_each(|a| {
         if let Some(env) = a.get_env() {
-            if a.is_allow_invalid_utf8_set() {
-                if let Some(value) = matches.get_one::<OsString>(a.get_id()) {
-                    env::set_var(env, value);
-                }
-            } else if let Ok(Some(value)) = matches.try_get_one::<PathBuf>(a.get_id()) {
+            if let Ok(Some(value)) = matches.try_get_one::<PathBuf>(a.get_id().as_str()) {
                 env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id()) {
+            } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id().as_str()) {
                 env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id()) {
+            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id().as_str()) {
                 env::set_var(env, value.to_string());
+            } else if let Ok(Some(value)) = matches.try_get_one::<OsString>(a.get_id().as_str()) {
+                env::set_var(env, value);
             }
         }
     });

@@ -24,135 +24,78 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [x.x.x] (unreleased) - 2022-mm-dd
+# [1.8.0] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
 
-### Protoc now required to build ([Issue #1970](https://github.com/apollographql/router/issues/1970))
+### Remove timeout from otlp exporter ([Issue #2337](https://github.com/apollographql/router/issues/2337))
 
-Protoc is now required to build Apollo Router. Upgrading to Open Telemetry 0.18 has enabled us to upgrade tonic which in turn no longer bundles protoc.
-Users must install it themselves https://grpc.io/docs/protoc-installation/.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
-
-### Jaeger scheduled_delay moved to batch_processor->scheduled_delay ([Issue #2232](https://github.com/apollographql/router/issues/2232))
-
-Jager config previously allowed configuration of scheduled_delay for batch span processor. To bring it in line with all other exporters this is now set using a batch_processor section.
+`batch_processor` configuration contains timeout, so the existing timeout property has been removed from the parent configuration element.
 
 Before:
 ```yaml
 telemetry:
   tracing:
-    jaeger:
-      scheduled_delay: 100ms
+    otlp:
+      timeout: 5s
 ```
-
 After:
 ```yaml
 telemetry:
   tracing:
-    jaeger:
+    otlp:
       batch_processor:
-        scheduled_delay: 100ms
+        timeout: 5s
 ```
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
 
 ## 🚀 Features
-### Tracing batch span processor is now configurable ([Issue #2232](https://github.com/apollographql/router/issues/2232))
 
-Exporting traces often requires performance tuning based on the throughput of the router, sampling settings and ingestion capability of tracing ingress.
+### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
 
-All exporters now support configuring the batch span processor in the router yaml. 
-```yaml
-telemetry:
-  apollo:
-    batch_processor:
-      scheduled_delay: 100ms
-      max_concurrent_exports: 1000
-      max_export_batch_size: 10000
-      max_export_timeout: 100s
-      max_queue_size: 10000
-  tracing:
-    jaeger|zipkin|otlp|datadog:
-      batch_processor:
-        scheduled_delay: 100ms
-        max_concurrent_exports: 1000
-        max_export_batch_size: 10000
-        max_export_timeout: 100s
-        max_queue_size: 10000
-```
+For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
 
-See the Open Telemetry docs for more information.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
-
-### Add support for setting multi-value header keys to rhai ([Issue #2211](https://github.com/apollographql/router/issues/2211))
-
-Adds support for setting a header map key with an array. This causes the HeaderMap key/values to be appended() to the map, rather than inserted().
-
-Example use from rhai as:
-
-```
-  response.headers["set-cookie"] = [
-    "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
-    "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
-  ];
-```
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2219
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
 ## 🐛 Fixes
 
-### Filter nullified deferred responses ([Issue #2213](https://github.com/apollographql/router/issues/2168))
+### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
 
-[`@defer` spec updates](https://github.com/graphql/graphql-spec/compare/01d7b98f04810c9a9db4c0e53d3c4d54dbf10b82...f58632f496577642221c69809c32dd46b5398bd7#diff-0f02d73330245629f776bb875e5ca2b30978a716732abca136afdd028d5cd33cR448-R470)
-mandate that a deferred response should not be sent if its path points to an element of the response that was nullified
-in a previous payload.
+Before this fix, the context injected in headers to subgraphs was wrong, it was not the right parent span id.
 
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2184
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2345
 
-### wait for opentelemetry tracer provider to shutdown ([PR #2191](https://github.com/apollographql/router/pull/2191))
-
-When we drop Telemetry we spawn a thread to perform the global opentelemetry trace provider shutdown. The documentation of this function indicates that "This will invoke the shutdown method on all span processors. span processors should export remaining spans before return". We should give that process some time to complete (5 seconds currently) before returning from the `drop`. This will provide more opportunity for spans to be exported.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2191
 
 ## 🛠 Maintenance
 
-### improve plugin registration predictability ([PR #2181](https://github.com/apollographql/router/pull/2181))
+### Simplify telemetry config code ([Issue #2337](https://github.com/apollographql/router/issues/2337))
 
-This replaces [ctor](https://crates.io/crates/ctor) with [linkme](https://crates.io/crates/linkme). `ctor` enables rust code to execute before `main`. This can be a source of undefined behaviour and we don't need our code to execute before `main`. `linkme` provides a registration mechanism that is perfect for this use case, so switching to use it makes the router more predictable, simpler to reason about and with a sound basis for future plugin enhancements.
+This brings the telemetry plugin configuration closer to standards recommended in the [yaml design guidance](dev-docs/yaml-design-guidance.md).
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2181
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
 
-### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
+### Upgrade the clap version in scaffold template ([Issue #2165](https://github.com/apollographql/router/issues/2165))
 
-This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
+Upgrade clap deps version to the right one to be able to create new scaffolded plugins thanks to xtask.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2343
 
-### Upgrade OpenTelemetry to 0.18 ([Issue #1970](https://github.com/apollographql/router/issues/1970))
+### Upgrade axum to `0.6.1` ([PR #2303](https://github.com/apollographql/router/pull/2303))
 
-Update to OpenTelemetry 0.18.
+For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
 
-By [@bryncooke](https://github.com/bryncooke) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/1970 and https://github.com/apollographql/router/pull/2236
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
 
-### Remove spaceport ([Issue #2233](https://github.com/apollographql/router/issues/2233))
+### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
 
-Removal significantly simplifies telemetry code and likely to increase performance and reliability.
+When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/1970
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
 
-### Update to Rust 1.65 ([Issue #2220](https://github.com/apollographql/router/issues/2220))
+### Move APQ and EnsureQueryPresence in the router service ([PR #2296](https://github.com/apollographql/router/pull/2296))
 
-Rust MSRV incremented to 1.65.
+Moving APQ from the axum level to the supergraph service reintroduced a `Buffer` in the service pipeline.
+Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2221
-
-## 📚 Documentation
-### Create yaml config design guidance ([Issue #2158](https://github.com/apollographql/router/pull/2158))
-
-Added some yaml design guidance to help us create consistent yaml config for new and existing features.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2159
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296

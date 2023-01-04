@@ -23,7 +23,8 @@ pub(crate) struct Config {
     #[serde(deserialize_with = "deser_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
 
-    pub(crate) batch_processor: Option<BatchProcessorConfig>,
+    #[serde(default)]
+    pub(crate) batch_processor: BatchProcessorConfig,
 }
 
 const fn default_agent_endpoint() -> &'static str {
@@ -52,10 +53,7 @@ where
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::info!(
-            "configuring Zipkin tracing: {}",
-            self.batch_processor.as_ref().cloned().unwrap_or_default()
-        );
+        tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let collector_endpoint = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(url) => Some(url),
@@ -63,7 +61,7 @@ impl TracingConfigurator for Config {
 
         let exporter = opentelemetry_zipkin::new_pipeline()
             .with_trace_config(trace_config.into())
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with(&collector_endpoint, |b, endpoint| {
                 b.with_collector_endpoint(&endpoint.to_string())
             })
@@ -71,13 +69,7 @@ impl TracingConfigurator for Config {
 
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_batch_config(
-                    self.batch_processor
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_default()
-                        .into(),
-                )
+                .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
         ))

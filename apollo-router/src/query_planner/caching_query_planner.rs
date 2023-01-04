@@ -10,6 +10,7 @@ use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 use serde_json_bytes::value::Serializer;
 use tower::ServiceExt;
+use tracing::Instrument;
 
 use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
@@ -32,7 +33,11 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
 where
-    T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse>,
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = QueryPlannerError,
+    >,
 {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(
@@ -49,6 +54,58 @@ where
             delegate,
             schema_id,
         }
+    }
+
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        let keys = self.cache.in_memory_keys().await;
+        keys.into_iter()
+            .take(count)
+            .map(|key| (key.query, key.operation))
+            .collect()
+    }
+
+    pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
+        let schema_id = self.schema_id.clone();
+
+        let mut count = 0usize;
+        for (query, operation) in cache_keys {
+            let caching_key = CachingQueryKey {
+                schema_id: schema_id.clone(),
+                query: query.clone(),
+                operation: operation.to_owned(),
+            };
+            let context = Context::new();
+
+            let entry = self.cache.get(&caching_key).await;
+            if entry.is_first() {
+                let request = QueryPlannerRequest {
+                    query,
+                    operation_name: operation,
+                    context: context.clone(),
+                };
+
+                let res = match self.delegate.ready().await {
+                    Ok(service) => service.call(request).await,
+                    Err(_) => break,
+                };
+
+                match res {
+                    Ok(QueryPlannerResponse { content, .. }) => {
+                        if let Some(content) = &content {
+                            count += 1;
+                            entry.insert(Ok(content.clone())).await;
+                        }
+                    }
+                    Err(error) => {
+                        count += 1;
+                        let e = Arc::new(error);
+                        entry.insert(Err(e.clone())).await;
+                    }
+                }
+            }
+        }
+
+        tracing::debug!("warmed up the query planner cache with {count} queries");
     }
 }
 
@@ -82,42 +139,58 @@ where
             let context = request.context.clone();
             let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
-                let res = qp.delegate.ready().await?.call(request).await;
-                match res {
-                    Ok(QueryPlannerResponse {
-                        content,
-                        context,
-                        errors,
-                    }) => {
-                        if let Some(content) = &content {
-                            entry.insert(Ok(content.clone())).await;
-                        }
+                // some clients might timeout and cancel the request before query planning is finished,
+                // so we execute it in a task that can continue even after the request was canceled and
+                // the join handle was dropped. That way, the next similar query will use the cache instead
+                // of restarting the query planner until another timeout
+                tokio::task::spawn(
+                    async move {
+                        let res = qp.delegate.ready().await?.call(request).await;
 
-                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                            match (plan.usage_reporting).serialize(Serializer) {
-                                Ok(v) => {
-                                    context.insert_json_value(USAGE_REPORTING, v);
+                        match res {
+                            Ok(QueryPlannerResponse {
+                                content,
+                                context,
+                                errors,
+                            }) => {
+                                if let Some(content) = &content {
+                                    entry.insert(Ok(content.clone())).await;
                                 }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        e
-                                    );
+
+                                if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                                    match (plan.usage_reporting).serialize(Serializer) {
+                                        Ok(v) => {
+                                            context.insert_json_value(USAGE_REPORTING, v);
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                            "usage reporting was not serializable to context, {}",
+                                            e
+                                        );
+                                        }
+                                    }
                                 }
+                                Ok(QueryPlannerResponse {
+                                    content,
+                                    context,
+                                    errors,
+                                })
+                            }
+                            Err(error) => {
+                                let e = Arc::new(error);
+                                entry.insert(Err(e.clone())).await;
+                                Err(CacheResolverError::RetrievalError(e))
                             }
                         }
-                        Ok(QueryPlannerResponse {
-                            content,
-                            context,
-                            errors,
-                        })
                     }
-                    Err(error) => {
-                        let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
-                        Err(CacheResolverError::RetrievalError(e))
-                    }
-                }
+                    .in_current_span(),
+                )
+                .await
+                .map_err(|e| {
+                    CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
+                        e.to_string(),
+                    )))
+                })?
             } else {
                 let res = entry
                     .get()

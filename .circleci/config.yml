@@ -3,7 +3,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.1.1
+  gh: circleci/github-cli@2.2.0
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -51,7 +51,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
@@ -140,6 +140,12 @@ commands:
             curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
             unzip protoc.zip -d $HOME/.local
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Add protoc to env
+          command: |
+            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
+            $newpath = "$oldpath;$HOME/.local/bin"
+            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
   # This job makes sure everything is ready to run integration tests
   macos_prepare_env:
@@ -173,12 +179,6 @@ commands:
             [net]
             git-fetch-with-cli = true
             "@
-      - run:
-          name: Add protoc to env
-          command: |
-            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
-            $newpath = “$oldpath;$HOME/.local/bin”
-            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
   install_minimal_rust:
     steps:
@@ -228,9 +228,19 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - run: cargo xtask lint
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+      - run:
+          name: Install xtask
+          command: |
+              set -e -o pipefail
+              xtask help || { cd xtask && cargo install --path . && cd ..; }
+      - run: xtask lint
+      - save_cache:
+          name: Save .cargo
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+          paths:
+            - ~/.cargo
 
   xtask_check_compliance:
     parameters:
@@ -240,8 +250,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
@@ -273,6 +283,10 @@ commands:
       cargo_test_args:
         type: string
         default: "--"
+      # additional cache key to have a cache for test_updated
+      cache_key:
+        type: string
+        default: ""
     steps:
       - run:
           name: Start jaeger
@@ -281,8 +295,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
@@ -386,10 +400,8 @@ jobs:
       - checkout
       - linux_amd_install_baseline
       - run:
-          name: Use latest Rust Nightly and update all Rust dependencies
+          name: Update all Rust dependencies
           command: |
-            sed -i '/channel/d' rust-toolchain.toml
-            echo 'channel = "nightly"' >> rust-toolchain.toml
             rm Cargo.lock
             cargo fetch
       - test_workspace:
@@ -397,6 +409,7 @@ jobs:
           # schema_generation test skipped because schemars changed its representation of enums:
           # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
           cargo_test_args: --no-fail-fast -- --skip schema_generation
+          cache_key: .test_updated
 
   build_release:
     parameters:
@@ -419,6 +432,7 @@ jobs:
             equal: [*macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
+            - macos_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -440,13 +454,33 @@ jobs:
           condition:
             or:
               - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
             - install_minimal_rust
+            - linux_amd_install_baseline
+            - run:
+                command: >
+                  cargo xtask dist
+            - run:
+                command: >
+                  mkdir -p artifacts
+            - run:
+                command: >
+                  cargo xtask package --output artifacts/
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  sudo apt-get update
+            - install_minimal_rust
+            - linux_arm_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -480,6 +514,7 @@ jobs:
                   [net]
                   git-fetch-with-cli = true
                   "@
+            - windows_install_baseline
             - run:
                 command: >
                   cargo xtask dist
@@ -620,14 +655,17 @@ workflows:
               only:
                 - dev
       - prepare_release:
+          name: "Prepare major release"
           release_type: "major"
           requires:
             - prepare_major_release_approval
       - prepare_release:
+          name: "Prepare minor release"
           release_type: "minor"
           requires:
             - prepare_minor_release_approval
       - prepare_release:
+          name: "Prepare patch release"
           release_type: "patch"
           requires:
             - prepare_patch_release_approval

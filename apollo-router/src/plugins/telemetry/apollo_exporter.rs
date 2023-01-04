@@ -30,11 +30,8 @@ use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-const DEFAULT_QUEUE_SIZE: usize = 65_536;
-// Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
-// It's less error prone to set a different value to let us compute traces and metrics
-pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 #[derive(thiserror::Error, Debug)]
@@ -88,9 +85,10 @@ impl Default for Sender {
 /// Sending periodically (in the case of metrics).
 #[derive(Clone)]
 pub(crate) struct ApolloExporter {
+    batch_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
-    header: crate::plugins::telemetry::apollo_exporter::proto::ReportHeader,
+    header: proto::reports::ReportHeader,
     client: Client,
     strip_traces: Arc<Mutex<bool>>,
 }
@@ -98,11 +96,12 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
+        batch_config: &BatchProcessorConfig,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
     ) -> Result<ApolloExporter, BoxError> {
-        let header = crate::plugins::telemetry::apollo_exporter::proto::ReportHeader {
+        let header = proto::reports::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
             hostname: hostname()?,
             agent_version: format!(
@@ -117,21 +116,23 @@ impl ApolloExporter {
         };
 
         tracing::debug!("creating apollo exporter {}", endpoint);
-
         Ok(ApolloExporter {
             endpoint: endpoint.clone(),
+            batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
-            client: reqwest::Client::default(),
+            client: reqwest::Client::builder()
+                .timeout(batch_config.max_export_timeout)
+                .build()
+                .map_err(BoxError::from)?,
             header,
             strip_traces: Default::default(),
         })
     }
 
     pub(crate) fn start(self) -> Sender {
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
-        // This is the task that actually sends metrics
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(self.batch_config.max_queue_size);
         tokio::spawn(async move {
-            let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
+            let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
 
             tokio::pin!(timeout);
@@ -162,7 +163,8 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        if report.operation_count == 0 {
+        // We may be sending traces but with no operation count
+        if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return Ok(());
         }
         tracing::debug!("submitting report: {:?}", report);
@@ -182,7 +184,6 @@ impl ApolloExporter {
             .finish()
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         let mut backoff = Duration::from_millis(0);
-
         let req = self
             .client
             .post(self.endpoint.clone())
@@ -256,6 +257,7 @@ impl ApolloExporter {
                     }
                 }
                 Err(e) => {
+                    println!("Got {}", e);
                     // TODO: Ultimately need more sophisticated handling here. For example
                     // a redirect should not be treated the same way as a connect or a
                     // type builder error...
@@ -295,8 +297,10 @@ pub(crate) fn get_uname() -> Result<String, std::io::Error> {
 
 #[allow(unreachable_pub)]
 pub(crate) mod proto {
-    #![allow(clippy::derive_partial_eq_without_eq)]
-    tonic::include_proto!("report");
+    pub(crate) mod reports {
+        #![allow(clippy::derive_partial_eq_without_eq)]
+        tonic::include_proto!("reports");
+    }
 }
 
 /// Reporting Error type
@@ -391,6 +395,6 @@ fn check_reports_proto_is_up_to_date() {
     assert!(
         content == include_str!("proto/reports.proto"),
         "Protobuf file is out of date. Run this command to update it:\n\n    \
-            curl -f {proto_url} > apollo-router/src/spaceport/proto/reports.proto\n\n"
+            curl -f {proto_url} > apollo-router/src/plugins/telemetry/proto/reports.proto\n\n"
     );
 }

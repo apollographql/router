@@ -21,7 +21,8 @@ pub(crate) struct Config {
     #[schemars(with = "String", default = "default_agent_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
 
-    pub(crate) batch_processor: Option<BatchProcessorConfig>,
+    #[serde(default)]
+    pub(crate) batch_processor: BatchProcessorConfig,
 }
 const fn default_agent_endpoint() -> &'static str {
     "default"
@@ -29,10 +30,7 @@ const fn default_agent_endpoint() -> &'static str {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::info!(
-            "configuring Datadog tracing: {}",
-            self.batch_processor.as_ref().cloned().unwrap_or_default()
-        );
+        tracing::info!("configuring Datadog tracing: {}", self.batch_processor);
         let url = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(s) => Some(s),
@@ -41,18 +39,12 @@ impl TracingConfigurator for Config {
             .with(&url, |b, e| {
                 b.with_agent_endpoint(e.to_string().trim_end_matches('/'))
             })
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with_trace_config(trace_config.into())
             .build_exporter()?;
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_batch_config(
-                    self.batch_processor
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_default()
-                        .into(),
-                )
+                .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
         ))

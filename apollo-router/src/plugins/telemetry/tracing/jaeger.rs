@@ -34,8 +34,7 @@ pub(crate) struct Config {
     pub(crate) endpoint: Endpoint,
 
     #[serde(default)]
-    #[schemars(default)]
-    pub(crate) batch_processor: Option<BatchProcessorConfig>,
+    pub(crate) batch_processor: BatchProcessorConfig,
 }
 
 // This is needed because of the use of flatten.
@@ -83,10 +82,7 @@ fn default_agent_endpoint() -> &'static str {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::info!(
-            "configuring Jaeger tracing: {}",
-            self.batch_processor.as_ref().cloned().unwrap_or_default()
-        );
+        tracing::info!("configuring Jaeger tracing: {}", self.batch_processor);
         match &self.endpoint {
             Endpoint::Agent { endpoint } => {
                 let socket = match endpoint {
@@ -100,18 +96,12 @@ impl TracingConfigurator for Config {
                 };
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
-                    .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+                    .with_service_name(trace_config.service_name.clone())
                     .with(&socket, |b, s| b.with_endpoint(s))
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                        .with_batch_config(
-                            self.batch_processor
-                                .as_ref()
-                                .cloned()
-                                .unwrap_or_default()
-                                .into(),
-                        )
+                        .with_batch_config(self.batch_processor.clone().into())
                         .build()
                         .filtered(),
                 ))
@@ -126,18 +116,12 @@ impl TracingConfigurator for Config {
                 // Until that time we need to wrap a tracer provider with Jeager in.
                 let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(trace_config.into())
-                    .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+                    .with_service_name(trace_config.service_name.clone())
                     .with(username, |b, u| b.with_username(u))
                     .with(password, |b, p| b.with_password(p))
                     .with_endpoint(&endpoint.to_string())
                     .with_reqwest()
-                    .with_batch_processor_config(
-                        self.batch_processor
-                            .as_ref()
-                            .cloned()
-                            .unwrap_or_default()
-                            .into(),
-                    )
+                    .with_batch_processor_config(self.batch_processor.clone().into())
                     .build_batch(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(DelegateSpanProcessor { tracer_provider }))
             }
