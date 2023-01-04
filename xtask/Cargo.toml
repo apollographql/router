@@ -31,7 +31,7 @@ structopt = { version = "0.3", default-features = false }
 tar = "0.4"
 tempfile = "3"
 tap = "1.0.1"
-tokio = "1.23.0"
+tokio = "1.23.1"
 which = "4"
 zip = { version = "0.6", default-features = false }
 sha2 = "0.10"
