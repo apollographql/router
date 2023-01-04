@@ -9,6 +9,7 @@ use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use schemars::gen::SchemaSettings;
 use schemars::schema::RootSchema;
+use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
 use super::expansion::expand_env_variables;
@@ -21,6 +22,8 @@ use super::ConfigurationError;
 use super::APOLLO_PLUGIN_PREFIX;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
 pub(crate) use crate::configuration::upgrade::upgrade_configuration;
+
+const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
 /// Generate a JSON schema for the configuration.
 pub(crate) fn generate_config_schema() -> RootSchema {
@@ -115,7 +118,6 @@ pub(crate) fn validate_yaml_configuration(
             .enumerate()
             .filter_map(|(idx, mut e)| {
                 if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
-                    const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
                     match element {
                         yaml::Value::String(value, marker) => {
                             let start_marker = marker;
@@ -146,23 +148,8 @@ pub(crate) fn validate_yaml_configuration(
                         seq_element @ yaml::Value::Sequence(_, m) => {
                             let (start_marker, end_marker) = (m, seq_element.end_marker());
 
-                            let offset = 0.max(
-                                start_marker
-                                    .line()
-                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            );
-                            let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, line)| {
-                                    let real_line = idx + offset;
-                                    match real_line.cmp(&start_marker.line()) {
-                                        Ordering::Equal => format!("┌ {line}"),
-                                        Ordering::Greater => format!("| {line}"),
-                                        Ordering::Less => line.to_string(),
-                                    }
-                                })
-                                .join("\n");
+                            let lines =
+                                context_lines(&yaml_split_by_lines, start_marker, end_marker);
 
                             Some(format!(
                                 "{}. {}\n\n{}\n└-----> {}",
@@ -177,23 +164,9 @@ pub(crate) fn validate_yaml_configuration(
                                 current_label.as_ref()?.marker.as_ref()?,
                                 map_value.end_marker(),
                             );
-                            let offset = 0.max(
-                                start_marker
-                                    .line()
-                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            );
-                            let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, line)| {
-                                    let real_line = idx + offset;
-                                    match real_line.cmp(&start_marker.line()) {
-                                        Ordering::Equal => format!("┌ {line}"),
-                                        Ordering::Greater => format!("| {line}"),
-                                        Ordering::Less => line.to_string(),
-                                    }
-                                })
-                                .join("\n");
+
+                            let lines =
+                                context_lines(&yaml_split_by_lines, start_marker, end_marker);
 
                             Some(format!(
                                 "{}. {}\n\n{}\n└-----> {}",
@@ -248,4 +221,28 @@ pub(crate) fn validate_yaml_configuration(
     }
 
     Ok(config)
+}
+
+fn context_lines(
+    yaml_split_by_lines: &[&str],
+    start_marker: &Marker,
+    end_marker: &Marker,
+) -> String {
+    let offset = 0.max(
+        start_marker
+            .line()
+            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
+    );
+    yaml_split_by_lines[offset..end_marker.line()]
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let real_line = idx + offset;
+            match real_line.cmp(&start_marker.line()) {
+                Ordering::Equal => format!("┌ {line}"),
+                Ordering::Greater => format!("| {line}"),
+                Ordering::Less => line.to_string(),
+            }
+        })
+        .join("\n")
 }
