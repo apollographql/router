@@ -83,7 +83,7 @@ impl Endpoint {
                     .into_response())
             }
         };
-        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
     }
 }
 /// Factory for creating a RouterService
@@ -180,10 +180,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         }
 
-        Ok(Self::RouterFactory::new(
-            Arc::new(supergraph_creator),
-            &configuration,
-        ))
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), &configuration).await)
     }
 }
 

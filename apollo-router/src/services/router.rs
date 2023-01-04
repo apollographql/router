@@ -1,9 +1,11 @@
 #![allow(missing_docs)] // FIXME
 
 use bytes::Bytes;
+use futures::future::Either;
 use futures::Stream;
 use futures::StreamExt;
 use http::header::HeaderName;
+use http::header::CONTENT_TYPE;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
@@ -16,6 +18,7 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use super::supergraph;
+use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
 use crate::json_ext::Path;
 use crate::Context;
@@ -208,18 +211,36 @@ impl Response {
     pub async fn into_graphql_response_stream(
         self,
     ) -> impl Stream<Item = Result<crate::graphql::Response, serde_json::Error>> {
-        let multipart = Multipart::new(self.response.into_body(), "graphql");
+        Box::pin(
+            if self
+                .response
+                .headers()
+                .get(CONTENT_TYPE)
+                .iter()
+                .any(|value| *value == HeaderValue::from_static(MULTIPART_DEFER_CONTENT_TYPE))
+            {
+                let multipart = Multipart::new(self.response.into_body(), "graphql");
 
-        Box::pin(futures::stream::unfold(multipart, |mut m| async {
-            if let Ok(Some(response)) = m.next_field().await {
-                if let Ok(bytes) = response.bytes().await {
-                    return Some((
-                        serde_json::from_slice::<crate::graphql::Response>(&bytes),
-                        m,
-                    ));
-                }
-            }
-            None
-        }))
+                Either::Left(futures::stream::unfold(multipart, |mut m| async {
+                    if let Ok(Some(response)) = m.next_field().await {
+                        if let Ok(bytes) = response.bytes().await {
+                            return Some((
+                                serde_json::from_slice::<crate::graphql::Response>(&bytes),
+                                m,
+                            ));
+                        }
+                    }
+                    None
+                }))
+            } else {
+                let mut body = self.response.into_body();
+                let res = body.next().await.and_then(|res| res.ok());
+
+                Either::Right(
+                    futures::stream::iter(res.into_iter())
+                        .map(|bytes| serde_json::from_slice::<crate::graphql::Response>(&bytes)),
+                )
+            },
+        )
     }
 }
