@@ -34,6 +34,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 
+### Upgrade axum to `0.6.1` ([PR #2303](https://github.com/apollographql/router/pull/2303))
+
+For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
+
 ### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
 
 When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
