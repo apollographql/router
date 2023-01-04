@@ -118,12 +118,15 @@ pub(crate) fn validate_yaml_configuration(
                     const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
                     match element {
                         yaml::Value::String(value, marker) => {
-                            let lines = yaml_split_by_lines[0.max(
-                                marker
+                            let start_marker = marker;
+                            let end_marker = marker;
+                            let offset = 0.max(
+                                start_marker
                                     .line()
                                     .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            )
-                                ..marker.line()]
+                            );
+
+                            let lines = yaml_split_by_lines[offset..end_marker.line()]
                                 .iter()
                                 .join("\n");
 
