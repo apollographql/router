@@ -31,7 +31,6 @@ use tower::ServiceExt;
 use tower_http::decompression::Decompression;
 use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
-use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
@@ -141,13 +140,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             request.headers_mut().insert(ACCEPT, app_json);
             request.headers_mut().append(ACCEPT, app_graphql_json);
 
-            get_text_map_propagator(|propagator| {
-                propagator.inject_context(
-                    &Span::current().context(),
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                );
-            });
-
             let schema_uri = request.uri().clone();
             let host = schema_uri.host().map(String::from).unwrap_or_default();
             let port = schema_uri.port_u16().unwrap_or_else(|| {
@@ -170,17 +162,27 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             }
 
             let path = schema_uri.path().to_string();
+
+            let subgraph_req_span = tracing::info_span!("subgraph_request",
+                "otel.kind" = "CLIENT",
+                "net.peer.name" = &display(host),
+                "net.peer.port" = &display(port),
+                "http.route" = &display(path),
+                "http.url" = &display(schema_uri),
+                "net.transport" = "ip_tcp",
+                "apollo.subgraph.name" = %service_name
+            );
+
+            get_text_map_propagator(|propagator| {
+                propagator.inject_context(
+                    &subgraph_req_span.context(),
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                );
+            });
+
             let response = client
                 .call(request)
-                .instrument(tracing::info_span!("subgraph_request",
-                    "otel.kind" = "CLIENT",
-                    "net.peer.name" = &display(host),
-                    "net.peer.port" = &display(port),
-                    "http.route" = &display(path),
-                    "http.url" = &display(schema_uri),
-                    "net.transport" = "ip_tcp",
-                    "apollo.subgraph.name" = %service_name
-                ))
+                .instrument(subgraph_req_span)
                 .await
                 .map_err(|err| {
                     tracing::error!(fetch_error = format!("{:?}", err).as_str());
