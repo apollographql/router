@@ -32,6 +32,15 @@ For `experimental_cache` with redis caching it now works with only a single Redi
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
+## 🐛 Fixes
+
+### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
+
+Before this fix, the context injected in headers to subgraphs was wrong, it was not the right parent span id.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2345
+
+
 ## 🛠 Maintenance
 
 ### Upgrade the clap version in scaffold template ([Issue #2165](https://github.com/apollographql/router/issues/2165))
