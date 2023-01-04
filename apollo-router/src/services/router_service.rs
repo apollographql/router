@@ -349,6 +349,7 @@ where
                     Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::BAD_REQUEST)
+                            .header(CONTENT_TYPE, APPLICATION_JSON.to_string())
                             .body(Body::from(
                                 serde_json::to_string(
                                     &graphql::Error::builder()

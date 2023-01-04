@@ -33,3 +33,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
+
+## 🛠 Maintenance
+
+### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
+
+When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
