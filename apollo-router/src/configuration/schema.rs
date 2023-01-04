@@ -6,6 +6,7 @@ use std::cmp::Ordering;
 use std::fmt::Write;
 
 use itertools::Itertools;
+use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use schemars::gen::SchemaSettings;
@@ -159,25 +160,67 @@ pub(crate) fn validate_yaml_configuration(
                             e
                         );
                     }
-                    map_value @ yaml::Value::Mapping(current_label, _value, marker) => {
-                        let (start_marker, end_marker) = (
-                            current_label
-                                .as_ref()
-                                .and_then(|label| label.marker.as_ref())
-                                .unwrap_or(marker),
-                            map_value.end_marker(),
-                        );
+                    map_value @ yaml::Value::Mapping(current_label, map, marker) => {
+                        // workaround because ValidationErrorKind is not Clone
+                        let unexpected_opt = match &e.kind {
+                            ValidationErrorKind::AdditionalProperties { unexpected } => {
+                                Some(unexpected.clone())
+                            }
+                            _ => None,
+                        };
 
-                        let lines = context_lines(&yaml_split_by_lines, start_marker, end_marker);
+                        if let Some(unexpected) = unexpected_opt {
+                            for key in unexpected {
+                                if let Some((label, value)) =
+                                    map.iter().find(|(label, _)| label.name == key)
+                                {
+                                    println!("key {key} => {label:?}");
+                                    let (start_marker, end_marker) = (
+                                        label.marker.as_ref().unwrap_or(marker),
+                                        value.end_marker(),
+                                    );
 
-                        write!(
-                            &mut errors,
-                            "{}. {}\n\n{}\n└-----> {}\n\n",
-                            idx + 1,
-                            e.instance_path,
-                            lines,
-                            e
-                        );
+                                    let lines = context_lines(
+                                        &yaml_split_by_lines,
+                                        start_marker,
+                                        end_marker,
+                                    );
+
+                                    e.kind = ValidationErrorKind::AdditionalProperties {
+                                        unexpected: vec![key.clone()],
+                                    };
+
+                                    write!(
+                                        &mut errors,
+                                        "{}. {}\n\n{}\n└-----> {}\n\n",
+                                        idx + 1,
+                                        e.instance_path,
+                                        lines,
+                                        e
+                                    );
+                                }
+                            }
+                        } else {
+                            let (start_marker, end_marker) = (
+                                current_label
+                                    .as_ref()
+                                    .and_then(|label| label.marker.as_ref())
+                                    .unwrap_or(marker),
+                                map_value.end_marker(),
+                            );
+
+                            let lines =
+                                context_lines(&yaml_split_by_lines, start_marker, end_marker);
+
+                            write!(
+                                &mut errors,
+                                "{}. {}\n\n{}\n└-----> {}\n\n",
+                                idx + 1,
+                                e.instance_path,
+                                lines,
+                                e
+                            );
+                        }
                     }
                 }
             } else {
