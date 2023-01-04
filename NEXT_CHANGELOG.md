@@ -36,6 +36,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 
+### Upgrade the clap version in scaffold template ([Issue #2165](https://github.com/apollographql/router/issues/2165))
+
+Upgrade clap deps version to the right one to be able to create new scaffolded plugins thanks to xtask.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2343
+
 ### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
 
 When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
