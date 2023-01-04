@@ -86,8 +86,13 @@ telemetry:
         metadata:
           foo: bar
 
-      # Optional timeout in humatime form
-      timeout: 2s
+      # Optional batch_processor configuration
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
 ```
 
 Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.
