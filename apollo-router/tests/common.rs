@@ -124,6 +124,7 @@ impl TracingTest {
         panic!("unable to send successful request to router")
     }
 
+    #[allow(dead_code)]
     pub async fn get_metrics(&self) -> reqwest::Result<String> {
         let client = reqwest::Client::new();
 
