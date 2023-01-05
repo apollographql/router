@@ -188,6 +188,30 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
+                      ],
+                      [
+                        "monotonic_counter.apollo_router_cache_miss_count",
+                        1
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
+                      ],
+                      [
+                        "histogram.apollo_router_cache_miss_time",
+                        "[REDACTED]"
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
                       ]
                     ],
                     "metadata": {
