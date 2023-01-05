@@ -130,6 +130,7 @@ pub(crate) fn validate_yaml_configuration(
 
                         let lines = yaml_split_by_lines[offset..end_marker.line()]
                             .iter()
+                            .map(|line| format!("  {line}"))
                             .join("\n");
 
                         // Replace the value in the error message with the one from the raw config.
@@ -142,7 +143,7 @@ pub(crate) fn validate_yaml_configuration(
                             idx + 1,
                             e.instance_path,
                             lines,
-                            " ".repeat(0.max(marker.col())),
+                            " ".repeat(2 + marker.col()),
                             e
                         );
                     }
@@ -211,7 +212,7 @@ pub(crate) fn validate_yaml_configuration(
                             let lines =
                                 context_lines(&yaml_split_by_lines, start_marker, end_marker);
 
-                            write!(
+                            let _ = write!(
                                 &mut errors,
                                 "{}. {}\n\n{}\n└-----> {}\n\n",
                                 idx + 1,
