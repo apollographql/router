@@ -285,7 +285,7 @@ fn context_lines(
             match real_line.cmp(&start_marker.line()) {
                 Ordering::Equal => format!("┌ {line}"),
                 Ordering::Greater => format!("| {line}"),
-                Ordering::Less => line.to_string(),
+                Ordering::Less => format!("  {line}"),
             }
         })
         .join("\n")

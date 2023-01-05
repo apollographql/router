@@ -5,18 +5,18 @@ expression: error.to_string()
 configuration had errors: 
 1. /plugins
 
-
-plugins:
+  
+  plugins:
 ┌   non_existant:
 |     foo: "bar"
 └-----> Additional properties are not allowed ('non_existant' was unexpected)
 
 2. /telemetry
 
-  non_existant:
-    foo: "bar"
-
-telemetry:
+    non_existant:
+      foo: "bar"
+  
+  telemetry:
 ┌   another_non_existant: 3
 └-----> Additional properties are not allowed ('another_non_existant' was unexpected)
 
