@@ -176,7 +176,7 @@ subgraphs:
             r#"configuration had errors: 
 1. 
 
-
+  
   supergraph:
     path: /
 ┌ subgraphs:
