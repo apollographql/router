@@ -197,7 +197,7 @@ impl Plugin for AuthenticationPlugin {
                             {
                                 return failure_message(
                                     request.context,
-                                    format!("Missing '{}' header", &my_config.header_name),
+                                    format!("Missing {} header", &my_config.header_name),
                                     StatusCode::UNAUTHORIZED,
                                 );
                             }
@@ -230,7 +230,10 @@ impl Plugin for AuthenticationPlugin {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         return failure_message(
                             request.context,
-                            format!("'{jwt_value_untrimmed}' is not correctly formatted"),
+                            format!(
+                                "{} is not correctly formatted: {jwt_value_untrimmed}",
+                                my_config.header_prefix
+                            ),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -241,7 +244,7 @@ impl Plugin for AuthenticationPlugin {
                         // Prepare an HTTP 400 response with a GraphQL error message
                         return failure_message(
                             request.context,
-                            format!("'{jwt_value}' is not correctly formatted"),
+                            format!("{jwt_value} is not correctly formatted"),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -255,7 +258,7 @@ impl Plugin for AuthenticationPlugin {
                         Err(e) => {
                             return failure_message(
                                 request.context,
-                                format!("'{jwt}' is not a valid JWT header: {e}"),
+                                format!("{jwt} is not a valid JWT header: {e}"),
                                 StatusCode::BAD_REQUEST,
                             );
                         }
@@ -357,7 +360,6 @@ impl Plugin for AuthenticationPlugin {
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
-                            tracing::info!(?request.context, "request context");
                             Ok(ControlFlow::Continue(request))
                         }
                         None => failure_message(
@@ -384,23 +386,318 @@ register_plugin!("apollo", "authentication", AuthenticationPlugin);
 #[cfg(test)]
 mod tests {
 
-    #[tokio::test]
-    async fn load_plugin() {
+    use super::*;
+    use crate::plugin::test;
+    use crate::services::supergraph;
+
+    async fn build_a_test_harness() -> router::BoxCloneService {
+        // create a mock service we will use to test our plugin
+        let mut mock_service = test::MockSupergraphService::new();
+
+        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
+        let expected_mock_response_data = "response created within the mock";
+
+        // Let's set up our mock to make sure it will be called once
+        mock_service.expect_clone().return_once(move || {
+            let mut mock_service = test::MockSupergraphService::new();
+            mock_service
+                .expect_call()
+                .once()
+                .returning(move |req: supergraph::Request| {
+                    Ok(supergraph::Response::fake_builder()
+                        .data(expected_mock_response_data)
+                        .context(req.context)
+                        .build()
+                        .unwrap())
+                });
+            mock_service
+        });
+
+        let jwks_file = std::fs::canonicalize("tests/fixtures/hmac.json").unwrap();
+        let jwks_url = format!("file://{}", jwks_file.display());
         let config = serde_json::json!({
-            "plugins": {
-                "apollo.authentication": {
-                    "jwks_url": "http://127.0.0.1:8081"
-                }
+            "authentication": {
+                "jwks_url": &jwks_url
             }
         });
-        // Build a test harness. Usually we'd use this and send requests to
-        // it, but in this case it's enough to build the harness to see our
-        // output when our service registers.
-        let _test_harness = crate::TestHarness::builder()
+
+        crate::TestHarness::builder()
             .configuration_json(config)
             .unwrap()
+            .supergraph_hook(move |_| mock_service.clone().boxed())
             .build_router()
             .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn load_plugin() {
+        let _test_harness = build_a_test_harness().await;
+    }
+
+    #[tokio::test]
+    async fn it_rejects_when_there_is_no_auth_header() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .build()
             .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        let expected_error = graphql::Error::builder()
+            .message("Missing authorization header")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        assert_eq!(response.errors, vec![expected_error]);
+
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_rejects_when_auth_prefix_is_missing() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(http::header::AUTHORIZATION, "invalid")
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        let expected_error = graphql::Error::builder()
+            .message("Bearer is not correctly formatted: invalid")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        assert_eq!(response.errors, vec![expected_error]);
+
+        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_rejects_when_auth_prefix_has_no_jwt() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(http::header::AUTHORIZATION, "Bearer")
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        let expected_error = graphql::Error::builder()
+            .message("Bearer is not correctly formatted")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        assert_eq!(response.errors, vec![expected_error]);
+
+        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(http::header::AUTHORIZATION, "Bearer header.payload")
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        let expected_error = graphql::Error::builder()
+            .message("header.payload is not a valid JWT header: InvalidToken")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        assert_eq!(response.errors, vec![expected_error]);
+
+        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "Bearer header.payload.signature",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        let expected_error = graphql::Error::builder()
+            .message("header.payload.signature is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        assert_eq!(response.errors, vec![expected_error]);
+
+        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImdhcnkifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.I1UG-Cx3dHuSvrJpLA7hYVZutpeh8cawgwjPRAm5zss",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        let expected_error = graphql::Error::builder()
+            .message("Could not create decode JWT: InvalidSignature")
+            .extension_code("AUTH_ERROR")
+            .build();
+
+        assert_eq!(response.errors, vec![expected_error]);
+
+        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+    }
+
+    #[tokio::test]
+    async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
+        let test_harness = build_a_test_harness().await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImdhcnkifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.I1UG-Cx3dHuSvrJpLA7hYVSutpeh8cawgwjPRAm5zss",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(response.errors, vec![]);
+
+        assert_eq!(StatusCode::OK, service_response.response.status());
+
+        let expected_mock_response_data = "response created within the mock";
+        // with the expected message
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
     }
 }
