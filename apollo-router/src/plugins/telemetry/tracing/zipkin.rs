@@ -61,7 +61,7 @@ impl TracingConfigurator for Config {
 
         let exporter = opentelemetry_zipkin::new_pipeline()
             .with_trace_config(trace_config.into())
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with(&collector_endpoint, |b, endpoint| {
                 b.with_collector_endpoint(&endpoint.to_string())
             })
