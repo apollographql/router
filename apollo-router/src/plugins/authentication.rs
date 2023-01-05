@@ -28,16 +28,13 @@ use crate::Context;
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication plugin";
 
 type SharedDeduplicate = Arc<
-    Deduplicate<
-        Box<dyn Fn(String) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static>,
-        String,
-        JwkSet,
-    >,
+    Deduplicate<Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static>, Url, JwkSet>,
 >;
 
 struct AuthenticationPlugin {
     configuration: Conf,
     jwks: SharedDeduplicate,
+    jwks_url: Url,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
@@ -68,15 +65,16 @@ impl Plugin for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let getter: Box<dyn Fn(String) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
-            Box::new(|s_url: String| -> DeduplicateFuture<JwkSet> {
-                let url: Url = Url::from_str(&s_url).expect("fix later");
+        let url: Url = Url::from_str(&init.config.jwks_url)?;
+        let getter: Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
+            Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
                 let fut = if url.scheme() == "file" {
                     // TODO: Write code to load JwkSet from disk
                     todo!()
                 } else {
                     async {
                         let jwks: JwkSet = serde_json::from_value(
+                            // TODO: Create one lazy client and use that
                             reqwest::get(url).await.ok()?.json().await.ok()?,
                         )
                         .ok()?;
@@ -89,12 +87,14 @@ impl Plugin for AuthenticationPlugin {
         Ok(AuthenticationPlugin {
             configuration: init.config,
             jwks: Arc::new(deduplicator),
+            jwks_url: url,
         })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let request_full_config = self.configuration.clone();
         let request_jwks = self.jwks.clone();
+        let request_jwks_url = self.jwks_url.clone();
 
         fn external_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
             move |_request: &router::Request| {
@@ -111,6 +111,8 @@ impl Plugin for AuthenticationPlugin {
             .checkpoint_async(move |request: router::Request| {
                 let my_config = request_full_config.clone();
                 let my_jwks = request_jwks.clone();
+                let my_jwks_url = request_jwks_url.clone();
+
                 async move {
                     // We are going to do a lot of similar checking so let's define a local function
                     // to help reduce repetition
@@ -219,14 +221,14 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // GET THE JWKS here
-                    let jwks_opt = match my_jwks.get(my_config.jwks_url).await {
+                    // Get the JWKS here
+                    // If the user has instructed us to clear the cache on fail, then we should.
+                    let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
                             if !my_config.retain_keys {
-                                tracing::info!("Could not retrieve JWKS, clearing cached JWKS");
-                                // TODO: Doesn't work until I fix deduplicate::clear()
-                                // my_jwks.clear();
+                                tracing::info!("Clearing cached JWKS");
+                                my_jwks.clear();
                             }
                             return failure_message(
                                 request.context,
@@ -239,9 +241,13 @@ impl Plugin for AuthenticationPlugin {
                     let jwks = match jwks_opt {
                         Some(k) => k,
                         None => {
+                            if !my_config.retain_keys {
+                                tracing::info!("Clearing cached JWKS");
+                                my_jwks.clear();
+                            }
                             return failure_message(
                                 request.context,
-                                "Did not receive valid JWKS set".to_string(),
+                                "Could not find JWKS set at the configured location".to_string(),
                                 StatusCode::INTERNAL_SERVER_ERROR,
                             );
                         }

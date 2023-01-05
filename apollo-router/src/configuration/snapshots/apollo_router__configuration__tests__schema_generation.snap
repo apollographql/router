@@ -8,6 +8,29 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "authentication": {
+      "type": "object",
+      "required": [
+        "jwks_url"
+      ],
+      "properties": {
+        "header_name": {
+          "default": "authorization",
+          "type": "string"
+        },
+        "header_prefix": {
+          "default": "Bearer",
+          "type": "string"
+        },
+        "jwks_url": {
+          "type": "string"
+        },
+        "retain_keys": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
     "cors": {
       "description": "Cross origin request headers.",
       "default": {
