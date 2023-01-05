@@ -124,11 +124,10 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             let path = schema_uri.path().to_string();
 
-            let subgraph_http_request = subgraph_http::Request {
+            let mut subgraph_http_request = subgraph_http::Request {
                 subgraph_request: request,
-                context: context.clone(),
+                context,
             };
-
             let subgraph_req_span = tracing::info_span!("subgraph_request",
                 "otel.kind" = "CLIENT",
                 "net.peer.name" = &display(host),
@@ -141,34 +140,15 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             get_text_map_propagator(|propagator| {
                 propagator.inject_context(
                     &subgraph_req_span.context(),
-                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                    &mut opentelemetry_http::HeaderInjector(
+                        subgraph_http_request.subgraph_request.headers_mut(),
+                    ),
                 );
             });
-
-            let subgraph_http::Response { response, context } = client
-                .call(subgraph_http_request)
-                .instrument(subgraph_req_span)
-                .await
-                .map_err(|err| {
-                    tracing::error!(fetch_error = format!("{:?}", err).as_str());
-
-                    FetchError::SubrequestHttpError {
-                        service: service_name.clone(),
-                        reason: err.to_string(),
-                    }
-                })?;
-
-            // Keep our parts, we'll need them later
-            let (parts, body) = response.into_parts();
-            if display_headers {
-                tracing::info!(
-                        http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-                )
-            };
             let cloned_service_name = service_name.clone();
-            let (parts, body) = async move {
-                let response = client
-                    .call(request)
+            let (parts, body, context) = async move {
+                    let subgraph_http::Response { response, context } = client
+                    .call(subgraph_http_request)
                     .await
                     .map_err(|err| {
                         tracing::error!(fetch_error = format!("{:?}", err).as_str());
@@ -178,13 +158,14 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                             reason: err.to_string(),
                         }
                     })?;
+
                 // Keep our parts, we'll need them later
                 let (parts, body) = response.into_parts();
                 if display_headers {
                     tracing::info!(
-                        http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
-                    );
-                }
+                            http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
+                    )
+                };
                 if let Some(content_type) = parts.headers.get(header::CONTENT_TYPE) {
                     if let Ok(content_type_str) = content_type.to_str() {
                         // Using .contains because sometimes we could have charset included (example: "application/json; charset=utf-8")
@@ -222,7 +203,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                         }
                     })?;
 
-                Ok((parts, body))
+                Ok((parts, body, context))
             }.instrument(subgraph_req_span).await?;
 
             if display_body {

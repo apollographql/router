@@ -412,6 +412,86 @@ expression: get_spans()
                                     }
                                   },
                                   "children": {
+                                    "apollo_router::services::subgraph_http_service::body_compression": {
+                                      "name": "apollo_router::services::subgraph_http_service::body_compression",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "body_compression",
+                                          "target": "apollo_router::services::subgraph_http_service",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::services::subgraph_http_service",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::services::subgraph_http_service::subgraph_request": {
+                                      "name": "apollo_router::services::subgraph_http_service::subgraph_request",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "otel.kind",
+                                            "CLIENT"
+                                          ],
+                                          [
+                                            "net.peer.name",
+                                            "products.demo.starstuff.dev"
+                                          ],
+                                          [
+                                            "net.peer.port",
+                                            "443"
+                                          ],
+                                          [
+                                            "http.route",
+                                            "/"
+                                          ],
+                                          [
+                                            "net.transport",
+                                            "ip_tcp"
+                                          ],
+                                          [
+                                            "apollo.subgraph.name",
+                                            "products"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "subgraph_request",
+                                          "target": "apollo_router::services::subgraph_http_service",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router::services::subgraph_http_service",
+                                          "fields": {
+                                            "names": [
+                                              "otel.kind",
+                                              "net.peer.name",
+                                              "net.peer.port",
+                                              "http.route",
+                                              "net.transport",
+                                              "apollo.subgraph.name"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
+                                    "apollo_router::services::subgraph_http_service::aggregate_response_data": {
+                                      "name": "apollo_router::services::subgraph_http_service::aggregate_response_data",
+                                      "record": {
+                                        "entries": [],
+                                        "metadata": {
+                                          "name": "aggregate_response_data",
+                                          "target": "apollo_router::services::subgraph_http_service",
+                                          "level": "DEBUG",
+                                          "module_path": "apollo_router::services::subgraph_http_service",
+                                          "fields": {
+                                            "names": []
+                                          }
+                                        }
+                                      },
+                                      "children": {}
+                                    },
                                     "apollo_router::services::subgraph_service::aggregate_response_data": {
                                       "name": "apollo_router::services::subgraph_service::aggregate_response_data",
                                       "record": {
@@ -463,15 +543,51 @@ expression: get_spans()
                                 }
                               },
                               "children": {}
+                            }
+                          }
+                        },
+                        "apollo_router::query_planner::execution::flatten": {
+                          "name": "apollo_router::query_planner::execution::flatten",
+                          "record": {
+                            "entries": [
+                              [
+                                "graphql.path",
+                                "/topProducts/@"
+                              ],
+                              [
+                                "otel.kind",
+                                "INTERNAL"
+                              ]
+                            ],
+                            "metadata": {
                               "name": "flatten",
                               "target": "apollo_router::query_planner::execution",
                               "level": "INFO",
+                              "module_path": "apollo_router::query_planner::execution",
                               "fields": {
                                 "names": [
                                   "graphql.path",
                                   "otel.kind"
                                 ]
                               }
+                            }
+                          },
+                          "children": {
+                            "apollo_router::query_planner::execution::fetch": {
+                              "name": "apollo_router::query_planner::execution::fetch",
+                              "record": {
+                                "entries": [
+                                  [
+                                    "otel.kind",
+                                    "INTERNAL"
+                                  ],
+                                  [
+                                    "apollo.subgraph.name",
+                                    "reviews"
+                                  ],
+                                  [
+                                    "apollo_private.sent_time_offset",
+                                    0
                                   ]
                                 ],
                                 "metadata": {
@@ -595,6 +711,86 @@ expression: get_spans()
                                         }
                                       },
                                       "children": {
+                                        "apollo_router::services::subgraph_http_service::body_compression": {
+                                          "name": "apollo_router::services::subgraph_http_service::body_compression",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "body_compression",
+                                              "target": "apollo_router::services::subgraph_http_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_http_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        },
+                                        "apollo_router::services::subgraph_http_service::subgraph_request": {
+                                          "name": "apollo_router::services::subgraph_http_service::subgraph_request",
+                                          "record": {
+                                            "entries": [
+                                              [
+                                                "otel.kind",
+                                                "CLIENT"
+                                              ],
+                                              [
+                                                "net.peer.name",
+                                                "reviews.demo.starstuff.dev"
+                                              ],
+                                              [
+                                                "net.peer.port",
+                                                "443"
+                                              ],
+                                              [
+                                                "http.route",
+                                                "/"
+                                              ],
+                                              [
+                                                "net.transport",
+                                                "ip_tcp"
+                                              ],
+                                              [
+                                                "apollo.subgraph.name",
+                                                "reviews"
+                                              ]
+                                            ],
+                                            "metadata": {
+                                              "name": "subgraph_request",
+                                              "target": "apollo_router::services::subgraph_http_service",
+                                              "level": "INFO",
+                                              "module_path": "apollo_router::services::subgraph_http_service",
+                                              "fields": {
+                                                "names": [
+                                                  "otel.kind",
+                                                  "net.peer.name",
+                                                  "net.peer.port",
+                                                  "http.route",
+                                                  "net.transport",
+                                                  "apollo.subgraph.name"
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        },
+                                        "apollo_router::services::subgraph_http_service::aggregate_response_data": {
+                                          "name": "apollo_router::services::subgraph_http_service::aggregate_response_data",
+                                          "record": {
+                                            "entries": [],
+                                            "metadata": {
+                                              "name": "aggregate_response_data",
+                                              "target": "apollo_router::services::subgraph_http_service",
+                                              "level": "DEBUG",
+                                              "module_path": "apollo_router::services::subgraph_http_service",
+                                              "fields": {
+                                                "names": []
+                                              }
+                                            }
+                                          },
+                                          "children": {}
+                                        },
                                         "apollo_router::services::subgraph_service::aggregate_response_data": {
                                           "name": "apollo_router::services::subgraph_service::aggregate_response_data",
                                           "record": {
@@ -838,6 +1034,86 @@ expression: get_spans()
                                             }
                                           },
                                           "children": {
+                                            "apollo_router::services::subgraph_http_service::body_compression": {
+                                              "name": "apollo_router::services::subgraph_http_service::body_compression",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "body_compression",
+                                                  "target": "apollo_router::services::subgraph_http_service",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router::services::subgraph_http_service",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
+                                            "apollo_router::services::subgraph_http_service::subgraph_request": {
+                                              "name": "apollo_router::services::subgraph_http_service::subgraph_request",
+                                              "record": {
+                                                "entries": [
+                                                  [
+                                                    "otel.kind",
+                                                    "CLIENT"
+                                                  ],
+                                                  [
+                                                    "net.peer.name",
+                                                    "products.demo.starstuff.dev"
+                                                  ],
+                                                  [
+                                                    "net.peer.port",
+                                                    "443"
+                                                  ],
+                                                  [
+                                                    "http.route",
+                                                    "/"
+                                                  ],
+                                                  [
+                                                    "net.transport",
+                                                    "ip_tcp"
+                                                  ],
+                                                  [
+                                                    "apollo.subgraph.name",
+                                                    "products"
+                                                  ]
+                                                ],
+                                                "metadata": {
+                                                  "name": "subgraph_request",
+                                                  "target": "apollo_router::services::subgraph_http_service",
+                                                  "level": "INFO",
+                                                  "module_path": "apollo_router::services::subgraph_http_service",
+                                                  "fields": {
+                                                    "names": [
+                                                      "otel.kind",
+                                                      "net.peer.name",
+                                                      "net.peer.port",
+                                                      "http.route",
+                                                      "net.transport",
+                                                      "apollo.subgraph.name"
+                                                    ]
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
+                                            "apollo_router::services::subgraph_http_service::aggregate_response_data": {
+                                              "name": "apollo_router::services::subgraph_http_service::aggregate_response_data",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "aggregate_response_data",
+                                                  "target": "apollo_router::services::subgraph_http_service",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router::services::subgraph_http_service",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
                                             "apollo_router::services::subgraph_service::aggregate_response_data": {
                                               "name": "apollo_router::services::subgraph_service::aggregate_response_data",
                                               "record": {
@@ -967,8 +1243,77 @@ expression: get_spans()
                                           }
                                         }
                                       },
+                                      "children": {}
+                                    },
+                                    "apollo_router::plugins::telemetry::subgraph": {
+                                      "name": "apollo_router::plugins::telemetry::subgraph",
+                                      "record": {
+                                        "entries": [
+                                          [
+                                            "apollo.subgraph.name",
+                                            "accounts"
+                                          ],
+                                          [
+                                            "graphql.document",
+                                            "query($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}"
+                                          ],
+                                          [
+                                            "graphql.operation.name",
+                                            ""
+                                          ],
+                                          [
+                                            "otel.kind",
+                                            "INTERNAL"
+                                          ]
+                                        ],
+                                        "metadata": {
+                                          "name": "subgraph",
+                                          "target": "apollo_router::plugins::telemetry",
+                                          "level": "INFO",
+                                          "module_path": "apollo_router::plugins::telemetry",
+                                          "fields": {
+                                            "names": [
+                                              "apollo.subgraph.name",
+                                              "graphql.document",
+                                              "graphql.operation.name",
+                                              "otel.kind",
+                                              "apollo_private.ftv1"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "children": {
+                                        "apollo_router::services::subgraph_service::subgraph_request": {
+                                          "name": "apollo_router::services::subgraph_service::subgraph_request",
+                                          "record": {
+                                            "entries": [
+                                              [
+                                                "otel.kind",
+                                                "CLIENT"
+                                              ],
+                                              [
+                                                "net.peer.name",
+                                                "accounts.demo.starstuff.dev"
+                                              ],
+                                              [
+                                                "net.peer.port",
+                                                "443"
+                                              ],
+                                              [
+                                                "http.route",
+                                                "/"
+                                              ],
+                                              [
+                                                "http.url",
+                                                "https://accounts.demo.starstuff.dev/"
+                                              ],
+                                              [
+                                                "net.transport",
+                                                "ip_tcp"
+                                              ],
                                               [
                                                 "apollo.subgraph.name",
+                                                "accounts"
                                               ]
                                             ],
                                             "metadata": {
@@ -990,6 +1335,86 @@ expression: get_spans()
                                             }
                                           },
                                           "children": {
+                                            "apollo_router::services::subgraph_http_service::body_compression": {
+                                              "name": "apollo_router::services::subgraph_http_service::body_compression",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "body_compression",
+                                                  "target": "apollo_router::services::subgraph_http_service",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router::services::subgraph_http_service",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
+                                            "apollo_router::services::subgraph_http_service::subgraph_request": {
+                                              "name": "apollo_router::services::subgraph_http_service::subgraph_request",
+                                              "record": {
+                                                "entries": [
+                                                  [
+                                                    "otel.kind",
+                                                    "CLIENT"
+                                                  ],
+                                                  [
+                                                    "net.peer.name",
+                                                    "accounts.demo.starstuff.dev"
+                                                  ],
+                                                  [
+                                                    "net.peer.port",
+                                                    "443"
+                                                  ],
+                                                  [
+                                                    "http.route",
+                                                    "/"
+                                                  ],
+                                                  [
+                                                    "net.transport",
+                                                    "ip_tcp"
+                                                  ],
+                                                  [
+                                                    "apollo.subgraph.name",
+                                                    "accounts"
+                                                  ]
+                                                ],
+                                                "metadata": {
+                                                  "name": "subgraph_request",
+                                                  "target": "apollo_router::services::subgraph_http_service",
+                                                  "level": "INFO",
+                                                  "module_path": "apollo_router::services::subgraph_http_service",
+                                                  "fields": {
+                                                    "names": [
+                                                      "otel.kind",
+                                                      "net.peer.name",
+                                                      "net.peer.port",
+                                                      "http.route",
+                                                      "net.transport",
+                                                      "apollo.subgraph.name"
+                                                    ]
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
+                                            "apollo_router::services::subgraph_http_service::aggregate_response_data": {
+                                              "name": "apollo_router::services::subgraph_http_service::aggregate_response_data",
+                                              "record": {
+                                                "entries": [],
+                                                "metadata": {
+                                                  "name": "aggregate_response_data",
+                                                  "target": "apollo_router::services::subgraph_http_service",
+                                                  "level": "DEBUG",
+                                                  "module_path": "apollo_router::services::subgraph_http_service",
+                                                  "fields": {
+                                                    "names": []
+                                                  }
+                                                }
+                                              },
+                                              "children": {}
+                                            },
                                             "apollo_router::services::subgraph_service::aggregate_response_data": {
                                               "name": "apollo_router::services::subgraph_service::aggregate_response_data",
                                               "record": {
