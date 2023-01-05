@@ -1,20 +1,25 @@
 //! Authentication plugin
 // With regards to ELv2 licensing, this entire file is license key functionality
 
-use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use deduplicate::Deduplicate;
 use deduplicate::DeduplicateFuture;
+use http::header::ACCEPT;
+use http::header::CONTENT_TYPE;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
-// use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::DecodingKey;
+use jsonwebtoken::EncodingKey;
+use jsonwebtoken::Header;
 use jsonwebtoken::Validation;
+use once_cell::sync::Lazy;
+use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::fs::read_to_string;
@@ -23,19 +28,30 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use url::Url;
 
+use crate::error::LicenseError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::apollo_graph_reference;
+use crate::services::apollo_key;
 use crate::services::router;
 use crate::Context;
-
-pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication plugin";
 
 type SharedDeduplicate = Arc<
     Deduplicate<Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static>, Url, JwkSet>,
 >;
+
+pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication plugin";
+
+const DEFAULT_AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(15);
+
+static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
+    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
+    apollo_key().ok_or(LicenseError::MissingKey)?;
+    Ok(Client::new())
+});
 
 struct AuthenticationPlugin {
     configuration: Conf,
@@ -80,7 +96,20 @@ impl Plugin for AuthenticationPlugin {
                         read_to_string(path).await.ok()?
                     } else {
                         // TODO: Create one lazy client and use that
-                        reqwest::get(url).await.ok()?.text().await.ok()?
+                        let my_client = CLIENT.as_ref().map_err(|e| e.to_string()).ok()?.clone();
+
+                        my_client
+                            .get(url)
+                            .header(ACCEPT, "application/json")
+                            .header(CONTENT_TYPE, "application/json")
+                            .timeout(DEFAULT_AUTHENTICATION_TIMEOUT)
+                            .send()
+                            .await
+                            .ok()?
+                            .text()
+                            .await
+                            .ok()?
+                        // reqwest::get(url).await.ok()?.text().await.ok()?
                     };
                     let jwks: JwkSet = serde_json::from_str(&data).ok()?;
                     Some(jwks)
@@ -88,6 +117,20 @@ impl Plugin for AuthenticationPlugin {
                 Box::pin(fut)
             });
         let deduplicator = Deduplicate::with_capacity(getter, 1);
+        // XXX For debugging, generate a valid JWT...
+        let key = "c2VjcmV0Cg==";
+        let claims = serde_json::json!( {
+            "exp": 10_000_000_000usize,
+            "another claim": "this is another claim"
+        });
+        let header = Header {
+            kid: Some("gary".to_string()),
+            ..Default::default()
+        };
+        let tok_maybe =
+            jsonwebtoken::encode(&header, &claims, &EncodingKey::from_base64_secret(key)?);
+        tracing::info!(?tok_maybe, "use this JWT for testing");
+
         Ok(AuthenticationPlugin {
             configuration: init.config,
             jwks: Arc::new(deduplicator),
@@ -260,7 +303,7 @@ impl Plugin for AuthenticationPlugin {
                     // Now let's try to validate our token
                     match jwks.find(&kid) {
                         Some(jwk) => {
-                            let decoding_key = match DecodingKey::from_jwk(&jwk) {
+                            let decoding_key = match DecodingKey::from_jwk(jwk) {
                                 Ok(k) => k,
                                 Err(e) => {
                                     return failure_message(
@@ -284,7 +327,7 @@ impl Plugin for AuthenticationPlugin {
 
                             let validation = Validation::new(algorithm);
 
-                            let token_data = match decode::<HashMap<String, String>>(
+                            let token_data = match decode::<serde_json::Value>(
                                 jwt,
                                 &decoding_key,
                                 &validation,
@@ -299,34 +342,17 @@ impl Plugin for AuthenticationPlugin {
                                 }
                             };
 
-                            // XXX RESUME HERE WITH DOING SOMETHING WITH token_data
-                            tracing::info!("token_data: {:?}", token_data);
-
-                            /*
-                            // XXX: NEED TO RESUME HERE WITH VALIDATION AND CLAIM POPULATION
-                            match &jwk.algorithm {
-                                AlgorithmParameters::EllipticCurve(ecp) => {
-                                    todo!()
-                                }
-                                AlgorithmParameters::OctetKey(okp) => {
-                                    todo!()
-                                }
-                                AlgorithmParameters::OctetKeyPair(okp) => {
-                                    todo!()
-                                }
-                                AlgorithmParameters::RSA(rkp) => {
-                                    // Extra
-                                    todo!()
-                                }
-                                _ => {
-                                    return failure_message(
-                                        request.context,
-                                        format!("unsupported algorithm: {:?}", jwk.algorithm),
-                                        StatusCode::BAD_REQUEST,
-                                    );
-                                }
+                            if let Err(e) = request
+                                .context
+                                .insert("apollo_authentication::JWT::claims", token_data.claims)
+                            {
+                                return failure_message(
+                                    request.context,
+                                    format!("Could not insert claims into context: {}", e),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                );
                             }
-                            */
+                            tracing::info!(?request.context, "request context");
                             Ok(ControlFlow::Continue(request))
                         }
                         None => failure_message(
