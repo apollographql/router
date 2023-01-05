@@ -1,6 +1,7 @@
 //! Authentication plugin
 // With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -8,10 +9,15 @@ use std::sync::Arc;
 use deduplicate::Deduplicate;
 use deduplicate::DeduplicateFuture;
 use http::StatusCode;
+use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
+// use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::DecodingKey;
+use jsonwebtoken::Validation;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::fs::read_to_string;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -68,18 +74,16 @@ impl Plugin for AuthenticationPlugin {
         let url: Url = Url::from_str(&init.config.jwks_url)?;
         let getter: Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
             Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
-                let fut = if url.scheme() == "file" {
-                    // TODO: Write code to load JwkSet from disk
-                    todo!()
-                } else {
-                    async {
-                        let jwks: JwkSet = serde_json::from_value(
-                            // TODO: Create one lazy client and use that
-                            reqwest::get(url).await.ok()?.json().await.ok()?,
-                        )
-                        .ok()?;
-                        Some(jwks)
-                    }
+                let fut = async {
+                    let data = if url.scheme() == "file" {
+                        let path = url.to_file_path().ok()?;
+                        read_to_string(path).await.ok()?
+                    } else {
+                        // TODO: Create one lazy client and use that
+                        reqwest::get(url).await.ok()?.text().await.ok()?
+                    };
+                    let jwks: JwkSet = serde_json::from_str(&data).ok()?;
+                    Some(jwks)
                 };
                 Box::pin(fut)
             });
@@ -255,9 +259,74 @@ impl Plugin for AuthenticationPlugin {
 
                     // Now let's try to validate our token
                     match jwks.find(&kid) {
-                        Some(_jwk) => {
-                            //todo!()
+                        Some(jwk) => {
+                            let decoding_key = match DecodingKey::from_jwk(&jwk) {
+                                Ok(k) => k,
+                                Err(e) => {
+                                    return failure_message(
+                                        request.context,
+                                        format!("Could not create decoding key: {}", e),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    );
+                                }
+                            };
+
+                            let algorithm = match jwk.common.algorithm {
+                                Some(a) => a,
+                                None => {
+                                    return failure_message(
+                                        request.context,
+                                        "Jwk does not contain an algorithm".to_string(),
+                                        StatusCode::INTERNAL_SERVER_ERROR,
+                                    );
+                                }
+                            };
+
+                            let validation = Validation::new(algorithm);
+
+                            let token_data = match decode::<HashMap<String, String>>(
+                                jwt,
+                                &decoding_key,
+                                &validation,
+                            ) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    return failure_message(
+                                        request.context,
+                                        format!("Could not create decode JWT: {}", e),
+                                        StatusCode::UNAUTHORIZED,
+                                    );
+                                }
+                            };
+
+                            // XXX RESUME HERE WITH DOING SOMETHING WITH token_data
+                            tracing::info!("token_data: {:?}", token_data);
+
+                            /*
                             // XXX: NEED TO RESUME HERE WITH VALIDATION AND CLAIM POPULATION
+                            match &jwk.algorithm {
+                                AlgorithmParameters::EllipticCurve(ecp) => {
+                                    todo!()
+                                }
+                                AlgorithmParameters::OctetKey(okp) => {
+                                    todo!()
+                                }
+                                AlgorithmParameters::OctetKeyPair(okp) => {
+                                    todo!()
+                                }
+                                AlgorithmParameters::RSA(rkp) => {
+                                    // Extra
+                                    todo!()
+                                }
+                                _ => {
+                                    return failure_message(
+                                        request.context,
+                                        format!("unsupported algorithm: {:?}", jwk.algorithm),
+                                        StatusCode::BAD_REQUEST,
+                                    );
+                                }
+                            }
+                            */
                             Ok(ControlFlow::Continue(request))
                         }
                         None => failure_message(
