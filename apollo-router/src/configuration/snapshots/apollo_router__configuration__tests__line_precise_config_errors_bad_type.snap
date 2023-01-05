@@ -3,7 +3,7 @@ source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /supergraph/listen
+1. at line 5
 
   
   supergraph:

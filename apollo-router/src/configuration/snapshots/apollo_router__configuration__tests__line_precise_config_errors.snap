@@ -3,7 +3,7 @@ source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /plugins
+1. at line 3
 
   
   plugins:
@@ -11,7 +11,7 @@ configuration had errors:
 |     foo: "bar"
 └-----> Additional properties are not allowed ('non_existant' was unexpected)
 
-2. /telemetry
+2. at line 7
 
     non_existant:
       foo: "bar"

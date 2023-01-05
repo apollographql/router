@@ -174,7 +174,7 @@ subgraphs:
         error.to_string(),
         String::from(
             r#"configuration had errors: 
-1. 
+1. at line 4
 
   
   supergraph:
@@ -203,7 +203,7 @@ unknown:
         error.to_string(),
         String::from(
             r#"configuration had errors: 
-1. 
+1. at line 2
 
   
 ┌ unknown:

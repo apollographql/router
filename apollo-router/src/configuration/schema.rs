@@ -139,9 +139,9 @@ pub(crate) fn validate_yaml_configuration(
 
                         let _ = write!(
                             &mut errors,
-                            "{}. {}\n\n{}\n{}^----- {}\n\n",
+                            "{}. at line {}\n\n{}\n{}^----- {}\n\n",
                             idx + 1,
-                            e.instance_path,
+                            start_marker.line(),
                             lines,
                             " ".repeat(2 + marker.col()),
                             e
@@ -154,9 +154,9 @@ pub(crate) fn validate_yaml_configuration(
 
                         let _ = write!(
                             &mut errors,
-                            "{}. {}\n\n{}\n└-----> {}\n\n",
+                            "{}. at line {}\n\n{}\n└-----> {}\n\n",
                             idx + 1,
-                            e.instance_path,
+                            start_marker.line(),
                             lines,
                             e
                         );
@@ -192,9 +192,9 @@ pub(crate) fn validate_yaml_configuration(
 
                                     let _ = write!(
                                         &mut errors,
-                                        "{}. {}\n\n{}\n└-----> {}\n\n",
+                                        "{}. at line {}\n\n{}\n└-----> {}\n\n",
                                         idx + 1,
-                                        e.instance_path,
+                                        start_marker.line(),
                                         lines,
                                         e
                                     );
@@ -214,9 +214,9 @@ pub(crate) fn validate_yaml_configuration(
 
                             let _ = write!(
                                 &mut errors,
-                                "{}. {}\n\n{}\n└-----> {}\n\n",
+                                "{}. at line {}\n\n{}\n└-----> {}\n\n",
                                 idx + 1,
-                                e.instance_path,
+                                start_marker.line(),
                                 lines,
                                 e
                             );
