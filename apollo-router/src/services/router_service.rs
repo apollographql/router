@@ -28,6 +28,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
 
+use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_JSON_CONTEXT_KEY;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
@@ -40,6 +41,7 @@ use super::HasPlugins;
 #[cfg(test)]
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
@@ -60,14 +62,18 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
+    apq_layer: APQLayer,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>) -> Self {
-        RouterService { supergraph_creator }
+    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
+        RouterService {
+            supergraph_creator,
+            apq_layer,
+        }
     }
 }
 
@@ -98,6 +104,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         &configuration,
     )
+    .await
     .make()
 }
 
@@ -137,6 +144,7 @@ pub(crate) async fn empty() -> impl Service<
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         &Configuration::default(),
     )
+    .await
     .make()
 }
 
@@ -164,20 +172,47 @@ where
 
         let (parts, body) = router_request.into_parts();
 
-        let supergraph_service = self.supergraph_creator.create();
+        let supergraph_creator = self.supergraph_creator.clone();
+        let apq = self.apq_layer.clone();
+
         let fut = async move {
-            let graphql_request: Result<graphql::Request, &str> = if parts.method == Method::GET {
+            let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
+                == Method::GET
+            {
                 parts
                     .uri
                     .query()
-                    .and_then(|q| graphql::Request::from_urlencoded_query(q.to_string()).ok())
-                    .ok_or("missing query string")
+                    .map(|q| {
+                        graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
+                            (
+                                "failed to decode a valid GraphQL request from path",
+                                format!("failed to decode a valid GraphQL request from path {}", e),
+                            )
+                        })
+                    })
+                    .unwrap_or_else(|| {
+                        Err(("missing query string", "missing query string".to_string()))
+                    })
             } else {
                 hyper::body::to_bytes(body)
                     .await
-                    .map_err(|_| ())
-                    .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
-                    .map_err(|_| "failed to parse the request body as JSON")
+                    .map_err(|e| {
+                        (
+                            "failed to get the request body",
+                            format!("failed to get the request body: {}", e),
+                        )
+                    })
+                    .and_then(|bytes| {
+                        serde_json::from_reader(bytes.reader()).map_err(|err| {
+                            (
+                                "failed to deserialize the request body into JSON",
+                                format!(
+                                    "failed to deserialize the request body into JSON: {}",
+                                    err
+                                ),
+                            )
+                        })
+                    })
             };
 
             match graphql_request {
@@ -188,7 +223,37 @@ where
                     };
 
                     let SupergraphResponse { response, context } =
-                        supergraph_service.oneshot(request).await?;
+                        match apq.request(request).await.and_then(|request| {
+                            let query = request.supergraph_request.body().query.as_ref();
+
+                            if query.is_none() || query.unwrap().trim().is_empty() {
+                                let errors = vec![crate::error::Error::builder()
+                                    .message("Must provide query string.".to_string())
+                                    .extension_code("MISSING_QUERY_STRING")
+                                    .build()];
+                                tracing::error!(
+                                    monotonic_counter.apollo_router_http_requests_total = 1u64,
+                                    status = %StatusCode::BAD_REQUEST.as_u16(),
+                                    error = "Must provide query string",
+                                    "Must provide query string"
+                                );
+
+                                Err(SupergraphResponse::builder()
+                                    .errors(errors)
+                                    .status_code(StatusCode::BAD_REQUEST)
+                                    .context(request.context)
+                                    .build()
+                                    .expect("response is valid"))
+                            } else {
+                                Ok(request)
+                            }
+                        }) {
+                            Err(response) => response,
+                            Ok(request) => {
+                                let supergraph_service = supergraph_creator.create();
+                                supergraph_service.oneshot(request).await?
+                            }
+                        };
 
                     let accepts_wildcard: bool = context
                         .get(ACCEPTS_WILDCARD_CONTEXT_KEY)
@@ -313,7 +378,7 @@ where
                         }
                     }
                 }
-                Err(error) => {
+                Err((error, extension_details)) => {
                     // BAD REQUEST
                     ::tracing::error!(
                         monotonic_counter.apollo_router_http_requests_total = 1u64,
@@ -324,7 +389,17 @@ where
                     Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::BAD_REQUEST)
-                            .body(Body::from("Invalid GraphQL request"))
+                            .header(CONTENT_TYPE, APPLICATION_JSON.to_string())
+                            .body(Body::from(
+                                serde_json::to_string(
+                                    &graphql::Error::builder()
+                                        .message(String::from("Invalid GraphQL request"))
+                                        .extension_code("INVALID_GRAPHQL_REQUEST")
+                                        .extension("details", extension_details)
+                                        .build(),
+                                )
+                                .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
+                            ))
                             .expect("cannot fail"),
                         context,
                     })
@@ -351,6 +426,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
+    apq_layer: APQLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -399,11 +475,20 @@ where
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
         Send,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
+    pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
+        let apq_layer = APQLayer::with_cache(
+            DeduplicatingCache::from_configuration(
+                &configuration.supergraph.apq.experimental_cache,
+                "APQ",
+            )
+            .await,
+        );
+
         Self {
             supergraph_creator,
             static_page,
+            apq_layer,
         }
     }
 
@@ -415,8 +500,10 @@ where
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negociation::RouterLayer::default()
-            .layer(RouterService::new(self.supergraph_creator.clone()));
+        let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
+            self.supergraph_creator.clone(),
+            self.apq_layer.clone(),
+        ));
 
         ServiceBuilder::new()
             .layer(self.static_page.clone())
@@ -427,6 +514,12 @@ where
                     .rev()
                     .fold(router_service.boxed(), |acc, (_, e)| e.router_service(acc)),
             )
+    }
+}
+
+impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.supergraph_creator.cache_keys(count).await
     }
 }
 
@@ -540,5 +633,61 @@ mod tests {
             .call(post_request.try_into().unwrap())
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn it_fails_on_empty_query() {
+        let expected_error = "Must provide query string.";
+
+        let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
+
+        let request = SupergraphRequest::fake_builder()
+            .query("".to_string())
+            .build()
+            .expect("expecting valid request")
+            .try_into()
+            .unwrap();
+
+        let response = router_service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        let actual_error = response.errors[0].message.clone();
+
+        assert_eq!(expected_error, actual_error);
+        assert!(response.errors[0].extensions.contains_key("code"));
+    }
+
+    #[tokio::test]
+    async fn it_fails_on_no_query() {
+        let expected_error = "Must provide query string.";
+
+        let router_service = from_supergraph_mock_callback(move |_req| unreachable!()).await;
+
+        let request = SupergraphRequest::fake_builder()
+            .build()
+            .expect("expecting valid request")
+            .try_into()
+            .unwrap();
+
+        let response = router_service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
+        let actual_error = response.errors[0].message.clone();
+        assert_eq!(expected_error, actual_error);
+        assert!(response.errors[0].extensions.contains_key("code"));
     }
 }

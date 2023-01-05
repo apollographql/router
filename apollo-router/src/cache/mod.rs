@@ -32,11 +32,6 @@ where
     K: KeyType + 'static,
     V: ValueType + 'static,
 {
-    #[cfg(test)]
-    pub(crate) async fn new() -> Self {
-        Self::with_capacity(DEFAULT_CACHE_CAPACITY, None, "test").await
-    }
-
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
         redis_urls: Option<Vec<String>>,
@@ -131,6 +126,10 @@ where
         let mut locked_wait_map = self.wait_map.lock().await;
         let _ = locked_wait_map.remove(key);
         let _ = sender.send(value);
+    }
+
+    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+        self.storage.in_memory_keys().await
     }
 }
 

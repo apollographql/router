@@ -24,145 +24,78 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [x.x.x] (unreleased) - 2022-mm-dd
+# [1.8.0] (unreleased) - 2022-mm-dd
 
 ## ❗ BREAKING ❗
-## 🚀 Features
 
-### Apollo uplink: Configurable schema poll timeout ([PR #2271](https://github.com/apollographql/router/pull/2271))
+### Remove timeout from otlp exporter ([Issue #2337](https://github.com/apollographql/router/issues/2337))
 
-In addition to the url and poll interval, Uplink poll timeout can now be configured via command line arg and env variable:
+`batch_processor` configuration contains timeout, so the existing timeout property has been removed from the parent configuration element.
 
-```bash
-        --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>
-            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_TIMEOUT=] [default: 30s]
-```
-
-It defaults to 30 seconds.
-
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2271
-
-## 🐛 Fixes
-
-### Return an error on duplicate keys in configuration ([Issue #1428](https://github.com/apollographql/router/issues/1428))
-
-If you have duplicated keys in your yaml configuration like this:
-
+Before:
 ```yaml
 telemetry:
   tracing:
-    propagation:
-      jaeger: true
+    otlp:
+      timeout: 5s
+```
+After:
+```yaml
+telemetry:
   tracing:
-    propagation:
-      jaeger: false
+    otlp:
+      batch_processor:
+        timeout: 5s
 ```
 
-It will now throw an error on router startup:
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
 
-`ERROR duplicated keys detected in your yaml configuration: 'telemetry.tracing'`
+## 🚀 Features
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2270
+### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
 
-### Return root `__typename` in first chunk of defer response when first response is empty ([Issue #1922](https://github.com/apollographql/router/issues/1922))
+For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
 
-With this query:
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
-```graphql
-{
-  __typename
-  ...deferedFragment @defer
-}
+## 🐛 Fixes
 
-fragment deferedFragment on Query {
-  slow
-}
-```
+### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
 
-You will receive the first response chunk:
+Before this fix, the context injected in headers to subgraphs was wrong, it was not the right parent span id.
 
-```json
-{"data":{"__typename": "Query"},"hasNext":true}
-```
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2345
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2274
-
-### Change log level when we can't get the schema from GCP ([Issue #2004](https://github.com/apollographql/router/issues/2004))
-
-Set the log level for this specific log to `debug`.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
-
-### Traces won't cause missing field-stats ([Issue #2267](https://github.com/apollographql/router/issues/2267))
-
-Previously if a request was sampled for tracing it was not contributing to metrics correctly. This was a particular problem for users with a high sampling rate.
-Now metrics and traces have been separated so that metrics are always comprehensive and traces are ancillary.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2277 and https://github.com/apollographql/router/pull/2286
-
-### Replace notify recommended watcher with PollWatcher ([Issue #2245](https://github.com/apollographql/router/issues/2245))
-
-We noticed that we kept receiving issues about hot reload. We tried to fix this a while back by moving from HotWatch to Notify, but there are still issues. The problem appears to be caused by having different mechanisms on different platforms. Switching to the PollWatcher, which offers less sophisticated functionality but is the same on all platforms, should solve these issues at the expense of slightly worse reactiveness.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2276
-
-### Keep the error path when redacting subgraph errors ([Issue #1818](https://github.com/apollographql/router/issues/1818))
-
-Error redaction was erasing the error's path, which made it impossible to affect the errors to deferred responses. Now the redacted errors keep the path. Since the response shape for the primary and deferred responses are defined from the API schema, there is no possibility of leaking internal schema information here.
-
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2273
-
-### Wrong urldecoding for variables in get requests ([Issue #2248](https://github.com/apollographql/router/issues/2248))
-
-Using APQs, any '+' characters would be replaced by spaces in variables, breaking for instance datetimes with timezone info.
-
-By [@neominik](https://github.com/neominik) in https://github.com/apollographql/router/pull/2249
 
 ## 🛠 Maintenance
 
-### Add outgoing request URLs for the subgraph calls in the OTEL spans ([Issue #2280](https://github.com/apollographql/router/issues/2280))
+### Simplify telemetry config code ([Issue #2337](https://github.com/apollographql/router/issues/2337))
 
-Add attribute named `http.url` containing the subgraph URL in span `subgraph_request`.
+This brings the telemetry plugin configuration closer to standards recommended in the [yaml design guidance](dev-docs/yaml-design-guidance.md).
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2291
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
 
-### Return more consistent errors ([Issue #2101](https://github.com/apollographql/router/issues/2101))
+### Upgrade the clap version in scaffold template ([Issue #2165](https://github.com/apollographql/router/issues/2165))
 
-Change some of our errors we returned by following [this specs](https://www.apollographql.com/docs/apollo-server/data/errors/). It adds a `code` field in `extensions` describing the current error. 
+Upgrade clap deps version to the right one to be able to create new scaffolded plugins thanks to xtask.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2178
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2343
 
-## 🥼 Experimental
+### Upgrade axum to `0.6.1` ([PR #2303](https://github.com/apollographql/router/pull/2303))
 
-### Introduce a `router_service` ([Issue #1496](https://github.com/apollographql/router/issues/1496))
+For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
 
-A `router_service` is now part of our service stack, which allows plugin developers to process raw http requests and raw http responses, that wrap the already available `supergraph_service`
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2170
+### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
 
-### Introduce an externalization mechanism based on `router_service` ([Issue #1916](https://github.com/apollographql/router/issues/1916))
+When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
 
-If external extensibility is configured, then a block of data is transmitted (encoded as JSON) to an endpoint via an HTTP POST request. The router will process the response to the POST request before resuming execution.
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
 
-Conceptually, an external co-processor performs the same functionality as you may provide via a rust plugin or a rhai script within the router. The difference is the protocol which governs the interaction between the router and the co-processor.
+### Move APQ and EnsureQueryPresence in the router service ([PR #2296](https://github.com/apollographql/router/pull/2296))
 
-Sample configuration:
+Moving APQ from the axum level to the supergraph service reintroduced a `Buffer` in the service pipeline.
+Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
 
-```yaml
-plugins:
-  experimental.external:
-    url: http://127.0.0.1:8081 # mandatory URL which is the address of the co-processor
-    timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
-    stages: # In future, multiple stages may be configurable
-      router: # Currently, the only valid value is router
-        request: # What data should we transmit to the co-processor from the router request?
-          headers: true # All of these data content attributes are optional and false by default.
-          context: true
-          body: true
-          sdl: true
-        response: # What data should we transmit to the co-processor from the router response?
-          headers: true
-          context: true
-```
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2229
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296

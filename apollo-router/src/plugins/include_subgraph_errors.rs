@@ -206,6 +206,7 @@ mod test {
             Arc::new(builder.build().await.expect("should build")),
             &Configuration::default(),
         )
+        .await
         .make()
         .boxed()
     }

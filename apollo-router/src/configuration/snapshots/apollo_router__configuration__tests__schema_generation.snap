@@ -746,7 +746,8 @@ expression: "&schema"
             "in_memory": {
               "limit": 512
             }
-          }
+          },
+          "warmed_up_queries": 0
         }
       },
       "type": "object",
@@ -828,7 +829,8 @@ expression: "&schema"
               "in_memory": {
                 "limit": 512
               }
-            }
+            },
+            "warmed_up_queries": 0
           },
           "type": "object",
           "required": [
@@ -859,6 +861,13 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false
+            },
+            "warmed_up_queries": {
+              "description": "Warm up the cache on reloads by running the query plan over a list of the most used queries Defaults to 0 (do not warm up the cache)",
+              "default": 0,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
             }
           },
           "additionalProperties": false
@@ -2031,6 +2040,13 @@ expression: "&schema"
                   "type": "string"
                 },
                 "grpc": {
+                  "default": {
+                    "domain_name": null,
+                    "ca": null,
+                    "cert": null,
+                    "key": null,
+                    "metadata": {}
+                  },
                   "type": "object",
                   "properties": {
                     "ca": {
@@ -2042,6 +2058,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "domain_name": {
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2050,40 +2067,36 @@ expression: "&schema"
                       "nullable": true
                     },
                     "metadata": {
-                      "default": null,
+                      "default": {},
                       "type": "object",
-                      "additionalProperties": true,
-                      "nullable": true
+                      "additionalProperties": true
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "http": {
+                  "default": {
+                    "headers": {}
+                  },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "default": {},
                       "type": "object",
                       "additionalProperties": {
                         "type": "string"
-                      },
-                      "nullable": true
+                      }
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "protocol": {
+                  "default": "grpc",
                   "type": "string",
                   "enum": [
                     "grpc",
                     "http"
-                  ],
-                  "nullable": true
-                },
-                "timeout": {
-                  "default": null,
-                  "type": "string"
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -2196,12 +2209,10 @@ expression: "&schema"
             "experimental_response_trace_id": {
               "description": "A way to expose trace id in response headers",
               "type": "object",
-              "required": [
-                "enabled"
-              ],
               "properties": {
                 "enabled": {
                   "description": "Expose the trace_id in response headers",
+                  "default": false,
                   "type": "boolean"
                 },
                 "header_name": {
@@ -2472,6 +2483,13 @@ expression: "&schema"
                   "type": "string"
                 },
                 "grpc": {
+                  "default": {
+                    "domain_name": null,
+                    "ca": null,
+                    "cert": null,
+                    "key": null,
+                    "metadata": {}
+                  },
                   "type": "object",
                   "properties": {
                     "ca": {
@@ -2483,6 +2501,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "domain_name": {
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2491,40 +2510,36 @@ expression: "&schema"
                       "nullable": true
                     },
                     "metadata": {
-                      "default": null,
+                      "default": {},
                       "type": "object",
-                      "additionalProperties": true,
-                      "nullable": true
+                      "additionalProperties": true
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "http": {
+                  "default": {
+                    "headers": {}
+                  },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "default": {},
                       "type": "object",
                       "additionalProperties": {
                         "type": "string"
-                      },
-                      "nullable": true
+                      }
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "protocol": {
+                  "default": "grpc",
                   "type": "string",
                   "enum": [
                     "grpc",
                     "http"
-                  ],
-                  "nullable": true
-                },
-                "timeout": {
-                  "default": null,
-                  "type": "string"
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -2534,16 +2549,16 @@ expression: "&schema"
               "type": "object",
               "properties": {
                 "baggage": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "datadog": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "jaeger": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "request": {
                   "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
@@ -2557,16 +2572,15 @@ expression: "&schema"
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "trace_context": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "zipkin": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 }
               },
               "additionalProperties": false,
@@ -2636,34 +2650,34 @@ expression: "&schema"
                   }
                 },
                 "max_attributes_per_event": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_attributes_per_link": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_attributes_per_span": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_events_per_span": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_links_per_span": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "parent_based_sampler": {
                   "default": true,
@@ -2697,12 +2711,12 @@ expression: "&schema"
                   ]
                 },
                 "service_name": {
-                  "type": "string",
-                  "nullable": true
+                  "default": "${env.OTEL_SERVICE_NAME:-router}",
+                  "type": "string"
                 },
                 "service_namespace": {
-                  "type": "string",
-                  "nullable": true
+                  "default": "",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,

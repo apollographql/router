@@ -79,7 +79,7 @@ impl Endpoint {
                     .into_response())
             }
         };
-        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
     }
 }
 /// Factory for creating a RouterService
@@ -129,7 +129,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterFactory>,
+        previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
         // Process the plugins.
@@ -143,12 +143,26 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         }
 
         // We're good to go with the new service.
-        let supergraph_creator = builder.build().await?;
+        let mut supergraph_creator = builder.build().await?;
 
-        Ok(Self::RouterFactory::new(
-            Arc::new(supergraph_creator),
-            &configuration,
-        ))
+        if let Some(router) = previous_router {
+            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
+                let cache_keys = router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                if !cache_keys.is_empty() {
+                    tracing::info!(
+                        "warming up the query plan cache with {} queries, this might take a while",
+                        cache_keys.len()
+                    );
+
+                    supergraph_creator.warm_up_query_planner(cache_keys).await;
+                }
+            }
+        }
+
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), &configuration).await)
     }
 }
 

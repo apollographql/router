@@ -16,10 +16,8 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
-use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
-use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_http_service::SubgraphHTTPCreator;
 use super::subgraph_service::MakeSubgraphService;
@@ -388,18 +386,9 @@ impl PluggableSupergraphServiceBuilder {
             plugins.clone(),
         ));
 
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
-            )
-            .await,
-        );
-
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_creator,
-            apq_layer,
             schema: self.schema,
             plugins,
         })
@@ -433,7 +422,6 @@ pub(crate) trait SupergraphFactory:
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_creator: Arc<SubgraphCreator>,
-    apq_layer: APQLayer,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
@@ -485,9 +473,7 @@ impl SupergraphCreator {
         };
 
         ServiceBuilder::new()
-            .layer(self.apq_layer.clone())
             .layer(content_negociation::SupergraphLayer::default())
-            .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins
                     .iter()
@@ -496,6 +482,16 @@ impl SupergraphCreator {
                         e.supergraph_service(acc)
                     }),
             )
+    }
+
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.query_planner_service.cache_keys(count).await
+    }
+    pub(crate) async fn warm_up_query_planner(
+        &mut self,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
+        self.query_planner_service.warm_up(cache_keys).await
     }
 
     /// Create a test service.
