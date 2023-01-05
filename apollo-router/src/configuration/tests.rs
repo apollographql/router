@@ -170,7 +170,22 @@ subgraphs:
         Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
-    assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            r#"configuration had errors: 
+1. 
+
+
+  supergraph:
+    path: /
+┌ subgraphs:
+|   account: true
+└-----> Additional properties are not allowed ('subgraphs' was unexpected)
+
+"#
+        )
+    );
 }
 
 #[test]
@@ -187,7 +202,15 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            "unknown fields: additional properties are not allowed ('unknown' was/were unexpected)"
+            r#"configuration had errors: 
+1. 
+
+  
+┌ unknown:
+|   foo: true
+└-----> Additional properties are not allowed ('unknown' was unexpected)
+
+"#
         )
     );
 }

@@ -136,7 +136,7 @@ pub(crate) fn validate_yaml_configuration(
                         // This guarantees that if the env variable contained a secret it won't be leaked.
                         e.instance = Cow::Owned(coerce(value));
 
-                        write!(
+                        let _ = write!(
                             &mut errors,
                             "{}. {}\n\n{}\n{}^----- {}\n\n",
                             idx + 1,
@@ -151,7 +151,7 @@ pub(crate) fn validate_yaml_configuration(
 
                         let lines = context_lines(&yaml_split_by_lines, start_marker, end_marker);
 
-                        write!(
+                        let _ = write!(
                             &mut errors,
                             "{}. {}\n\n{}\n└-----> {}\n\n",
                             idx + 1,
@@ -174,7 +174,6 @@ pub(crate) fn validate_yaml_configuration(
                                 if let Some((label, value)) =
                                     map.iter().find(|(label, _)| label.name == key)
                                 {
-                                    println!("key {key} => {label:?}");
                                     let (start_marker, end_marker) = (
                                         label.marker.as_ref().unwrap_or(marker),
                                         value.end_marker(),
@@ -190,7 +189,7 @@ pub(crate) fn validate_yaml_configuration(
                                         unexpected: vec![key.clone()],
                                     };
 
-                                    write!(
+                                    let _ = write!(
                                         &mut errors,
                                         "{}. {}\n\n{}\n└-----> {}\n\n",
                                         idx + 1,
