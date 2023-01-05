@@ -99,3 +99,10 @@ Moving APQ from the axum level to the supergraph service reintroduced a `Buffer`
 Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296
+
+### Refactor yaml validation error reports ([Issue #2180](https://github.com/apollographql/router/issues/2180))
+
+YAML configuration file validation prints a report of the errors it encountered, but that report was missing some
+information, and had small mistakes around alignment and pointing out the right line.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2347
