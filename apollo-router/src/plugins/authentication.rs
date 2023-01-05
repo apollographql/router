@@ -92,10 +92,16 @@ impl Plugin for AuthenticationPlugin {
             Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
                 let fut = async {
                     let data = if url.scheme() == "file" {
+                        // TODO: Uncomment to make this commercial only before devcomplete
+                        /*
+                        apollo_graph_reference()
+                            .ok_or(LicenseError::MissingGraphReference)
+                            .ok()?;
+                        apollo_key().ok_or(LicenseError::MissingKey).ok()?;
+                        */
                         let path = url.to_file_path().ok()?;
                         read_to_string(path).await.ok()?
                     } else {
-                        // TODO: Create one lazy client and use that
                         let my_client = CLIENT.as_ref().map_err(|e| e.to_string()).ok()?.clone();
 
                         my_client
@@ -109,7 +115,6 @@ impl Plugin for AuthenticationPlugin {
                             .text()
                             .await
                             .ok()?
-                        // reqwest::get(url).await.ok()?.text().await.ok()?
                     };
                     let jwks: JwkSet = serde_json::from_str(&data).ok()?;
                     Some(jwks)
