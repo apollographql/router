@@ -29,4 +29,4 @@ Complete the checklist (and note appropriate exceptions) before a final PR is ra
 2. Configuration is an important part of many changes. Where applicable please try to document configuration examples.
 3. Tick whichever testing boxes are applicable. If you are adding Manual Tests:
     - please document the manual testing (extensively) in the Exceptions.
-    - please raise a separate issue to automate the test (tag: manual test)
+    - please raise a separate issue to automate the test and label it (or ask for it to be labeled) as `manual test`
