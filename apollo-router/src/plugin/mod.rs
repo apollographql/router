@@ -182,6 +182,10 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// Called once all plugins have been initialized and it is safe to assume that this plugin will take effect.
+    /// Interaction with globals is safe in this method.
+    fn activate(&self) {}
+
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
     /// This service runs at the very beginning and very end of the request lifecycle.
@@ -276,6 +280,9 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService;
 
+    /// Called once all plugins have been initialized and it is safe to assume that this plugin will take effect.
+    fn activate(&self);
+
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
@@ -305,6 +312,10 @@ where
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         self.subgraph_service(name, service)
+    }
+
+    fn activate(&self) {
+        self.activate()
     }
 
     fn name(&self) -> &'static str {

@@ -318,13 +318,6 @@ impl PluggableSupergraphServiceBuilder {
     }
 
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
-        // Note: The plugins are always applied in reverse, so that the
-        // fold is applied in the correct sequence. We could reverse
-        // the list of plugins, but we want them back in the original
-        // order at the end of this function. Instead, we reverse the
-        // various iterators that we create for folding and leave
-        // the plugins in their original order.
-
         let configuration = self.configuration.unwrap_or_default();
 
         let introspection = if configuration.supergraph.introspection {
@@ -351,6 +344,12 @@ impl PluggableSupergraphServiceBuilder {
             self.subgraph_services,
             plugins.clone(),
         ));
+
+        // Activate all plugins.
+        // We must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+        for (_, plugin) in plugins.iter() {
+            plugin.activate();
+        }
 
         Ok(SupergraphCreator {
             query_planner_service,

@@ -30,7 +30,7 @@ use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
 
-mod aggregation;
+pub(crate) mod aggregation;
 pub(crate) mod apollo;
 pub(crate) mod layer;
 pub(crate) mod otlp;

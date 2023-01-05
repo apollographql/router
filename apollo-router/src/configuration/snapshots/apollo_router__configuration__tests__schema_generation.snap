@@ -1028,11 +1028,15 @@ expression: "&schema"
           "type": "object",
           "properties": {
             "display_filename": {
-              "default": true,
+              "default": false,
               "type": "boolean"
             },
             "display_line_number": {
-              "default": true,
+              "default": false,
+              "type": "boolean"
+            },
+            "display_target": {
+              "default": false,
               "type": "boolean"
             },
             "format": {
@@ -1121,8 +1125,7 @@ expression: "&schema"
               }
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "metrics": {
           "type": "object",

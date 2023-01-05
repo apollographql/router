@@ -65,6 +65,7 @@ async fn get_router_service() -> BoxCloneService {
             ROUTER_SERVICE_RUNTIME
                 .spawn(async {
                     TestHarness::builder()
+                        .log_level("INFO")
                         .configuration_json(config)
                         .expect("test harness had config errors")
                         .schema(include_str!("fixtures/supergraph.graphql"))

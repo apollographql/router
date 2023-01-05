@@ -199,31 +199,21 @@ where
                     UpdateConfiguration(new_configuration),
                 ) => {
                     tracing::info!("reloading configuration");
-                    if let Err(e) = configuration.is_compatible(&new_configuration) {
-                        tracing::error!("could not reload configuration: {e}");
 
-                        Running {
-                            configuration,
-                            schema,
-                            router_service_factory,
-                            server_handle,
-                        }
-                    } else {
-                        self.reload_server(
-                            configuration,
-                            schema,
-                            router_service_factory,
-                            server_handle,
-                            Some(Arc::new(*new_configuration)),
-                            None,
-                        )
-                        .await
-                        .map(|s| {
-                            tracing::info!("reloaded");
-                            s
-                        })
-                        .into_ok_or_err2()
-                    }
+                    self.reload_server(
+                        configuration,
+                        schema,
+                        router_service_factory,
+                        server_handle,
+                        Some(Arc::new(*new_configuration)),
+                        None,
+                    )
+                    .await
+                    .map(|s| {
+                        tracing::info!("reloaded");
+                        s
+                    })
+                    .into_ok_or_err2()
                 }
 
                 // Anything else we don't care about
