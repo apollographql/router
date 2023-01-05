@@ -27,9 +27,10 @@ telemetry:
 ## Using in a containers environment
 
 The prometheus endpoint listens to 127.0.0.1 by default, which won't allow connections issued from a network.
-While this is a safe default, *other containers won't be able to access the prometheus endpoint*, which will disable metric scraping.
+While this is a safe default, _other containers won't be able to access the prometheus endpoint_, which will disable metric scraping.
 
 You can change this by setting:
+
 ```yaml title="router.yaml"
 telemetry:
   metrics:
@@ -39,7 +40,6 @@ telemetry:
       listen: 0.0.0.0:9090
       path: /metrics
 ```
-
 
 Assuming you're running locally:
 
@@ -61,6 +61,10 @@ The following metrics are available using Prometheus:
 - HTTP router request duration (`apollo_router_http_request_duration_seconds_bucket`)
 - HTTP request duration by subgraph (`apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`)
 - Total number of HTTP requests by HTTP Status (`apollo_router_http_requests_total`)
+- Number of cache hits for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_count`
+- Number of cache misses for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_count`
+- Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_time`
+- Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_time`
 
 ## Using OpenTelemetry Collector
 
