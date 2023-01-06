@@ -9,6 +9,7 @@ mod tests;
 mod upgrade;
 mod yaml;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -618,14 +619,16 @@ pub(crate) struct RedisCache {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Tls {
     #[serde(default)]
-    pub(crate) subgraphs: Option<Subgraph>,
+    pub(crate) all: Option<Subgraph>,
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, Subgraph>,
 }
 
 #[buildstructor::buildstructor]
 impl Tls {
     #[builder]
-    pub(crate) fn new(subgraphs: Option<Subgraph>) -> Self {
-        Self { subgraphs }
+    pub(crate) fn new(all: Option<Subgraph>, subgraphs: HashMap<String, Subgraph>) -> Self {
+        Self { all, subgraphs }
     }
 }
 

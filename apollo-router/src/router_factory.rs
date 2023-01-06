@@ -143,35 +143,24 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         let tls_root_store = configuration
             .tls
-            .subgraphs
+            .all
             .as_ref()
-            .and_then(|subgraphs| subgraphs.certificate_authorities.as_ref())
-            .and_then(|certificate_authorities| {
-                let mut store = RootCertStore::empty();
-                let certificates = load_certs(certificate_authorities)
-                    .map_err(|e| {
-                        tracing::error!("could not parse certificate list: {e:?}");
-                    })
-                    .ok()?;
-                for certificate in certificates {
-                    store
-                        .add(&certificate)
-                        .map_err(|e| {
-                            tracing::error!("could not add certificate to root store: {e:?}");
-                        })
-                        .ok()?;
-                }
-                if store.is_empty() {
-                    None
-                } else {
-                    Some(store)
-                }
-            });
+            .and_then(|subgraphs| subgraphs.certificate_authorities.as_deref())
+            .and_then(create_certificate_store);
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
+            let subgraph_root_store = configuration
+                .tls
+                .subgraphs
+                .get(name)
+                .as_ref()
+                .and_then(|subgraph| subgraph.certificate_authorities.as_deref())
+                .and_then(create_certificate_store)
+                .or_else(|| tls_root_store.clone());
+
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
@@ -179,9 +168,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             {
                 Some(shaping) => Either::A(shaping.subgraph_service_internal(
                     name,
-                    SubgraphService::new(name, tls_root_store.clone()),
+                    SubgraphService::new(name, subgraph_root_store),
                 )),
-                None => Either::B(SubgraphService::new(name, tls_root_store.clone())),
+                None => Either::B(SubgraphService::new(name, subgraph_root_store)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -230,35 +219,24 @@ impl YamlRouterFactory {
 
         let tls_root_store = configuration
             .tls
-            .subgraphs
+            .all
             .as_ref()
-            .and_then(|subgraphs| subgraphs.certificate_authorities.as_ref())
-            .and_then(|certificate_authorities| {
-                let mut store = RootCertStore::empty();
-                let certificates = load_certs(certificate_authorities)
-                    .map_err(|e| {
-                        tracing::error!("could not parse certificate list: {e:?}");
-                    })
-                    .ok()?;
-                for certificate in certificates {
-                    store
-                        .add(&certificate)
-                        .map_err(|e| {
-                            tracing::error!("could not add certificate to root store: {e:?}");
-                        })
-                        .ok()?;
-                }
-                if store.is_empty() {
-                    None
-                } else {
-                    Some(store)
-                }
-            });
+            .and_then(|subgraphs| subgraphs.certificate_authorities.as_deref())
+            .and_then(create_certificate_store);
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        builder = builder.with_configuration(configuration);
+        builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
+            let subgraph_root_store = configuration
+                .tls
+                .subgraphs
+                .get(name)
+                .as_ref()
+                .and_then(|subgraph| subgraph.certificate_authorities.as_deref())
+                .and_then(create_certificate_store)
+                .or_else(|| tls_root_store.clone());
+
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
@@ -266,9 +244,9 @@ impl YamlRouterFactory {
             {
                 Some(shaping) => Either::A(shaping.subgraph_service_internal(
                     name,
-                    SubgraphService::new(name, tls_root_store.clone()),
+                    SubgraphService::new(name, subgraph_root_store),
                 )),
-                None => Either::B(SubgraphService::new(name, tls_root_store.clone())),
+                None => Either::B(SubgraphService::new(name, subgraph_root_store)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -278,6 +256,28 @@ impl YamlRouterFactory {
         }
 
         builder.build().await.map_err(BoxError::from)
+    }
+}
+
+fn create_certificate_store(certificate_authorities: &str) -> Option<RootCertStore> {
+    let mut store = RootCertStore::empty();
+    let certificates = load_certs(certificate_authorities)
+        .map_err(|e| {
+            tracing::error!("could not parse certificate list: {e:?}");
+        })
+        .ok()?;
+    for certificate in certificates {
+        store
+            .add(&certificate)
+            .map_err(|e| {
+                tracing::error!("could not add certificate to root store: {e:?}");
+            })
+            .ok()?;
+    }
+    if store.is_empty() {
+        None
+    } else {
+        Some(store)
     }
 }
 
