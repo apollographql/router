@@ -3,6 +3,8 @@
 
 use std::ops::ControlFlow;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -45,7 +47,11 @@ type SharedDeduplicate = Arc<
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication plugin";
 
-const DEFAULT_AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(15);
+const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
+
+const DEFAULT_AUTHENTICATION_COOLDOWN: Duration = Duration::from_secs(15);
+
+static COOLDOWN: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
@@ -72,6 +78,9 @@ struct Conf {
     // Key retention policy
     #[serde(default)]
     retain_keys: bool,
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    cooldown: Option<Duration>,
 }
 
 fn default_header_name() -> String {
@@ -108,7 +117,7 @@ impl Plugin for AuthenticationPlugin {
                             .get(url)
                             .header(ACCEPT, "application/json")
                             .header(CONTENT_TYPE, "application/json")
-                            .timeout(DEFAULT_AUTHENTICATION_TIMEOUT)
+                            .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
                             .send()
                             .await
                             .ok()?
@@ -148,7 +157,7 @@ impl Plugin for AuthenticationPlugin {
         let request_jwks = self.jwks.clone();
         let request_jwks_url = self.jwks_url.clone();
 
-        fn external_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
+        fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
             move |_request: &router::Request| {
                 tracing::info_span!(
                     AUTHENTICATION_SPAN_NAME,
@@ -159,7 +168,7 @@ impl Plugin for AuthenticationPlugin {
         }
 
         ServiceBuilder::new()
-            .instrument(external_service_span())
+            .instrument(authentication_service_span())
             .checkpoint_async(move |request: router::Request| {
                 let my_config = request_full_config.clone();
                 let my_jwks = request_jwks.clone();
@@ -192,9 +201,7 @@ impl Plugin for AuthenticationPlugin {
                     let jwt_value_result =
                         match request.router_request.headers().get(&my_config.header_name) {
                             Some(value) => value.to_str(),
-                            None =>
-                            // Prepare an HTTP 401 response with a GraphQL error message
-                            {
+                            None => {
                                 return failure_message(
                                     request.context,
                                     format!("Missing {} header", &my_config.header_name),
@@ -207,7 +214,6 @@ impl Plugin for AuthenticationPlugin {
                     let jwt_value_untrimmed = match jwt_value_result {
                         Ok(value) => value,
                         Err(_not_a_string_error) => {
-                            // Prepare an HTTP 400 response with a GraphQL error message
                             return failure_message(
                                 request.context,
                                 "configured header is not convertible to a string".to_string(),
@@ -227,7 +233,6 @@ impl Plugin for AuthenticationPlugin {
                         .as_str()
                         .starts_with(&my_config.header_prefix.to_uppercase())
                     {
-                        // Prepare an HTTP 400 response with a GraphQL error message
                         return failure_message(
                             request.context,
                             format!(
@@ -241,7 +246,6 @@ impl Plugin for AuthenticationPlugin {
                     // Split our string in (at most 2) sections.
                     let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
                     if jwt_parts.len() != 2 {
-                        // Prepare an HTTP 400 response with a GraphQL error message
                         return failure_message(
                             request.context,
                             format!("{jwt_value} is not correctly formatted"),
@@ -277,14 +281,41 @@ impl Plugin for AuthenticationPlugin {
                     };
 
                     // Get the JWKS here
-                    // If the user has instructed us to clear the cache on fail, then we should.
+                    let closure_jwks = my_jwks.clone();
+                    // If we ever find that:
+                    //  - we can't retrieve a JWKS (a)
+                    //  - the retrieved JWKS is None (b)
+                    //  - we have a kid that we don't know about (c)
+                    // We need to do some additional processing.  (I've tagged with comments a/b/c below)
+                    // In scenario (c), we have to clear the cache, since we've got to be able to
+                    // force new keys to be loaded.
+                    let err_cleanup = move |force_clear_keys| {
+                        // If we are forced to clear the keys or the user has instructed us to clear the
+                        // cache, then we should.
+                        if force_clear_keys || !my_config.retain_keys {
+                            tracing::info!("Clearing cached JWKS");
+                            closure_jwks.clear();
+                            // Impose the COOLDOWN
+                            // Only spawn 1 task to remove the cooldown
+                            if COOLDOWN
+                                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                tokio::spawn(async move {
+                                    let t = my_config
+                                        .cooldown
+                                        .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
+                                    tokio::time::sleep(t).await;
+                                    COOLDOWN.store(false, Ordering::SeqCst);
+                                });
+                            }
+                        }
+                    };
+
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
-                            if !my_config.retain_keys {
-                                tracing::info!("Clearing cached JWKS");
-                                my_jwks.clear();
-                            }
+                            err_cleanup(false); // a.
                             return failure_message(
                                 request.context,
                                 format!("Could not retrieve JWKS set: {e}"),
@@ -296,10 +327,7 @@ impl Plugin for AuthenticationPlugin {
                     let jwks = match jwks_opt {
                         Some(k) => k,
                         None => {
-                            if !my_config.retain_keys {
-                                tracing::info!("Clearing cached JWKS");
-                                my_jwks.clear();
-                            }
+                            err_cleanup(false); // b.
                             return failure_message(
                                 request.context,
                                 "Could not find JWKS set at the configured location".to_string(),
@@ -362,11 +390,43 @@ impl Plugin for AuthenticationPlugin {
                             }
                             Ok(ControlFlow::Continue(request))
                         }
-                        None => failure_message(
-                            request.context,
-                            format!("Could not find kid: {kid} in JWKS set"),
-                            StatusCode::UNAUTHORIZED,
-                        ),
+                        None => {
+                            // If we receive a kid we don't recognise, we should try to refresh our
+                            // JWKS set. However, and this is important, we don't want to become a
+                            // potential DOS. Let's have a COOLDOWN here to prevent this happening
+                            // too frequently.
+                            // Only perform err_cleanup(), etc... if COOLDOWN is not active.
+                            if COOLDOWN.load(Ordering::SeqCst) {
+                                let response = router::Response::error_builder()
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(
+                                                "Could not retrieve JWKS set: router cooling down",
+                                            )
+                                            .extension_code("AUTH_ERROR")
+                                            .build(),
+                                    )
+                                    .header(
+                                        http::header::RETRY_AFTER,
+                                        my_config
+                                            .cooldown
+                                            .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN)
+                                            .as_secs()
+                                            .to_string(),
+                                    )
+                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                    .context(request.context)
+                                    .build()?;
+                                Ok(ControlFlow::Break(response))
+                            } else {
+                                err_cleanup(true); // c.
+                                failure_message(
+                                    request.context,
+                                    format!("Could not find kid: {kid} in JWKS set"),
+                                    StatusCode::UNAUTHORIZED,
+                                )
+                            }
+                        }
                     }
                 }
             })
