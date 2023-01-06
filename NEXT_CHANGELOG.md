@@ -64,7 +64,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 Change the default value of `apollo.field_level_instrumentation_sampler` to `always_off` instead of `0.01`
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2355
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2356
 
 ### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
 
