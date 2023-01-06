@@ -29,7 +29,7 @@ use crate::common::TracingTest;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing() -> Result<(), BoxError> {
+async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("my_app")
         .install_simple()?;
