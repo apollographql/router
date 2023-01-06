@@ -60,6 +60,24 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Correctly handle aliased __typename ([Issue #2330](https://github.com/apollographql/router/issues/2330))
+
+If you aliased a `__typename` like in this example query:
+
+```graphql
+{
+  myproducts: products {
+       total
+       __typename
+  }
+  _0___typename: __typename
+}
+```
+
+Before this fix, `_0___typename` was set to `null`. Thanks to this fix it returns `"Query"`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2357
+
 ### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
 
 Before this fix, the context injected in headers to subgraphs was wrong, it was not the right parent span id.
