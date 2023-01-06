@@ -53,6 +53,7 @@ async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
         router.touch_config()?;
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     let metrics = router.get_metrics().await.unwrap();
     dbg!(&metrics);
