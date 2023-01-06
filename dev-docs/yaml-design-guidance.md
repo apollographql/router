@@ -37,12 +37,13 @@ The most important goal is usability, so do break the rules if it makes sense, b
 
 1. [Avoid empty config](#avoid-empty-config).
 2. [Use `#[serde(default)]`](#use-serdedefault).
-3. [Do use `#[serde(deny_unknown_fields)]`](#use-serdedenyunknownfields).
-4. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
-5. [Use consistent terminology](#use-consistent-terminology).
-6. [Don't use negative options](#dont-use-negative-options).
-7. [Document your configuration options](#document-your-configuration-options).
-8. [Plan for the future](#plan-for-the-future).
+3. [Avoid `Option<...>`](#avoid-option)
+4. [Do use `#[serde(deny_unknown_fields)]`](#use-serdedenyunknownfields).
+5. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
+6. [Use consistent terminology](#use-consistent-terminology).
+7. [Don't use negative options](#dont-use-negative-options).
+8. [Document your configuration options](#document-your-configuration-options).
+9. [Plan for the future](#plan-for-the-future).
 
 ### Avoid empty config
 
@@ -96,7 +97,7 @@ export:
 ```rust
 #[serde(deny_unknown_fields)]
 struct Export {
-    url: Url
+    url: Option<Url>
 }
 ```
 ```yaml
@@ -125,6 +126,35 @@ struct Export {
 }
 ```
 Take a look at `env_defaults` in `expansion.rs` to see how env variables should be defaulted.
+
+### Avoid `Option<...>`
+Using option significantly complicates consuming code as it has to deal with the presence or otherwise, especially where you are transferring data to a non-buildstructor builder where `with_` methods are not present.
+
+#### GOOD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url
+}
+```
+```rust
+builder = builder.with_url(config.url);
+```
+
+#### BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    url: Option<Url>
+}
+```
+```rust
+if let Some(url) = config.url {
+    builder = builder.with_url(url);
+}
+```
+
 
 ### Use `#[serde(deny_unknown_fields)]`
 Every container that takes part in config should be annotated with `#[serde(deny_unknown_fields)]`. If not the user can make mistakes on their config and they they won't get errors.
