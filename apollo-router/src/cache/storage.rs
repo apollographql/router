@@ -106,6 +106,18 @@ where
             }
             #[cfg(feature = "experimental_cache")]
             None => {
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_miss_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+
                 let instant_redis = Instant::now();
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
@@ -141,17 +153,6 @@ where
                         }
                     }
                 } else {
-                    tracing::info!(
-                        monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                        kind = %self.caller,
-                        storage = &tracing::field::display(CacheStorageName::Redis),
-                    );
-                    let duration = instant_redis.elapsed().as_secs_f64();
-                    tracing::info!(
-                        histogram.apollo_router_cache_miss_time = duration,
-                        kind = %self.caller,
-                        storage = &tracing::field::display(CacheStorageName::Redis),
-                    );
                     None
                 }
             }
