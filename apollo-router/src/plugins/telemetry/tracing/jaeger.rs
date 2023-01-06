@@ -96,7 +96,7 @@ impl TracingConfigurator for Config {
                 };
                 let exporter = opentelemetry_jaeger::new_agent_pipeline()
                     .with_trace_config(trace_config.into())
-                    .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+                    .with_service_name(trace_config.service_name.clone())
                     .with(&socket, |b, s| b.with_endpoint(s))
                     .build_async_agent_exporter(opentelemetry::runtime::Tokio)?;
                 Ok(builder.with_span_processor(
@@ -116,7 +116,7 @@ impl TracingConfigurator for Config {
                 // Until that time we need to wrap a tracer provider with Jeager in.
                 let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()
                     .with_trace_config(trace_config.into())
-                    .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+                    .with_service_name(trace_config.service_name.clone())
                     .with(username, |b, u| b.with_username(u))
                     .with(password, |b, p| b.with_password(p))
                     .with_endpoint(&endpoint.to_string())

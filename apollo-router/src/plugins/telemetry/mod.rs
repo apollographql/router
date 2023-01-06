@@ -632,22 +632,22 @@ impl Telemetry {
         // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
-        if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
+        if propagation.jaeger || tracing.jaeger.is_some() {
             propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
         }
-        if propagation.baggage.unwrap_or_default() {
+        if propagation.baggage {
             propagators.push(Box::new(BaggagePropagator::default()));
         }
-        if propagation.trace_context.unwrap_or_default() || tracing.otlp.is_some() {
+        if propagation.trace_context || tracing.otlp.is_some() {
             propagators.push(Box::new(TraceContextPropagator::default()));
         }
-        if propagation.zipkin.unwrap_or_default() || tracing.zipkin.is_some() {
+        if propagation.zipkin || tracing.zipkin.is_some() {
             propagators.push(Box::new(opentelemetry_zipkin::Propagator::default()));
         }
-        if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
+        if propagation.datadog || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
         }
-        if let Some(from_request_header) = &propagation.request.as_ref().map(|r| &r.header_name) {
+        if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
             )));
