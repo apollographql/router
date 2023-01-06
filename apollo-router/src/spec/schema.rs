@@ -9,7 +9,6 @@ use std::sync::Arc;
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
-use apollo_compiler::DocumentDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_parser::ast;
 use http::Uri;
@@ -561,7 +560,8 @@ fn parse_with_apollo_compiler(
 ) -> Result<Schema, SchemaError> {
     let schema_with_introspection = Schema::with_introspection(schema);
 
-    let compiler = ApolloCompiler::new(&schema_with_introspection);
+    let mut compiler = ApolloCompiler::new();
+    let id = compiler.create_schema(&schema_with_introspection, "schema.graphql");
     let mut errors = compiler.validate();
     // TODO: do something with warnings and advice?
     errors.retain(|diagnostic| diagnostic.is_error());
@@ -570,7 +570,7 @@ fn parse_with_apollo_compiler(
     }
 
     // Trace log recursion limit data
-    let recursion_limit = compiler.db.ast().recursion_limit();
+    let recursion_limit = compiler.db.ast(id).recursion_limit();
     tracing::trace!(?recursion_limit, "recursion limit data");
 
     fn as_string(value: &hir::Value) -> Option<&String> {
@@ -612,71 +612,74 @@ fn parse_with_apollo_compiler(
 
     let object_field = |field: &hir::FieldDefinition| (field.name().to_owned(), field.ty().into());
     let implements_interface = |imp: &hir::ImplementsInterface| imp.interface().to_owned();
-    let mut object_types: HashMap<_, _> = compiler
+    let object_types: HashMap<_, _> = compiler
         .db
         .object_types()
         .iter()
-        .map(|def| {
+        .map(|(name, def)| {
             (
-                def.name().to_owned(),
+                name.clone(),
                 ObjectType {
-                    name: def.name().to_owned(),
-                    fields: def.fields_definition().iter().map(object_field).collect(),
+                    name: name.clone(),
+                    fields: def
+                        .fields_definition()
+                        .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.fields_definition()),
+                        )
+                        .map(object_field)
+                        .collect(),
                     interfaces: def
                         .implements_interfaces()
                         .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.implements_interfaces()),
+                        )
                         .map(implements_interface)
                         .collect(),
                 },
             )
         })
         .collect();
-    for ext in compiler.db.object_type_extensions().iter() {
-        if let Some(def) = object_types.get_mut(ext.name()) {
-            def.fields
-                .extend(ext.fields_definition().iter().map(object_field));
-            def.interfaces
-                .extend(ext.implements_interfaces().iter().map(implements_interface))
-        } else {
-            failfast_debug!(
-                "Extension exists for {:?} but ObjectTypeDefinition could not be found.",
-                ext.name(),
-            );
-        }
-    }
 
-    let mut interfaces: HashMap<_, _> = compiler
+    let interfaces: HashMap<_, _> = compiler
         .db
         .interfaces()
         .iter()
-        .map(|def| {
+        .map(|(name, def)| {
             (
-                def.name().to_owned(),
+                name.clone(),
                 Interface {
-                    name: def.name().to_owned(),
-                    fields: def.fields_definition().iter().map(object_field).collect(),
+                    name: name.clone(),
+                    fields: def
+                        .fields_definition()
+                        .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.fields_definition()),
+                        )
+                        .map(object_field)
+                        .collect(),
                     interfaces: def
                         .implements_interfaces()
                         .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.implements_interfaces()),
+                        )
                         .map(implements_interface)
                         .collect(),
                 },
             )
         })
         .collect();
-    for ext in compiler.db.interface_type_extensions().iter() {
-        if let Some(def) = interfaces.get_mut(ext.name()) {
-            def.fields
-                .extend(ext.fields_definition().iter().map(object_field));
-            def.interfaces
-                .extend(ext.implements_interfaces().iter().map(implements_interface))
-        } else {
-            failfast_debug!(
-                "Extension exists for {:?} but ObjectTypeDefinition could not be found.",
-                ext.name(),
-            );
-        }
-    }
+
     let input_field = |field: &hir::InputValueDefinition| {
         (
             field.name().to_owned(),
@@ -686,56 +689,49 @@ fn parse_with_apollo_compiler(
             ),
         )
     };
-    let mut input_types: HashMap<_, _> = compiler
+    let input_types: HashMap<_, _> = compiler
         .db
         .input_objects()
         .iter()
-        .map(|def| {
+        .map(|(name, def)| {
             (
-                def.name().to_owned(),
+                name.clone(),
                 InputObjectType {
-                    name: def.name().to_owned(),
+                    name: name.clone(),
                     fields: def
                         .input_fields_definition()
                         .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.input_fields_definition()),
+                        )
                         .map(input_field)
                         .collect(),
                 },
             )
         })
         .collect();
-    for ext in compiler.db.input_object_type_extensions().iter() {
-        if let Some(def) = input_types.get_mut(ext.name()) {
-            def.fields
-                .extend(ext.input_fields_definition().iter().map(input_field))
-        } else {
-            failfast_debug!(
-                "Extension exists for {:?} but InputTypeDefinition could not be found.",
-                ext.name(),
-            );
-        }
-    }
 
-    let scalars = compiler.db.scalars();
-    let scalars = scalars
+    let custom_scalars = compiler
+        .db
+        .scalars()
         .iter()
-        .filter(|def| !def.is_built_in())
-        .map(|def| def.name().to_owned());
-    let scalar_extensions = compiler.db.scalar_type_extensions();
-    let scalar_extensions = scalar_extensions.iter().map(|def| def.name().to_owned());
-    let custom_scalars = scalars.chain(scalar_extensions).collect();
+        .filter(|(_name, def)| !def.is_built_in())
+        .map(|(name, _def)| name.clone())
+        .collect();
 
     let enums = compiler
         .db
         .enums()
         .iter()
-        .map(|def| {
+        .map(|(name, def)| {
             let values = def
                 .enum_values_definition()
                 .iter()
                 .map(|value| value.enum_value().to_owned())
                 .collect();
-            (def.name().to_owned(), values)
+            (name.clone(), values)
         })
         .collect();
 
@@ -748,7 +744,7 @@ fn parse_with_apollo_compiler(
         .schema()
         .root_operation_type_definition()
         .iter()
-        .filter(|def| def.ast_ptr().is_some()) // exclude implict operations
+        .filter(|def| def.loc().is_some()) // exclude implict operations
         .map(|def| {
             (
                 def.operation_type().into(),
