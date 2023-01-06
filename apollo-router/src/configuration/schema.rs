@@ -223,8 +223,6 @@ pub(crate) fn validate_yaml_configuration(
                         }
                     }
                 }
-            } else {
-                //None
             }
         }
 
