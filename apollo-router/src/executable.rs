@@ -50,12 +50,7 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
-pub(crate) static OPENTELEMETRY_LAYER_HANDLE: OnceCell<
-    Handle<
-        Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-        Layered<EnvFilter, Registry>,
-    >,
-> = OnceCell::new();
+pub(crate) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<HotTracer> = OnceCell::new();
 
 pub(crate) static FMT_LAYER_HANDLE: OnceCell<
     Handle<

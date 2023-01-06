@@ -1,4 +1,5 @@
 //! Telemetry plugin.
+use std::borrow::Cow;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
@@ -30,12 +31,12 @@ use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::{SpanBuilder, SpanContext, Tracer};
 use opentelemetry::KeyValue;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -1787,5 +1788,55 @@ mod tests {
             .sorted()
             .join("\n");
         assert_snapshot!(prom_metrics);
+    }
+}
+
+struct HotTracer<S> {
+    parent: S,
+}
+
+impl<S: Tracer> Tracer for HotTracer<S> {
+    type Span = S::Span;
+
+    fn start<T>(&self, name: T) -> Self::Span
+    where
+        T: Into<Cow<'static, str>>,
+    {
+        self.parent.start(name)
+    }
+
+    fn start_with_context<T>(&self, name: T, parent_cx: &opentelemetry::Context) -> Self::Span
+    where
+        T: Into<Cow<'static, str>>,
+    {
+        self.parent.start_with_context(name)
+    }
+
+    fn span_builder<T>(&self, name: T) -> SpanBuilder
+    where
+        T: Into<Cow<'static, str>>,
+    {
+        self.parent.span_builder(name)
+    }
+
+    fn build(&self, builder: SpanBuilder) -> Self::Span {
+        self.parent.build(builder)
+    }
+
+    fn build_with_context(
+        &self,
+        builder: SpanBuilder,
+        parent_cx: &opentelemetry::Context,
+    ) -> Self::Span {
+        self.parent.build_with_context(builder, parent_cx)
+    }
+
+    fn in_span<T, F, N>(&self, name: N, f: F) -> T
+    where
+        F: FnOnce(opentelemetry::Context) -> T,
+        N: Into<Cow<'static, str>>,
+        Self::Span: Send + Sync + 'static,
+    {
+        self.parent.in_span(name)
     }
 }
