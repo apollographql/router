@@ -14,6 +14,10 @@ expression: "&schema"
         "jwks_url"
       ],
       "properties": {
+        "cooldown": {
+          "default": null,
+          "type": "string"
+        },
         "header_name": {
           "default": "authorization",
           "type": "string"
@@ -24,10 +28,6 @@ expression: "&schema"
         },
         "jwks_url": {
           "type": "string"
-        },
-        "retain_keys": {
-          "default": false,
-          "type": "boolean"
         }
       }
     },
