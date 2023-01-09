@@ -169,6 +169,7 @@ enum Propagate {
     },
     /// Propagate header given a regex to match header name
     Matching {
+        /// The regex on header name
         #[schemars(schema_with = "propagate_matching")]
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,

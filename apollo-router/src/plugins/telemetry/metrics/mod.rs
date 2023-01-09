@@ -121,7 +121,7 @@ schmar_enum_fn!(
 #[serde(untagged)]
 /// Configuration to forward header values in metric labels
 pub(crate) enum HeaderForward {
-    /// Using a named header
+    /// Match via header name
     Named {
         /// The name of the header
         #[schemars(with = "String")]
@@ -132,10 +132,14 @@ pub(crate) enum HeaderForward {
         /// The optional default value
         default: Option<String>,
     },
-    /// Using a regex on the header name
-    #[schemars(schema_with = "forward_header_matching")]
-    #[serde(deserialize_with = "deserialize_regex")]
-    Matching(Regex),
+
+    /// Match via rgex
+    Matching {
+        /// Using a regex on the header name
+        #[schemars(schema_with = "forward_header_matching")]
+        #[serde(deserialize_with = "deserialize_regex")]
+        matching: Regex,
+    },
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
@@ -184,7 +188,7 @@ impl HeaderForward {
                     attributes.insert(rename.clone().unwrap_or_else(|| named.to_string()), value);
                 }
             }
-            HeaderForward::Matching(matching) => {
+            HeaderForward::Matching { matching } => {
                 headers
                     .iter()
                     .filter(|(name, _)| matching.is_match(name.as_str()))

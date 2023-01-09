@@ -33,4 +33,4 @@ telemetry:
           bar: baz
 
 override_subgraph_url:
-  foo: bar
+  products: http://example.com

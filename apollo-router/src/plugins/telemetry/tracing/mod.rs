@@ -16,6 +16,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde_json::Value;
 use tower::BoxError;
 use url::ParseError;
 
@@ -34,21 +35,18 @@ pub(crate) trait TracingConfigurator {
 }
 
 schmar_enum_fn!(
-    agent_default_endpoint,
-    AgentDefault,
-    "The default agent endpoint"
+    agent_endpoint,
+    String,
+    Value::String("default".to_string()),
+    "The agent endpoint to send reports to"
 );
-schmar_enum_fn!(agent_url_endpoint, Url, "A custom URL endpoint");
-
 /// The endpoint to send reports to
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum AgentEndpoint {
     /// The default agent endpoint
-    #[schemars(schema_with = "agent_default_endpoint")]
     Default(AgentDefault),
     /// A custom URL endpoint
-    #[schemars(schema_with = "agent_url_endpoint")]
     Url(Url),
 }
 

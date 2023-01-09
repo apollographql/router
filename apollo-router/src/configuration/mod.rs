@@ -853,7 +853,6 @@ impl Default for Server {
 
 #[macro_export]
 macro_rules! schmar_enum_fn {
-    // `()` indicates that the macro takes no argument.
     ($name:ident, $ty:ty, $description:expr) => {
         // The macro will expand into the contents of this block.
         fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -865,6 +864,7 @@ macro_rules! schmar_enum_fn {
             schemars::schema::Schema::Object(schema)
         }
     };
+
     ($name:ident, $ty:ty, $default:expr, $description:expr) => {
         // The macro will expand into the contents of this block.
         fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
@@ -872,6 +872,7 @@ macro_rules! schmar_enum_fn {
             let mut schema = schema.into_object();
             let mut metadata = schemars::schema::Metadata::default();
             metadata.description = Some($description.to_string());
+            metadata.default = Some($default);
             schema.metadata = Some(Box::new(metadata));
             schemars::schema::Schema::Object(schema)
         }

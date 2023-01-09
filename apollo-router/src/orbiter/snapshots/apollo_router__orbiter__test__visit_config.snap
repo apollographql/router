@@ -11,6 +11,7 @@ configurationheaders.subgraphs.redacted.request.insert.len: 1
 configurationheaders.subgraphs.redacted.request.insert.name.redacted: 1
 configurationheaders.subgraphs.redacted.request.insert.value.redacted: 1
 configurationheaders.subgraphs.redacted.request.remove.len: 1
+configurationheaders.subgraphs.redacted.request.remove.named.redacted: 1
 configurationtelemetry.apollo.send_headers.len: 1
 configurationtelemetry.tracing.otlp.endpoint.redacted: 1
 configurationtelemetry.tracing.otlp.protocol.redacted: 1
