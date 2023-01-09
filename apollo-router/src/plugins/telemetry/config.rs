@@ -50,7 +50,7 @@ where
 
 impl<T> GenericWith<T> for T where Self: Sized {}
 
-/// Telwemetry configuration
+/// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {

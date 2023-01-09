@@ -892,7 +892,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "telemetry": {
-      "description": "Telwemetry configuration",
+      "description": "Telemetry configuration",
       "type": "object",
       "properties": {
         "apollo": {
