@@ -368,6 +368,7 @@ mod test {
                 ".session_id" => "[session_id]",
                 ".apollo_key" => "[apollo_key]",
                 ".apollo_graph_ref" => "[apollo_graph_ref]",
+                ".platform.os" => "[os]"
         });
                 });
     }

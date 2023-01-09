@@ -5,7 +5,7 @@ expression: report
 session_id: "[session_id]"
 version: 1.7.0
 platform:
-  os: linux
+  os: "[os]"
   continuous_integration: ~
 supergraph_hash: 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
 apollo_key: "[apollo_key]"
