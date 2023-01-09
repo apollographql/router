@@ -141,12 +141,13 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
-        let tls_root_store = configuration
+        let tls_root_store: Option<RootCertStore> = configuration
             .tls
             .all
             .certificate_authorities
             .as_deref()
-            .and_then(create_certificate_store);
+            .map(create_certificate_store)
+            .transpose()?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration.clone());
@@ -158,7 +159,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .get(name)
                 .as_ref()
                 .and_then(|subgraph| subgraph.certificate_authorities.as_deref())
-                .and_then(create_certificate_store)
+                .map(create_certificate_store)
+                .transpose()?
                 .or_else(|| tls_root_store.clone());
 
             let subgraph_service = match plugins
@@ -222,7 +224,8 @@ impl YamlRouterFactory {
             .all
             .certificate_authorities
             .as_deref()
-            .and_then(create_certificate_store);
+            .map(create_certificate_store)
+            .transpose()?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration.clone());
@@ -234,7 +237,8 @@ impl YamlRouterFactory {
                 .get(name)
                 .as_ref()
                 .and_then(|subgraph| subgraph.certificate_authorities.as_deref())
-                .and_then(create_certificate_store)
+                .map(create_certificate_store)
+                .transpose()?
                 .or_else(|| tls_root_store.clone());
 
             let subgraph_service = match plugins
@@ -259,25 +263,28 @@ impl YamlRouterFactory {
     }
 }
 
-fn create_certificate_store(certificate_authorities: &str) -> Option<RootCertStore> {
+fn create_certificate_store(
+    certificate_authorities: &str,
+) -> Result<RootCertStore, ConfigurationError> {
     let mut store = RootCertStore::empty();
-    let certificates = load_certs(certificate_authorities)
-        .map_err(|e| {
-            tracing::error!("could not parse certificate list: {e:?}");
-        })
-        .ok()?;
+    let certificates = load_certs(certificate_authorities).map_err(|e| {
+        ConfigurationError::CertificateAuthorities {
+            error: format!("could not parse the certificate list: {e}"),
+        }
+    })?;
     for certificate in certificates {
         store
             .add(&certificate)
-            .map_err(|e| {
-                tracing::error!("could not add certificate to root store: {e:?}");
-            })
-            .ok()?;
+            .map_err(|e| ConfigurationError::CertificateAuthorities {
+                error: format!("could not add certificate to root store: {e}"),
+            })?;
     }
     if store.is_empty() {
-        None
+        Err(ConfigurationError::CertificateAuthorities {
+            error: "the certificate list is empty".to_string(),
+        })
     } else {
-        Some(store)
+        Ok(store)
     }
 }
 

@@ -69,6 +69,9 @@ pub enum ConfigurationError {
 
     /// could not migrate configuration: {error}.
     MigrationFailure { error: String },
+
+    /// could not load certificate authorities: {error}
+    CertificateAuthorities { error: String },
 }
 
 /// The configuration for the router.
