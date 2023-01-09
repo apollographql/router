@@ -382,8 +382,16 @@ impl EngineBlock {
         let engine = Arc::new(Rhai::new_rhai_engine(scripts));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
+        // Keep these two lower cases ones as mistakes until 2.0
         scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
+
+        scope.push_constant("APOLLO_SDL", sdl.to_string());
+        scope.push_constant("APOLLO_START", Instant::now());
+        scope.push_constant(
+            "APOLLO_AUTHENTICATION_JWT_CLAIMS",
+            "apollo_authentication::JWT::claims".to_string(),
+        );
 
         // Run the AST with our scope to put any global variables
         // defined in scripts into scope.

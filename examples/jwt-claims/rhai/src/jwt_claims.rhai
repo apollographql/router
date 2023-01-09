@@ -17,9 +17,8 @@ fn supergraph_service(service) {
 //  - not equal to "issuer"
 //
 fn process_request(request) {
-
     try {
-        let claims = request.context["apollo_authentication::JWT::claims"];
+        let claims = request.context[APOLLO_AUTHENTICATION_JWT_CLAIMS];
         if claims == () {
             throw #{
                 status: 401,
