@@ -2762,13 +2762,18 @@ expression: "&schema"
     "tls": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "default": {
-        "subgraphs": null
+        "all": {
+          "certificate_authorities": null
+        },
+        "subgraphs": {}
       },
       "type": "object",
       "properties": {
-        "subgraphs": {
+        "all": {
           "description": "Configuration options pertaining to the subgraph server component.",
-          "default": null,
+          "default": {
+            "certificate_authorities": null
+          },
           "type": "object",
           "properties": {
             "certificate_authorities": {
@@ -2778,8 +2783,24 @@ expression: "&schema"
               "nullable": true
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
+        },
+        "subgraphs": {
+          "default": {},
+          "type": "object",
+          "additionalProperties": {
+            "description": "Configuration options pertaining to the subgraph server component.",
+            "type": "object",
+            "properties": {
+              "certificate_authorities": {
+                "description": "list of certificate authorities in PEM format",
+                "default": null,
+                "type": "string",
+                "nullable": true
+              }
+            },
+            "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
