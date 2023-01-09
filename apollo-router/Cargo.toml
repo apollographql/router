@@ -49,9 +49,9 @@ async-compression = { version = "0.3.15", features = [
     "gzip",
     "deflate",
 ] }
-async-trait = "0.1.60"
+async-trait = "0.1.61"
 atty = "0.2.14"
-axum = { version = "0.6.1", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.6.2", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.67"
 base64 = "0.20.0"
 buildstructor = "0.5.1"
