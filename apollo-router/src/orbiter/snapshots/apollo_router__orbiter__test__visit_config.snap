@@ -15,5 +15,6 @@ configurationheaders.subgraphs.redacted.request.remove.named.redacted: 1
 configurationoverride_subgraph_url.len: 1
 configurationtelemetry.apollo.send_headers.len: 1
 configurationtelemetry.tracing.otlp.endpoint.redacted: 1
+configurationtelemetry.tracing.otlp.grpc.metadata.len: 2
 configurationtelemetry.tracing.otlp.protocol.redacted: 1
 

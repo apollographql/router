@@ -270,15 +270,6 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
                 }
             }
             let path = path.join(".");
-
-            if matches!(
-                item.keyword_location().last(),
-                Some(&PathChunk::Keyword("additionalProperties"))
-            ) {
-                *usage
-                    .entry(format!("configuration{}.len", path))
-                    .or_default() += 1;
-            }
             if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
                 *usage
                     .entry(format!("configuration{}.len", path))
@@ -300,6 +291,21 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
                     *usage
                         .entry(format!("configuration{}.redacted", path))
                         .or_default() += 1;
+                }
+                Value::Object(o) => {
+                    if matches!(
+                        item.keyword_location().last(),
+                        Some(&PathChunk::Property(_))
+                    ) {
+                        let schema_node = raw_json_schema
+                            .pointer(&item.keyword_location().to_string())
+                            .expect("schema node must resolve");
+                        if let Some(Value::Bool(true)) = schema_node.get("additionalProperties") {
+                            *usage
+                                .entry(format!("configuration{}.len", path))
+                                .or_default() += o.len() as u64;
+                        }
+                    }
                 }
                 _ => {}
             }
