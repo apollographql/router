@@ -1,8 +1,0 @@
-{"keys":[
-{ 
-  "kty" : "oct",
-  "kid" : "gary",
-  "alg" : "HS256",
-  "k"   : "c2VjcmV0Cg==",
-  "use" : "sig"
-}]}

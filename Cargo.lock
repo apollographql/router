@@ -2542,6 +2542,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "jwt-claims"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "futures",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "jwt-simple"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

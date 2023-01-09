@@ -1,0 +1,7 @@
+# You must enable router JWT authentication to extract claims
+authentication:
+  jwks_url: file:///Users/garypen/dev/router/examples/jwt-claims/rhai/jwks.json
+
+rhai:
+  scripts: src
+  main: jwt_claims.rhai

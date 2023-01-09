@@ -75,9 +75,9 @@ struct Conf {
     // Header prefix
     #[serde(default = "default_header_prefix")]
     header_prefix: String,
-    // List of KIDs
+    // JWKS update policy
     #[serde(default)]
-    kids: Vec<String>,
+    jwks_update: bool,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     cooldown: Option<Duration>,
@@ -89,12 +89,6 @@ fn default_header_name() -> String {
 
 fn default_header_prefix() -> String {
     "Bearer".to_string()
-}
-
-impl Conf {
-    fn clear_keys(&self) -> bool {
-        self.kids.is_empty()
-    }
 }
 
 #[async_trait::async_trait]
@@ -144,7 +138,7 @@ impl Plugin for AuthenticationPlugin {
             "another claim": "this is another claim"
         });
         let header = Header {
-            kid: Some("gary".to_string()),
+            kid: Some("key1".to_string()),
             ..Default::default()
         };
         let tok_maybe =
@@ -286,23 +280,19 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
+                    // Get the JWKS here
+                    let closure_jwks = my_jwks.clone();
                     // If we ever find that:
                     //  - we can't retrieve a JWKS (a)
                     //  - the retrieved JWKS is None (b)
                     //  - we have a kid that we don't know about (c)
                     // We need to do some additional processing.  (I've tagged with comments a/b/c below)
-                    let closure_jwks = my_jwks.clone();
-                    let closure_clear_keys = my_config.clear_keys();
                     let err_cleanup = move || {
-                        // If we have a list of KIDs (i.e.: clear_keys() == false), then we
-                        // must not remove any existing JWKS. Even when we don't recognise a supplied KID
-                        // (case c). Eventually, the configuration of the router will be updated
-                        // with a new set of KIDs at which point we will restart the State Machine
-                        // and this will trigger the re-population of the JWKS.
-                        //
-                        // If we don't have a list of KIDs, we should always clear any JWKS and
-                        // rely on the COOLDOWN to prevent this from occuring too often for case c.
-                        if closure_clear_keys {
+                        // If jwks_update is set, then we clear the cache so that subsequent
+                        // requests will retrieve new JWKS.
+                        // The COOLDOWN controls attempts to retrieve based on a new "kid", but not
+                        // repeated attempts due to failure to retrieve JWKS.
+                        if my_config.jwks_update {
                             tracing::info!("Clearing cached JWKS");
                             closure_jwks.clear();
                             // Impose the COOLDOWN
@@ -322,7 +312,6 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // Get the JWKS here
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
@@ -402,9 +391,15 @@ impl Plugin for AuthenticationPlugin {
                             Ok(ControlFlow::Continue(request))
                         }
                         None => {
-                            // If we don't have a set of KIDs, then we may have imposed a COOLDOWN.
-                            // Let's check and only perform err_cleanup(), etc... if COOLDOWN is
-                            // not active.
+                            // If jwks_update is configured, we will clear the JWKS cache and set a
+                            // COOLDOWN interval. This prevents potential DOS problems related to
+                            // deliberate fake "kid" attacks.
+                            //
+                            // Once the COOLDOWN expires, we can try again to retrieve new JWKS if
+                            // a new "kid" is encountered.
+                            //
+                            // If jwks_update is false, which is the default,  then we'll not
+                            // exercise this code.
                             if COOLDOWN.load(Ordering::SeqCst) {
                                 let response = router::Response::error_builder()
                                     .error(
@@ -482,7 +477,7 @@ mod tests {
             mock_service
         });
 
-        let jwks_file = std::fs::canonicalize("tests/fixtures/hmac.json").unwrap();
+        let jwks_file = std::fs::canonicalize("tests/fixtures/jwks.json").unwrap();
         let jwks_url = format!("file://{}", jwks_file.display());
         let config = serde_json::json!({
             "authentication": {
@@ -700,7 +695,7 @@ mod tests {
             .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
-                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImdhcnkifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.I1UG-Cx3dHuSvrJpLA7hYVZutpeh8cawgwjPRAm5zss",
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5B",
             )
             .build()
             .unwrap();
@@ -740,7 +735,7 @@ mod tests {
             .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
-                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImdhcnkifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.I1UG-Cx3dHuSvrJpLA7hYVSutpeh8cawgwjPRAm5zss",
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
             )
             .build()
             .unwrap();
