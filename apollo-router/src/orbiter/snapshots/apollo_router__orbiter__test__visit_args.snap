@@ -2,8 +2,6 @@
 source: apollo-router/src/orbiter/mod.rs
 expression: usage
 ---
-args.apollo_graph_ref.redacted: 1
-args.apollo_key.redacted: 1
 args.config_path.redacted: 1
 args.hot_reload.true: 1
 

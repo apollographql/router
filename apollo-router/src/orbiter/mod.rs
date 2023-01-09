@@ -340,6 +340,8 @@ mod test {
                 .map(|a| a.to_string())
                 .collect(),
         );
+        usage.remove("args.apollo_graph_ref.redacted");
+        usage.remove("args.apollo_key.redacted");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(usage);
         });
