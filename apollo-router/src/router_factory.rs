@@ -18,6 +18,7 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
+use crate::configuration::Subgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
@@ -144,9 +145,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let tls_root_store: Option<RootCertStore> = configuration
             .tls
             .all
-            .certificate_authorities
-            .as_deref()
-            .map(create_certificate_store)
+            .create_certificate_store()
             .transpose()?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
@@ -158,8 +157,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .subgraphs
                 .get(name)
                 .as_ref()
-                .and_then(|subgraph| subgraph.certificate_authorities.as_deref())
-                .map(create_certificate_store)
+                .and_then(|subgraph| subgraph.create_certificate_store())
                 .transpose()?
                 .or_else(|| tls_root_store.clone());
 
@@ -222,9 +220,7 @@ impl YamlRouterFactory {
         let tls_root_store = configuration
             .tls
             .all
-            .certificate_authorities
-            .as_deref()
-            .map(create_certificate_store)
+            .create_certificate_store()
             .transpose()?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
@@ -236,8 +232,7 @@ impl YamlRouterFactory {
                 .subgraphs
                 .get(name)
                 .as_ref()
-                .and_then(|subgraph| subgraph.certificate_authorities.as_deref())
-                .map(create_certificate_store)
+                .and_then(|subgraph| subgraph.create_certificate_store())
                 .transpose()?
                 .or_else(|| tls_root_store.clone());
 
@@ -260,6 +255,16 @@ impl YamlRouterFactory {
         }
 
         builder.build().await.map_err(BoxError::from)
+    }
+}
+
+impl Subgraph {
+    fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
+        if let Some(certificate_authorities) = &self.certificate_authorities {
+            Some(create_certificate_store(certificate_authorities))
+        } else {
+            None
+        }
     }
 }
 
