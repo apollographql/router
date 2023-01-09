@@ -567,11 +567,17 @@ expression: "&schema"
       "additionalProperties": false
     },
     "override_subgraph_url": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string",
-        "format": "uri"
-      }
+      "description": "Subgraph URL mappings",
+      "anyOf": [
+        {
+          "description": "Subgraph URL mappings",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      ]
     },
     "plugins": {
       "description": "Plugin configuration",

@@ -271,6 +271,14 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
             }
             let path = path.join(".");
 
+            if matches!(
+                item.keyword_location().last(),
+                Some(&PathChunk::Keyword("additionalProperties"))
+            ) {
+                *usage
+                    .entry(format!("configuration{}.len", path))
+                    .or_default() += 1;
+            }
             if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
                 *usage
                     .entry(format!("configuration{}.len", path))
