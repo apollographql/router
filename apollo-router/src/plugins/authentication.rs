@@ -75,9 +75,9 @@ struct Conf {
     // Header prefix
     #[serde(default = "default_header_prefix")]
     header_prefix: String,
-    // Key retention policy
+    // List of KIDs
     #[serde(default)]
-    retain_keys: bool,
+    kids: Vec<String>,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     cooldown: Option<Duration>,
@@ -89,6 +89,12 @@ fn default_header_name() -> String {
 
 fn default_header_prefix() -> String {
     "Bearer".to_string()
+}
+
+impl Conf {
+    fn clear_keys(&self) -> bool {
+        self.kids.is_empty()
+    }
 }
 
 #[async_trait::async_trait]
@@ -280,19 +286,23 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // Get the JWKS here
-                    let closure_jwks = my_jwks.clone();
                     // If we ever find that:
                     //  - we can't retrieve a JWKS (a)
                     //  - the retrieved JWKS is None (b)
                     //  - we have a kid that we don't know about (c)
                     // We need to do some additional processing.  (I've tagged with comments a/b/c below)
-                    // In scenario (c), we have to clear the cache, since we've got to be able to
-                    // force new keys to be loaded.
-                    let err_cleanup = move |force_clear_keys| {
-                        // If we are forced to clear the keys or the user has instructed us to clear the
-                        // cache, then we should.
-                        if force_clear_keys || !my_config.retain_keys {
+                    let closure_jwks = my_jwks.clone();
+                    let closure_clear_keys = my_config.clear_keys();
+                    let err_cleanup = move || {
+                        // If we have a list of KIDs (i.e.: clear_keys() == false), then we
+                        // must not remove any existing JWKS. Even when we don't recognise a supplied KID
+                        // (case c). Eventually, the configuration of the router will be updated
+                        // with a new set of KIDs at which point we will restart the State Machine
+                        // and this will trigger the re-population of the JWKS.
+                        //
+                        // If we don't have a list of KIDs, we should always clear any JWKS and
+                        // rely on the COOLDOWN to prevent this from occuring too often for case c.
+                        if closure_clear_keys {
                             tracing::info!("Clearing cached JWKS");
                             closure_jwks.clear();
                             // Impose the COOLDOWN
@@ -312,10 +322,11 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
+                    // Get the JWKS here
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
-                            err_cleanup(false); // a.
+                            err_cleanup(); // a.
                             return failure_message(
                                 request.context,
                                 format!("Could not retrieve JWKS set: {e}"),
@@ -327,7 +338,7 @@ impl Plugin for AuthenticationPlugin {
                     let jwks = match jwks_opt {
                         Some(k) => k,
                         None => {
-                            err_cleanup(false); // b.
+                            err_cleanup(); // b.
                             return failure_message(
                                 request.context,
                                 "Could not find JWKS set at the configured location".to_string(),
@@ -391,11 +402,9 @@ impl Plugin for AuthenticationPlugin {
                             Ok(ControlFlow::Continue(request))
                         }
                         None => {
-                            // If we receive a kid we don't recognise, we should try to refresh our
-                            // JWKS set. However, and this is important, we don't want to become a
-                            // potential DOS. Let's have a COOLDOWN here to prevent this happening
-                            // too frequently.
-                            // Only perform err_cleanup(), etc... if COOLDOWN is not active.
+                            // If we don't have a set of KIDs, then we may have imposed a COOLDOWN.
+                            // Let's check and only perform err_cleanup(), etc... if COOLDOWN is
+                            // not active.
                             if COOLDOWN.load(Ordering::SeqCst) {
                                 let response = router::Response::error_builder()
                                     .error(
@@ -419,7 +428,7 @@ impl Plugin for AuthenticationPlugin {
                                     .build()?;
                                 Ok(ControlFlow::Break(response))
                             } else {
-                                err_cleanup(true); // c.
+                                err_cleanup(); // c.
                                 failure_message(
                                     request.context,
                                     format!("Could not find kid: {kid} in JWKS set"),
