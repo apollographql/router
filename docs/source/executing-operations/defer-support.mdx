@@ -7,7 +7,7 @@ description: Improve performance by delivering entity fields incrementally
 
 Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
 
-The Apollo Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
+The Apollo Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
 
 ## What is `@defer`?
 
