@@ -32,3 +32,5 @@ telemetry:
           foo: bar
           bar: baz
 
+override_subgraph_url:
+  foo: bar

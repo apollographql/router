@@ -2,6 +2,8 @@ use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
@@ -24,13 +26,23 @@ struct ExposeQueryPlan {
     enabled: bool,
 }
 
+/// Expose query plan configuration
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum Bool {
+    /// Enable query plan expose
+    True,
+    /// Disable query plan expose
+    False,
+}
+
 #[async_trait::async_trait]
 impl Plugin for ExposeQueryPlan {
-    type Config = bool;
+    type Config = Bool;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ExposeQueryPlan {
-            enabled: init.config
+            enabled: init.config == Bool::True
                 || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true"),
         })
     }

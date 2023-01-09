@@ -4,32 +4,52 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use http::Uri;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tower::BoxError;
 use tower::ServiceExt;
+use url::Url;
 
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::subgraph;
 use crate::SubgraphRequest;
+use crate::{register_plugin, schmar_enum_fn};
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
     urls: HashMap<String, Uri>,
 }
 
-#[async_trait::async_trait]
-impl Plugin for OverrideSubgraphUrl {
-    type Config = HashMap<String, url::Url>;
+schmar_enum_fn!(urls, HashMap<String, Url>, "The url overrides");
 
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Ok(OverrideSubgraphUrl {
-            urls: init
-                .config
+/// Url overrides
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum Config {
+    /// The URL overrides
+    #[schemars(schema_with = "urls")]
+    Urls(HashMap<String, Url>),
+}
+
+impl From<Config> for OverrideSubgraphUrl {
+    fn from(config: Config) -> Self {
+        let Config::Urls(urls) = config;
+        OverrideSubgraphUrl {
+            urls: urls
                 .into_iter()
                 .map(|(k, v)| (k, Uri::from_str(v.as_str()).unwrap()))
                 .collect(),
-        })
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Plugin for OverrideSubgraphUrl {
+    type Config = Config;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        Ok(init.config.into())
     }
 
     fn subgraph_service(

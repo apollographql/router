@@ -1,6 +1,8 @@
 use std::ops::ControlFlow;
 
 use http::StatusCode;
+use schemars::JsonSchema;
+use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -19,13 +21,23 @@ struct ForbidMutations {
     forbid: bool,
 }
 
+/// Forbid mutations
+#[derive(Debug, Clone, Eq, PartialEq, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+enum Bool {
+    /// Forbid mutations
+    True,
+    /// Enable mutations
+    False,
+}
+
 #[async_trait::async_trait]
 impl Plugin for ForbidMutations {
-    type Config = bool;
+    type Config = Bool;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ForbidMutations {
-            forbid: init.config,
+            forbid: init.config == Bool::True,
         })
     }
 
@@ -82,7 +94,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
+        let service_stack = ForbidMutations::new(PluginInit::new(Bool::True, Default::default()))
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock_service.boxed());
@@ -106,7 +118,7 @@ mod forbid_http_get_mutations_tests {
             .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
+        let service_stack = ForbidMutations::new(PluginInit::new(Bool::True, Default::default()))
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(MockExecutionService::new().boxed());
@@ -127,7 +139,7 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(false, Default::default()))
+        let service_stack = ForbidMutations::new(PluginInit::new(Bool::False, Default::default()))
             .await
             .expect("couldnt' create forbid mutations plugin")
             .execution_service(mock_service.boxed());
