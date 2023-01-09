@@ -32,13 +32,12 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+
     use apollo_router::graphql;
     use apollo_router::plugin::test;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
     use http::StatusCode;
-    use std::sync::Arc;
-    use std::sync::Mutex;
     use tower::util::ServiceExt;
 
     async fn build_a_test_harness() -> router::BoxCloneService {
