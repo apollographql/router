@@ -75,9 +75,6 @@ struct Conf {
     // Header prefix
     #[serde(default = "default_header_prefix")]
     header_prefix: String,
-    // JWKS update policy
-    #[serde(default)]
-    jwks_update: bool,
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     cooldown: Option<Duration>,
@@ -287,12 +284,12 @@ impl Plugin for AuthenticationPlugin {
                     //  - the retrieved JWKS is None (b)
                     //  - we have a kid that we don't know about (c)
                     // We need to do some additional processing.  (I've tagged with comments a/b/c below)
-                    let err_cleanup = move || {
-                        // If jwks_update is set, then we clear the cache so that subsequent
+                    let err_cleanup = move |cache_clear| {
+                        // If cache_clear is set, then we clear the cache so that subsequent
                         // requests will retrieve new JWKS.
                         // The COOLDOWN controls attempts to retrieve based on a new "kid", but not
                         // repeated attempts due to failure to retrieve JWKS.
-                        if my_config.jwks_update {
+                        if cache_clear {
                             tracing::info!("Clearing cached JWKS");
                             closure_jwks.clear();
                             // Impose the COOLDOWN
@@ -315,7 +312,7 @@ impl Plugin for AuthenticationPlugin {
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
-                            err_cleanup(); // a.
+                            err_cleanup(false); // a.
                             return failure_message(
                                 request.context,
                                 format!("Could not retrieve JWKS set: {e}"),
@@ -327,7 +324,7 @@ impl Plugin for AuthenticationPlugin {
                     let jwks = match jwks_opt {
                         Some(k) => k,
                         None => {
-                            err_cleanup(); // b.
+                            err_cleanup(false); // b.
                             return failure_message(
                                 request.context,
                                 "Could not find JWKS set at the configured location".to_string(),
@@ -391,15 +388,11 @@ impl Plugin for AuthenticationPlugin {
                             Ok(ControlFlow::Continue(request))
                         }
                         None => {
-                            // If jwks_update is configured, we will clear the JWKS cache and set a
-                            // COOLDOWN interval. This prevents potential DOS problems related to
-                            // deliberate fake "kid" attacks.
+                            // We can't find this "kid". We will observe the COOLDOWN, if one is
+                            // set, to minimise the impact of DOS attacks via this vector.
                             //
-                            // Once the COOLDOWN expires, we can try again to retrieve new JWKS if
-                            // a new "kid" is encountered.
-                            //
-                            // If jwks_update is false, which is the default,  then we'll not
-                            // exercise this code.
+                            // If there is no COOLDOWN, we'll trigger a cache update and set a
+                            // COOLDOWN (via the true flag to err_cleanup(true).
                             if COOLDOWN.load(Ordering::SeqCst) {
                                 let response = router::Response::error_builder()
                                     .error(
@@ -423,7 +416,7 @@ impl Plugin for AuthenticationPlugin {
                                     .build()?;
                                 Ok(ControlFlow::Break(response))
                             } else {
-                                err_cleanup(); // c.
+                                err_cleanup(true); // c.
                                 failure_message(
                                     request.context,
                                     format!("Could not find kid: {kid} in JWKS set"),
