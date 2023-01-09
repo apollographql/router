@@ -86,18 +86,23 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
+    /// Healthcheck configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
 
+    /// Sandbox configuration
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
+    /// Homepage configuration
     #[serde(default)]
     pub(crate) homepage: Homepage,
 
+    /// Configuration for the supergraph
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
+
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -491,6 +496,7 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
+    /// Set to false to disable preview defer support
     #[serde(default = "default_defer_support")]
     pub(crate) preview_defer_support: bool,
 
@@ -558,15 +564,19 @@ impl Default for Supergraph {
     }
 }
 
+/// Apq configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
 }
 
+/// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
     /// Warm up the cache on reloads by running the query plan over
     /// a list of the most used queries
@@ -575,9 +585,9 @@ pub(crate) struct QueryPlanning {
     pub(crate) warmed_up_queries: usize,
 }
 
+/// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
@@ -615,6 +625,7 @@ pub(crate) struct RedisCache {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
+    /// Set to true to enable sandbox
     #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
@@ -654,6 +665,7 @@ impl Default for Sandbox {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Homepage {
+    /// Set to false to disable the homepage
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -698,6 +710,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
+    /// Set to false to disable the healthcheck endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }
@@ -836,4 +849,31 @@ impl Default for Server {
     fn default() -> Self {
         Server::builder().build()
     }
+}
+
+#[macro_export]
+macro_rules! schmar_enum_fn {
+    // `()` indicates that the macro takes no argument.
+    ($name:ident, $ty:ty, $description:expr) => {
+        // The macro will expand into the contents of this block.
+        fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+            let schema = <$ty>::json_schema(gen);
+            let mut schema = schema.into_object();
+            let mut metadata = schemars::schema::Metadata::default();
+            metadata.description = Some($description.to_string());
+            schema.metadata = Some(Box::new(metadata));
+            schemars::schema::Schema::Object(schema)
+        }
+    };
+    ($name:ident, $ty:ty, $default:expr, $description:expr) => {
+        // The macro will expand into the contents of this block.
+        fn $name(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+            let schema = <$ty>::json_schema(gen);
+            let mut schema = schema.into_object();
+            let mut metadata = schemars::schema::Metadata::default();
+            metadata.description = Some($description.to_string());
+            schema.metadata = Some(Box::new(metadata));
+            schemars::schema::Schema::Object(schema)
+        }
+    };
 }

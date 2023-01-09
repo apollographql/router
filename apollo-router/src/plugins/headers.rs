@@ -34,9 +34,9 @@ use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::register_plugin;
 use crate::services::subgraph;
 use crate::SubgraphRequest;
+use crate::{register_plugin, schmar_enum_fn};
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -57,16 +57,23 @@ enum Operation {
     Propagate(Propagate),
 }
 
+schmar_enum_fn!(remove_named, String, "Remove a header given a header name");
+schmar_enum_fn!(
+    remove_matching,
+    String,
+    "Remove a header given a regex matching header name"
+);
+
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case")]
 /// Remove header
 enum Remove {
-    #[schemars(with = "String")]
+    #[schemars(schema_with = "remove_named")]
     #[serde(deserialize_with = "deserialize_header_name")]
     /// Remove a header given a header name
     Named(HeaderName),
 
-    #[schemars(with = "String")]
+    #[schemars(schema_with = "remove_matching")]
     #[serde(deserialize_with = "deserialize_regex")]
     /// Remove a header given a regex matching header name
     Matching(Regex),
@@ -132,6 +139,12 @@ struct InsertFromBody {
     default: Option<HeaderValue>,
 }
 
+schmar_enum_fn!(
+    propagate_matching,
+    String,
+    "Remove a header given a regex matching header name"
+);
+
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
@@ -156,12 +169,13 @@ enum Propagate {
     },
     /// Propagate header given a regex to match header name
     Matching {
-        #[schemars(with = "String")]
+        #[schemars(schema_with = "propagate_matching")]
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,
     },
 }
 
+/// Configuration for header propagation
 #[derive(Clone, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {

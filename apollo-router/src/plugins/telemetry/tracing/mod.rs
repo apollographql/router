@@ -20,6 +20,7 @@ use tower::BoxError;
 use url::ParseError;
 
 use crate::plugins::telemetry::config::Trace;
+use crate::schmar_enum_fn;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
@@ -32,16 +33,30 @@ pub(crate) trait TracingConfigurator {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
 }
 
+schmar_enum_fn!(
+    agent_default_endpoint,
+    AgentDefault,
+    "The default agent endpoint"
+);
+schmar_enum_fn!(agent_url_endpoint, Url, "A custom URL endpoint");
+
+/// The endpoint to send reports to
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum AgentEndpoint {
+    /// The default agent endpoint
+    #[schemars(schema_with = "agent_default_endpoint")]
     Default(AgentDefault),
+    /// A custom URL endpoint
+    #[schemars(schema_with = "agent_url_endpoint")]
     Url(Url),
 }
 
+/// The default agent endpoint
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum AgentDefault {
+    /// The default agent endpoint
     Default,
 }
 
@@ -148,6 +163,7 @@ where
     }
 }
 
+/// Batch processor configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(

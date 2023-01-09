@@ -412,7 +412,9 @@ struct Rhai {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Conf {
+    /// The directory where scripts are located
     scripts: Option<PathBuf>,
+    /// The main rhai script name
     main: Option<String>,
 }
 

@@ -126,6 +126,7 @@ pub(crate) enum EndpointDefault {
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct HttpExporter {
+    /// Headers to send on report requests
     #[serde(default)]
     pub(crate) headers: HashMap<String, String>,
 }

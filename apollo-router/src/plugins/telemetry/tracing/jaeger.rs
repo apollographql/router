@@ -25,14 +25,17 @@ use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::schmar_enum_fn;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 // Can't use #[serde(deny_unknown_fields)] because we're using flatten for endpoint
 pub(crate) struct Config {
+    /// The endpoint to send to
     #[serde(flatten)]
     #[schemars(schema_with = "endpoint_schema")]
     pub(crate) endpoint: Endpoint,
 
+    /// Batch processor configuration
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 }
@@ -61,30 +64,46 @@ fn endpoint_schema(gen: &mut SchemaGenerator) -> Schema {
     schema.into()
 }
 
+/// Collector endpoint configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) struct CollectorEndpoint {
+    /// The endpoint to send reports to
+    endpoint: Url,
+    /// The optional username
+    username: Option<String>,
+    /// The optional password
+    password: Option<String>,
+}
+
+schmar_enum_fn!(
+    agent_endpoint,
+    String,
+    "The agent endpoint to send reports to"
+);
+schmar_enum_fn!(
+    collector_endpoint,
+    CollectorEndpoint,
+    "The collector endpoint to send reports to"
+);
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Endpoint {
-    Agent {
-        #[schemars(with = "String", default = "default_agent_endpoint")]
-        #[serde(deserialize_with = "deser_endpoint")]
-        endpoint: AgentEndpoint,
-    },
-    Collector {
-        #[schemars(with = "String")]
-        endpoint: Url,
-        username: Option<String>,
-        password: Option<String>,
-    },
-}
-fn default_agent_endpoint() -> &'static str {
-    "default"
+    /// Jaeger agent configuration
+    #[schemars(schema_with = "agent_endpoint")]
+    #[serde(deserialize_with = "deser_endpoint")]
+    Agent(AgentEndpoint),
+    /// Jaeger collector configuration
+    #[schemars(schema_with = "collector_endpoint")]
+    Collector(CollectorEndpoint),
 }
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
         tracing::info!("configuring Jaeger tracing: {}", self.batch_processor);
         match &self.endpoint {
-            Endpoint::Agent { endpoint } => {
+            Endpoint::Agent(endpoint) => {
                 let socket = match endpoint {
                     AgentEndpoint::Default(_) => None,
                     AgentEndpoint::Url(u) => {
@@ -106,12 +125,12 @@ impl TracingConfigurator for Config {
                         .filtered(),
                 ))
             }
-            Endpoint::Collector {
+            Endpoint::Collector(CollectorEndpoint {
                 endpoint,
                 username,
                 password,
                 ..
-            } => {
+            }) => {
                 // We are waiting for a release of https://github.com/open-telemetry/opentelemetry-rust/issues/894
                 // Until that time we need to wrap a tracer provider with Jeager in.
                 let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()

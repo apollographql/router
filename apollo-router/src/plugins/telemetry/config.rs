@@ -50,22 +50,31 @@ where
 
 impl<T> GenericWith<T> for T where Self: Sized {}
 
+/// Telwemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
+    /// Logging configuration
     #[serde(rename = "experimental_logging")]
     pub(crate) logging: Option<Logging>,
+    /// Metrics configuration
     pub(crate) metrics: Option<Metrics>,
+    /// Tracing configuration
     pub(crate) tracing: Option<Tracing>,
+    /// Apollo reporting configuration
     pub(crate) apollo: Option<apollo::Config>,
 }
 
+/// Metrics configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(dead_code)]
 pub(crate) struct Metrics {
+    /// Common metrics configuration across all exporters
     pub(crate) common: Option<MetricsCommon>,
+    /// Open Telemetry native exporter configuration
     pub(crate) otlp: Option<otlp::Config>,
+    /// Prometheus exporter configuration
     pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
@@ -83,6 +92,7 @@ pub(crate) struct MetricsCommon {
     pub(crate) resources: HashMap<String, String>,
 }
 
+/// Tracing configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Tracing {
@@ -91,11 +101,17 @@ pub(crate) struct Tracing {
     /// A way to expose trace id in response headers
     #[serde(default, rename = "experimental_response_trace_id")]
     pub(crate) response_trace_id: ExposeTraceId,
+    /// Propagation configuration
     pub(crate) propagation: Option<Propagation>,
+    /// Common configuration
     pub(crate) trace_config: Option<Trace>,
+    /// Open Telemetry native exporter configuration
     pub(crate) otlp: Option<otlp::Config>,
+    /// Jaeger exporter configuration
     pub(crate) jaeger: Option<tracing::jaeger::Config>,
+    /// Zipkin exporter configuration
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
+    /// Datadog exporter configuration
     pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
@@ -105,8 +121,10 @@ pub(crate) struct Logging {
     /// Log format
     #[serde(default)]
     pub(crate) format: LoggingFormat,
+    /// Display the filename in the logs
     #[serde(default = "default_display_filename")]
     pub(crate) display_filename: bool,
+    /// Display the line number in the logs
     #[serde(default = "default_display_line_number")]
     pub(crate) display_line_number: bool,
     /// Log configuration to log request and response for subgraphs and supergraph
@@ -267,20 +285,27 @@ pub(crate) struct ExposeTraceId {
     pub(crate) header_name: Option<HeaderName>,
 }
 
+/// Configure propagation of traces. In general you won't have to do this as these are automatically configured
+/// along with any exporter you configure.
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
     #[serde(default)]
     pub(crate) request: RequestPropagation,
+    /// Propagate baggage https://www.w3.org/TR/baggage/
     #[serde(default)]
     pub(crate) baggage: bool,
+    /// Propagate trace context https://www.w3.org/TR/trace-context/
     #[serde(default)]
     pub(crate) trace_context: bool,
+    /// Propagate Jaeger
     #[serde(default)]
     pub(crate) jaeger: bool,
+    /// Propagate Datadog
     #[serde(default)]
     pub(crate) datadog: bool,
+    /// Propagate Zipkin
     #[serde(default)]
     pub(crate) zipkin: bool,
 }
@@ -298,24 +323,34 @@ pub(crate) struct RequestPropagation {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub(crate) struct Trace {
+    /// The trace service name
     #[serde(default = "default_service_name")]
     pub(crate) service_name: String,
+    /// The trace service namespace
     #[serde(default = "default_service_namespace")]
     pub(crate) service_namespace: String,
+    /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
     #[serde(default = "default_sampler")]
     pub(crate) sampler: SamplerOption,
+    /// Whether to use parent based sampling
     #[serde(default = "default_parent_based_sampler")]
     pub(crate) parent_based_sampler: bool,
+    /// The maximum events per span before discarding
     #[serde(default = "default_max_events_per_span")]
     pub(crate) max_events_per_span: u32,
+    /// The maximum attributes per span before discarding
     #[serde(default = "default_max_attributes_per_span")]
     pub(crate) max_attributes_per_span: u32,
+    /// The maximum links per span before discarding
     #[serde(default = "default_max_links_per_span")]
     pub(crate) max_links_per_span: u32,
+    /// The maximum attributes per event before discarding
     #[serde(default = "default_max_attributes_per_event")]
     pub(crate) max_attributes_per_event: u32,
+    /// The maximum attributes per link before discarding
     #[serde(default = "default_max_attributes_per_link")]
     pub(crate) max_attributes_per_link: u32,
+    /// Default attributes
     #[serde(default)]
     pub(crate) attributes: BTreeMap<String, AttributeValue>,
 }

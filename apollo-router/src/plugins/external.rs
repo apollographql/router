@@ -43,41 +43,51 @@ struct ExternalPlugin {
     sdl: Arc<String>,
 }
 
+/// The
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct BaseConf {
+    /// Send the headers
     #[serde(default)]
     headers: bool,
+    /// Send the context
     #[serde(default)]
     context: bool,
+    /// Send the body
     #[serde(default)]
     body: bool,
+    /// Send the SDL
     #[serde(default)]
     sdl: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct RouterStage {
+    /// The request configuration
     #[serde(default)]
     request: Option<BaseConf>,
+    /// The response configuration
     #[serde(default)]
     response: Option<BaseConf>,
 }
 
+/// The stages request/response configuration
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct Stages {
+    /// The router stage
     #[serde(default)]
     router: Option<RouterStage>,
 }
 
+/// Configures the externalization plugin
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // The url you'd like to offload processing to
+    /// The url you'd like to offload processing to
     url: String,
-    // The timeout for external requests
+    /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     timeout: Option<Duration>,
-    // The stages request/response configuration
+    /// The stages request/response configuration
     #[serde(default)]
     stages: Option<Stages>,
 }

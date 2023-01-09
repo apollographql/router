@@ -18,7 +18,6 @@ use serde_json::Value;
 use tower::BoxError;
 
 use crate::error::FetchError;
-use crate::graphql;
 use crate::graphql::Request;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
@@ -29,6 +28,7 @@ use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
+use crate::{graphql, schmar_enum_fn};
 
 mod aggregation;
 pub(crate) mod apollo;
@@ -53,15 +53,17 @@ pub(crate) struct MetricsAttributesConf {
     pub(crate) subgraph: Option<SubgraphAttributesConf>,
 }
 
+/// Configuration to add custom attributes/labels on metrics to subgraphs
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphAttributesConf {
-    // Apply to all subgraphs
+    /// Attributes for all subgraphs
     pub(crate) all: Option<AttributesForwardConf>,
-    // Apply to specific subgraph
+    /// Attributes per subgraph
     pub(crate) subgraphs: Option<HashMap<String, AttributesForwardConf>>,
 }
 
+/// Configuration to add custom attributes/labels on metrics to subgraphs
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AttributesForwardConf {
@@ -82,10 +84,13 @@ pub(crate) struct AttributesForwardConf {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to insert custom attributes/labels in metrics
 pub(crate) struct Insert {
+    /// The name of the attribute to insert
     pub(crate) name: String,
+    /// The value of the attribute to insert
     pub(crate) value: String,
 }
 
+/// Configuration to forward from headers/body
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Forward {
@@ -105,6 +110,12 @@ pub(crate) struct ErrorsForward {
     pub(crate) extensions: Option<Vec<BodyForward>>,
 }
 
+schmar_enum_fn!(
+    forward_header_matching,
+    String,
+    "Using a regex on the header name"
+);
+
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
@@ -112,28 +123,32 @@ pub(crate) struct ErrorsForward {
 pub(crate) enum HeaderForward {
     /// Using a named header
     Named {
+        /// The name of the header
         #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
+        /// The optional output name
         rename: Option<String>,
+        /// The optional default value
         default: Option<String>,
     },
     /// Using a regex on the header name
-    Matching {
-        #[schemars(with = "String")]
-        #[serde(deserialize_with = "deserialize_regex")]
-        matching: Regex,
-    },
+    #[schemars(schema_with = "forward_header_matching")]
+    #[serde(deserialize_with = "deserialize_regex")]
+    Matching(Regex),
 }
 
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
+    /// The path in the body
     #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_json_query")]
     pub(crate) path: JSONQuery,
+    /// The name of the attribute
     pub(crate) name: String,
+    /// The optional default value
     pub(crate) default: Option<String>,
 }
 
@@ -141,8 +156,11 @@ pub(crate) struct BodyForward {
 #[serde(deny_unknown_fields)]
 /// Configuration to forward context values in metric attributes/labels
 pub(crate) struct ContextForward {
+    /// The name of the value in the context
     pub(crate) named: String,
+    /// The optional output name
     pub(crate) rename: Option<String>,
+    /// The optional default value
     pub(crate) default: Option<String>,
 }
 
@@ -166,7 +184,7 @@ impl HeaderForward {
                     attributes.insert(rename.clone().unwrap_or_else(|| named.to_string()), value);
                 }
             }
-            HeaderForward::Matching { matching } => {
+            HeaderForward::Matching(matching) => {
                 headers
                     .iter()
                     .filter(|(name, _)| matching.is_match(name.as_str()))
