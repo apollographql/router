@@ -619,7 +619,7 @@ pub(crate) struct RedisCache {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Tls {
     #[serde(default)]
-    pub(crate) all: Option<Subgraph>,
+    pub(crate) all: Subgraph,
     #[serde(default)]
     pub(crate) subgraphs: HashMap<String, Subgraph>,
 }
@@ -627,14 +627,14 @@ pub(crate) struct Tls {
 #[buildstructor::buildstructor]
 impl Tls {
     #[builder]
-    pub(crate) fn new(all: Option<Subgraph>, subgraphs: HashMap<String, Subgraph>) -> Self {
+    pub(crate) fn new(all: Subgraph, subgraphs: HashMap<String, Subgraph>) -> Self {
         Self { all, subgraphs }
     }
 }
 
 impl Default for Tls {
     fn default() -> Self {
-        Self::builder().build()
+        Self::builder().all(Subgraph::default()).build()
     }
 }
 

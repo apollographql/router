@@ -144,8 +144,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         let tls_root_store = configuration
             .tls
             .all
-            .as_ref()
-            .and_then(|subgraphs| subgraphs.certificate_authorities.as_deref())
+            .certificate_authorities
+            .as_deref()
             .and_then(create_certificate_store);
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
@@ -220,8 +220,8 @@ impl YamlRouterFactory {
         let tls_root_store = configuration
             .tls
             .all
-            .as_ref()
-            .and_then(|subgraphs| subgraphs.certificate_authorities.as_deref())
+            .certificate_authorities
+            .as_deref()
             .and_then(create_certificate_store);
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
