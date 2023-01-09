@@ -112,7 +112,13 @@ expression: "&schema"
       "additionalProperties": false
     },
     "forbid_mutations": {
-      "type": "boolean"
+      "description": "Forbid mutations configuration",
+      "anyOf": [
+        {
+          "description": "Enabled",
+          "type": "boolean"
+        }
+      ]
     },
     "headers": {
       "description": "Configuration for header propagation",
@@ -584,7 +590,13 @@ expression: "&schema"
       "default": null,
       "properties": {
         "experimental.expose_query_plan": {
-          "type": "boolean"
+          "description": "Expose query plan",
+          "anyOf": [
+            {
+              "description": "Enabled",
+              "type": "boolean"
+            }
+          ]
         },
         "experimental.external": {
           "description": "Configures the externalization plugin",
