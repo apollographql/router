@@ -3,10 +3,10 @@ source: apollo-router/src/orbiter/mod.rs
 expression: report
 ---
 session_id: "[session_id]"
-version: 1.7.0
+version: "[version]"
 platform:
   os: "[os]"
-  continuous_integration: ~
+  continuous_integration: "[ci]"
 supergraph_hash: 47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=
 apollo_key: "[apollo_key]"
 apollo_graph_ref: "[apollo_graph_ref]"

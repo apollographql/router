@@ -365,12 +365,14 @@ mod test {
         let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
+                ".version" => "[version]",
                 ".session_id" => "[session_id]",
                 ".apollo_key" => "[apollo_key]",
                 ".apollo_graph_ref" => "[apollo_graph_ref]",
-                ".platform.os" => "[os]"
+                ".platform.os" => "[os]",
+                ".platform.continuous_integration" => "[ci]"
+            });
         });
-                });
     }
 
     // TODO, enable once we are live.
