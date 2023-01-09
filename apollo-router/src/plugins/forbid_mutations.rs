@@ -2,7 +2,8 @@ use std::ops::ControlFlow;
 
 use http::StatusCode;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;

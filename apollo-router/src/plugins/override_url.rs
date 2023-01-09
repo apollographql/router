@@ -5,7 +5,8 @@ use std::str::FromStr;
 
 use http::Uri;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
 

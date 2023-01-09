@@ -2,10 +2,11 @@
 use std::fmt::Debug;
 
 use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::trace::BatchSpanProcessor;
+use opentelemetry::sdk::trace::Builder;
 use opentelemetry::sdk::trace::Span;
 use opentelemetry::sdk::trace::SpanProcessor;
 use opentelemetry::sdk::trace::TracerProvider;
-use opentelemetry::sdk::trace::{BatchSpanProcessor, Builder};
 use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
 use schemars::JsonSchema;
@@ -17,9 +18,11 @@ use url::Url;
 use super::agent_endpoint;
 use super::deser_endpoint;
 use super::AgentEndpoint;
-use crate::plugins::telemetry::config::{GenericWith, Trace};
+use crate::plugins::telemetry::config::GenericWith;
+use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::plugins::telemetry::tracing::{BatchProcessorConfig, SpanProcessorExt};
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]

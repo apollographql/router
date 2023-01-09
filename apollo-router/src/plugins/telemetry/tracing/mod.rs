@@ -21,7 +21,6 @@ use tower::BoxError;
 use url::ParseError;
 
 use crate::plugins::telemetry::config::Trace;
-use crate::schmar_enum_fn;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
@@ -34,7 +33,7 @@ pub(crate) trait TracingConfigurator {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
 }
 
-schmar_enum_fn!(
+schemar_fn!(
     agent_endpoint,
     String,
     Value::String("default".to_string()),

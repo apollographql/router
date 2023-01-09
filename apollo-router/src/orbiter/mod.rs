@@ -5,24 +5,27 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use clap::CommandFactory;
-use http::header::{CONTENT_TYPE, USER_AGENT};
+use http::header::CONTENT_TYPE;
+use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
 use jsonschema::paths::PathChunk;
 use jsonschema::JSONSchema;
 use lazy_static::lazy_static;
 use serde::Serialize;
-use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
+use serde_json::Map;
+use serde_json::Value;
+use sha2::Digest;
+use sha2::Sha256;
 use tower::BoxError;
 use uuid::Uuid;
 
 use crate::configuration::generate_config_schema;
-use crate::Configuration;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
+use crate::Configuration;
 
 lazy_static! {
     /// This session id is created once when the router starts. It persists between config reloads.
@@ -145,8 +148,7 @@ fn create_report(configuration: Arc<Configuration>, schema: Arc<Schema>) -> Usag
         "configuration.plugins.len".to_string(),
         configuration
             .get("plugins")
-            .map(|plugins| plugins.as_array())
-            .flatten()
+            .and_then(|plugins| plugins.as_array())
             .map(|plugins| plugins.len())
             .unwrap_or_default() as u64,
     );
@@ -249,7 +251,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
     // For this to work ALL config must have an annotation, e.g. documentation.
     // For each config path we need to sanitize the it for arrays and also custom names e.g. header names.
     // This corresponds to the json schema keywords of `items` and `additionalProperties`
-    if let BasicOutput::Valid(output) = compiled_json_schema.apply(&config).basic() {
+    if let BasicOutput::Valid(output) = compiled_json_schema.apply(config).basic() {
         for item in output {
             let instance_ptr = item.instance_location();
             let value = config
@@ -258,17 +260,17 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
 
             // Compose the redacted path.
             let mut path = Vec::new();
-            let mut keyword_location = item.keyword_location().iter();
-            while let Some(keyword) = keyword_location.next() {
-                if let PathChunk::Property(property) = keyword {
+            for chunk in item.keyword_location() {
+                if let PathChunk::Property(property) = chunk {
                     // We hit a properties keyword, we can grab the next keyword as it'll be a property name.
                     path.push(property.to_string());
                 }
-                if keyword == &PathChunk::Keyword("additionalProperties") {
+                if &PathChunk::Keyword("additionalProperties") == chunk {
                     // This is free format properties. It's redacted
                     path.push("redacted".to_string());
                 }
             }
+
             let path = path.join(".");
             if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
                 *usage
@@ -321,11 +323,12 @@ mod test {
     use std::env;
     use std::sync::Arc;
 
-    use crate::Configuration;
     use insta::assert_yaml_snapshot;
 
+    use crate::orbiter::create_report;
+    use crate::orbiter::visit_args;
     use crate::orbiter::visit_config;
-    use crate::orbiter::{create_report, visit_args};
+    use crate::Configuration;
 
     #[test]
     fn test_visit_args() {

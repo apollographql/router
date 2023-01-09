@@ -642,18 +642,13 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                     let properties = v.as_object().expect("properties must be an object");
                     for (k, v) in properties {
                         let path = format!("{}.{}", path, k);
-                        if !v
-                            .as_object()
-                            .map(|o| o.get("description"))
-                            .flatten()
-                            .is_some()
-                        {
+                        if v.as_object().and_then(|o| o.get("description")).is_none() {
                             errors.push(format!("{} was missing a description", path));
                         }
                         visit_schema(&path, v, errors)
                     }
                 } else {
-                    visit_schema(&path, v, errors)
+                    visit_schema(path, v, errors)
                 }
             }
         }

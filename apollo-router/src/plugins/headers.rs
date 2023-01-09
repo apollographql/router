@@ -34,9 +34,9 @@ use crate::plugin::serde::deserialize_option_header_value;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::register_plugin;
 use crate::services::subgraph;
 use crate::SubgraphRequest;
-use crate::{register_plugin, schmar_enum_fn};
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -57,8 +57,8 @@ enum Operation {
     Propagate(Propagate),
 }
 
-schmar_enum_fn!(remove_named, String, "Remove a header given a header name");
-schmar_enum_fn!(
+schemar_fn!(remove_named, String, "Remove a header given a header name");
+schemar_fn!(
     remove_matching,
     String,
     "Remove a header given a regex matching header name"
@@ -139,7 +139,7 @@ struct InsertFromBody {
     default: Option<HeaderValue>,
 }
 
-schmar_enum_fn!(
+schemar_fn!(
     propagate_matching,
     String,
     "Remove a header given a regex matching header name"

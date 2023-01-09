@@ -26,7 +26,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::schmar_enum_fn;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 
@@ -143,12 +142,12 @@ impl Default for Config {
     }
 }
 
-schmar_enum_fn!(
+schemar_fn!(
     forward_headers_only,
     Vec<String>,
     "Send only the headers specified"
 );
-schmar_enum_fn!(
+schemar_fn!(
     forward_headers_except,
     Vec<String>,
     "Send all headers except those specified"
@@ -181,13 +180,13 @@ impl Default for ForwardHeaders {
     }
 }
 
-schmar_enum_fn!(
+schemar_fn!(
     forward_variables_except,
     Vec<String>,
     "Send all variables except those specified"
 );
 
-schmar_enum_fn!(
+schemar_fn!(
     forward_variables_only,
     Vec<String>,
     "Send only the variables specified"

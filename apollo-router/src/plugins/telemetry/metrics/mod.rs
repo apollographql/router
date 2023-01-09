@@ -18,6 +18,7 @@ use serde_json::Value;
 use tower::BoxError;
 
 use crate::error::FetchError;
+use crate::graphql;
 use crate::graphql::Request;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
@@ -28,7 +29,6 @@ use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
-use crate::{graphql, schmar_enum_fn};
 
 mod aggregation;
 pub(crate) mod apollo;
@@ -110,7 +110,7 @@ pub(crate) struct ErrorsForward {
     pub(crate) extensions: Option<Vec<BodyForward>>,
 }
 
-schmar_enum_fn!(
+schemar_fn!(
     forward_header_matching,
     String,
     "Using a regex on the header name"
