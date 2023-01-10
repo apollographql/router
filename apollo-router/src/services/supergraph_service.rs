@@ -20,7 +20,7 @@ use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
-use super::subgraph_service::SubgraphCreator;
+use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
@@ -347,14 +347,14 @@ impl PluggableSupergraphServiceBuilder {
 
         let plugins = Arc::new(self.plugins);
 
-        let subgraph_creator = Arc::new(SubgraphCreator::new(
+        let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
             plugins.clone(),
         ));
 
         Ok(SupergraphCreator {
             query_planner_service,
-            subgraph_creator,
+            subgraph_service_factory,
             schema: self.schema,
             plugins,
         })
@@ -387,7 +387,7 @@ pub(crate) trait SupergraphFactory:
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    subgraph_creator: Arc<SubgraphCreator>,
+    subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
@@ -423,7 +423,7 @@ impl SupergraphCreator {
             .execution_service_factory(ExecutionCreator {
                 schema: self.schema.clone(),
                 plugins: self.plugins.clone(),
-                subgraph_creator: self.subgraph_creator.clone(),
+                subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
             .build();
