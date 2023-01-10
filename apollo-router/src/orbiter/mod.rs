@@ -163,7 +163,7 @@ fn create_report(
     visit_args(&mut usage, env::args().collect());
 
     Ok(UsageReport {
-        session_id: *SESSION_ID.get_or_init(|| Uuid::new_v4()),
+        session_id: *SESSION_ID.get_or_init(Uuid::new_v4),
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         platform: Platform {
             os,
