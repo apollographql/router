@@ -322,18 +322,6 @@ async fn consume_responses(
     }
 }
 
-pub(crate) trait ExecutionServiceFactory:
-    ServiceFactory<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
-{
-    type ExecutionService: Service<
-            ExecutionRequest,
-            Response = ExecutionResponse,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
-}
-
 #[derive(Clone)]
 pub(crate) struct ExecutionCreator {
     pub(crate) schema: Arc<Schema>,
@@ -359,9 +347,4 @@ impl ServiceFactory<ExecutionRequest> for ExecutionCreator {
             )
             .boxed()
     }
-}
-
-impl ExecutionServiceFactory for ExecutionCreator {
-    type ExecutionService = execution::BoxService;
-    type Future = <ExecutionService as Service<ExecutionRequest>>::Future;
 }

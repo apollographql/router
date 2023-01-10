@@ -22,7 +22,6 @@ use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionCreator;
-use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
@@ -56,18 +55,18 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct SupergraphService<ExecutionFactory> {
-    execution_service_factory: ExecutionFactory,
+pub(crate) struct SupergraphService {
+    execution_service_factory: ExecutionCreator,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
 }
 
 #[buildstructor::buildstructor]
-impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
+impl SupergraphService {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-        execution_service_factory: ExecutionFactory,
+        execution_service_factory: ExecutionCreator,
         schema: Arc<Schema>,
     ) -> Self {
         SupergraphService {
@@ -78,10 +77,7 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     }
 }
 
-impl<ExecutionFactory> Service<SupergraphRequest> for SupergraphService<ExecutionFactory>
-where
-    ExecutionFactory: ExecutionServiceFactory,
-{
+impl Service<SupergraphRequest> for SupergraphService {
     type Response = SupergraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
