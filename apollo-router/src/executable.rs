@@ -18,10 +18,13 @@ use clap::Subcommand;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
 use opentelemetry::trace::TracerProvider;
-use tracing_subscriber::layer::{Layered, SubscriberExt};
+use tracing_subscriber::layer::Layered;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::{EnvFilter, Layer, Registry};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
+use tracing_subscriber::Registry;
 use url::ParseError;
 use url::Url;
 
@@ -30,6 +33,7 @@ use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
+use crate::plugins::telemetry::HotTracer;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -50,7 +54,9 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
-pub(crate) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<HotTracer> = OnceCell::new();
+pub(crate) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
+    HotTracer<opentelemetry::sdk::trace::Tracer>,
+> = OnceCell::new();
 
 pub(crate) static FMT_LAYER_HANDLE: OnceCell<
     Handle<
@@ -593,12 +599,12 @@ fn copy_args_to_env() {
 }
 
 pub(crate) fn init_tracing(log_level: &str) -> Result<()> {
+    let hot_tracer = HotTracer::new(
+        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("a", None, None),
+    );
     let (opentelemetry_layer, opentelemetry_handle) = tracing_subscriber::reload::Layer::new(
         tracing_opentelemetry::layer()
-            .with_tracer(
-                opentelemetry::sdk::trace::TracerProvider::default()
-                    .versioned_tracer("a", None, None),
-            )
+            .with_tracer(hot_tracer.clone())
             .boxed(),
     );
 
@@ -628,9 +634,9 @@ pub(crate) fn init_tracing(log_level: &str) -> Result<()> {
         .init();
 
     // Stash the reload handles so that we can hot reload later
-    OPENTELEMETRY_LAYER_HANDLE
-        .set(opentelemetry_handle)
-        .map_err(|_| anyhow!("failed to set OpenTelemetry layer handle"))?;
+    OPENTELEMETRY_TRACER_HANDLE
+        .set(hot_tracer)
+        .map_err(|_| anyhow!("failed to set OpenTelemetry tracer"))?;
     FMT_LAYER_HANDLE
         .set(fmt_handle)
         .map_err(|_| anyhow!("failed to set fmt layer handle"))?;

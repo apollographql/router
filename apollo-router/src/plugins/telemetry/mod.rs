@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -31,12 +32,14 @@ use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::trace::SpanBuilder;
+use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
+use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::trace::{SpanBuilder, SpanContext, Tracer};
 use opentelemetry::KeyValue;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
@@ -47,17 +50,22 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::fmt::format::Format;
 use tracing_subscriber::layer::Layered;
-use tracing_subscriber::{EnvFilter, Layer, Registry};
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::Layer;
+use tracing_subscriber::Registry;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::formatters::text::TextFormatter;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
-use crate::executable::{FMT_LAYER_HANDLE, OPENTELEMETRY_LAYER_HANDLE};
+use crate::executable::FMT_LAYER_HANDLE;
+use crate::executable::OPENTELEMETRY_TRACER_HANDLE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -65,7 +73,8 @@ use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
-use crate::plugins::telemetry::formatters::{filter_metric_events, FilteringFormatter};
+use crate::plugins::telemetry::formatters::filter_metric_events;
+use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -193,7 +202,7 @@ impl Plugin for Telemetry {
     fn activate(&self) {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
-        if let Some(handle) = OPENTELEMETRY_LAYER_HANDLE.get() {
+        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.
@@ -210,6 +219,7 @@ impl Plugin for Telemetry {
                 Some(env!("CARGO_PKG_VERSION")),
                 None,
             );
+            hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
             // To ensure we don't hang tracing providers are dropped in a blocking thread.
@@ -219,6 +229,7 @@ impl Plugin for Telemetry {
                 .expect("otel error handler lock poisoned, fatal");
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+
             // Set the meter provider
             opentelemetry::global::set_meter_provider(
                 self.meter_provider
@@ -227,10 +238,9 @@ impl Plugin for Telemetry {
                     .take()
                     .expect("must have new meter_provider"),
             );
-
-            handle
-                .reload(tracing_opentelemetry::layer().with_tracer(tracer).boxed())
-                .expect("otel layer reload must succeed");
+            // handle
+            // .reload(tracing_opentelemetry::layer().with_tracer(tracer).boxed())
+            // .expect("otel layer reload must succeed");
         }
 
         if let Some(handle) = FMT_LAYER_HANDLE.get() {
@@ -586,10 +596,7 @@ impl Telemetry {
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
                 .event_format(FilteringFormatter::new(
-                    Format::default()
-                        .with_target(logging.display_target)
-                        .with_line_number(logging.display_line_number)
-                        .with_file(logging.display_filename),
+                    TextFormatter::new(),
                     filter_metric_events,
                 ))
                 .boxed(),
@@ -1791,8 +1798,35 @@ mod tests {
     }
 }
 
-struct HotTracer<S> {
-    parent: S,
+#[derive(Clone)]
+pub(crate) struct HotTracer<S> {
+    parent: Arc<RwLock<S>>,
+}
+
+impl<S: Tracer + PreSampledTracer> PreSampledTracer for HotTracer<S> {
+    fn sampled_context(
+        &self,
+        data: &mut tracing_opentelemetry::OtelData,
+    ) -> opentelemetry::Context {
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .sampled_context(data)
+    }
+
+    fn new_trace_id(&self) -> opentelemetry::trace::TraceId {
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .new_trace_id()
+    }
+
+    fn new_span_id(&self) -> opentelemetry::trace::SpanId {
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .new_span_id()
+    }
 }
 
 impl<S: Tracer> Tracer for HotTracer<S> {
@@ -1802,25 +1836,37 @@ impl<S: Tracer> Tracer for HotTracer<S> {
     where
         T: Into<Cow<'static, str>>,
     {
-        self.parent.start(name)
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .start(name)
     }
 
     fn start_with_context<T>(&self, name: T, parent_cx: &opentelemetry::Context) -> Self::Span
     where
         T: Into<Cow<'static, str>>,
     {
-        self.parent.start_with_context(name)
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .start_with_context(name, parent_cx)
     }
 
     fn span_builder<T>(&self, name: T) -> SpanBuilder
     where
         T: Into<Cow<'static, str>>,
     {
-        self.parent.span_builder(name)
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .span_builder(name)
     }
 
     fn build(&self, builder: SpanBuilder) -> Self::Span {
-        self.parent.build(builder)
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .build(builder)
     }
 
     fn build_with_context(
@@ -1828,7 +1874,10 @@ impl<S: Tracer> Tracer for HotTracer<S> {
         builder: SpanBuilder,
         parent_cx: &opentelemetry::Context,
     ) -> Self::Span {
-        self.parent.build_with_context(builder, parent_cx)
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .build_with_context(builder, parent_cx)
     }
 
     fn in_span<T, F, N>(&self, name: N, f: F) -> T
@@ -1837,6 +1886,24 @@ impl<S: Tracer> Tracer for HotTracer<S> {
         N: Into<Cow<'static, str>>,
         Self::Span: Send + Sync + 'static,
     {
-        self.parent.in_span(name)
+        self.parent
+            .read()
+            .expect("parent tracer must be available")
+            .in_span(name, f)
+    }
+}
+
+impl<S> HotTracer<S> {
+    pub(crate) fn new(parent: S) -> Self {
+        Self {
+            parent: Arc::new(RwLock::new(parent)),
+        }
+    }
+
+    pub(crate) fn reload(&self, new: S) {
+        *self
+            .parent
+            .write()
+            .expect("parent tracer must be available") = new;
     }
 }

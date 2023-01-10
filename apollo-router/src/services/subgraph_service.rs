@@ -154,12 +154,6 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             });
             let display_headers = context.contains_key(LOGGING_DISPLAY_HEADERS);
             let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
-            if display_headers {
-                tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
-            }
-            if display_body {
-                tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
-            }
 
             let path = schema_uri.path().to_string();
 
@@ -178,6 +172,12 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 );
             });
+            if display_headers {
+                tracing::info!(http.request.headers = ?request.headers(), apollo.subgraph.name = %service_name, "Request headers to subgraph {service_name:?}");
+            }
+            if display_body {
+                tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
+            }
             let cloned_service_name = service_name.clone();
             let (parts, body) = async move {
                 let response = client
