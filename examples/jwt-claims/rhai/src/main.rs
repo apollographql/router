@@ -63,7 +63,27 @@ mod tests {
             mock_service
         });
 
+        #[cfg(target_os = "windows")]
+        let mut jwks_file = std::fs::canonicalize("jwks.json").unwrap();
+        #[cfg(not(target_os = "windows"))]
         let jwks_file = std::fs::canonicalize("jwks.json").unwrap();
+
+        #[cfg(target_os = "windows")]
+        {
+            // We need to manipulate our canonicalized file if we are on Windows.
+            // We replace windows path separators with posix path separators
+            // We also drop the first 3 characters from the path since they will be
+            // something like (drive letter may vary) '\\?\C:' and that isn't
+            // a valid URI
+            let mut file_string = jwks_file.display().to_string();
+            file_string = file_string.replace("\\", "/");
+            let len = file_string
+                .char_indices()
+                .nth(3)
+                .map_or(0, |(idx, _ch)| idx);
+            jwks_file = file_string[len..].into();
+        }
+
         let jwks_url = format!("file://{}", jwks_file.display());
         let config = serde_json::json!({
             "authentication": {
