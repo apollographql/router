@@ -67,7 +67,9 @@ mod tests {
         let jwks_url = format!("file://{}", jwks_file.display());
         let config = serde_json::json!({
             "authentication": {
-                "jwks_url": &jwks_url
+                "jwt": {
+                    "jwks_url": &jwks_url
+                }
             }
         });
 

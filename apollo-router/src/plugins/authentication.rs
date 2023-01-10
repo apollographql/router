@@ -60,13 +60,13 @@ static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
 });
 
 struct AuthenticationPlugin {
-    configuration: Conf,
+    configuration: JWTConf,
     jwks: SharedDeduplicate,
     jwks_url: Url,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct Conf {
+struct JWTConf {
     // Retrieve our JWK Set from here
     jwks_url: String,
     // HTTP header expected to contain JWT
@@ -78,6 +78,14 @@ struct Conf {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     cooldown: Option<Duration>,
+}
+
+// We may support additional authentication mechanisms in future, so all
+// configuration (which is currently JWT specific) is isolated to the
+// JWTConf structure.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+struct Conf {
+    jwt: JWTConf,
 }
 
 fn default_header_name() -> String {
@@ -93,7 +101,7 @@ impl Plugin for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let url: Url = Url::from_str(&init.config.jwks_url)?;
+        let url: Url = Url::from_str(&init.config.jwt.jwks_url)?;
         let getter: Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
             Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
                 let fut = async {
@@ -143,7 +151,7 @@ impl Plugin for AuthenticationPlugin {
         tracing::info!(?tok_maybe, "use this JWT for testing");
 
         Ok(AuthenticationPlugin {
-            configuration: init.config,
+            configuration: init.config.jwt,
             jwks: Arc::new(deduplicator),
             jwks_url: url,
         })
@@ -479,7 +487,9 @@ mod tests {
         let jwks_url = format!("file://{}", jwks_file.display());
         let config = serde_json::json!({
             "authentication": {
-                "jwks_url": &jwks_url
+                "jwt" : {
+                    "jwks_url": &jwks_url
+                }
             }
         });
 

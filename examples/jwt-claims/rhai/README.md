@@ -2,8 +2,7 @@
 
 Demonstrates JWT claim manipulation via Rhai script.
 
-Example JWTs you can use with this example. These JWTS don't expire until
-2054, so they'll be good for a while yet...
+Example JWTs you can use with this example. These JWTS don't expire until 2054, so they'll be good for a while yet...
 
 Valid JWT:
 
@@ -18,6 +17,8 @@ Invalid JWT (Issuer not acceptable):
 eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImFmZGE4NWUwOWEzMjBjZjc0ODE3Nzg3NDU5MmRlNjRkIn0.eyJpc3MiOiJodHRwczovL2RpZmZlcmVudC1pZHAubG9jYWwiLCJhdWQiOiJhcGkxIiwic3ViIjoiNWJlODYzNTkwNzNjNDM0YmFkMmRhMzkzMjIyMmRhYmUiLCJjbGllbnRfaWQiOiJteV9jbGllbnRfYXBwIiwiZXhwIjoyNjczMjY0NzM3LCJpYXQiOjE2NzMyNjExMzcsImp0aSI6IjhiN2JjMzRkMDE4NTZjZWQyMmExOTk0YmRlMWIwMDZlIn0.k4DtEbk18OnLNV0OE6eiTIby4wCF6ouJRW7fwnbm7ECIt0Vai2dJ60nQY1DlCz-GgdCz9eV83VYWlQ4u6c07SA
 
 Usage:
+
+NOTE: Before you run this example you must edit the path to the jwks.json file in router.yaml so that the URL is a correct absolute URL. Relative file paths are not valid URLs, so we need an absolute path. I've left the absolute path that I use on my laptop in router.yaml so that you can see what a valid URL would look like.
 
 ```bash
 cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
