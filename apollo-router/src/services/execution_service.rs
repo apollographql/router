@@ -323,13 +323,13 @@ async fn consume_responses(
 }
 
 #[derive(Clone)]
-pub(crate) struct ExecutionCreator {
+pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) plugins: Arc<Plugins>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }
 
-impl ServiceFactory<ExecutionRequest> for ExecutionCreator {
+impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
     type Service = execution::BoxService;
 
     fn create(&self) -> Self::Service {
