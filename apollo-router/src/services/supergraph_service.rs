@@ -104,12 +104,13 @@ where
 
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
         let execution = self.execution_service_factory.create();
-        let busy_timer = self.busy_timer.clone();
+
+        let busy_timer = Arc::new(Mutex::new(BusyTimer::new()));
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = service_call(planning, execution, schema, req)
+        let fut = service_call(planning, execution, schema, busy_timer.clone(), req)
             .then(|res| async move {
                 let busy_ns = busy_timer.lock().await.current();
                 tracing::info!("was busy for {busy_ns}ns",);
@@ -143,6 +144,7 @@ async fn service_call<ExecutionService>(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
     execution: ExecutionService,
     schema: Arc<Schema>,
+    busy_timer: Arc<Mutex<BusyTimer>>,
     req: SupergraphRequest,
 ) -> Result<SupergraphResponse, BoxError>
 where
