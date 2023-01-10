@@ -24,14 +24,14 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::external::Externalizable;
-use crate::external::PipelineStep;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::external::Control;
+use crate::services::external::Externalizable;
+use crate::services::external::PipelineStep;
 use crate::services::router;
 use crate::Context;
 
