@@ -515,13 +515,14 @@ mod tests {
         {
             // We need to manipulate our canonicalized file if we are on Windows.
             // We replace windows path separators with posix path separators
-            // We also drop the first 6 characters from the path since they will be
-            // something like (drive letter may vary) '\\?\C:'
+            // We also drop the first 3 characters from the path since they will be
+            // something like (drive letter may vary) '\\?\C:' and that isn't
+            // a valid URI
             let mut file_string = jwks_file.display().to_string();
             file_string = file_string.replace("\\", "/");
             let len = file_string
                 .char_indices()
-                .nth(6)
+                .nth(3)
                 .map_or(0, |(idx, _ch)| idx);
             jwks_file = file_string[len..].into();
         }
