@@ -126,9 +126,13 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
                     tokio::task::spawn_blocking(|| {
                         tracing::debug!("sending anonymous usage data to Apollo");
-                        let report = create_report(configuration, schema);
-                        if let Err(e) = send(report) {
-                            tracing::debug!("failed to send anonymous usage: {}", e);
+                        match create_report(configuration, schema) {
+                            Ok(report) => {
+                                if let Err(e) = send(report) {
+                                    tracing::debug!("failed to send usage report: {}", e);
+                                }
+                            }
+                            Err(e) => tracing::debug!("failed to create usage report: {}", e),
                         }
                     });
                 }
@@ -137,9 +141,12 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
     }
 }
 
-fn create_report(configuration: Arc<Configuration>, schema: Arc<Schema>) -> UsageReport {
-    let mut configuration: Value =
-        serde_yaml::from_str(&configuration.string).expect("configuration must be parseable");
+fn create_report(
+    configuration: Arc<Configuration>,
+    schema: Arc<Schema>,
+) -> Result<UsageReport, BoxError> {
+    let mut configuration: Value = serde_yaml::from_str(&configuration.string)
+        .map_err(|_| BoxError::from("configuration must be parseable"))?;
     let os = get_os();
     let mut usage = HashMap::new();
 
@@ -173,7 +180,7 @@ fn create_report(configuration: Arc<Configuration>, schema: Arc<Schema>) -> Usag
     let result = hasher.finalize();
     let supergraph_hash = base64::encode(result);
 
-    UsageReport {
+    Ok(UsageReport {
         session_id: *SESSION_ID,
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         platform: Platform {
@@ -187,7 +194,7 @@ fn create_report(configuration: Arc<Configuration>, schema: Arc<Schema>) -> Usag
             .into_iter()
             .map(|(k, v)| (k, Value::Number(v.into())))
             .collect(),
-    }
+    })
 }
 
 fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
@@ -364,7 +371,8 @@ mod test {
         let mut config: Configuration =
             serde_yaml::from_str(&config_string).expect("yaml must be valid");
         config.string = Arc::new(config_string);
-        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()));
+        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()))
+            .expect("report must be created");
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
                 ".version" => "[version]",
@@ -372,9 +380,18 @@ mod test {
                 ".apollo_key" => "[apollo_key]",
                 ".apollo_graph_ref" => "[apollo_graph_ref]",
                 ".platform.os" => "[os]",
-                ".platform.continuous_integration" => "[ci]"
+                ".platform.continuous_integration" => "[ci]",
             });
         });
+    }
+
+    #[test]
+    fn test_create_report_invalid_yaml() {
+        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
+        let mut config: Configuration =
+            serde_yaml::from_str(&config_string).expect("yaml must be valid");
+        config.string = Arc::new("".to_string());
+        assert!(create_report(Arc::new(config), Arc::new(crate::spec::Schema::default())).is_err());
     }
 
     // TODO, enable once we are live.
