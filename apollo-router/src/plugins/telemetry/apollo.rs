@@ -13,6 +13,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
+use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
@@ -74,6 +75,7 @@ pub(crate) struct Config {
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
     /// Value MUST be less than global sampling rate
+    /// Default: always_off
     #[serde(default = "default_field_level_instrumentation_sampler")]
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
@@ -95,7 +97,7 @@ pub(crate) struct Config {
 }
 
 fn default_field_level_instrumentation_sampler() -> SamplerOption {
-    SamplerOption::TraceIdRatioBased(0.01)
+    SamplerOption::Always(Sampler::AlwaysOff)
 }
 
 fn endpoint_default() -> Url {
