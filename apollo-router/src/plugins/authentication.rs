@@ -443,6 +443,8 @@ register_plugin!("apollo", "authentication", AuthenticationPlugin);
 #[cfg(test)]
 mod tests {
 
+    use std::path::Path;
+
     use super::*;
     use crate::plugin::test;
     use crate::services::supergraph;
@@ -470,7 +472,10 @@ mod tests {
             mock_service
         });
 
-        let jwks_file = std::fs::canonicalize("tests/fixtures/jwks.json").unwrap();
+        let jwks_base = Path::new("tests");
+
+        let jwks_path = jwks_base.join("fixtures").join("jwks.json");
+        let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
         let jwks_url = format!("file://{}", jwks_file.display());
         let config = serde_json::json!({
             "authentication": {
