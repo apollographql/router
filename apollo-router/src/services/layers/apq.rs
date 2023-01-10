@@ -12,8 +12,8 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]

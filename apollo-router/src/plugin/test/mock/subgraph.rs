@@ -14,8 +14,8 @@ use tower::Service;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 type MockResponses = HashMap<Request, Response>;
 

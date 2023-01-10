@@ -18,12 +18,17 @@ use tracing::Instrument;
 use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
-use super::TYPENAME;
 use crate::error::QueryPlannerError;
+use crate::graphql;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
-use crate::*;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::spec::query::TYPENAME;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
@@ -124,7 +129,7 @@ impl BridgeQueryPlanner {
                 let subselections = node.parse_subselections(&self.schema)?;
                 selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
-                    plan: Arc::new(query_planner::QueryPlan {
+                    plan: Arc::new(super::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
