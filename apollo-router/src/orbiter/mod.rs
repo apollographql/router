@@ -111,11 +111,11 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
             .await
             .map(|factory| {
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
-                    tokio::task::spawn_blocking(|| {
+                    tokio::task::spawn(async {
                         tracing::debug!("sending anonymous usage data to Apollo");
                         match create_report(configuration, schema) {
                             Ok(report) => {
-                                if let Err(e) = send(report) {
+                                if let Err(e) = send(report).await {
                                     tracing::debug!("failed to send usage report: {}", e);
                                 }
                             }
@@ -196,7 +196,7 @@ fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
     });
 }
 
-fn send(body: UsageReport) -> Result<String, BoxError> {
+async fn send(body: UsageReport) -> Result<String, BoxError> {
     tracing::debug!("anonymous usage: {}", serde_json::to_string_pretty(&body)?);
 
     #[cfg(not(test))]
@@ -204,14 +204,16 @@ fn send(body: UsageReport) -> Result<String, BoxError> {
     #[cfg(test)]
     let url = "http://localhost:8888/telemetry";
 
-    Ok(reqwest::blocking::Client::new()
+    Ok(reqwest::Client::new()
         .post(url)
         .header(USER_AGENT, "router")
         .header(CONTENT_TYPE, "application/json")
         .json(&serde_json::to_value(body)?)
         .timeout(Duration::from_secs(10))
-        .send()?
-        .text()?)
+        .send()
+        .await?
+        .text()
+        .await?)
 }
 
 fn get_os() -> String {
@@ -381,9 +383,6 @@ mod test {
     //             os: "test".to_string(),
     //             continuous_integration: Some(Vendor::CircleCI),
     //         },
-    //         supergraph_hash: "supergraph_hash".to_string(),
-    //         apollo_key: Some("apollo_key".to_string()),
-    //         apollo_graph_ref: Some("apollo_graph_ref".to_string()),
     //         usage: Default::default(),
     //     })
     //     .expect("expected send to succeed");
