@@ -247,7 +247,7 @@ impl Plugin for AuthenticationPlugin {
                         return failure_message(
                             request.context,
                             format!(
-                                "{} is not correctly formatted: {jwt_value_untrimmed}",
+                                "Header Value: '{jwt_value_untrimmed}' is not correctly formatted. prefix should be '{}'",
                                 my_config.header_prefix
                             ),
                             StatusCode::BAD_REQUEST,
@@ -259,7 +259,7 @@ impl Plugin for AuthenticationPlugin {
                     if jwt_parts.len() != 2 {
                         return failure_message(
                             request.context,
-                            format!("{jwt_value} is not correctly formatted"),
+                            format!("Header Value: '{jwt_value}' is not correctly formatted. Missing JWT"),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -273,7 +273,7 @@ impl Plugin for AuthenticationPlugin {
                         Err(e) => {
                             return failure_message(
                                 request.context,
-                                format!("{jwt} is not a valid JWT header: {e}"),
+                                format!("'{jwt}' is not a valid JWT header: {e}"),
                                 StatusCode::BAD_REQUEST,
                             );
                         }
@@ -443,7 +443,7 @@ impl Plugin for AuthenticationPlugin {
                                 err_cleanup(true); // c.
                                 failure_message(
                                     request.context,
-                                    format!("Could not find kid: {kid} in JWKS set"),
+                                    format!("Could not find kid: '{kid}' in JWKS set"),
                                     StatusCode::UNAUTHORIZED,
                                 )
                             }
@@ -473,7 +473,14 @@ mod tests {
     use crate::plugin::test;
     use crate::services::supergraph;
 
-    async fn build_a_test_harness() -> router::BoxCloneService {
+    async fn build_a_default_test_harness() -> router::BoxCloneService {
+        build_a_test_harness(None, None).await
+    }
+
+    async fn build_a_test_harness(
+        header_name: Option<String>,
+        header_prefix: Option<String>,
+    ) -> router::BoxCloneService {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
 
@@ -499,15 +506,42 @@ mod tests {
         let jwks_base = Path::new("tests");
 
         let jwks_path = jwks_base.join("fixtures").join("jwks.json");
+        #[cfg(target_os = "windows")]
+        let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
+        #[cfg(not(target_os = "windows"))]
         let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
+
+        #[cfg(target_os = "windows")]
+        {
+            // We need to manipulate our canonicalized string if we are on Windows.
+            // We replace windows path separators with posix path separators
+            // We also drop the first 6 characters from the path since they will be
+            // something like (drive letter may vary) '\\?\C:'
+            jwks_file = jwks_file.replace("\\", "/");
+            let len = jwks_file
+                .char_indices()
+                .rev()
+                .nth(6)
+                .map_or(0, |(idx, _ch)| idx);
+            jwks_file = &jwks_file[len..].to_string();
+        }
+
         let jwks_url = format!("file://{}", jwks_file.display());
-        let config = serde_json::json!({
+        let mut config = serde_json::json!({
             "authentication": {
                 "jwt" : {
                     "jwks_url": &jwks_url
                 }
             }
         });
+
+        if let Some(hn) = header_name {
+            config["authentication"]["jwt"]["header_name"] = serde_json::Value::String(hn);
+        }
+
+        if let Some(hp) = header_prefix {
+            config["authentication"]["jwt"]["header_prefix"] = serde_json::Value::String(hp);
+        }
 
         crate::TestHarness::builder()
             .configuration_json(config)
@@ -520,12 +554,12 @@ mod tests {
 
     #[tokio::test]
     async fn load_plugin() {
-        let _test_harness = build_a_test_harness().await;
+        let _test_harness = build_a_default_test_harness().await;
     }
 
     #[tokio::test]
     async fn it_rejects_when_there_is_no_auth_header() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -561,7 +595,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_when_auth_prefix_is_missing() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -587,7 +621,9 @@ mod tests {
         .unwrap();
 
         let expected_error = graphql::Error::builder()
-            .message("Bearer is not correctly formatted: invalid")
+            .message(
+                "Header Value: 'invalid' is not correctly formatted. prefix should be 'Bearer'",
+            )
             .extension_code("AUTH_ERROR")
             .build();
 
@@ -598,7 +634,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_when_auth_prefix_has_no_jwt() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -624,7 +660,7 @@ mod tests {
         .unwrap();
 
         let expected_error = graphql::Error::builder()
-            .message("Bearer is not correctly formatted")
+            .message("Header Value: 'Bearer' is not correctly formatted. Missing JWT")
             .extension_code("AUTH_ERROR")
             .build();
 
@@ -635,7 +671,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -661,7 +697,7 @@ mod tests {
         .unwrap();
 
         let expected_error = graphql::Error::builder()
-            .message("header.payload is not a valid JWT header: InvalidToken")
+            .message("'header.payload' is not a valid JWT header: InvalidToken")
             .extension_code("AUTH_ERROR")
             .build();
 
@@ -672,7 +708,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -701,7 +737,7 @@ mod tests {
         .unwrap();
 
         let expected_error = graphql::Error::builder()
-            .message("header.payload.signature is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
+            .message("'header.payload.signature' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
             .extension_code("AUTH_ERROR")
             .build();
 
@@ -712,7 +748,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -752,7 +788,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
-        let test_harness = build_a_test_harness().await;
+        let test_harness = build_a_default_test_harness().await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -760,6 +796,84 @@ mod tests {
             .header(
                 http::header::AUTHORIZATION,
                 "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(response.errors, vec![]);
+
+        assert_eq!(StatusCode::OK, service_response.response.status());
+
+        let expected_mock_response_data = "response created within the mock";
+        // with the expected message
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
+        let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None).await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                "SOMETHING",
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(response.errors, vec![]);
+
+        assert_eq!(StatusCode::OK, service_response.response.status());
+
+        let expected_mock_response_data = "response created within the mock";
+        // with the expected message
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
+        let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string())).await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "SOMETHING eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
             )
             .build()
             .unwrap();
