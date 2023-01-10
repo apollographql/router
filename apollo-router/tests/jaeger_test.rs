@@ -29,7 +29,7 @@ use crate::common::TracingTest;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing() -> Result<(), BoxError> {
+async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("my_app")
         .install_simple()?;
@@ -53,6 +53,13 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
         router.touch_config()?;
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    let metrics = router.get_metrics().await.unwrap();
+    assert!(metrics.contains(r#"apollo_router_cache_hit_count{kind="query planner",service_name="apollo-router",storage="memory"} 9"#));
+    assert!(metrics.contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 1"#));
+    assert!(metrics.contains("apollo_router_cache_hit_time"));
+    assert!(metrics.contains("apollo_router_cache_miss_time"));
+
     Ok(())
 }
 
