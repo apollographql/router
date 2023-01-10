@@ -10,6 +10,7 @@ use async_compression::tokio::write::BrotliEncoder;
 use async_compression::tokio::write::GzipEncoder;
 use async_compression::tokio::write::ZlibEncoder;
 use futures::future::BoxFuture;
+use futures::lock::Mutex;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
@@ -39,6 +40,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::router_factory::BusyTimer;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -315,18 +317,20 @@ pub(crate) trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
 #[derive(Clone)]
 pub(crate) struct SubgraphCreator {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
-
     pub(crate) plugins: Arc<Plugins>,
+    pub(crate) busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 impl SubgraphCreator {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
+        busy_timer: Arc<Mutex<BusyTimer>>,
     ) -> Self {
         SubgraphCreator {
             services: Arc::new(services.into_iter().collect()),
             plugins,
+            busy_timer,
         }
     }
 }

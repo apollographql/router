@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
+use futures::lock::Mutex;
 use futures::stream::StreamExt;
+use futures::FutureExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
@@ -36,6 +38,7 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::router_factory::BusyTimer;
 use crate::supergraph;
 use crate::Configuration;
 use crate::Context;
@@ -60,6 +63,7 @@ pub(crate) struct SupergraphService<ExecutionFactory> {
     execution_service_factory: ExecutionFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
+    busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 #[buildstructor::buildstructor]
@@ -69,11 +73,13 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionFactory,
         schema: Arc<Schema>,
+        busy_timer: Arc<Mutex<BusyTimer>>,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
             schema,
+            busy_timer,
         }
     }
 }
@@ -98,12 +104,18 @@ where
 
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
         let execution = self.execution_service_factory.create();
+        let busy_timer = self.busy_timer.clone();
 
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut =
-            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
+        let fut = service_call(planning, execution, schema, req)
+            .then(|res| async move {
+                let busy_ns = busy_timer.lock().await.current();
+                tracing::info!("was busy for {busy_ns}ns",);
+                res
+            })
+            .or_else(|error: BoxError| async move {
                 let errors = vec![crate::error::Error {
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
@@ -347,9 +359,12 @@ impl PluggableSupergraphServiceBuilder {
 
         let plugins = Arc::new(self.plugins);
 
+        let busy_timer = Arc::new(Mutex::new(BusyTimer::new()));
+
         let subgraph_creator = Arc::new(SubgraphCreator::new(
             self.subgraph_services,
             plugins.clone(),
+            busy_timer.clone(),
         ));
 
         Ok(SupergraphCreator {
@@ -357,6 +372,7 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_creator,
             schema: self.schema,
             plugins,
+            busy_timer,
         })
     }
 }
@@ -390,6 +406,7 @@ pub(crate) struct SupergraphCreator {
     subgraph_creator: Arc<SubgraphCreator>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
+    busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 pub(crate) trait HasPlugins {
@@ -426,6 +443,7 @@ impl SupergraphCreator {
                 subgraph_creator: self.subgraph_creator.clone(),
             })
             .schema(self.schema.clone())
+            .busy_timer(self.busy_timer.clone())
             .build();
 
         let supergraph_service = match self
