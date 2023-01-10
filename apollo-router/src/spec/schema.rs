@@ -23,7 +23,7 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 /// A GraphQL schema.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     subtype_map: HashMap<String, HashSet<String>>,
