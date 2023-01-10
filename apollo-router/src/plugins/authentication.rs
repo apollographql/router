@@ -178,6 +178,7 @@ impl Plugin for AuthenticationPlugin {
                 let my_config = request_full_config.clone();
                 let my_jwks = request_jwks.clone();
                 let my_jwks_url = request_jwks_url.clone();
+                const AUTHENTICATION_KIND: &str = "JWT";
 
                 async move {
                     // We are going to do a lot of similar checking so let's define a local function
@@ -188,6 +189,11 @@ impl Plugin for AuthenticationPlugin {
                         status: StatusCode,
                     ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
                     {
+                        // This is a metric and will not appear in the logs
+                        tracing::info!(
+                            monotonic_counter.apollo_authentication_failure_count = 1u64,
+                            kind = %AUTHENTICATION_KIND
+                        );
                         let response = router::Response::error_builder()
                             .error(
                                 graphql::Error::builder()
@@ -393,6 +399,11 @@ impl Plugin for AuthenticationPlugin {
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
+                            // This is a metric and will not appear in the logs
+                            tracing::info!(
+                                monotonic_counter.apollo_authentication_success_count = 1u64,
+                                kind = %AUTHENTICATION_KIND
+                            );
                             Ok(ControlFlow::Continue(request))
                         }
                         None => {
@@ -402,6 +413,11 @@ impl Plugin for AuthenticationPlugin {
                             // If there is no COOLDOWN, we'll trigger a cache update and set a
                             // COOLDOWN (via the true flag to err_cleanup(true).
                             if COOLDOWN.load(Ordering::SeqCst) {
+                                // This is a metric and will not appear in the logs
+                                tracing::info!(
+                                    monotonic_counter.apollo_authentication_cooldown_count = 1u64,
+                                    kind = %AUTHENTICATION_KIND
+                                );
                                 let response = router::Response::error_builder()
                                     .error(
                                         graphql::Error::builder()

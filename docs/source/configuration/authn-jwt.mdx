@@ -72,6 +72,28 @@ The default value for this parameter, 15s, should be suitable for almost all
 use cases. However, it is provided so that advanced users can configure this
 if required.
 
+## Observability
+
+### Tracing
+
+There is a tracing span for the authentication plugin. The span name is "authentication plugin".
+
+### Metrics
+
+Three metrics are provided and exported via prometheus. They look like this:
+
+```
+# HELP apollo_authentication_failure_count apollo_authentication_failure_count
+# TYPE apollo_authentication_failure_count counter
+apollo_authentication_failure_count{kind="JWT",service_name="apollo-router"} 1
+# HELP apollo_authentication_success_count apollo_authentication_success_count
+# TYPE apollo_authentication_success_count counter
+apollo_authentication_success_count{kind="JWT",service_name="apollo-router"} 11
+# HELP apollo_authentication_cooldown_count apollo_authentication_cooldown_count
+# TYPE apollo_authentication_cooldown_count counter
+apollo_authentication_cooldown_count{kind="JWT",service_name="apollo-router"} 3
+```
+
 ## Validation
 
 The router will validate that a token is correctly signed and will extract all claims from the token into the request context. The token will not be validated if the token has expired. 
@@ -120,6 +142,8 @@ fn process_request(request) {
     }
 }
 ```
+
+Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a rhai scope constant with a value of `"apollo_authentication::JWT::claims"`.
 
 ## Header Propagation
 
