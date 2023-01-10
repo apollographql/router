@@ -14,8 +14,6 @@ use lazy_static::lazy_static;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
-use sha2::Digest;
-use sha2::Sha256;
 use tower::BoxError;
 use uuid::Uuid;
 
@@ -51,12 +49,6 @@ struct UsageReport {
     version: String,
     /// Information about the current architecture/platform
     platform: Platform,
-    /// A hash of the supergraph schema
-    supergraph_hash: String,
-    /// The apollo key if specified
-    apollo_key: Option<String>,
-    /// The apollo graph ref is specified
-    apollo_graph_ref: Option<String>,
     /// Information about what was being used
     usage: Map<String, Value>,
 }
@@ -76,9 +68,6 @@ impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
 ///   "version": "1.4.0", // The version of the router
 ///   "os": "linux",
 ///   "ci": null,
-///   "supergraph_hash": "anebfoiwhefowiefj",
-///   "apollo-key": "<the actualy key>|anonymous",
-///   "apollo-graph-ref": "<the actual graph ref>|unmanaged"
 ///   "usage": {
 ///     "configuration.headers.all.request.propagate.named.redacted": 3
 ///     "configuration.headers.all.request.propagate.default.redacted": 1
@@ -143,7 +132,7 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
 
 fn create_report(
     configuration: Arc<Configuration>,
-    schema: Arc<Schema>,
+    _schema: Arc<Schema>,
 ) -> Result<UsageReport, BoxError> {
     let mut configuration: Value = serde_yaml::from_str(&configuration.string)
         .map_err(|_| BoxError::from("configuration must be parseable"))?;
@@ -175,11 +164,6 @@ fn create_report(
     #[cfg(not(test))]
     visit_args(&mut usage, env::args().collect());
 
-    let mut hasher = Sha256::default();
-    hasher.update(schema.string.as_bytes());
-    let result = hasher.finalize();
-    let supergraph_hash = base64::encode(result);
-
     Ok(UsageReport {
         session_id: *SESSION_ID,
         version: std::env!("CARGO_PKG_VERSION").to_string(),
@@ -187,9 +171,6 @@ fn create_report(
             os,
             continuous_integration: ci_info::get().vendor,
         },
-        supergraph_hash,
-        apollo_key: std::env::var("APOLLO_KEY").ok(),
-        apollo_graph_ref: std::env::var("APOLLO_GRAPH_REF").ok(),
         usage: usage
             .into_iter()
             .map(|(k, v)| (k, Value::Number(v.into())))
@@ -377,8 +358,6 @@ mod test {
                     assert_yaml_snapshot!(report, {
                 ".version" => "[version]",
                 ".session_id" => "[session_id]",
-                ".apollo_key" => "[apollo_key]",
-                ".apollo_graph_ref" => "[apollo_graph_ref]",
                 ".platform.os" => "[os]",
                 ".platform.continuous_integration" => "[ci]",
             });

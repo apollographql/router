@@ -66,9 +66,6 @@ For example:
    "version": "1.4.0", // The version of the router
    "os": "linux",
    "ci": null,
-   "supergraph_hash": "anebfoiwhefowiefj",
-   "apollo-key": "<the actualy key>|anonymous",
-   "apollo-graph-ref": "<the actual graph ref>|unmanaged"
    "usage": {
      "configuration.headers.all.request.propagate.named.redacted": 3
      "configuration.headers.all.request.propagate.default.redacted": 1
