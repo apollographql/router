@@ -146,7 +146,7 @@ struct RouterShaping {
 #[serde(deny_unknown_fields)]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
-/// Configuration for the traffic shaping plugin
+/// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     #[serde(default)]
     /// Applied at the router level

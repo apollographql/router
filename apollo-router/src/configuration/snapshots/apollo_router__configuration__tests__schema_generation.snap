@@ -2971,7 +2971,7 @@ expression: "&schema"
       }
     },
     "traffic_shaping": {
-      "description": "Configuration for the traffic shaping plugin",
+      "description": "Configuration for the experimental traffic shaping plugin",
       "type": "object",
       "properties": {
         "all": {
