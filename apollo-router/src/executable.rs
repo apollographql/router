@@ -145,7 +145,12 @@ pub(crate) struct Opt {
     log_level: String,
 
     /// Reload configuration and schema files automatically.
-    #[clap(alias = "hr", long = "hot-reload", env = "APOLLO_ROUTER_HOT_RELOAD")]
+    #[clap(
+        alias = "hr",
+        long = "hot-reload",
+        env = "APOLLO_ROUTER_HOT_RELOAD",
+        action(ArgAction::SetTrue)
+    )]
     hot_reload: bool,
 
     /// Configuration location relative to the project directory.
@@ -158,7 +163,12 @@ pub(crate) struct Opt {
     config_path: Option<PathBuf>,
 
     /// Enable development mode.
-    #[clap(env = "APOLLO_ROUTER_DEV_ENV", long = "dev")]
+    #[clap(
+        env = APOLLO_ROUTER_DEV_ENV,
+        long = "dev",
+        hide(true),
+        action(ArgAction::SetTrue)
+    )]
     dev: bool,
 
     /// Schema location relative to the project directory.
@@ -171,7 +181,7 @@ pub(crate) struct Opt {
     supergraph_path: Option<PathBuf>,
 
     /// Prints the configuration schema.
-    #[clap(long, hide(true))]
+    #[clap(long, action(ArgAction::SetTrue), hide(true))]
     schema: bool,
 
     /// Subcommands
@@ -179,11 +189,11 @@ pub(crate) struct Opt {
     command: Option<Commands>,
 
     /// Your Apollo key.
-    #[clap(env = "APOLLO_KEY", hide(true))]
+    #[clap(skip = std::env::var("APOLLO_KEY").ok())]
     apollo_key: Option<String>,
 
     /// Your Apollo graph reference.
-    #[clap(env = "APOLLO_GRAPH_REF", hide(true))]
+    #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
     apollo_graph_ref: Option<String>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
