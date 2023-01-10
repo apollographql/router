@@ -123,6 +123,22 @@ impl TracingTest {
         }
         panic!("unable to send successful request to router")
     }
+
+    #[allow(dead_code)]
+    pub async fn get_metrics(&self) -> reqwest::Result<String> {
+        let client = reqwest::Client::new();
+
+        let request = client
+            .get("http://localhost:4000/metrics")
+            .header("apollographql-client-name", "custom_name")
+            .header("apollographql-client-version", "1.0")
+            .build()
+            .unwrap();
+
+        let res = client.execute(request).await?;
+
+        res.text().await
+    }
 }
 
 impl Drop for TracingTest {
