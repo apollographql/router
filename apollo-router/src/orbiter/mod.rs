@@ -10,7 +10,7 @@ use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
 use jsonschema::paths::PathChunk;
 use jsonschema::JSONSchema;
-use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
@@ -25,10 +25,8 @@ use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
 use crate::Configuration;
 
-lazy_static! {
-    /// This session id is created once when the router starts. It persists between config reloads.
-    static ref SESSION_ID: Uuid = Uuid::new_v4();
-}
+/// This session id is created once when the router starts. It persists between config reloads.
+static SESSION_ID: OnceCell<Uuid> = OnceCell::new();
 
 /// Platform represents the platform the CLI is being run from
 #[derive(Debug, Serialize)]
@@ -165,7 +163,7 @@ fn create_report(
     visit_args(&mut usage, env::args().collect());
 
     Ok(UsageReport {
-        session_id: *SESSION_ID,
+        session_id: *SESSION_ID.get_or_init(|| Uuid::new_v4()),
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         platform: Platform {
             os,

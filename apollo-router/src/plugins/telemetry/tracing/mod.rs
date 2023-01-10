@@ -36,7 +36,7 @@ pub(crate) trait TracingConfigurator {
 schemar_fn!(
     agent_endpoint,
     String,
-    Value::String("default".to_string()),
+    Some(Value::String("default".to_string())),
     "The agent endpoint to send reports to"
 );
 /// The endpoint to send reports to
