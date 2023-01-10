@@ -4,7 +4,8 @@ use serde::Serialize;
 
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::*;
+use crate::spec::Schema;
+use crate::spec::SpecError;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
