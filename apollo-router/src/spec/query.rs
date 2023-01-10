@@ -557,7 +557,7 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if field_name.as_str() == TYPENAME {
+                        if name.as_str() == TYPENAME {
                             if input_value.is_string() {
                                 *output_value = input_value.clone();
                             }
@@ -765,7 +765,7 @@ impl Query {
                         );
                         path.pop();
                         res?
-                    } else if field_name_str == TYPENAME {
+                    } else if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
                             output.insert(
                                 field_name.clone(),
