@@ -521,7 +521,6 @@ mod tests {
             file_string = file_string.replace("\\", "/");
             let len = file_string
                 .char_indices()
-                .rev()
                 .nth(6)
                 .map_or(0, |(idx, _ch)| idx);
             jwks_file = file_string[len..].into();
