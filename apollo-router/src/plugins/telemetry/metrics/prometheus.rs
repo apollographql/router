@@ -3,6 +3,7 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
+use once_cell::sync::OnceCell;
 use opentelemetry::sdk::export::metrics::aggregation;
 use opentelemetry::sdk::metrics::controllers;
 use opentelemetry::sdk::metrics::processors;
@@ -24,6 +25,8 @@ use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
 use crate::ListenAddr;
+
+pub(crate) static PROMETHEUS_REGISTRY: OnceCell<prometheus::Registry> = OnceCell::new();
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -65,6 +68,7 @@ impl MetricsConfigurator for Config {
                 self.listen,
                 self.path
             );
+            let registry = PROMETHEUS_REGISTRY.get_or_init(prometheus::Registry::new);
             let controller = controllers::basic(
                 processors::factory(
                     selectors::simple::histogram([
@@ -82,7 +86,23 @@ impl MetricsConfigurator for Config {
                     .map(|(k, v)| KeyValue::new(k, v)),
             ))
             .build();
-            let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
+            let exporter = opentelemetry_prometheus::exporter(controller)
+                .with_registry(registry.clone())
+                .try_init()?;
+
+            // let registry = self.registry.unwrap_or_else(prometheus::Registry::new);
+
+            // let controller = Arc::new(Mutex::new(self.controller));
+            // let collector = Collector::with_controller(controller.clone());
+            // registry
+            //     .register(Box::new(collector))
+            //     .map_err(|e| MetricsError::Other(e.to_string()))?;
+
+            // let exporter = PrometheusExporter {
+            //     registry,
+            //     controller,
+            // };
+            // opentelemetry::global::set_meter_provider(exporter.meter_provider()?);
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),

@@ -33,6 +33,9 @@ use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
+use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
+use crate::plugins::telemetry::metrics::layer::MetricsLayer;
+use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::HotTracer;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -56,6 +59,55 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 // generic types in the layer definition.
 pub(crate) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     HotTracer<opentelemetry::sdk::trace::Tracer>,
+> = OnceCell::new();
+pub(crate) static METRICS_LAYER_HANDLE: OnceCell<
+    tracing_subscriber::reload::Handle<
+        MetricsLayer,
+        Layered<
+            tracing_subscriber::reload::Layer<
+                Box<
+                    dyn Layer<
+                            Layered<
+                                tracing_subscriber::reload::Layer<
+                                    Box<
+                                        dyn Layer<Layered<EnvFilter, tracing_subscriber::Registry>>
+                                            + Send
+                                            + Sync,
+                                    >,
+                                    Layered<EnvFilter, Registry>,
+                                >,
+                                Layered<EnvFilter, Registry>,
+                            >,
+                        > + Send
+                        + Sync,
+                >,
+                Layered<
+                    tracing_subscriber::reload::Layer<
+                        Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
+                        Layered<EnvFilter, Registry>,
+                    >,
+                    Layered<EnvFilter, Registry>,
+                    Layered<EnvFilter, Registry>,
+                >,
+            >,
+            Layered<
+                tracing_subscriber::reload::Layer<
+                    Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
+                    Layered<EnvFilter, Registry>,
+                >,
+                Layered<EnvFilter, Registry>,
+                Layered<EnvFilter, Registry>,
+            >,
+            Layered<
+                tracing_subscriber::reload::Layer<
+                    Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
+                    Layered<EnvFilter, Registry>,
+                >,
+                Layered<EnvFilter, Registry>,
+                Layered<EnvFilter, Registry>,
+            >,
+        >,
+    >,
 > = OnceCell::new();
 
 pub(crate) static FMT_LAYER_HANDLE: OnceCell<
@@ -626,17 +678,24 @@ pub(crate) fn init_tracing(log_level: &str) -> Result<()> {
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
 
+    let (metrics_layer, metrics_handle) =
+        tracing_subscriber::reload::Layer::new(MetricsLayer::default());
+
     // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(log_level)?)
         .with(opentelemetry_layer)
         .with(fmt_layer)
+        .with(metrics_layer)
         .init();
 
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
         .set(hot_tracer)
         .map_err(|_| anyhow!("failed to set OpenTelemetry tracer"))?;
+    METRICS_LAYER_HANDLE
+        .set(metrics_handle)
+        .map_err(|_| anyhow!("failed to set metrics layer handle"))?;
     FMT_LAYER_HANDLE
         .set(fmt_handle)
         .map_err(|_| anyhow!("failed to set fmt layer handle"))?;

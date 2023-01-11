@@ -24,6 +24,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
+use opentelemetry::metrics::MeterProvider;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -65,6 +66,7 @@ use self::formatters::text::TextFormatter;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use crate::executable::FMT_LAYER_HANDLE;
+use crate::executable::METRICS_LAYER_HANDLE;
 use crate::executable::OPENTELEMETRY_TRACER_HANDLE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -80,6 +82,7 @@ use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStat
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
+use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
@@ -107,7 +110,7 @@ pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
 pub(crate) mod formatters;
-mod metrics;
+pub(crate) mod metrics;
 mod otlp;
 mod tracing;
 // Tracing consts
@@ -184,6 +187,7 @@ impl Plugin for Telemetry {
         config.logging.validate()?;
 
         let mut meter_provider_builder = Self::create_metrics_exporters(&config)?;
+        opentelemetry::global::set_meter_provider(meter_provider_builder.meter_provider());
 
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
@@ -231,16 +235,21 @@ impl Plugin for Telemetry {
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
 
             // Set the meter provider
-            opentelemetry::global::set_meter_provider(
-                self.meter_provider
-                    .lock()
-                    .expect("mutex poisoned")
-                    .take()
-                    .expect("must have new meter_provider"),
-            );
+            // opentelemetry::global::set_meter_provider(
+            //     self.meter_provider
+            //         .lock()
+            //         .expect("mutex poisoned")
+            //         .take()
+            //         .expect("must have new meter_provider"),
+            // );
             // handle
             // .reload(tracing_opentelemetry::layer().with_tracer(tracer).boxed())
             // .expect("otel layer reload must succeed");
+        }
+        if let Some(handle) = METRICS_LAYER_HANDLE.get() {
+            handle
+                .reload(MetricsLayer::default())
+                .expect("metrics layer reload must succeed");
         }
 
         if let Some(handle) = FMT_LAYER_HANDLE.get() {
@@ -1890,6 +1899,20 @@ impl<S: Tracer> Tracer for HotTracer<S> {
             .read()
             .expect("parent tracer must be available")
             .in_span(name, f)
+    }
+}
+
+impl<S: MeterProvider> MeterProvider for HotTracer<S> {
+    fn versioned_meter(
+        &self,
+        name: &'static str,
+        version: Option<&'static str>,
+        schema_url: Option<&'static str>,
+    ) -> opentelemetry::metrics::Meter {
+        self.parent
+            .read()
+            .expect("rwlock poisoned")
+            .versioned_meter(name, version, schema_url)
     }
 }
 
