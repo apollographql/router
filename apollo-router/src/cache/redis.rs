@@ -150,7 +150,7 @@ impl RedisCacheStorage {
         }
     }
 
-    pub(crate) async fn mget<K: KeyType, V: ValueType>(
+    pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
     ) -> Option<Vec<Option<RedisValue<V>>>> {
@@ -227,7 +227,7 @@ impl RedisCacheStorage {
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
     ) {
-        tracing::info!("inserting into redis: {:#?}", data);
+        tracing::trace!("inserting into redis: {:#?}", data);
 
         if let Some(ttl) = self.ttl.as_ref() {
             let expiration: usize = ttl.as_secs().try_into().unwrap();
@@ -251,7 +251,7 @@ impl RedisCacheStorage {
                 }
             };
 
-            tracing::info!("insert result {:?}", r);
+            tracing::trace!("insert result {:?}", r);
         } else {
             let mut guard = self.inner.lock().await;
 
@@ -265,7 +265,7 @@ impl RedisCacheStorage {
                         .await
                 }
             };
-            tracing::info!("insert result {:?}", r);
+            tracing::trace!("insert result {:?}", r);
         }
     }
 }
