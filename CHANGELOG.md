@@ -203,6 +203,12 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🚀 Features
 
+### The Helm chart has graduated from prerelease to general availability ([PR #2380](https://github.com/apollographql/router/pull/2380))
+
+As part of this release, we have promoted the Helm chart from its prerelease "release-candidate" stage to a "stable" version number.  We have chosen to match the version of the Helm chart to the Router version, which is very agreeable with our automated Router releasing pipeline.  This means the first stable version of the Helm chart will be `1.8.0` which will pair with Router 1.8.0 and subsequent versions will be in lock-step.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2380
+
 ### Newly scaffolded projects now include a `Dockerfile` ([Issue #2295](https://github.com/apollographql/router/issues/2295))
 
 Custom Router binary projects created using our [scaffolding tooling](https://www.apollographql.com/docs/router/customizations/custom-binary/) will now have a `Dockerfile` emitted to facilitate building custom Docker containers.
