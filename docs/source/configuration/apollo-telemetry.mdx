@@ -17,7 +17,13 @@ More information on usage reporting is available in the [Studio documentation](/
 
 ## Enabling field-level instrumentation
 
-Field-level instrumentation (also known as FTV1 tracing) is set to `0.01` by default. To enable it, add the following to your router configuration:
+[Apollo field-level instrumentation](https://www.apollographql.com/docs/federation/metrics) (also known as FTV1 tracing) is set to a sampling rate of `0.01` by default, which means it will request traces for 1% of traffic.  To change it to a higher rate, set the `field_level_instrumentation_sampler` value to a rate higher than `0.1`. To completely disable it, set it to `always_off`.
+
+> **Note**
+> Since field-level instrumentation is _dependent_ OpenTelemetry tracing, it is necessary to set the `sampler` value for traces to a value the _same or higher_ than the `field_level_instrumentation_sampler` value.
+
+The following example sets both Apollo field-level tracing and OpenTelemetry tracing to attempt to sample 50% of requests:
+
 
 ```yaml
 telemetry:
