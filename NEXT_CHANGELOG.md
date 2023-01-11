@@ -116,6 +116,13 @@ For `experimental_cache` with redis caching it now works with only a single Redi
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
+### Support TLS connections to single instance Redis ([Issue #2332](https://github.com/apollographql/router/issues/2332))
+
+TLS support is mandatory for some hosted Redis providers.
+TLS connections for clusters are not supported yet, see [Issue #2332](https://github.com/apollographql/router/issues/2332) for updates.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2336
+
 ## 🐛 Fixes
 
 ### Correctly handle aliased __typename ([Issue #2330](https://github.com/apollographql/router/issues/2330))
