@@ -711,7 +711,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true,
+        "defer_support": true,
         "apq": {
           "experimental_cache": {
             "in_memory": {
@@ -772,6 +772,11 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
+        "defer_support": {
+          "description": "Enable defer support",
+          "default": true,
+          "type": "boolean"
+        },
         "introspection": {
           "description": "Enable introspection Default: false",
           "default": false,
@@ -795,10 +800,6 @@ expression: "&schema"
           "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
           "default": "/",
           "type": "string"
-        },
-        "preview_defer_support": {
-          "default": true,
-          "type": "boolean"
         },
         "query_planning": {
           "description": "Query planning options",

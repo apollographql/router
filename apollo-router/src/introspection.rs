@@ -27,7 +27,7 @@ impl Introspection {
     ) -> Self {
         Self {
             cache: CacheStorage::new(capacity, None, "introspection").await,
-            defer_support: configuration.supergraph.preview_defer_support,
+            defer_support: configuration.supergraph.defer_support,
         }
     }
 
