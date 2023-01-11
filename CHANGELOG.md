@@ -129,7 +129,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Correctly handle aliased __typename ([Issue #2330](https://github.com/apollographql/router/issues/2330))
+### Correctly handle aliased `__typename` fields ([Issue #2330](https://github.com/apollographql/router/issues/2330))
 
 If you aliased a `__typename` like in this example query:
 
@@ -143,7 +143,7 @@ If you aliased a `__typename` like in this example query:
 }
 ```
 
-Before this fix, `_0___typename` was set to `null`. Thanks to this fix it returns `"Query"`.
+Before this fix, `_0___typename` was set to `null`. Thanks to this fix it now properly returns `Query`.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2357
 
@@ -153,12 +153,11 @@ Change the default value of `apollo.field_level_instrumentation_sampler` to `alw
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2356
 
-### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
+### `subgraph_request` span is now set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
 
-Before this fix, the context injected in headers to subgraphs was wrong, it was not the right parent span id.
+Before this fix, the context injected in headers to subgraphs was wrong and not attached to the correct parent span id, causing it to appear disconnected when rendering the trace tree.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2345
-
 
 ## 🛠 Maintenance
 
