@@ -63,12 +63,12 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -1359,7 +1359,7 @@ impl Rhai {
                 },
             )
             .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
-                x.insert(key, value)
+                let _= x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
@@ -1652,7 +1652,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::SubgraphRequest;
+    use crate::services::SubgraphRequest;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {
@@ -1765,7 +1765,7 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str(),
-            "rhai execution error: 'Runtime error: An error occured (line 30, position 5) in call to function execution_request'"
+            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)\nin call to function 'execution_request''"
         );
         Ok(())
     }
@@ -2147,7 +2147,7 @@ mod tests {
         if let Err(error) = base_process_function("process_subgraph_response_string").await {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5)\nin call to function 'process_subgraph_response_string''");
         } else {
             // Test failed
             panic!("error processed incorrectly");
@@ -2173,7 +2173,7 @@ mod tests {
         {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5)\nin call to function 'process_subgraph_response_om_missing_message''");
         } else {
             // Test failed
             panic!("error processed incorrectly");

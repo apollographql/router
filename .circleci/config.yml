@@ -3,7 +3,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.1.1
+  gh: circleci/github-cli@2.2.0
 
 executors:
   amd_linux_build: &amd_linux_build_executor

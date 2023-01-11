@@ -309,6 +309,37 @@ fn reformat_response_data_inline_fragment() {
 }
 
 #[test]
+fn typename_with_alias() {
+    let schema = "type Query {
+        getStuff: Stuff
+      }
+
+      type Stuff {
+          stuff: Bar
+      }
+      type Bar {
+          bar: String
+      }";
+    let query = "{ getStuff { stuff{bar} } __0_typename: __typename }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"getStuff": { "stuff": {"bar": "2"}}}
+        })
+        .expected(json! {{
+            "getStuff": {
+                "stuff": {
+                    "bar": "2",
+                },
+            },
+            "__0_typename": "Query"
+        }})
+        .test();
+}
+
+#[test]
 fn inline_fragment_on_top_level_operation() {
     let schema = "type Query {
         get: Test

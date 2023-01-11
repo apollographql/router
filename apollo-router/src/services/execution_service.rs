@@ -29,9 +29,9 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::services::execution;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::Schema;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::spec::Schema;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
