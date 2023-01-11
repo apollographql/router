@@ -129,7 +129,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Support TLS connections to single instance Redis ([Issue #2332](https://github.com/apollographql/router/issues/2332))
 
-TLS connections are now supported when connecting to single Redis instances. It is useful for connecting to hosted  Redis providers where TLS is mandatory.
+TLS connections are now supported when connecting to single Redis instances. It is useful for connecting to hosted Redis providers where TLS is mandatory.
 TLS connections for clusters are not supported yet, see [Issue #2332](https://github.com/apollographql/router/issues/2332) for updates.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2336
