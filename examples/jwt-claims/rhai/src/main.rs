@@ -109,6 +109,16 @@ mod tests {
 
     #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
+        // Set this to enable commercial feature support or the test will
+        // fail. It's inherently racy to set/remove env vars so this is
+        // horrible hackery. Luckily it will go away soon when commercial
+        // feature support is finalised.
+        let add_remove_graph_ref = std::env::var("APOLLO_GRAPH_REF").is_err();
+
+        if add_remove_graph_ref {
+            std::env::set_var("APOLLO_GRAPH_REF", "");
+        }
+
         let test_harness = build_a_test_harness().await;
 
         // Let's create a request with our operation name
@@ -144,5 +154,8 @@ mod tests {
         let expected_mock_response_data = "response created within the mock";
         // with the expected message
         assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+        if add_remove_graph_ref {
+            std::env::remove_var("APOLLO_GRAPH_REF");
+        }
     }
 }

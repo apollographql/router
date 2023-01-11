@@ -35,7 +35,6 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::apollo_graph_reference;
-use crate::services::apollo_key;
 use crate::services::router;
 use crate::Context;
 
@@ -53,7 +52,6 @@ static COOLDOWN: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    apollo_key().ok_or(LicenseError::MissingKey)?;
     Ok(Client::new())
 });
 
@@ -108,8 +106,6 @@ impl Plugin for AuthenticationPlugin {
                         apollo_graph_reference()
                             .ok_or(LicenseError::MissingGraphReference)
                             .ok()?;
-                        #[cfg(not(test))]
-                        apollo_key().ok_or(LicenseError::MissingKey).ok()?;
                         let path = url.to_file_path().ok()?;
                         read_to_string(path).await.ok()?
                     } else {

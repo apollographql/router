@@ -18,8 +18,10 @@ eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImFmZGE4NWUwOWEzMjBjZjc0ODE3Nzg3
 
 Usage:
 
-NOTE: Before you run this example you must edit the path to the jwks.json file in router.yaml so that the URL is a correct absolute URL. Relative file paths are not valid URLs, so we need an absolute path. I've left the absolute path that I use on my laptop in router.yaml so that you can see what a valid URL would look like.
+Before you run this example you must edit the path to the jwks.json file in router.yaml so that the URL is a correct absolute URL. Relative file paths are not valid URLs, so we need an absolute path. I've left the absolute path that I use on my laptop in router.yaml so that you can see what a valid URL would look like.
+
+You must also enable commercial feature support in the router by making sure APOLLO_GRAPH_REF is set in your environment.
 
 ```bash
-cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
+APOLLO_GRAPH_REF= cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```
