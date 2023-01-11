@@ -147,8 +147,8 @@ mod async_checkpoint_tests {
     use super::*;
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockExecutionService;
-    use crate::ExecutionRequest;
-    use crate::ExecutionResponse;
+    use crate::services::ExecutionRequest;
+    use crate::services::ExecutionResponse;
 
     #[tokio::test]
     async fn test_service_builder() {
@@ -157,23 +157,22 @@ mod async_checkpoint_tests {
         let mut execution_service = MockExecutionService::new();
         execution_service.expect_clone().return_once(move || {
             let mut execution_service = MockExecutionService::new();
-            execution_service.expect_call().times(1).returning(
-                move |req: crate::ExecutionRequest| {
+            execution_service
+                .expect_call()
+                .times(1)
+                .returning(move |req: ExecutionRequest| {
                     Ok(ExecutionResponse::fake_builder()
                         .label(expected_label.to_string())
                         .context(req.context)
                         .build()
                         .unwrap())
-                },
-            );
+                });
 
             execution_service
         });
 
         let service_stack = ServiceBuilder::new()
-            .checkpoint_async(|req: crate::ExecutionRequest| async {
-                Ok(ControlFlow::Continue(req))
-            })
+            .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
             .service(execution_service);
 
         let request = ExecutionRequest::fake_builder().build();

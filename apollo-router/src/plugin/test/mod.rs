@@ -20,6 +20,7 @@ use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::MakeSubgraphService;
 use crate::services::Plugins;
 use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 #[derive(Clone)]
 pub(crate) struct MockSubgraphFactory {
@@ -28,12 +29,11 @@ pub(crate) struct MockSubgraphFactory {
 }
 
 impl SubgraphServiceFactory for MockSubgraphFactory {
-    type SubgraphService = BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
+    type SubgraphService = BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
 
-    type Future =
-        <BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> as Service<
-            SubgraphRequest,
-        >>::Future;
+    type Future = <BoxService<SubgraphRequest, SubgraphResponse, BoxError> as Service<
+        SubgraphRequest,
+    >>::Future;
 
     fn create(&self, name: &str) -> Option<Self::SubgraphService> {
         self.subgraphs.get(name).map(|service| {
