@@ -62,13 +62,14 @@ Added metrics for caching.
 Each cache metric contains a `kind` attribute to indicate the kind of cache (`query planner`, `apq`, `introspection`)
 and a `storage` attribute to indicate the backing storage e.g memory/disk.
 
-`apollo_router_cache_hit_count` to know when it hits the cache.
+The following buckets are exposed:
+`apollo_router_cache_hit_count` - cache hits.
 
-`apollo_router_cache_miss_count` to know when it misses the cache.
+`apollo_router_cache_miss_count` - cache misses.
 
-`apollo_router_cache_hit_time` to know how much time it takes when it hits the cache.
+`apollo_router_cache_hit_time` - cache hit duration.
 
-`apollo_router_cache_miss_time` to know how much time it takes when it misses the cache.
+`apollo_router_cache_miss_time` - cache miss duration.
 
 Example
 ```
