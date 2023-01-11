@@ -42,16 +42,16 @@ access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
 apollo-parser = "0.4.1"
-arc-swap = "1.5.1"
+arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
     "tokio",
     "brotli",
     "gzip",
     "deflate",
 ] }
-async-trait = "0.1.60"
+async-trait = "0.1.61"
 atty = "0.2.14"
-axum = { version = "0.6.1", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.6.2", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.67"
 base64 = "0.20.0"
 buildstructor = "0.5.1"
@@ -99,7 +99,7 @@ multer = "2.0.4"
 multimap = "0.8.3"
 # To avoid tokio issues
 notify = { version = "5.0.0", default-features = false, features=["macos_kqueue"] }
-once_cell = "1.16.0"
+once_cell = "1.17.0"
 
 # Any package that starts with `opentelemetry` needs to be updated with care
 # because it is tightly intertwined with the `tracing` packages on account of
@@ -140,14 +140,14 @@ opentelemetry-prometheus = "0.11.0"
 paste = "1.0.11"
 pin-project-lite = "0.2.9"
 prometheus = "0.13"
-prost = "0.11.5"
-prost-types = "0.11.5"
+prost = "0.11.6"
+prost-types = "0.11.6"
 proteus = "0.5.0"
 rand = "0.8.5"
-rhai = { version = "1.11.0", features = ["sync", "serde", "internals"] }
-redis = { version = "0.21.7", optional = true, features = ["cluster", "tokio-comp"] }
+rhai = { version = "1.12.0", features = ["sync", "serde", "internals"] }
+redis = { version = "0.21.7", optional = true, features = ["tokio-comp", "tls", "tokio-native-tls-comp"] }
 redis_cluster_async =  { version = "0.7.0", optional = true }
-regex = "1.7.0"
+regex = "1.7.1"
 reqwest = { version = "0.11.13", default-features = false, features = [
     "rustls-tls",
     "json",
@@ -167,7 +167,7 @@ static_assertions = "1.1.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"
 thiserror = "1.0.38"
-tokio = { version = "1.23.0", features = ["full"] }
+tokio = { version = "1.24.1", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
 tokio-util = { version = "0.7.4", features = ["net", "codec"] }
 tonic = { version = "0.8.3", features = ["transport", "tls", "tls-roots", "gzip"] }
@@ -205,12 +205,12 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
-insta = { version = "1.23.0", features = ["json", "redactions", "yaml"] }
+insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.0"
 maplit = "1.0.2"
 memchr = { version = "2.5.0", default-features = false }
 mockall = "0.11.3"
-once_cell = "1.16.0"
+once_cell = "1.17.0"
 reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",

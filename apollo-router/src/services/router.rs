@@ -21,9 +21,9 @@ use super::supergraph;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::graphql;
 use crate::json_ext::Path;
+use crate::services::TryIntoHeaderName;
+use crate::services::TryIntoHeaderValue;
 use crate::Context;
-use crate::TryIntoHeaderName;
-use crate::TryIntoHeaderValue;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;

@@ -1,6 +1,7 @@
 // This entire file is license key functionality
 
-use std::fmt;
+use std::fmt::Display;
+use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
+use tokio::time::Instant;
 
 #[cfg(feature = "experimental_cache")]
 use super::redis::*;
@@ -46,6 +48,7 @@ where
 // a suitable implementation.
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
+    caller: String,
     inner: Arc<Mutex<LruCache<K, V>>>,
     #[cfg(feature = "experimental_cache")]
     redis: Option<RedisCacheStorage>,
@@ -59,9 +62,10 @@ where
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
         _redis_urls: Option<Vec<String>>,
-        _caller: &str,
+        caller: &str,
     ) -> Self {
         Self {
+            caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             #[cfg(feature = "experimental_cache")]
             redis: if let Some(urls) = _redis_urls {
@@ -69,7 +73,7 @@ where
                     Err(e) => {
                         tracing::error!(
                             "could not open connection to Redis for {} caching: {:?}",
-                            _caller,
+                            caller,
                             e
                         );
                         None
@@ -84,25 +88,90 @@ where
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
         let mut guard = self.inner.lock().await;
+        let instant_memory = Instant::now();
         match guard.get(key) {
-            Some(v) => Some(v.clone()),
+            Some(v) => {
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_hit_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                Some(v.clone())
+            }
             #[cfg(feature = "experimental_cache")]
             None => {
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_miss_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+
+                let instant_redis = Instant::now();
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
                     match redis.get::<K, V>(inner_key).await {
                         Some(v) => {
                             guard.put(key.clone(), v.0.clone());
+                            tracing::info!(
+                                monotonic_counter.apollo_router_cache_hit_count = 1u64,
+                                kind = %self.caller,
+                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            );
+                            let duration = instant_redis.elapsed().as_secs_f64();
+                            tracing::info!(
+                                histogram.apollo_router_cache_hit_time = duration,
+                                kind = %self.caller,
+                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            );
                             Some(v.0)
                         }
-                        None => None,
+                        None => {
+                            tracing::info!(
+                                monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                                kind = %self.caller,
+                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            );
+                            let duration = instant_redis.elapsed().as_secs_f64();
+                            tracing::info!(
+                                histogram.apollo_router_cache_miss_time = duration,
+                                kind = %self.caller,
+                                storage = &tracing::field::display(CacheStorageName::Redis),
+                            );
+                            None
+                        }
                     }
                 } else {
                     None
                 }
             }
             #[cfg(not(feature = "experimental_cache"))]
-            None => None,
+            None => {
+                // Cache miss
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_miss_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                None
+            }
         }
     }
 
@@ -129,5 +198,21 @@ where
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
         self.inner.lock().await.len()
+    }
+}
+
+enum CacheStorageName {
+    #[cfg(feature = "experimental_cache")]
+    Redis,
+    Memory,
+}
+
+impl Display for CacheStorageName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            #[cfg(feature = "experimental_cache")]
+            CacheStorageName::Redis => write!(f, "redis"),
+            CacheStorageName::Memory => write!(f, "memory"),
+        }
     }
 }

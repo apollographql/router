@@ -39,7 +39,7 @@ impl TracingConfigurator for Config {
             .with(&url, |b, e| {
                 b.with_agent_endpoint(e.to_string().trim_end_matches('/'))
             })
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with_trace_config(trace_config.into())
             .build_exporter()?;
         Ok(builder.with_span_processor(

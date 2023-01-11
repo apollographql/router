@@ -117,8 +117,7 @@ impl RedisCacheStorage {
         ttl: Option<Duration>,
     ) -> Result<Self, redis::RedisError> {
         let connection = if urls.len() == 1 {
-            let client =
-                redis::Client::open(urls.pop().expect("urls contains only one url; qed")).unwrap();
+            let client = redis::Client::open(urls.pop().expect("urls contains only one url; qed"))?;
             let connection = client.get_async_connection().await?;
             RedisConnection::Single(connection)
         } else {

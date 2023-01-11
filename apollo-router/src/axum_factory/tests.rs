@@ -67,6 +67,7 @@ use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service;
+use crate::services::supergraph;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -1994,7 +1995,7 @@ Accept: application/json\r
 #[tokio::test]
 async fn test_health_check() {
     let router_service = router_service::from_supergraph_mock_callback(|_| {
-        Ok(crate::supergraph::Response::builder()
+        Ok(supergraph::Response::builder()
             .data(json!({ "__typename": "Query"}))
             .context(Context::new())
             .build()

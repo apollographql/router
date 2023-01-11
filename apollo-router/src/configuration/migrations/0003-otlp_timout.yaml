@@ -1,0 +1,6 @@
+description: telemetry.tracing.otlp.timeout moved to telemetry.tracing.otlp.batch_processor.max_export_timeout
+actions:
+  - type: move
+    from: telemetry.tracing.otlp.timeout
+    to: telemetry.tracing.otlp.batch_processor.max_export_timeout
+

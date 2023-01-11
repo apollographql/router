@@ -680,7 +680,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true,
+        "defer_support": true,
         "apq": {
           "experimental_cache": {
             "in_memory": {
@@ -741,6 +741,11 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
+        "defer_support": {
+          "description": "Enable defer support",
+          "default": true,
+          "type": "boolean"
+        },
         "introspection": {
           "description": "Enable introspection Default: false",
           "default": false,
@@ -764,10 +769,6 @@ expression: "&schema"
           "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
           "default": "/",
           "type": "string"
-        },
-        "preview_defer_support": {
-          "default": true,
-          "type": "boolean"
         },
         "query_planning": {
           "description": "Query planning options",
@@ -909,7 +910,7 @@ expression: "&schema"
               "type": "string"
             },
             "field_level_instrumentation_sampler": {
-              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate Default: always_off",
               "anyOf": [
                 {
                   "description": "Sample a given fraction. Fractions >= 1 will always sample.",
@@ -1987,6 +1988,13 @@ expression: "&schema"
                   "type": "string"
                 },
                 "grpc": {
+                  "default": {
+                    "domain_name": null,
+                    "ca": null,
+                    "cert": null,
+                    "key": null,
+                    "metadata": {}
+                  },
                   "type": "object",
                   "properties": {
                     "ca": {
@@ -1998,6 +2006,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "domain_name": {
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2006,40 +2015,36 @@ expression: "&schema"
                       "nullable": true
                     },
                     "metadata": {
-                      "default": null,
+                      "default": {},
                       "type": "object",
-                      "additionalProperties": true,
-                      "nullable": true
+                      "additionalProperties": true
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "http": {
+                  "default": {
+                    "headers": {}
+                  },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "default": {},
                       "type": "object",
                       "additionalProperties": {
                         "type": "string"
-                      },
-                      "nullable": true
+                      }
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "protocol": {
+                  "default": "grpc",
                   "type": "string",
                   "enum": [
                     "grpc",
                     "http"
-                  ],
-                  "nullable": true
-                },
-                "timeout": {
-                  "default": null,
-                  "type": "string"
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -2152,12 +2157,10 @@ expression: "&schema"
             "experimental_response_trace_id": {
               "description": "A way to expose trace id in response headers",
               "type": "object",
-              "required": [
-                "enabled"
-              ],
               "properties": {
                 "enabled": {
                   "description": "Expose the trace_id in response headers",
+                  "default": false,
                   "type": "boolean"
                 },
                 "header_name": {
@@ -2428,6 +2431,13 @@ expression: "&schema"
                   "type": "string"
                 },
                 "grpc": {
+                  "default": {
+                    "domain_name": null,
+                    "ca": null,
+                    "cert": null,
+                    "key": null,
+                    "metadata": {}
+                  },
                   "type": "object",
                   "properties": {
                     "ca": {
@@ -2439,6 +2449,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "domain_name": {
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2447,40 +2458,36 @@ expression: "&schema"
                       "nullable": true
                     },
                     "metadata": {
-                      "default": null,
+                      "default": {},
                       "type": "object",
-                      "additionalProperties": true,
-                      "nullable": true
+                      "additionalProperties": true
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "http": {
+                  "default": {
+                    "headers": {}
+                  },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "default": {},
                       "type": "object",
                       "additionalProperties": {
                         "type": "string"
-                      },
-                      "nullable": true
+                      }
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "protocol": {
+                  "default": "grpc",
                   "type": "string",
                   "enum": [
                     "grpc",
                     "http"
-                  ],
-                  "nullable": true
-                },
-                "timeout": {
-                  "default": null,
-                  "type": "string"
+                  ]
                 }
               },
               "additionalProperties": false,
@@ -2490,16 +2497,16 @@ expression: "&schema"
               "type": "object",
               "properties": {
                 "baggage": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "datadog": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "jaeger": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "request": {
                   "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
@@ -2513,16 +2520,15 @@ expression: "&schema"
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "trace_context": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 },
                 "zipkin": {
-                  "type": "boolean",
-                  "nullable": true
+                  "default": false,
+                  "type": "boolean"
                 }
               },
               "additionalProperties": false,
@@ -2592,34 +2598,34 @@ expression: "&schema"
                   }
                 },
                 "max_attributes_per_event": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_attributes_per_link": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_attributes_per_span": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_events_per_span": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_links_per_span": {
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "parent_based_sampler": {
                   "default": true,
@@ -2653,12 +2659,12 @@ expression: "&schema"
                   ]
                 },
                 "service_name": {
-                  "type": "string",
-                  "nullable": true
+                  "default": "${env.OTEL_SERVICE_NAME:-router}",
+                  "type": "string"
                 },
                 "service_namespace": {
-                  "type": "string",
-                  "nullable": true
+                  "default": "",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,

@@ -36,18 +36,18 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::supergraph;
+use crate::services::supergraph;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
+use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
 use crate::ListenAddr;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
-use crate::Schema;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
