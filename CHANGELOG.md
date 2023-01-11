@@ -6,25 +6,25 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.8.0] - 2023-01-11
 
-# [1.8.0] (unreleased) - 2022-mm-dd
-
 ## 📃 Configuration
 
-Configuration will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However you should update your source configuration files.
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 
 ### Defer support GA docs and config ([Issue #2368](https://github.com/apollographql/router/issues/2368))
 
-`@defer` has reached GA, however there were still mentions of it being in preview. These have now been removed.
+We're pleased to announce that [`@defer` support](https://www.apollographql.com/docs/router/executing-operations/defer-support/) has been promoted to general availability in accordance with our [product launch stages](https://www.apollographql.com/docs/resources/product-launch-stages/).
 
-If you had disabled defer support via config then you will need to update your router.yaml
+Defer is enabled by default in the Router, however if you had previously explicitly *disabled* defer support via configuration then you will need to update your configuration accordingly:
 
-Before:
+#### Before:
+
 ```yaml
 supergraph:
   preview_defer_support: true
 ```
 
-After:
+#### After:
+
 ```yaml
 supergraph:
   defer_support: true
@@ -32,9 +32,9 @@ supergraph:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2378
 
-### Remove timeout from otlp exporter ([Issue #2337](https://github.com/apollographql/router/issues/2337))
+### Remove `timeout` from OTLP exporter ([Issue #2337](https://github.com/apollographql/router/issues/2337))
 
-`batch_processor` configuration contains timeout, so the existing timeout property has been removed from the parent configuration element.
+A duplicative `timeout` property has been removed from teh `telemetry.tracing.otlp` object since the `batch_processor` configuration already contained a `timeout` property.  The Router will tolerate both options for now and this will be a breaking change in a future major release.  Please update your configuration accordingly to reduce future work.
 
 Before:
 ```yaml
@@ -56,7 +56,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
-### Add cache hit/miss metrics ([Issue #1985](https://github.com/apollographql/router/issues/1985))
+### Emit hit/miss metrics for APQ, Query Planning and Introspection caches ([Issue #1985](https://github.com/apollographql/router/issues/1985))
 
 Add several metrics around the cache.
 Each cache metrics it contains `kind` attribute to know what kind of cache it was (`query planner`, `apq`, `introspection`)
