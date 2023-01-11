@@ -16,17 +16,14 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
-use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
-use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphCreator;
 use super::ExecutionCreator;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -39,18 +36,18 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::supergraph;
+use crate::services::supergraph;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
+use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
 use crate::ListenAddr;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
-use crate::Schema;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
@@ -355,18 +352,9 @@ impl PluggableSupergraphServiceBuilder {
             plugins.clone(),
         ));
 
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
-            )
-            .await,
-        );
-
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_creator,
-            apq_layer,
             schema: self.schema,
             plugins,
         })
@@ -400,7 +388,6 @@ pub(crate) trait SupergraphFactory:
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     subgraph_creator: Arc<SubgraphCreator>,
-    apq_layer: APQLayer,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
@@ -452,9 +439,7 @@ impl SupergraphCreator {
         };
 
         ServiceBuilder::new()
-            .layer(self.apq_layer.clone())
             .layer(content_negociation::SupergraphLayer::default())
-            .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins
                     .iter()

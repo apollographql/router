@@ -9,11 +9,13 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use crate::error::QueryPlannerError;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::query::SubSelection;
-use crate::*;
+use crate::spec::Query;
+use crate::spec::Schema;
 
 /// Query planning options.
 #[derive(Clone, Eq, Hash, PartialEq, Debug, Default, Serialize, Deserialize)]
