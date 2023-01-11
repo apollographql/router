@@ -17,8 +17,6 @@ use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::DecodingKey;
-use jsonwebtoken::EncodingKey;
-use jsonwebtoken::Header;
 use jsonwebtoken::Validation;
 use once_cell::sync::Lazy;
 use reqwest::Client;
@@ -106,13 +104,12 @@ impl Plugin for AuthenticationPlugin {
             Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
                 let fut = async {
                     let data = if url.scheme() == "file" {
-                        // TODO: Uncomment to make this commercial only before devcomplete
-                        /*
+                        #[cfg(not(test))]
                         apollo_graph_reference()
                             .ok_or(LicenseError::MissingGraphReference)
                             .ok()?;
+                        #[cfg(not(test))]
                         apollo_key().ok_or(LicenseError::MissingKey).ok()?;
-                        */
                         let path = url.to_file_path().ok()?;
                         read_to_string(path).await.ok()?
                     } else {
@@ -136,19 +133,6 @@ impl Plugin for AuthenticationPlugin {
                 Box::pin(fut)
             });
         let deduplicator = Deduplicate::with_capacity(getter, 1);
-        // XXX For debugging, generate a valid JWT...
-        let key = "c2VjcmV0Cg==";
-        let claims = serde_json::json!( {
-            "exp": 10_000_000_000usize,
-            "another claim": "this is another claim"
-        });
-        let header = Header {
-            kid: Some("key1".to_string()),
-            ..Default::default()
-        };
-        let tok_maybe =
-            jsonwebtoken::encode(&header, &claims, &EncodingKey::from_base64_secret(key)?);
-        tracing::info!(?tok_maybe, "use this JWT for testing");
 
         Ok(AuthenticationPlugin {
             configuration: init.config.jwt,
