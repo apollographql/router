@@ -62,14 +62,14 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
-    apq_layer: APQLayer,
+    apq_layer: Option<APQLayer>,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
+    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: Option<APQLayer>) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
@@ -222,8 +222,13 @@ where
                         context,
                     };
 
+                    let request_res = match apq {
+                        None => Ok(request),
+                        Some(apq) => apq.request(request).await,
+                    };
+
                     let SupergraphResponse { response, context } =
-                        match apq.request(request).await.and_then(|request| {
+                        match request_res.and_then(|request| {
                             let query = request.supergraph_request.body().query.as_ref();
 
                             if query.is_none() || query.unwrap().trim().is_empty() {
@@ -426,7 +431,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
-    apq_layer: APQLayer,
+    apq_layer: Option<APQLayer>,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -477,13 +482,17 @@ where
 {
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
-            )
-            .await,
-        );
+        let apq_layer = if configuration.supergraph.apq.enabled {
+            Some(APQLayer::with_cache(
+                DeduplicatingCache::from_configuration(
+                    &configuration.supergraph.apq.experimental_cache,
+                    "APQ",
+                )
+                .await,
+            ))
+        } else {
+            None
+        };
 
         Self {
             supergraph_creator,

@@ -682,6 +682,7 @@ expression: "&schema"
         "introspection": false,
         "defer_support": true,
         "apq": {
+          "enabled": true,
           "experimental_cache": {
             "in_memory": {
               "limit": 512
@@ -702,6 +703,7 @@ expression: "&schema"
         "apq": {
           "description": "Configures automatic persisted queries",
           "default": {
+            "enabled": true,
             "experimental_cache": {
               "in_memory": {
                 "limit": 512
@@ -713,6 +715,11 @@ expression: "&schema"
             "experimental_cache"
           ],
           "properties": {
+            "enabled": {
+              "description": "Activates Automatic Persisted Queries",
+              "default": true,
+              "type": "boolean"
+            },
             "experimental_cache": {
               "type": "object",
               "required": [
