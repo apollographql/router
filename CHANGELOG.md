@@ -10,7 +10,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 
-### Defer support GA docs and config ([Issue #2368](https://github.com/apollographql/router/issues/2368))
+### Defer support graduates from preview ([Issue #2368](https://github.com/apollographql/router/issues/2368))
 
 We're pleased to announce that [`@defer` support](https://www.apollographql.com/docs/router/executing-operations/defer-support/) has been promoted to general availability in accordance with our [product launch stages](https://www.apollographql.com/docs/resources/product-launch-stages/).
 
