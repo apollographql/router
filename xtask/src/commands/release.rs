@@ -161,7 +161,7 @@ impl Prepare {
         }
 
         if std::env::var("GITHUB_TOKEN").is_err() {
-            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."))
+            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
         }
         Ok(())
     }
@@ -431,7 +431,10 @@ impl Prepare {
         replace_in_file!(
             "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
             r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
-            format!(r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#, version)
+            format!(
+                r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#,
+                version
+            )
         );
 
         Ok(version)
@@ -464,7 +467,10 @@ impl Prepare {
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
             "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
-            format!("https://github.com/apollographql/router/tree/v{}/helm/chart/router", version)
+            format!(
+                "https://github.com/apollographql/router/tree/v{}/helm/chart/router",
+                version
+            )
         );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
@@ -497,6 +503,13 @@ impl Prepare {
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm charts");
+
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "version: \"v[^\"]+\"",
+            format!("version: \"{}\"", version)
+        );
+
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
             "appVersion: \"v[^\"]+\"",
@@ -527,7 +540,10 @@ impl Prepare {
                 replace_in_file!(
                     entry.path(),
                     r#"^(?P<indentation>\s+)image:\s*ghcr.io/apollographql/router:v.*$"#,
-                    format!("${{indentation}}image: ghcr.io/apollographql/router:v{}", version)
+                    format!(
+                        "${{indentation}}image: ghcr.io/apollographql/router:v{}",
+                        version
+                    )
                 );
             }
         }
