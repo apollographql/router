@@ -291,7 +291,7 @@ fragment deferedFragment on Query {
 }
 ```
 
-The Router now exhibits the correct behavior for this query with `__typename` being returned as soon as possible in the initial chunk, as follows: 
+The Router now exhibits the correct behavior for this query with `__typename` being returned as soon as possible in the initial chunk, as follows:
 
 ```json
 {"data":{"__typename": "Query"},"hasNext":true}
@@ -301,7 +301,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Log retriable Apollo Uplink failures at the `debug` level ([Issue #2004](https://github.com/apollographql/router/issues/2004))
 
-The log levels for messages pertaining to Apollo Uplink schema fetch failures are now emitted at `debug` level to reduce noise since such failures do not indicate an actual error since they can be and are retried immediately. 
+The log levels for messages pertaining to Apollo Uplink schema fetch failures are now emitted at `debug` level to reduce noise since such failures do not indicate an actual error since they can be and are retried immediately.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2215
 
@@ -381,7 +381,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 We now offer the ability to configure some aspects of the Router via the response to an HTTP `POST` request to an external endpoint.  Initially, we are only offering this option to customize the newly introduced `router_service` (above, in these release notes), but our intention is to introduce customization of [existing service layers](https://www.apollographql.com/docs/router/customizations/overview/#how-customizations-work) as well (e.g., `supergraph_service, `subgraph_service`, etc.).  Conceptually, this addition allows similar customizations that are possible with Rhai or Rust plugin by sending the operation's context as of a particular phase of the request pipeline "over the wire" as of a particular to an external HTTP service which has the ability to process its properties and return a (potentially) modified response to the Router.  This will become a stable part of our API as we receive feedback from its early adopters.  Please open a discussion with any feedback you might have!
 
-When this experimental option is enabled, contextual data will be transmitted as a JSON payload to an HTTP endpoint as a `POST` request.  The response to such a request will be processed by the Router and any changes made by the external service will effect the remaining layers in the request pipeline.  This allows external services to customize the  Router behavior, but requires intentionally blocking Router's normal request pipeline.  Therefore, any latency of a configured external service will have a direct impact on the performance of the Router and external services should be as performant as possible. 
+When this experimental option is enabled, contextual data will be transmitted as a JSON payload to an HTTP endpoint as a `POST` request.  The response to such a request will be processed by the Router and any changes made by the external service will effect the remaining layers in the request pipeline.  This allows external services to customize the  Router behavior, but requires intentionally blocking Router's normal request pipeline.  Therefore, any latency of a configured external service will have a direct impact on the performance of the Router and external services should be as performant as possible.
 
 To experiement with this behavior, consider adopting a configuration similar to the following which communicates with a service running on `http://127.0.0.1:8081` for the `router` service layer:
 
@@ -398,19 +398,19 @@ plugins:
     # They sit request pipeline as our Service Layers for Rust/Rhai, seen in our docs:
     #   https://www.apollographql.com/docs/router/customizations/overview/#how-customizations-work
     stages:
-    
+
       # Currently, the only supported value is "router".
       router:
-      
+
         # Define which properties of the request should be transmitted in the payload.
 	# Choosing the least amount of data will reduce the size of the payload.
 	# By default, all values are false and, when false, their presence in this map is optional.
-        request: 
+        request:
           headers: true
           context: true
           body: true
           sdl: true
-	
+
 	# Similar to "request", but which properties of the response should be sent.
 	# Again, all values are false by default and only must be specified if they are enabled.
         response:
@@ -474,7 +474,7 @@ By [@toneill818](https://github.com/toneill818) in https://github.com/apollograp
 
 Exporting traces often requires performance tuning based on the throughput of the router, sampling settings and ingestion capability of tracing ingress.
 
-All exporters now support configuring the batch span processor in the router yaml. 
+All exporters now support configuring the batch span processor in the router yaml.
 ```yaml
 telemetry:
   apollo:
@@ -589,7 +589,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### it_rate_limit_subgraph_requests fixed ([Issue #2213](https://github.com/apollographql/router/issues/2213))
 
-This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime. 
+This test was failing frequently due to it being a timing test being run in a single threaded tokio runtime.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2218
 
@@ -711,7 +711,7 @@ Using this configuration you will have a response header called `my-trace-id` co
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2131
 
-### Add configuration for logging and add more logs ([Issue #1998](https://github.com/apollographql/router/issues/1998)) 
+### Add configuration for logging and add more logs ([Issue #1998](https://github.com/apollographql/router/issues/1998))
 
 By default, logs do not contain request body, response body or headers.
 It is now possible to conditionally add this information for debugging and audit purposes.
@@ -780,7 +780,7 @@ Occasionally we will make changes to the Router yaml configuration format.
 When starting the Router, if the configuration can be upgraded, it will do so automatically and display a warning:
 
 ```
-2022-11-22T14:01:46.884897Z  WARN router configuration contains deprecated options: 
+2022-11-22T14:01:46.884897Z  WARN router configuration contains deprecated options:
 
   1. telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
 
@@ -945,7 +945,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Fix webpki license check ([PR #2202](https://github.com/apollographql/router/pull/2202))
 
-Fixed webpki license check. 
+Fixed webpki license check.
 Add missing Google Chromimum license.
 By [@o0Ignition0o](https://github.com/o0Ignition0o) [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2202
 
