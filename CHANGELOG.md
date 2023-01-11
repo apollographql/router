@@ -116,13 +116,13 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
 
-For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
+Experimental caching via Redis now works with single Redis instances when configured with a single URL.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
 
 ### Support TLS connections to single instance Redis ([Issue #2332](https://github.com/apollographql/router/issues/2332))
 
-TLS support is mandatory for some hosted Redis providers.
+TLS connections are now supported when connecting to single Redis instances. It is useful for connecting to hosted  Redis providers where TLS is mandatory.
 TLS connections for clusters are not supported yet, see [Issue #2332](https://github.com/apollographql/router/issues/2332) for updates.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2336
