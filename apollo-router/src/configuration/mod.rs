@@ -15,14 +15,9 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 
-use cors::*;
 use derivative::Derivative;
 use displaydoc::Display;
-use expansion::*;
-pub(crate) use experimental::print_all_experimental_conf;
 use itertools::Itertools;
-pub(crate) use schema::generate_config_schema;
-pub(crate) use schema::generate_upgrade;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -35,6 +30,11 @@ use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
 
+use self::cors::Cors;
+use self::expansion::Expansion;
+pub(crate) use self::experimental::print_all_experimental_conf;
+pub(crate) use self::schema::generate_config_schema;
+pub(crate) use self::schema::generate_upgrade;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;

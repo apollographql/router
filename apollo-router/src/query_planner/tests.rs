@@ -8,12 +8,28 @@ use http::Method;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 
-use super::*;
+use super::DeferredNode;
+use super::Depends;
+use super::FlattenNode;
+use super::OperationKind;
+use super::PlanNode;
+use super::Primary;
+use super::QueryPlan;
+use super::QueryPlanOptions;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::plugin;
 use crate::plugin::test::MockSubgraph;
+use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
+use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::SubgraphResponse;
+use crate::services::SubgraphServiceFactory;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
+use crate::Context;
 
 macro_rules! test_query_plan {
     () => {

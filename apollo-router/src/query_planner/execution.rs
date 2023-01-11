@@ -30,7 +30,10 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
-use crate::*;
+use crate::services::SubgraphServiceFactory;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Context;
 
 impl QueryPlan {
     /// Execute the plan and return a [`Response`].

@@ -118,6 +118,24 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🐛 Fixes
 
+### Correctly handle aliased __typename ([Issue #2330](https://github.com/apollographql/router/issues/2330))
+
+If you aliased a `__typename` like in this example query:
+
+```graphql
+{
+  myproducts: products {
+       total
+       __typename
+  }
+  _0___typename: __typename
+}
+```
+
+Before this fix, `_0___typename` was set to `null`. Thanks to this fix it returns `"Query"`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2357
+
 ### Change the default value of `apollo.field_level_instrumentation_sampler` ([Issue #2339](https://github.com/apollographql/router/issues/2339))
 
 Change the default value of `apollo.field_level_instrumentation_sampler` to `always_off` instead of `0.01`
