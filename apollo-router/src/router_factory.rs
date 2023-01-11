@@ -257,11 +257,9 @@ impl YamlRouterFactory {
 
 impl Subgraph {
     fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
-        if let Some(certificate_authorities) = &self.certificate_authorities {
-            Some(create_certificate_store(certificate_authorities))
-        } else {
-            None
-        }
+        self.certificate_authorities
+            .as_deref()
+            .map(create_certificate_store)
     }
 }
 
