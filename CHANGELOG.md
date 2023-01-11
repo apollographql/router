@@ -58,9 +58,9 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Emit hit/miss metrics for APQ, Query Planning and Introspection caches ([Issue #1985](https://github.com/apollographql/router/issues/1985))
 
-Add several metrics around the cache.
-Each cache metrics it contains `kind` attribute to know what kind of cache it was (`query planner`, `apq`, `introspection`)
-and the `storage` attribute to know where the cache is coming from.
+Added metrics for caching.
+Each cache metric contains a `kind` attribute to indicate the kind of cache (`query planner`, `apq`, `introspection`)
+and a `storage` attribute to indicate the backing storage e.g memory/disk.
 
 `apollo_router_cache_hit_count` to know when it hits the cache.
 
