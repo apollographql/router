@@ -164,42 +164,40 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Simplify telemetry config code ([Issue #2337](https://github.com/apollographql/router/issues/2337))
 
-This brings the telemetry plugin configuration closer to standards recommended in the [yaml design guidance](dev-docs/yaml-design-guidance.md).
+This brings the telemetry plugin configuration closer to standards recommended in the [YAML design guidance](dev-docs/yaml-design-guidance.md).
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
 
-### Upgrade the clap version in scaffold template ([Issue #2165](https://github.com/apollographql/router/issues/2165))
+### Upgrade the `clap` version in scaffold templates ([Issue #2165](https://github.com/apollographql/router/issues/2165))
 
-Upgrade clap deps version to the right one to be able to create new scaffolded plugins thanks to xtask.
+Upgrade `clap` dependency version to a version supporting the generation of scaffolded plugins via xtask.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2343
 
 ### Upgrade axum to `0.6.1` ([PR #2303](https://github.com/apollographql/router/pull/2303))
 
-For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
+For more details about the new `axum` release, please read [the project's change log](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
 
-### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
+### Set the HTTP response `content-type` as `application/json` when returning GraphQL errors ([Issue #2320](https://github.com/apollographql/router/issues/2320))
 
-When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
+When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the expected `content-type` header rather than omitting the header as it was previously.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
 
-### Move APQ and EnsureQueryPresence in the router service ([PR #2296](https://github.com/apollographql/router/pull/2296))
+### Move `APQ` and `EnsureQueryPresence` layers to the new `router_service` ([PR #2296](https://github.com/apollographql/router/pull/2296))
 
-Moving APQ from the axum level to the supergraph service reintroduced a `Buffer` in the service pipeline.
-Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
+Moving APQ from the axum level to the `supergraph_service` reintroduced a `Buffer` to the service pipeline.
+To avoid this, now the `APQ` and `EnsureQueryPresence` layers are part of the newly introduced `router_service`, removing that `Buffer`.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296
 
-### Refactor yaml validation error reports ([Issue #2180](https://github.com/apollographql/router/issues/2180))
+### Refactor YAML validation error reports ([Issue #2180](https://github.com/apollographql/router/issues/2180))
 
-YAML configuration file validation prints a report of the errors it encountered, but that report was missing some
-information, and had small mistakes around alignment and pointing out the right line.
+YAML configuration file validation prints a report of the errors it encountered, but that report was missing some details and occasionally had its diagnostics cursor pointing at the wrong character/line.  It now points at the correct place more reliably.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2347
-
 
 # [1.7.0] - 2022-12-22
 
