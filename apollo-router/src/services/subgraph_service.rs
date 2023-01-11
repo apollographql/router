@@ -168,7 +168,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             );
             get_text_map_propagator(|propagator| {
                 propagator.inject_context(
-                    &subgraph_req_span.context(),
+                    dbg!(&subgraph_req_span.context()),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 );
             });

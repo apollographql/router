@@ -40,9 +40,16 @@ inherits = "release"
 debug = 1
 
 # TODO: to delete
-# [patch.crates-io]
+[patch.crates-io]
 # opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
 # opentelemetry-http = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
 # opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
 # opentelemetry-zipkin = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
 # opentelemetry-datadog = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
+
+opentelemetry = { path = "../opentelemetry-rust/opentelemetry" }
+opentelemetry-http = { path = "../opentelemetry-rust/opentelemetry-http" }
+opentelemetry-jaeger = { path = "../opentelemetry-rust/opentelemetry-jaeger" }
+opentelemetry-zipkin = { path = "../opentelemetry-rust/opentelemetry-zipkin" }
+opentelemetry-datadog = { path = "../opentelemetry-rust/opentelemetry-datadog" }
+opentelemetry-prometheus = { path = "../opentelemetry-rust/opentelemetry-prometheus" }

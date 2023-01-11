@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::task::Context;
 use std::task::Poll;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
@@ -86,23 +89,24 @@ impl MetricsConfigurator for Config {
                     .map(|(k, v)| KeyValue::new(k, v)),
             ))
             .build();
+            let desc = prometheus::core::Desc::new(
+                format!(
+                    "desc_{}",
+                    SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .expect("time went backwards")
+                        .as_millis()
+                ),
+                String::from("Unique collector desc"),
+                Vec::new(),
+                HashMap::new(),
+            )
+            .expect("prometheus desc cannot fail with these criterias");
+
             let exporter = opentelemetry_prometheus::exporter(controller)
                 .with_registry(registry.clone())
+                .with_description(desc)
                 .try_init()?;
-
-            // let registry = self.registry.unwrap_or_else(prometheus::Registry::new);
-
-            // let controller = Arc::new(Mutex::new(self.controller));
-            // let collector = Collector::with_controller(controller.clone());
-            // registry
-            //     .register(Box::new(collector))
-            //     .map_err(|e| MetricsError::Other(e.to_string()))?;
-
-            // let exporter = PrometheusExporter {
-            //     registry,
-            //     controller,
-            // };
-            // opentelemetry::global::set_meter_provider(exporter.meter_provider()?);
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),
