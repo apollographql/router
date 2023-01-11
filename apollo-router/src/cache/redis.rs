@@ -133,6 +133,7 @@ impl RedisCacheStorage {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
         self.ttl = ttl;
     }
@@ -150,6 +151,7 @@ impl RedisCacheStorage {
         }
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn get_multiple<K: KeyType, V: ValueType>(
         &self,
         keys: Vec<RedisKey<K>>,
@@ -223,6 +225,7 @@ impl RedisCacheStorage {
         tracing::trace!("insert result {:?}", r);
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn insert_multiple<K: KeyType, V: ValueType>(
         &self,
         data: &[(RedisKey<K>, RedisValue<V>)],
