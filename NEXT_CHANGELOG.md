@@ -188,3 +188,10 @@ YAML configuration file validation prints a report of the errors it encountered,
 information, and had small mistakes around alignment and pointing out the right line.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2347
+
+### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
+
+Building the execution and subgraph services had to go through a factory trait before, which is not
+needed anymore since there is only one useful implementation.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
