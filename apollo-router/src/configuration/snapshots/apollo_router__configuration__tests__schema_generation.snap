@@ -910,7 +910,7 @@ expression: "&schema"
               "type": "string"
             },
             "field_level_instrumentation_sampler": {
-              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate Default: always_off",
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
               "anyOf": [
                 {
                   "description": "Sample a given fraction. Fractions >= 1 will always sample.",
