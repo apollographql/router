@@ -3,7 +3,7 @@ title: Traffic shaping in the Apollo Router
 ---
 
 The Apollo Router provides various features to improve the performance and reliability of
-the traffic with clients and subgraphs.
+the traffic between the client and router and between the router and subgraphs.
 
 ## Configuration
 
@@ -155,7 +155,8 @@ traffic_shaping:
 
 ### Ordering
 
-The traffic shaping steps need to happen in a specific order to interact properly:
+Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour.
+Declaration order in the configuration will not affect the runtime order:
 
 - preparing the subgraph request
 - variable deduplication
