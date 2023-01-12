@@ -59,7 +59,6 @@ impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
 }
 
 /// A service factory that will report some anonymous telemetry to Apollo. It can be disabled by users, but the data is useful for helping us to decide where to spend our efforts.
-/// In future we should try and move this towards otel metrics, this will allow us to send the information direct to something that ingests OTLP.
 /// The data sent looks something like this:
 /// ```json
 /// {
