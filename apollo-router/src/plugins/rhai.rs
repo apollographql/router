@@ -1500,6 +1500,14 @@ impl Rhai {
                 TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
             })
             .register_fn("to_string", |id: &mut TraceId| -> String { id.to_string() })
+            // Register basic "crypto" functions
+            // Base64 decode/encode
+            .register_fn("base64decode", |input: &mut ImmutableString| -> Result<String, Box<EvalAltResult>> {
+                String::from_utf8(base64::decode(input.as_bytes()).map_err(|e| e.to_string())?).map_err(|e| e.to_string().into())
+            })
+            .register_fn("base64encode", |input: &mut ImmutableString| -> String {
+                base64::encode(input.as_bytes())
+            })
             // Register a series of logging functions
             .register_fn("log_trace", |out: Dynamic| {
                 tracing::trace!(%out, "rhai_trace");
@@ -2092,6 +2100,24 @@ mod tests {
         let engine = Rhai::new_rhai_engine(None);
         let decoded: String = engine
             .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
+            .expect("can decode string");
+        assert_eq!(decoded, "This has an ümlaut in it.");
+    }
+
+    #[test]
+    fn it_can_base64encode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let encoded: String = engine
+            .eval(r#"base64encode("This has an ümlaut in it.")"#)
+            .expect("can encode string");
+        assert_eq!(encoded, "VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=");
+    }
+
+    #[test]
+    fn it_can_base64decode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let decoded: String = engine
+            .eval(r#"base64decode("VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=")"#)
             .expect("can decode string");
         assert_eq!(decoded, "This has an ümlaut in it.");
     }
