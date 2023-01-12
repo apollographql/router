@@ -142,7 +142,7 @@ pub(crate) struct GrpcExporter {
     pub(crate) ca: Option<String>,
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
-    /// The optional key for tls config
+    /// The optional private key file for TLS configuration.
     pub(crate) key: Option<String>,
 
     /// gRPC metadata
