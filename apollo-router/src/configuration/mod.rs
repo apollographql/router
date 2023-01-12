@@ -564,7 +564,7 @@ impl Default for Supergraph {
     }
 }
 
-/// Apq configuration
+/// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
