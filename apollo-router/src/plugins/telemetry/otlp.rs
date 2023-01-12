@@ -145,7 +145,7 @@ pub(crate) struct GrpcExporter {
     /// The optional key for tls config
     pub(crate) key: Option<String>,
 
-    /// GRPC metadata
+    /// gRPC metadata
     #[serde(
         deserialize_with = "metadata_map_serde::deserialize",
         serialize_with = "metadata_map_serde::serialize",
