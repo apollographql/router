@@ -231,7 +231,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
     let raw_json_schema =
         serde_json::to_value(generate_config_schema()).expect("config schema is must be valid");
     let compiled_json_schema = JSONSchema::compile(
-        &serde_json::to_value(&raw_json_schema).expect("config schema is must be valid"),
+        &serde_json::to_value(&raw_json_schema).expect("config schema must be valid"),
     )
     .expect("config schema must compile");
 
