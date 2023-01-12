@@ -9,36 +9,43 @@ expression: "&schema"
   "type": "object",
   "properties": {
     "authentication": {
+      "description": "Authentication",
       "type": "object",
       "required": [
         "experimental"
       ],
       "properties": {
         "experimental": {
+          "description": "The experimental configuration",
           "type": "object",
           "required": [
             "jwt"
           ],
           "properties": {
             "jwt": {
+              "description": "The JWT configuration",
               "type": "object",
               "required": [
                 "jwks_url"
               ],
               "properties": {
                 "cooldown": {
+                  "description": "JWKS retrieval cooldown",
                   "default": null,
                   "type": "string"
                 },
                 "header_name": {
+                  "description": "HTTP header expected to contain JWT",
                   "default": "authorization",
                   "type": "string"
                 },
                 "header_prefix": {
+                  "description": "Header prefix",
                   "default": "Bearer",
                   "type": "string"
                 },
                 "jwks_url": {
+                  "description": "Retrieve our JWK Set from here",
                   "type": "string"
                 }
               }

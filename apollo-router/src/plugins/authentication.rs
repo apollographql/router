@@ -63,14 +63,15 @@ struct AuthenticationPlugin {
 
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct JWTConf {
-    // Retrieve our JWK Set from here
+    /// Retrieve our JWK Set from here
     jwks_url: String,
-    // HTTP header expected to contain JWT
+    /// HTTP header expected to contain JWT
     #[serde(default = "default_header_name")]
     header_name: String,
-    // Header prefix
+    /// Header prefix
     #[serde(default = "default_header_prefix")]
     header_prefix: String,
+    /// JWKS retrieval cooldown
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     cooldown: Option<Duration>,
@@ -80,14 +81,17 @@ struct JWTConf {
 // from experimental.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct ExperimentalConf {
+    /// The JWT configuration
     jwt: JWTConf,
 }
 
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
+/// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
+    /// The experimental configuration
     experimental: ExperimentalConf,
 }
 
