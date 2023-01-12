@@ -105,7 +105,7 @@ pub(crate) struct Tracing {
     pub(crate) propagation: Option<Propagation>,
     /// Common configuration
     pub(crate) trace_config: Option<Trace>,
-    /// Open Telemetry native exporter configuration
+    /// OpenTelemetry native exporter configuration
     pub(crate) otlp: Option<otlp::Config>,
     /// Jaeger exporter configuration
     pub(crate) jaeger: Option<tracing::jaeger::Config>,
