@@ -383,11 +383,10 @@ impl EngineBlock {
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
+        // At 2.0 (or maybe before), replace with upper case
         scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
 
-        scope.push_constant("APOLLO_SDL", sdl.to_string());
-        scope.push_constant("APOLLO_START", Instant::now());
         scope.push_constant(
             "APOLLO_AUTHENTICATION_JWT_CLAIMS",
             "apollo_authentication::JWT::claims".to_string(),
