@@ -15,14 +15,9 @@ use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
 
-use cors::*;
 use derivative::Derivative;
 use displaydoc::Display;
-use expansion::*;
-pub(crate) use experimental::print_all_experimental_conf;
 use itertools::Itertools;
-pub(crate) use schema::generate_config_schema;
-pub(crate) use schema::generate_upgrade;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -35,6 +30,11 @@ use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
 
+use self::cors::Cors;
+use self::expansion::Expansion;
+pub(crate) use self::experimental::print_all_experimental_conf;
+pub(crate) use self::schema::generate_config_schema;
+pub(crate) use self::schema::generate_upgrade;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
@@ -483,8 +483,9 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
+    /// Enable defer support
     #[serde(default = "default_defer_support")]
-    pub(crate) preview_defer_support: bool,
+    pub(crate) defer_support: bool,
 
     /// Configures automatic persisted queries
     #[serde(default)]
@@ -506,7 +507,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
-        preview_defer_support: Option<bool>,
+        defer_support: Option<bool>,
         apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
@@ -514,7 +515,7 @@ impl Supergraph {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
             apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
@@ -529,7 +530,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
-        preview_defer_support: Option<bool>,
+        defer_support: Option<bool>,
         apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
@@ -537,7 +538,7 @@ impl Supergraph {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
             apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }

@@ -1,11 +1,13 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /supergraph/introspection
+1. at line 3
+
+  
+  supergraph:
+    introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
+                   ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "boolean"
 
 
-supergraph:
-  introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
-                 ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "boolean"

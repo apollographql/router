@@ -25,7 +25,8 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// for usability but could lead to surprises when updates are highly contested.
 ///
 /// Within the router, contention is likely to be highest within plugins which
-/// provide [`crate::SubgraphRequest`] or [`crate::SubgraphResponse`] processing. At such times,
+/// provide [`crate::services::SubgraphRequest`] or
+/// [`crate::services::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
 #[derive(Clone, Debug, Deserialize, Serialize)]

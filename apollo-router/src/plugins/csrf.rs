@@ -15,7 +15,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::supergraph;
-use crate::SupergraphResponse;
+use crate::services::SupergraphResponse;
 
 /// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]

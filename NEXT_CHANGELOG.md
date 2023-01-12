@@ -11,6 +11,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+## 📃 Configuration
 ## 🛠 Maintenance
 ## 📚 Documentation
 ## 🥼 Experimental
@@ -24,4 +25,3 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [x.x.x] (unreleased) - 2022-mm-dd

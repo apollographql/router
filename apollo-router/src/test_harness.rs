@@ -21,7 +21,7 @@ use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::SupergraphCreator;
-use crate::Schema;
+use crate::spec::Schema;
 
 #[cfg(test)]
 pub(crate) mod http_client;
@@ -237,7 +237,7 @@ impl<'a> TestHarness<'a> {
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config);
+        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
@@ -254,7 +254,7 @@ impl<'a> TestHarness<'a> {
         use crate::router_factory::RouterFactory;
 
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config);
+        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(router_creator, &config, web_endpoints)?;

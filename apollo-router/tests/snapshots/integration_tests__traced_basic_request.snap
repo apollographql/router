@@ -97,6 +97,10 @@ expression: get_spans()
               [
                 "otel.status_code",
                 "Ok"
+              ],
+              [
+                "message",
+                "dropping telemetry..."
               ]
             ],
             "metadata": {
@@ -184,6 +188,30 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
+                      ],
+                      [
+                        "monotonic_counter.apollo_router_cache_miss_count",
+                        1
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
+                      ],
+                      [
+                        "histogram.apollo_router_cache_miss_time",
+                        "[REDACTED]"
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
                       ]
                     ],
                     "metadata": {
@@ -233,10 +261,6 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
-                      ],
-                      [
-                        "message",
-                        "dropping telemetry..."
                       ]
                     ],
                     "metadata": {
@@ -405,23 +429,24 @@ expression: get_spans()
                                   }
                                 }
                               },
-                              "children": {}
-                            },
-                            "apollo_router::services::subgraph_service::aggregate_response_data": {
-                              "name": "apollo_router::services::subgraph_service::aggregate_response_data",
-                              "record": {
-                                "entries": [],
-                                "metadata": {
-                                  "name": "aggregate_response_data",
-                                  "target": "apollo_router::services::subgraph_service",
-                                  "level": "DEBUG",
-                                  "module_path": "apollo_router::services::subgraph_service",
-                                  "fields": {
-                                    "names": []
-                                  }
+                              "children": {
+                                "apollo_router::services::subgraph_service::aggregate_response_data": {
+                                  "name": "apollo_router::services::subgraph_service::aggregate_response_data",
+                                  "record": {
+                                    "entries": [],
+                                    "metadata": {
+                                      "name": "aggregate_response_data",
+                                      "target": "apollo_router::services::subgraph_service",
+                                      "level": "DEBUG",
+                                      "module_path": "apollo_router::services::subgraph_service",
+                                      "fields": {
+                                        "names": []
+                                      }
+                                    }
+                                  },
+                                  "children": {}
                                 }
-                              },
-                              "children": {}
+                              }
                             },
                             "apollo_router::services::subgraph_service::parse_subgraph_response": {
                               "name": "apollo_router::services::subgraph_service::parse_subgraph_response",
