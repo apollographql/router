@@ -25,3 +25,10 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
+## 🛠 Maintenance
+
+### Optimize regex based header plugin ([PR #2391](https://github.com/apollographql/router/pull/2389))
+
+Lower chances to allocate when applying regex based header propagation rules.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2389

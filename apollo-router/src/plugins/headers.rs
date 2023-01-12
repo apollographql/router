@@ -320,16 +320,18 @@ where
                 }
                 Operation::Remove(Remove::Matching(matching)) => {
                     let headers = req.subgraph_request.headers_mut();
-                    let matching_headers = headers
-                        .iter()
-                        .filter_map(|(name, _)| {
-                            matching.is_match(name.as_str()).then(|| name.clone())
+                    let new_headers = headers
+                        .drain()
+                        .filter_map(|(name, value)| {
+                            name.and_then(|name| {
+                                (RESERVED_HEADERS.contains(&name)
+                                    || !matching.is_match(name.as_str()))
+                                .then_some((name, value))
+                            })
                         })
-                        .filter(|name| !RESERVED_HEADERS.contains(name))
-                        .collect::<Vec<_>>();
-                    for name in matching_headers {
-                        headers.remove(name);
-                    }
+                        .collect();
+
+                    let _ = std::mem::replace(headers, new_headers);
                 }
                 Operation::Propagate(Propagate::Named {
                     named,
@@ -347,8 +349,9 @@ where
                     req.supergraph_request
                         .headers()
                         .iter()
-                        .filter(|(name, _)| matching.is_match(name.as_str()))
-                        .filter(|(name, _)| !RESERVED_HEADERS.contains(name))
+                        .filter(|(name, _)| {
+                            !RESERVED_HEADERS.contains(name) && matching.is_match(name.as_str())
+                        })
                         .for_each(|(name, value)| {
                             headers.insert(name, value.clone());
                         });
