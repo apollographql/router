@@ -32,7 +32,7 @@
     },
     "Executing Operations": {
       "Build and run queries": "/executing-operations/build-run-queries",
-      "@defer support (preview)": "/executing-operations/defer-support",
+      "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {

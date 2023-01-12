@@ -483,8 +483,9 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
+    /// Enable defer support
     #[serde(default = "default_defer_support")]
-    pub(crate) preview_defer_support: bool,
+    pub(crate) defer_support: bool,
 
     /// Configures automatic persisted queries
     #[serde(default)]
@@ -506,7 +507,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
-        preview_defer_support: Option<bool>,
+        defer_support: Option<bool>,
         apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
@@ -514,7 +515,7 @@ impl Supergraph {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
             apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
@@ -529,7 +530,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
-        preview_defer_support: Option<bool>,
+        defer_support: Option<bool>,
         apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
@@ -537,7 +538,7 @@ impl Supergraph {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
             apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
