@@ -301,35 +301,35 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
-pub(crate) trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
-    type SubgraphService: Service<
-            SubgraphRequest,
-            Response = SubgraphResponse,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send
-        + 'static;
-    type Future: Send + 'static;
-
-    fn create(&self, name: &str) -> Option<Self::SubgraphService>;
-}
-
 #[derive(Clone)]
-pub(crate) struct SubgraphCreator {
+pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
 
     pub(crate) plugins: Arc<Plugins>,
 }
 
-impl SubgraphCreator {
+impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
     ) -> Self {
-        SubgraphCreator {
+        SubgraphServiceFactory {
             services: Arc::new(services.into_iter().collect()),
             plugins,
         }
+    }
+
+    pub(crate) fn create(
+        &self,
+        name: &str,
+    ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
+        self.services.get(name).map(|service| {
+            let service = service.make();
+            self.plugins
+                .iter()
+                .rev()
+                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
+        })
     }
 }
 
@@ -351,23 +351,6 @@ where
 {
     fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
         self.clone().boxed()
-    }
-}
-
-impl SubgraphServiceFactory for SubgraphCreator {
-    type SubgraphService = BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
-    type Future = <BoxService<SubgraphRequest, SubgraphResponse, BoxError> as Service<
-        SubgraphRequest,
-    >>::Future;
-
-    fn create(&self, name: &str) -> Option<Self::SubgraphService> {
-        self.services.get(name).map(|service| {
-            let service = service.make();
-            self.plugins
-                .iter()
-                .rev()
-                .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
-        })
     }
 }
 
