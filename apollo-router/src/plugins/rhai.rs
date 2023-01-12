@@ -420,7 +420,9 @@ struct Rhai {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Conf {
+    /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
+    /// The main entry point for Rhai script evaluation
     main: Option<String>,
 }
 

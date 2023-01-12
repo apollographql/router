@@ -151,12 +151,15 @@ expression: "&schema"
       "additionalProperties": false
     },
     "forbid_mutations": {
+      "description": "Forbid mutations configuration",
       "type": "boolean"
     },
     "headers": {
+      "description": "Configuration for header propagation",
       "type": "object",
       "properties": {
         "all": {
+          "description": "Rules to apply to all subgraphs",
           "type": "object",
           "required": [
             "request"
@@ -185,9 +188,11 @@ expression: "&schema"
                             ],
                             "properties": {
                               "name": {
+                                "description": "The name of the header",
                                 "type": "string"
                               },
                               "value": {
+                                "description": "The value for the header",
                                 "type": "string"
                               }
                             },
@@ -221,13 +226,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "The default if the path in the body did not resolve to an element",
                                 "type": "string",
                                 "nullable": true
                               },
                               "name": {
+                                "description": "The target header name",
                                 "type": "string"
                               },
                               "path": {
+                                "description": "The path in the request body",
                                 "type": "string"
                               }
                             },
@@ -255,6 +263,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "named": {
+                                "description": "Remove a header given a header name",
                                 "type": "string"
                               }
                             },
@@ -268,6 +277,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "matching": {
+                                "description": "Remove a header given a regex matching against the header name",
                                 "type": "string"
                               }
                             },
@@ -295,13 +305,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "Default value for the header.",
                                 "type": "string",
                                 "nullable": true
                               },
                               "named": {
+                                "description": "The source header name",
                                 "type": "string"
                               },
                               "rename": {
+                                "description": "An optional target header name",
                                 "type": "string",
                                 "nullable": true
                               }
@@ -316,6 +329,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "matching": {
+                                "description": "The regex on header name",
                                 "type": "string"
                               }
                             },
@@ -334,6 +348,7 @@ expression: "&schema"
           "nullable": true
         },
         "subgraphs": {
+          "description": "Rules to specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -364,9 +379,11 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "name": {
+                                  "description": "The name of the header",
                                   "type": "string"
                                 },
                                 "value": {
+                                  "description": "The value for the header",
                                   "type": "string"
                                 }
                               },
@@ -400,13 +417,16 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "default": {
+                                  "description": "The default if the path in the body did not resolve to an element",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "name": {
+                                  "description": "The target header name",
                                   "type": "string"
                                 },
                                 "path": {
+                                  "description": "The path in the request body",
                                   "type": "string"
                                 }
                               },
@@ -434,6 +454,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "named": {
+                                  "description": "Remove a header given a header name",
                                   "type": "string"
                                 }
                               },
@@ -447,6 +468,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "matching": {
+                                  "description": "Remove a header given a regex matching against the header name",
                                   "type": "string"
                                 }
                               },
@@ -474,13 +496,16 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "default": {
+                                  "description": "Default value for the header.",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "named": {
+                                  "description": "The source header name",
                                   "type": "string"
                                 },
                                 "rename": {
+                                  "description": "An optional target header name",
                                   "type": "string",
                                   "nullable": true
                                 }
@@ -495,6 +520,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "matching": {
+                                  "description": "The regex on header name",
                                   "type": "string"
                                 }
                               },
@@ -516,7 +542,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "health-check": {
-      "description": "Configuration options pertaining to the http server component.",
+      "description": "Healthcheck configuration",
       "default": {
         "listen": "127.0.0.1:8088",
         "enabled": true
@@ -524,6 +550,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Set to false to disable the healthcheck endpoint",
           "default": true,
           "type": "boolean"
         },
@@ -545,13 +572,14 @@ expression: "&schema"
       "additionalProperties": false
     },
     "homepage": {
-      "description": "Configuration options pertaining to the home page.",
+      "description": "Homepage configuration",
       "default": {
         "enabled": true
       },
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Set to false to disable the homepage",
           "default": true,
           "type": "boolean"
         }
@@ -559,13 +587,16 @@ expression: "&schema"
       "additionalProperties": false
     },
     "include_subgraph_errors": {
+      "description": "Configuration for exposing errors that originate from subgraphs",
       "type": "object",
       "properties": {
         "all": {
+          "description": "Include errors from all subgraphs",
           "default": false,
           "type": "boolean"
         },
         "subgraphs": {
+          "description": "Include errors from specific subgraphs",
           "default": {},
           "type": "object",
           "additionalProperties": {
@@ -576,50 +607,65 @@ expression: "&schema"
       "additionalProperties": false
     },
     "override_subgraph_url": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string",
-        "format": "uri"
-      }
+      "description": "Subgraph URL mappings",
+      "anyOf": [
+        {
+          "description": "Subgraph URL mappings",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      ]
     },
     "plugins": {
       "description": "Plugin configuration",
       "default": null,
       "properties": {
         "experimental.expose_query_plan": {
+          "description": "Expose query plan",
           "type": "boolean"
         },
         "experimental.external": {
+          "description": "Configures the externalization plugin",
           "type": "object",
           "required": [
             "url"
           ],
           "properties": {
             "stages": {
+              "description": "The stages request/response configuration",
               "default": null,
               "type": "object",
               "properties": {
                 "router": {
+                  "description": "The router stage",
                   "default": null,
                   "type": "object",
                   "properties": {
                     "request": {
+                      "description": "The request configuration",
                       "default": null,
                       "type": "object",
                       "properties": {
                         "body": {
+                          "description": "Send the body",
                           "default": false,
                           "type": "boolean"
                         },
                         "context": {
+                          "description": "Send the context",
                           "default": false,
                           "type": "boolean"
                         },
                         "headers": {
+                          "description": "Send the headers",
                           "default": false,
                           "type": "boolean"
                         },
                         "sdl": {
+                          "description": "Send the SDL",
                           "default": false,
                           "type": "boolean"
                         }
@@ -627,22 +673,27 @@ expression: "&schema"
                       "nullable": true
                     },
                     "response": {
+                      "description": "The response configuration",
                       "default": null,
                       "type": "object",
                       "properties": {
                         "body": {
+                          "description": "Send the body",
                           "default": false,
                           "type": "boolean"
                         },
                         "context": {
+                          "description": "Send the context",
                           "default": false,
                           "type": "boolean"
                         },
                         "headers": {
+                          "description": "Send the headers",
                           "default": false,
                           "type": "boolean"
                         },
                         "sdl": {
+                          "description": "Send the SDL",
                           "default": false,
                           "type": "boolean"
                         }
@@ -656,10 +707,12 @@ expression: "&schema"
               "nullable": true
             },
             "timeout": {
+              "description": "The timeout for external requests",
               "default": null,
               "type": "string"
             },
             "url": {
+              "description": "The url you'd like to offload processing to",
               "type": "string"
             }
           }
@@ -672,10 +725,12 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "main": {
+          "description": "The main entry point for Rhai script evaluation",
           "type": "string",
           "nullable": true
         },
         "scripts": {
+          "description": "The directory where Rhai scripts can be found",
           "type": "string",
           "nullable": true
         }
@@ -683,13 +738,14 @@ expression: "&schema"
       "additionalProperties": false
     },
     "sandbox": {
-      "description": "Configuration options pertaining to the sandbox page.",
+      "description": "Sandbox configuration",
       "default": {
         "enabled": false
       },
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Set to true to enable sandbox",
           "default": false,
           "type": "boolean"
         }
@@ -714,7 +770,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "supergraph": {
-      "description": "Configuration options pertaining to the supergraph server component.",
+      "description": "Configuration for the supergraph",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
@@ -753,6 +809,7 @@ expression: "&schema"
           ],
           "properties": {
             "experimental_cache": {
+              "description": "Cache configuration",
               "type": "object",
               "required": [
                 "in_memory"
@@ -781,7 +838,7 @@ expression: "&schema"
           "additionalProperties": false
         },
         "defer_support": {
-          "description": "Enable defer support",
+          "description": "Set to false to disable defer support",
           "default": true,
           "type": "boolean"
         },
@@ -825,6 +882,7 @@ expression: "&schema"
           ],
           "properties": {
             "experimental_cache": {
+              "description": "Cache configuration",
               "type": "object",
               "required": [
                 "in_memory"
@@ -863,9 +921,11 @@ expression: "&schema"
       "additionalProperties": false
     },
     "telemetry": {
+      "description": "Telemetry configuration",
       "type": "object",
       "properties": {
         "apollo": {
+          "description": "Apollo reporting configuration",
           "type": "object",
           "properties": {
             "batch_processor": {
@@ -980,19 +1040,28 @@ expression: "&schema"
               "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
               "oneOf": [
                 {
+                  "description": "Don't send any headers",
                   "type": "string",
                   "enum": [
-                    "none",
+                    "none"
+                  ]
+                },
+                {
+                  "description": "Send all headers",
+                  "type": "string",
+                  "enum": [
                     "all"
                   ]
                 },
                 {
+                  "description": "Send only the headers specified",
                   "type": "object",
                   "required": [
                     "only"
                   ],
                   "properties": {
                     "only": {
+                      "description": "Send only the headers specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -1002,12 +1071,14 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 {
+                  "description": "Send all headers except those specified",
                   "type": "object",
                   "required": [
                     "except"
                   ],
                   "properties": {
                     "except": {
+                      "description": "Send all headers except those specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -1022,19 +1093,28 @@ expression: "&schema"
               "description": "To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio",
               "oneOf": [
                 {
+                  "description": "Dont send any variables",
                   "type": "string",
                   "enum": [
-                    "none",
+                    "none"
+                  ]
+                },
+                {
+                  "description": "Send all variables",
+                  "type": "string",
+                  "enum": [
                     "all"
                   ]
                 },
                 {
+                  "description": "Send only the variables specified",
                   "type": "object",
                   "required": [
                     "only"
                   ],
                   "properties": {
                     "only": {
+                      "description": "Send only the variables specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -1044,12 +1124,14 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 {
+                  "description": "Send all variables except those specified",
                   "type": "object",
                   "required": [
                     "except"
                   ],
                   "properties": {
                     "except": {
+                      "description": "Send all variables except those specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -1065,13 +1147,16 @@ expression: "&schema"
           "nullable": true
         },
         "experimental_logging": {
+          "description": "Logging configuration",
           "type": "object",
           "properties": {
             "display_filename": {
+              "description": "Display the filename in the logs",
               "default": true,
               "type": "boolean"
             },
             "display_line_number": {
+              "description": "Display the line number in the logs",
               "default": true,
               "type": "boolean"
             },
@@ -1165,9 +1250,11 @@ expression: "&schema"
           "nullable": true
         },
         "metrics": {
+          "description": "Metrics configuration",
           "type": "object",
           "properties": {
             "common": {
+              "description": "Common metrics configuration across all exporters",
               "type": "object",
               "properties": {
                 "attributes": {
@@ -1179,6 +1266,7 @@ expression: "&schema"
                       "type": "object",
                       "properties": {
                         "all": {
+                          "description": "Attributes for all subgraphs",
                           "type": "object",
                           "properties": {
                             "context": {
@@ -1192,13 +1280,16 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
+                                    "description": "The optional default value",
                                     "type": "string",
                                     "nullable": true
                                   },
                                   "named": {
+                                    "description": "The name of the value in the context",
                                     "type": "string"
                                   },
                                   "rename": {
+                                    "description": "The optional output name",
                                     "type": "string",
                                     "nullable": true
                                   }
@@ -1223,13 +1314,16 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "default": {
+                                        "description": "The optional default value",
                                         "type": "string",
                                         "nullable": true
                                       },
                                       "name": {
+                                        "description": "The name of the attribute",
                                         "type": "string"
                                       },
                                       "path": {
+                                        "description": "The path in the body",
                                         "type": "string"
                                       }
                                     },
@@ -1262,13 +1356,16 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "default": {
+                                        "description": "The optional default value",
                                         "type": "string",
                                         "nullable": true
                                       },
                                       "name": {
+                                        "description": "The name of the attribute",
                                         "type": "string"
                                       },
                                       "path": {
+                                        "description": "The path in the body",
                                         "type": "string"
                                       }
                                     },
@@ -1283,20 +1380,23 @@ expression: "&schema"
                                     "description": "Configuration to forward header values in metric labels",
                                     "anyOf": [
                                       {
-                                        "description": "Using a named header",
+                                        "description": "Match via header name",
                                         "type": "object",
                                         "required": [
                                           "named"
                                         ],
                                         "properties": {
                                           "default": {
+                                            "description": "The optional default value",
                                             "type": "string",
                                             "nullable": true
                                           },
                                           "named": {
+                                            "description": "The name of the header",
                                             "type": "string"
                                           },
                                           "rename": {
+                                            "description": "The optional output name",
                                             "type": "string",
                                             "nullable": true
                                           }
@@ -1304,13 +1404,14 @@ expression: "&schema"
                                         "additionalProperties": false
                                       },
                                       {
-                                        "description": "Using a regex on the header name",
+                                        "description": "Match via rgex",
                                         "type": "object",
                                         "required": [
                                           "matching"
                                         ],
                                         "properties": {
                                           "matching": {
+                                            "description": "Using a regex on the header name",
                                             "type": "string"
                                           }
                                         },
@@ -1340,13 +1441,16 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "default": {
+                                        "description": "The optional default value",
                                         "type": "string",
                                         "nullable": true
                                       },
                                       "name": {
+                                        "description": "The name of the attribute",
                                         "type": "string"
                                       },
                                       "path": {
+                                        "description": "The path in the body",
                                         "type": "string"
                                       }
                                     },
@@ -1361,20 +1465,23 @@ expression: "&schema"
                                     "description": "Configuration to forward header values in metric labels",
                                     "anyOf": [
                                       {
-                                        "description": "Using a named header",
+                                        "description": "Match via header name",
                                         "type": "object",
                                         "required": [
                                           "named"
                                         ],
                                         "properties": {
                                           "default": {
+                                            "description": "The optional default value",
                                             "type": "string",
                                             "nullable": true
                                           },
                                           "named": {
+                                            "description": "The name of the header",
                                             "type": "string"
                                           },
                                           "rename": {
+                                            "description": "The optional output name",
                                             "type": "string",
                                             "nullable": true
                                           }
@@ -1382,13 +1489,14 @@ expression: "&schema"
                                         "additionalProperties": false
                                       },
                                       {
-                                        "description": "Using a regex on the header name",
+                                        "description": "Match via rgex",
                                         "type": "object",
                                         "required": [
                                           "matching"
                                         ],
                                         "properties": {
                                           "matching": {
+                                            "description": "Using a regex on the header name",
                                             "type": "string"
                                           }
                                         },
@@ -1414,9 +1522,11 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "name": {
+                                    "description": "The name of the attribute to insert",
                                     "type": "string"
                                   },
                                   "value": {
+                                    "description": "The value of the attribute to insert",
                                     "type": "string"
                                   }
                                 },
@@ -1429,8 +1539,10 @@ expression: "&schema"
                           "nullable": true
                         },
                         "subgraphs": {
+                          "description": "Attributes per subgraph",
                           "type": "object",
                           "additionalProperties": {
+                            "description": "Configuration to add custom attributes/labels on metrics to subgraphs",
                             "type": "object",
                             "properties": {
                               "context": {
@@ -1444,13 +1556,16 @@ expression: "&schema"
                                   ],
                                   "properties": {
                                     "default": {
+                                      "description": "The optional default value",
                                       "type": "string",
                                       "nullable": true
                                     },
                                     "named": {
+                                      "description": "The name of the value in the context",
                                       "type": "string"
                                     },
                                     "rename": {
+                                      "description": "The optional output name",
                                       "type": "string",
                                       "nullable": true
                                     }
@@ -1475,13 +1590,16 @@ expression: "&schema"
                                       ],
                                       "properties": {
                                         "default": {
+                                          "description": "The optional default value",
                                           "type": "string",
                                           "nullable": true
                                         },
                                         "name": {
+                                          "description": "The name of the attribute",
                                           "type": "string"
                                         },
                                         "path": {
+                                          "description": "The path in the body",
                                           "type": "string"
                                         }
                                       },
@@ -1514,13 +1632,16 @@ expression: "&schema"
                                       ],
                                       "properties": {
                                         "default": {
+                                          "description": "The optional default value",
                                           "type": "string",
                                           "nullable": true
                                         },
                                         "name": {
+                                          "description": "The name of the attribute",
                                           "type": "string"
                                         },
                                         "path": {
+                                          "description": "The path in the body",
                                           "type": "string"
                                         }
                                       },
@@ -1535,20 +1656,23 @@ expression: "&schema"
                                       "description": "Configuration to forward header values in metric labels",
                                       "anyOf": [
                                         {
-                                          "description": "Using a named header",
+                                          "description": "Match via header name",
                                           "type": "object",
                                           "required": [
                                             "named"
                                           ],
                                           "properties": {
                                             "default": {
+                                              "description": "The optional default value",
                                               "type": "string",
                                               "nullable": true
                                             },
                                             "named": {
+                                              "description": "The name of the header",
                                               "type": "string"
                                             },
                                             "rename": {
+                                              "description": "The optional output name",
                                               "type": "string",
                                               "nullable": true
                                             }
@@ -1556,13 +1680,14 @@ expression: "&schema"
                                           "additionalProperties": false
                                         },
                                         {
-                                          "description": "Using a regex on the header name",
+                                          "description": "Match via rgex",
                                           "type": "object",
                                           "required": [
                                             "matching"
                                           ],
                                           "properties": {
                                             "matching": {
+                                              "description": "Using a regex on the header name",
                                               "type": "string"
                                             }
                                           },
@@ -1592,13 +1717,16 @@ expression: "&schema"
                                       ],
                                       "properties": {
                                         "default": {
+                                          "description": "The optional default value",
                                           "type": "string",
                                           "nullable": true
                                         },
                                         "name": {
+                                          "description": "The name of the attribute",
                                           "type": "string"
                                         },
                                         "path": {
+                                          "description": "The path in the body",
                                           "type": "string"
                                         }
                                       },
@@ -1613,20 +1741,23 @@ expression: "&schema"
                                       "description": "Configuration to forward header values in metric labels",
                                       "anyOf": [
                                         {
-                                          "description": "Using a named header",
+                                          "description": "Match via header name",
                                           "type": "object",
                                           "required": [
                                             "named"
                                           ],
                                           "properties": {
                                             "default": {
+                                              "description": "The optional default value",
                                               "type": "string",
                                               "nullable": true
                                             },
                                             "named": {
+                                              "description": "The name of the header",
                                               "type": "string"
                                             },
                                             "rename": {
+                                              "description": "The optional output name",
                                               "type": "string",
                                               "nullable": true
                                             }
@@ -1634,13 +1765,14 @@ expression: "&schema"
                                           "additionalProperties": false
                                         },
                                         {
-                                          "description": "Using a regex on the header name",
+                                          "description": "Match via rgex",
                                           "type": "object",
                                           "required": [
                                             "matching"
                                           ],
                                           "properties": {
                                             "matching": {
+                                              "description": "Using a regex on the header name",
                                               "type": "string"
                                             }
                                           },
@@ -1666,9 +1798,11 @@ expression: "&schema"
                                   ],
                                   "properties": {
                                     "name": {
+                                      "description": "The name of the attribute to insert",
                                       "type": "string"
                                     },
                                     "value": {
+                                      "description": "The value of the attribute to insert",
                                       "type": "string"
                                     }
                                   },
@@ -1700,13 +1834,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "The optional default value",
                                 "type": "string",
                                 "nullable": true
                               },
                               "named": {
+                                "description": "The name of the value in the context",
                                 "type": "string"
                               },
                               "rename": {
+                                "description": "The optional output name",
                                 "type": "string",
                                 "nullable": true
                               }
@@ -1731,13 +1868,16 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
+                                    "description": "The optional default value",
                                     "type": "string",
                                     "nullable": true
                                   },
                                   "name": {
+                                    "description": "The name of the attribute",
                                     "type": "string"
                                   },
                                   "path": {
+                                    "description": "The path in the body",
                                     "type": "string"
                                   }
                                 },
@@ -1770,13 +1910,16 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
+                                    "description": "The optional default value",
                                     "type": "string",
                                     "nullable": true
                                   },
                                   "name": {
+                                    "description": "The name of the attribute",
                                     "type": "string"
                                   },
                                   "path": {
+                                    "description": "The path in the body",
                                     "type": "string"
                                   }
                                 },
@@ -1791,20 +1934,23 @@ expression: "&schema"
                                 "description": "Configuration to forward header values in metric labels",
                                 "anyOf": [
                                   {
-                                    "description": "Using a named header",
+                                    "description": "Match via header name",
                                     "type": "object",
                                     "required": [
                                       "named"
                                     ],
                                     "properties": {
                                       "default": {
+                                        "description": "The optional default value",
                                         "type": "string",
                                         "nullable": true
                                       },
                                       "named": {
+                                        "description": "The name of the header",
                                         "type": "string"
                                       },
                                       "rename": {
+                                        "description": "The optional output name",
                                         "type": "string",
                                         "nullable": true
                                       }
@@ -1812,13 +1958,14 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "Using a regex on the header name",
+                                    "description": "Match via rgex",
                                     "type": "object",
                                     "required": [
                                       "matching"
                                     ],
                                     "properties": {
                                       "matching": {
+                                        "description": "Using a regex on the header name",
                                         "type": "string"
                                       }
                                     },
@@ -1848,13 +1995,16 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
+                                    "description": "The optional default value",
                                     "type": "string",
                                     "nullable": true
                                   },
                                   "name": {
+                                    "description": "The name of the attribute",
                                     "type": "string"
                                   },
                                   "path": {
+                                    "description": "The path in the body",
                                     "type": "string"
                                   }
                                 },
@@ -1869,20 +2019,23 @@ expression: "&schema"
                                 "description": "Configuration to forward header values in metric labels",
                                 "anyOf": [
                                   {
-                                    "description": "Using a named header",
+                                    "description": "Match via header name",
                                     "type": "object",
                                     "required": [
                                       "named"
                                     ],
                                     "properties": {
                                       "default": {
+                                        "description": "The optional default value",
                                         "type": "string",
                                         "nullable": true
                                       },
                                       "named": {
+                                        "description": "The name of the header",
                                         "type": "string"
                                       },
                                       "rename": {
+                                        "description": "The optional output name",
                                         "type": "string",
                                         "nullable": true
                                       }
@@ -1890,13 +2043,14 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "Using a regex on the header name",
+                                    "description": "Match via rgex",
                                     "type": "object",
                                     "required": [
                                       "matching"
                                     ],
                                     "properties": {
                                       "matching": {
+                                        "description": "Using a regex on the header name",
                                         "type": "string"
                                       }
                                     },
@@ -1922,9 +2076,11 @@ expression: "&schema"
                             ],
                             "properties": {
                               "name": {
+                                "description": "The name of the attribute to insert",
                                 "type": "string"
                               },
                               "value": {
+                                "description": "The value of the attribute to insert",
                                 "type": "string"
                               }
                             },
@@ -1963,12 +2119,14 @@ expression: "&schema"
               "nullable": true
             },
             "otlp": {
+              "description": "Open Telemetry native exporter configuration",
               "type": "object",
               "required": [
                 "endpoint"
               ],
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor settings",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2024,9 +2182,11 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send data to",
                   "type": "string"
                 },
                 "grpc": {
+                  "description": "gRPC configuration settings",
                   "default": {
                     "domain_name": null,
                     "ca": null,
@@ -2037,23 +2197,28 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
+                      "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
+                      "description": "The optional cert for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
+                      "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
                       "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "key": {
+                      "description": "The optional private key file for TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
+                      "description": "gRPC metadata",
                       "default": {},
                       "type": "object",
                       "additionalProperties": true
@@ -2062,12 +2227,14 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "http": {
+                  "description": "HTTP configuration settings",
                   "default": {
                     "headers": {}
                   },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "description": "Headers to send on report requests",
                       "default": {},
                       "type": "object",
                       "additionalProperties": {
@@ -2078,6 +2245,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "protocol": {
+                  "description": "The protocol to use when sending data",
                   "default": "grpc",
                   "type": "string",
                   "enum": [
@@ -2090,16 +2258,18 @@ expression: "&schema"
               "nullable": true
             },
             "prometheus": {
+              "description": "Prometheus exporter configuration",
               "type": "object",
               "required": [
                 "enabled"
               ],
               "properties": {
                 "enabled": {
+                  "description": "Set to true to enable",
                   "type": "boolean"
                 },
                 "listen": {
-                  "description": "Listening address.",
+                  "description": "The listen address",
                   "default": "127.0.0.1:9090",
                   "anyOf": [
                     {
@@ -2113,6 +2283,7 @@ expression: "&schema"
                   ]
                 },
                 "path": {
+                  "description": "The path where prometheus will be exposed",
                   "default": "/metrics",
                   "type": "string"
                 }
@@ -2125,12 +2296,18 @@ expression: "&schema"
           "nullable": true
         },
         "tracing": {
+          "description": "Tracing configuration",
           "type": "object",
           "properties": {
             "datadog": {
+              "description": "Datadog exporter configuration",
               "type": "object",
+              "required": [
+                "endpoint"
+              ],
               "properties": {
                 "batch_processor": {
+                  "description": "batch processor configuration",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2186,6 +2363,7 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send to",
                   "default": "default",
                   "type": "string"
                 }
@@ -2211,8 +2389,8 @@ expression: "&schema"
               "additionalProperties": false
             },
             "jaeger": {
-              "type": "object",
-              "oneOf": [
+              "description": "Jaeger exporter configuration",
+              "anyOf": [
                 {
                   "type": "object",
                   "required": [
@@ -2220,9 +2398,14 @@ expression: "&schema"
                   ],
                   "properties": {
                     "agent": {
+                      "description": "Agent configuration",
                       "type": "object",
+                      "required": [
+                        "endpoint"
+                      ],
                       "properties": {
                         "endpoint": {
+                          "description": "The endpoint to send to",
                           "default": "default",
                           "type": "string"
                         }
@@ -2230,6 +2413,20 @@ expression: "&schema"
                       "additionalProperties": false
                     },
                     "batch_processor": {
+                      "description": "Batch processor configuration",
+                      "default": {
+                        "scheduled_delay": {
+                          "secs": 5,
+                          "nanos": 0
+                        },
+                        "max_queue_size": 2048,
+                        "max_export_batch_size": 512,
+                        "max_export_timeout": {
+                          "secs": 30,
+                          "nanos": 0
+                        },
+                        "max_concurrent_exports": 1
+                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -2281,6 +2478,20 @@ expression: "&schema"
                   ],
                   "properties": {
                     "batch_processor": {
+                      "description": "Batch processor configuration",
+                      "default": {
+                        "scheduled_delay": {
+                          "secs": 5,
+                          "nanos": 0
+                        },
+                        "max_queue_size": 2048,
+                        "max_export_batch_size": 512,
+                        "max_export_timeout": {
+                          "secs": 30,
+                          "nanos": 0
+                        },
+                        "max_concurrent_exports": 1
+                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -2323,19 +2534,24 @@ expression: "&schema"
                       }
                     },
                     "collector": {
+                      "description": "Collector configuration",
                       "type": "object",
                       "required": [
                         "endpoint"
                       ],
                       "properties": {
                         "endpoint": {
-                          "type": "string"
+                          "description": "The endpoint to send reports to",
+                          "type": "string",
+                          "format": "uri"
                         },
                         "password": {
+                          "description": "The optional password",
                           "type": "string",
                           "nullable": true
                         },
                         "username": {
+                          "description": "The optional username",
                           "type": "string",
                           "nullable": true
                         }
@@ -2346,72 +2562,17 @@ expression: "&schema"
                   "additionalProperties": false
                 }
               ],
-              "properties": {
-                "batch_processor": {
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
-                  "type": "object",
-                  "properties": {
-                    "max_concurrent_exports": {
-                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task. The default is 1.",
-                      "default": 1,
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 0.0
-                    },
-                    "max_export_batch_size": {
-                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
-                      "default": 512,
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 0.0
-                    },
-                    "max_export_timeout": {
-                      "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
-                      "default": {
-                        "secs": 30,
-                        "nanos": 0
-                      },
-                      "type": "string"
-                    },
-                    "max_queue_size": {
-                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
-                      "default": 2048,
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 0.0
-                    },
-                    "scheduled_delay": {
-                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
-                      "default": {
-                        "secs": 5,
-                        "nanos": 0
-                      },
-                      "type": "string"
-                    }
-                  }
-                }
-              },
               "nullable": true
             },
             "otlp": {
+              "description": "OpenTelemetry native exporter configuration",
               "type": "object",
               "required": [
                 "endpoint"
               ],
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor settings",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2467,9 +2628,11 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send data to",
                   "type": "string"
                 },
                 "grpc": {
+                  "description": "gRPC configuration settings",
                   "default": {
                     "domain_name": null,
                     "ca": null,
@@ -2480,23 +2643,28 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
+                      "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
+                      "description": "The optional cert for tls config",
                       "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
+                      "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
                       "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "key": {
+                      "description": "The optional private key file for TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
+                      "description": "gRPC metadata",
                       "default": {},
                       "type": "object",
                       "additionalProperties": true
@@ -2505,12 +2673,14 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "http": {
+                  "description": "HTTP configuration settings",
                   "default": {
                     "headers": {}
                   },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "description": "Headers to send on report requests",
                       "default": {},
                       "type": "object",
                       "additionalProperties": {
@@ -2521,6 +2691,7 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "protocol": {
+                  "description": "The protocol to use when sending data",
                   "default": "grpc",
                   "type": "string",
                   "enum": [
@@ -2533,17 +2704,21 @@ expression: "&schema"
               "nullable": true
             },
             "propagation": {
+              "description": "Propagation configuration",
               "type": "object",
               "properties": {
                 "baggage": {
+                  "description": "Propagate baggage https://www.w3.org/TR/baggage/",
                   "default": false,
                   "type": "boolean"
                 },
                 "datadog": {
+                  "description": "Propagate Datadog",
                   "default": false,
                   "type": "boolean"
                 },
                 "jaeger": {
+                  "description": "Propagate Jaeger",
                   "default": false,
                   "type": "boolean"
                 },
@@ -2562,10 +2737,12 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 "trace_context": {
+                  "description": "Propagate trace context https://www.w3.org/TR/trace-context/",
                   "default": false,
                   "type": "boolean"
                 },
                 "zipkin": {
+                  "description": "Propagate Zipkin",
                   "default": false,
                   "type": "boolean"
                 }
@@ -2574,9 +2751,11 @@ expression: "&schema"
               "nullable": true
             },
             "trace_config": {
+              "description": "Common configuration",
               "type": "object",
               "properties": {
                 "attributes": {
+                  "description": "Default attributes",
                   "type": "object",
                   "additionalProperties": {
                     "anyOf": [
@@ -2637,40 +2816,47 @@ expression: "&schema"
                   }
                 },
                 "max_attributes_per_event": {
+                  "description": "The maximum attributes per event before discarding",
                   "default": 128,
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0.0
                 },
                 "max_attributes_per_link": {
+                  "description": "The maximum attributes per link before discarding",
                   "default": 128,
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0.0
                 },
                 "max_attributes_per_span": {
+                  "description": "The maximum attributes per span before discarding",
                   "default": 128,
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0.0
                 },
                 "max_events_per_span": {
+                  "description": "The maximum events per span before discarding",
                   "default": 128,
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0.0
                 },
                 "max_links_per_span": {
+                  "description": "The maximum links per span before discarding",
                   "default": 128,
                   "type": "integer",
                   "format": "uint32",
                   "minimum": 0.0
                 },
                 "parent_based_sampler": {
+                  "description": "Whether to use parent based sampling",
                   "default": true,
                   "type": "boolean"
                 },
                 "sampler": {
+                  "description": "The sampler, always_on, always_off or a decimal between 0.0 and 1.0",
                   "anyOf": [
                     {
                       "description": "Sample a given fraction. Fractions >= 1 will always sample.",
@@ -2698,10 +2884,12 @@ expression: "&schema"
                   ]
                 },
                 "service_name": {
+                  "description": "The trace service name",
                   "default": "${env.OTEL_SERVICE_NAME:-router}",
                   "type": "string"
                 },
                 "service_namespace": {
+                  "description": "The trace service namespace",
                   "default": "",
                   "type": "string"
                 }
@@ -2710,9 +2898,11 @@ expression: "&schema"
               "nullable": true
             },
             "zipkin": {
+              "description": "Zipkin exporter configuration",
               "type": "object",
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor configuration",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2768,6 +2958,7 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send to",
                   "default": "default",
                   "type": "string"
                 }
@@ -2783,28 +2974,33 @@ expression: "&schema"
       "additionalProperties": false
     },
     "test.always_fails_to_start": {
+      "description": "Configuration for the test plugin",
       "type": "object",
       "required": [
         "name"
       ],
       "properties": {
         "name": {
+          "description": "The name of the test",
           "type": "string"
         }
       }
     },
     "test.always_starts_and_stops": {
+      "description": "Configuration for the test plugin",
       "type": "object",
       "required": [
         "name"
       ],
       "properties": {
         "name": {
+          "description": "The name of the test",
           "type": "string"
         }
       }
     },
     "traffic_shaping": {
+      "description": "Configuration for the experimental traffic shaping plugin",
       "type": "object",
       "properties": {
         "all": {
@@ -2844,6 +3040,7 @@ expression: "&schema"
               "nullable": true
             },
             "experimental_retry": {
+              "description": "Retry configuration",
               "type": "object",
               "properties": {
                 "min_per_sec": {
@@ -2948,6 +3145,7 @@ expression: "&schema"
           "description": "Applied on specific subgraphs",
           "type": "object",
           "additionalProperties": {
+            "description": "Traffic shaping options",
             "type": "object",
             "properties": {
               "compression": {
@@ -2983,6 +3181,7 @@ expression: "&schema"
                 "nullable": true
               },
               "experimental_retry": {
+                "description": "Retry configuration",
                 "type": "object",
                 "properties": {
                   "min_per_sec": {
