@@ -27,8 +27,8 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🛠 Maintenance
 
-### Optimize regex based header plugin ([PR #2391](https://github.com/apollographql/router/pull/2389))
+### Optimize header propagation plugin's regex matching ([PR #2391](https://github.com/apollographql/router/pull/2389))
 
-Lower chances to allocate when applying regex based header propagation rules.
+We've changed the plugin to reduce the chances of generating memory allocations when applying regex-based header propagation rules.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2389
