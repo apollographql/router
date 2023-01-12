@@ -1,13 +1,15 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /cors/allow_headers/1
+1. at line 9
 
-  listen: 127.0.0.1:4000
-cors:
-  allow_headers:
-    - Content-Type
-    - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
-      ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "string"
+    listen: 127.0.0.1:4000
+  cors:
+    allow_headers:
+      - Content-Type
+      - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
+        ^----- "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}" is not of type "string"
+
+

@@ -39,6 +39,8 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema, Copy)]
 #[serde(rename_all = "lowercase")]
@@ -93,8 +95,8 @@ impl SubgraphService {
     }
 }
 
-impl tower::Service<crate::SubgraphRequest> for SubgraphService {
-    type Response = crate::SubgraphResponse;
+impl tower::Service<SubgraphRequest> for SubgraphService {
+    type Response = SubgraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -104,8 +106,8 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
             .map(|res| res.map_err(|e| Box::new(e) as BoxError))
     }
 
-    fn call(&mut self, request: crate::SubgraphRequest) -> Self::Future {
-        let crate::SubgraphRequest {
+    fn call(&mut self, request: SubgraphRequest) -> Self::Future {
+        let SubgraphRequest {
             subgraph_request,
             context,
             ..
@@ -256,7 +258,7 @@ impl tower::Service<crate::SubgraphRequest> for SubgraphService {
 
             let resp = http::Response::from_parts(parts, graphql);
 
-            Ok(crate::SubgraphResponse::new_from_response(resp, context))
+            Ok(SubgraphResponse::new_from_response(resp, context))
         })
     }
 }
@@ -299,67 +301,28 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
     }
 }
 
-pub(crate) trait SubgraphServiceFactory: Clone + Send + Sync + 'static {
-    type SubgraphService: Service<
-            crate::SubgraphRequest,
-            Response = crate::SubgraphResponse,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send
-        + 'static;
-    type Future: Send + 'static;
-
-    fn create(&self, name: &str) -> Option<Self::SubgraphService>;
-}
-
 #[derive(Clone)]
-pub(crate) struct SubgraphCreator {
+pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
 
     pub(crate) plugins: Arc<Plugins>,
 }
 
-impl SubgraphCreator {
+impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
     ) -> Self {
-        SubgraphCreator {
+        SubgraphServiceFactory {
             services: Arc::new(services.into_iter().collect()),
             plugins,
         }
     }
-}
 
-/// make new instances of the subgraph service
-///
-/// there can be multiple instances of that service executing at any given time
-pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
-    fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
-}
-
-impl<S> MakeSubgraphService for S
-where
-    S: Service<crate::SubgraphRequest, Response = crate::SubgraphResponse, Error = BoxError>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-    <S as Service<crate::SubgraphRequest>>::Future: Send,
-{
-    fn make(&self) -> BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> {
-        self.clone().boxed()
-    }
-}
-
-impl SubgraphServiceFactory for SubgraphCreator {
-    type SubgraphService = BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError>;
-    type Future =
-        <BoxService<crate::SubgraphRequest, crate::SubgraphResponse, BoxError> as Service<
-            crate::SubgraphRequest,
-        >>::Future;
-
-    fn create(&self, name: &str) -> Option<Self::SubgraphService> {
+    pub(crate) fn create(
+        &self,
+        name: &str,
+    ) -> Option<BoxService<SubgraphRequest, SubgraphResponse, BoxError>> {
         self.services.get(name).map(|service| {
             let service = service.make();
             self.plugins
@@ -367,6 +330,27 @@ impl SubgraphServiceFactory for SubgraphCreator {
                 .rev()
                 .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
         })
+    }
+}
+
+/// make new instances of the subgraph service
+///
+/// there can be multiple instances of that service executing at any given time
+pub(crate) trait MakeSubgraphService: Send + Sync + 'static {
+    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError>;
+}
+
+impl<S> MakeSubgraphService for S
+where
+    S: Service<SubgraphRequest, Response = SubgraphResponse, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <S as Service<SubgraphRequest>>::Future: Send,
+{
+    fn make(&self) -> BoxService<SubgraphRequest, SubgraphResponse, BoxError> {
+        self.clone().boxed()
     }
 }
 
@@ -386,6 +370,7 @@ mod tests {
     use serde_json_bytes::Value;
     use tower::service_fn;
     use tower::ServiceExt;
+    use SubgraphRequest;
 
     use super::*;
     use crate::graphql::Error;
@@ -393,7 +378,6 @@ mod tests {
     use crate::graphql::Response;
     use crate::query_planner::fetch::OperationKind;
     use crate::Context;
-    use crate::SubgraphRequest;
 
     // starts a local server emulating a subgraph returning status code 400
     async fn emulate_subgraph_bad_request(socket_addr: SocketAddr) {

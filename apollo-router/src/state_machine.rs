@@ -25,7 +25,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
-use crate::Schema;
+use crate::spec::Schema;
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[derive(derivative::Derivative)]
@@ -647,7 +647,7 @@ mod tests {
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
-                schema: Arc<crate::Schema>,
+                schema: Arc<Schema>,
                 previous_router: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;

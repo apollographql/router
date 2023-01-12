@@ -54,15 +54,17 @@ pub(crate) struct MetricsAttributesConf {
     pub(crate) subgraph: Option<SubgraphAttributesConf>,
 }
 
+/// Configuration to add custom attributes/labels on metrics to subgraphs
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphAttributesConf {
-    // Apply to all subgraphs
+    /// Attributes for all subgraphs
     pub(crate) all: Option<AttributesForwardConf>,
-    // Apply to specific subgraph
+    /// Attributes per subgraph
     pub(crate) subgraphs: Option<HashMap<String, AttributesForwardConf>>,
 }
 
+/// Configuration to add custom attributes/labels on metrics to subgraphs
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AttributesForwardConf {
@@ -83,10 +85,13 @@ pub(crate) struct AttributesForwardConf {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to insert custom attributes/labels in metrics
 pub(crate) struct Insert {
+    /// The name of the attribute to insert
     pub(crate) name: String,
+    /// The value of the attribute to insert
     pub(crate) value: String,
 }
 
+/// Configuration to forward from headers/body
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Forward {
@@ -106,22 +111,33 @@ pub(crate) struct ErrorsForward {
     pub(crate) extensions: Option<Vec<BodyForward>>,
 }
 
+schemar_fn!(
+    forward_header_matching,
+    String,
+    "Using a regex on the header name"
+);
+
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Configuration to forward header values in metric labels
 pub(crate) enum HeaderForward {
-    /// Using a named header
+    /// Match via header name
     Named {
-        #[schemars(schema_with = "string_schema")]
+        /// The name of the header
+        #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
+        /// The optional output name
         rename: Option<String>,
+        /// The optional default value
         default: Option<String>,
     },
-    /// Using a regex on the header name
+
+    /// Match via rgex
     Matching {
-        #[schemars(schema_with = "string_schema")]
+        /// Using a regex on the header name
+        #[schemars(schema_with = "forward_header_matching")]
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,
     },
@@ -131,10 +147,13 @@ pub(crate) enum HeaderForward {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
-    #[schemars(schema_with = "string_schema")]
+    /// The path in the body
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_json_query")]
     pub(crate) path: JSONQuery,
+    /// The name of the attribute
     pub(crate) name: String,
+    /// The optional default value
     pub(crate) default: Option<String>,
 }
 
@@ -142,8 +161,11 @@ pub(crate) struct BodyForward {
 #[serde(deny_unknown_fields)]
 /// Configuration to forward context values in metric attributes/labels
 pub(crate) struct ContextForward {
+    /// The name of the value in the context
     pub(crate) named: String,
+    /// The optional output name
     pub(crate) rename: Option<String>,
+    /// The optional default value
     pub(crate) default: Option<String>,
 }
 
@@ -449,10 +471,6 @@ impl AttributesForwardConf {
             .map(|e| e.get_attributes_from_error(err))
             .unwrap_or_default()
     }
-}
-
-fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    String::json_schema(gen)
 }
 
 #[derive(Default)]

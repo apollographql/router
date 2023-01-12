@@ -2,7 +2,6 @@
 
 use std::env;
 use std::ffi::OsStr;
-use std::ffi::OsString;
 use std::fmt;
 use std::fmt::Debug;
 use std::path::PathBuf;
@@ -265,6 +264,10 @@ pub(crate) struct Opt {
     #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_poll_interval: Duration,
 
+    /// Disable sending anonymous usage information to Apollo.
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED")]
+    anonymous_telemetry_disabled: bool,
+
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
     #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_timeout: Duration,
@@ -474,11 +477,10 @@ impl Executable {
             },
         };
 
-        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
-        let apollo_telemetry_msg = if is_telemetry_disabled {
-            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {
+            "anonymous usage data was disabled".to_string()
         } else {
-            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
+            "anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info".to_string()
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
@@ -610,14 +612,12 @@ fn copy_args_to_env() {
     let matches = Opt::command().get_matches();
     Opt::command().get_arguments().for_each(|a| {
         if let Some(env) = a.get_env() {
-            if let Ok(Some(value)) = matches.try_get_one::<PathBuf>(a.get_id().as_str()) {
-                env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id().as_str()) {
-                env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id().as_str()) {
-                env::set_var(env, value.to_string());
-            } else if let Ok(Some(value)) = matches.try_get_one::<OsString>(a.get_id().as_str()) {
-                env::set_var(env, value);
+            if let Some(raw) = matches
+                .get_raw(a.get_id().as_str())
+                .unwrap_or_default()
+                .next()
+            {
+                env::set_var(env, raw);
             }
         }
     });

@@ -14,15 +14,11 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::Arc;
 
-use cors::*;
 use derivative::Derivative;
 use displaydoc::Display;
-use expansion::*;
-pub(crate) use experimental::print_all_experimental_conf;
 use itertools::Itertools;
-pub(crate) use schema::generate_config_schema;
-pub(crate) use schema::generate_upgrade;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -35,6 +31,11 @@ use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
 
+use self::cors::Cors;
+use self::expansion::Expansion;
+pub(crate) use self::experimental::print_all_experimental_conf;
+pub(crate) use self::schema::generate_config_schema;
+pub(crate) use self::schema::generate_upgrade;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
@@ -77,22 +78,31 @@ pub enum ConfigurationError {
 #[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
+    /// The raw configuration string.
+    #[serde(skip)]
+    pub(crate) raw_yaml: Arc<String>,
+
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
 
+    /// Healthcheck configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
 
+    /// Sandbox configuration
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
+    /// Homepage configuration
     #[serde(default)]
     pub(crate) homepage: Homepage,
 
+    /// Configuration for the supergraph
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
+
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -104,7 +114,7 @@ pub struct Configuration {
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
     #[serde(flatten)]
-    apollo_plugins: ApolloPlugins,
+    pub(crate) apollo_plugins: ApolloPlugins,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -167,6 +177,7 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
+        raw_yaml: Option<String>,
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -178,6 +189,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
+            raw_yaml: Arc::new(raw_yaml.unwrap_or_default()),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -294,6 +306,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
+            raw_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
@@ -471,8 +484,9 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
+    /// Set to false to disable defer support
     #[serde(default = "default_defer_support")]
-    pub(crate) preview_defer_support: bool,
+    pub(crate) defer_support: bool,
 
     /// Configures automatic persisted queries
     #[serde(default)]
@@ -494,7 +508,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
-        preview_defer_support: Option<bool>,
+        defer_support: Option<bool>,
         apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
@@ -502,7 +516,7 @@ impl Supergraph {
             listen: listen.unwrap_or_else(default_graphql_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
             apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
@@ -517,7 +531,7 @@ impl Supergraph {
         listen: Option<ListenAddr>,
         path: Option<String>,
         introspection: Option<bool>,
-        preview_defer_support: Option<bool>,
+        defer_support: Option<bool>,
         apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
@@ -525,7 +539,7 @@ impl Supergraph {
             listen: listen.unwrap_or_else(test_listen),
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
-            preview_defer_support: preview_defer_support.unwrap_or_else(default_defer_support),
+            defer_support: defer_support.unwrap_or_else(default_defer_support),
             apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
@@ -538,15 +552,19 @@ impl Default for Supergraph {
     }
 }
 
+/// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
 }
 
+/// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
     /// Warm up the cache on reloads by running the query plan over
     /// a list of the most used queries
@@ -555,9 +573,9 @@ pub(crate) struct QueryPlanning {
     pub(crate) warmed_up_queries: usize,
 }
 
+/// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
@@ -595,6 +613,7 @@ pub(crate) struct RedisCache {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
+    /// Set to true to enable sandbox
     #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
@@ -634,6 +653,7 @@ impl Default for Sandbox {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Homepage {
+    /// Set to false to disable the homepage
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -678,6 +698,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
+    /// Set to false to disable the healthcheck endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }

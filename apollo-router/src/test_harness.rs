@@ -21,7 +21,7 @@ use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::SupergraphCreator;
-use crate::Schema;
+use crate::spec::Schema;
 
 #[cfg(test)]
 pub(crate) mod http_client;

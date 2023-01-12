@@ -4,7 +4,14 @@ use apollo_parser::ast;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::*;
+use crate::spec::parse_include;
+use crate::spec::parse_skip;
+use crate::spec::FieldType;
+use crate::spec::Include;
+use crate::spec::Schema;
+use crate::spec::Selection;
+use crate::spec::Skip;
+use crate::spec::SpecError;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub(crate) struct Fragments {

@@ -75,8 +75,8 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
+    use crate::services::SupergraphRequest;
     use crate::Context;
-    use crate::SupergraphRequest;
     use crate::TestHarness;
 
     #[tokio::test]

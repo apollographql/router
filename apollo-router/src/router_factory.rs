@@ -25,11 +25,11 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::transport;
+use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
+use crate::spec::Schema;
 use crate::ListenAddr;
-use crate::PluggableSupergraphServiceBuilder;
-use crate::Schema;
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -115,7 +115,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<crate::Schema>,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError>;
@@ -412,7 +412,7 @@ mod test {
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
-    use crate::Schema;
+    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -430,8 +430,10 @@ mod test {
     #[derive(Debug)]
     struct AlwaysStartsAndStopsPlugin {}
 
+    /// Configuration for the test plugin
     #[derive(Debug, Default, Deserialize, JsonSchema)]
     struct Conf {
+        /// The name of the test
         name: String,
     }
 

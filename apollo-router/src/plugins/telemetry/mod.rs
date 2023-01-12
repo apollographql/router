@@ -93,17 +93,17 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::subgraph::Request;
+use crate::services::subgraph::Response;
 use crate::services::supergraph;
-use crate::subgraph::Request;
-use crate::subgraph::Response;
+use crate::services::ExecutionRequest;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
-use crate::ExecutionRequest;
 use crate::ListenAddr;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
@@ -1355,8 +1355,8 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {

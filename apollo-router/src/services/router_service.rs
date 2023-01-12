@@ -47,13 +47,13 @@ use crate::graphql;
 use crate::plugin::test::MockSupergraphService;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
-use crate::RouterRequest;
-use crate::RouterResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
