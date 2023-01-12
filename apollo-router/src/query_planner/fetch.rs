@@ -22,7 +22,6 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::services::subgraph_service::SubgraphServiceFactory;
 use crate::services::SubgraphRequest;
 use crate::spec::Schema;
 
@@ -188,15 +187,12 @@ impl Variables {
 
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a, SF>(
+    pub(crate) async fn fetch_node<'a>(
         &'a self,
-        parameters: &'a ExecutionParameters<'a, SF>,
+        parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
-    ) -> Result<(Value, Vec<Error>), FetchError>
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> Result<(Value, Vec<Error>), FetchError> {
         let FetchNode {
             operation,
             operation_kind,

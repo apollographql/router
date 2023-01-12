@@ -25,7 +25,16 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
+# [1.8.1] (unreleased) - 2022-mm-dd
+
 ## 🛠 Maintenance
+
+### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
+
+Building the execution and subgraph services had to go through a factory trait before, which is not
+needed anymore since there is only one useful implementation.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
 
 ### Optimize header propagation plugin's regex matching ([PR #2391](https://github.com/apollographql/router/pull/2389))
 
