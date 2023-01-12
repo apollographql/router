@@ -98,7 +98,7 @@ mod forbid_http_get_mutations_tests {
             Default::default(),
         ))
         .await
-        .expect("couldnt' create forbid mutations plugin")
+        .expect("couldn't create forbid_mutations plugin")
         .execution_service(mock_service.boxed());
 
         let request = create_request(Method::GET, OperationKind::Query);
@@ -125,7 +125,7 @@ mod forbid_http_get_mutations_tests {
             Default::default(),
         ))
         .await
-        .expect("couldnt' create forbid mutations plugin")
+        .expect("couldn't create forbid_mutations plugin")
         .execution_service(MockExecutionService::new().boxed());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
@@ -149,7 +149,7 @@ mod forbid_http_get_mutations_tests {
             Default::default(),
         ))
         .await
-        .expect("couldnt' create forbid mutations plugin")
+        .expect("couldn't create forbid_mutations plugin")
         .execution_service(mock_service.boxed());
 
         let request = create_request(Method::GET, OperationKind::Mutation);
