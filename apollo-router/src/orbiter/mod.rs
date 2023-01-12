@@ -197,7 +197,7 @@ fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
 }
 
 async fn send(body: UsageReport) -> Result<String, BoxError> {
-    tracing::debug!("anonymous usage: {}", serde_json::to_string_pretty(&body)?);
+    tracing::debug!("transmitting anonymous analytics: {}", serde_json::to_string_pretty(&body)?);
 
     #[cfg(not(test))]
     let url = "https://router.apollo.dev/telemetry";
