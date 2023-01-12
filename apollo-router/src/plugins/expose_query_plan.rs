@@ -29,20 +29,19 @@ struct ExposeQueryPlan {
 
 /// Expose query plan
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, untagged)]
-enum Bool {
+#[serde(deny_unknown_fields)]
+struct ExposeQueryPlanConfig(
     /// Enabled
-    Value(bool),
-}
+    bool,
+);
 
 #[async_trait::async_trait]
 impl Plugin for ExposeQueryPlan {
-    type Config = Bool;
+    type Config = ExposeQueryPlanConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let Bool::Value(enabled) = init.config;
         Ok(ExposeQueryPlan {
-            enabled: enabled
+            enabled: init.config.0
                 || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true"),
         })
     }
