@@ -20,7 +20,6 @@ use tower::BoxError;
 use uuid::Uuid;
 
 use crate::configuration::generate_config_schema;
-
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
