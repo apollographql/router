@@ -23,7 +23,7 @@ use crate::*;
 /// A GraphQL schema.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Schema {
-    pub(crate) string: Arc<String>,
+    pub(crate) raw_sdl: Arc<String>,
     subtype_map: HashMap<String, HashSet<String>>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
@@ -455,7 +455,7 @@ impl Schema {
 
             Ok(Schema {
                 subtype_map,
-                string: Arc::new(schema.to_owned()),
+                raw_sdl: Arc::new(schema.to_owned()),
                 subgraphs,
                 object_types,
                 input_types,
@@ -473,7 +473,7 @@ impl Schema {
 impl Schema {
     /// Extracts a string containing the entire [`Schema`].
     pub(crate) fn as_string(&self) -> &Arc<String> {
-        &self.string
+        &self.raw_sdl
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
