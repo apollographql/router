@@ -11,29 +11,37 @@ expression: "&schema"
     "authentication": {
       "type": "object",
       "required": [
-        "jwt"
+        "experimental"
       ],
       "properties": {
-        "jwt": {
+        "experimental": {
           "type": "object",
           "required": [
-            "jwks_url"
+            "jwt"
           ],
           "properties": {
-            "cooldown": {
-              "default": null,
-              "type": "string"
-            },
-            "header_name": {
-              "default": "authorization",
-              "type": "string"
-            },
-            "header_prefix": {
-              "default": "Bearer",
-              "type": "string"
-            },
-            "jwks_url": {
-              "type": "string"
+            "jwt": {
+              "type": "object",
+              "required": [
+                "jwks_url"
+              ],
+              "properties": {
+                "cooldown": {
+                  "default": null,
+                  "type": "string"
+                },
+                "header_name": {
+                  "default": "authorization",
+                  "type": "string"
+                },
+                "header_prefix": {
+                  "default": "Bearer",
+                  "type": "string"
+                },
+                "jwks_url": {
+                  "type": "string"
+                }
+              }
             }
           }
         }
