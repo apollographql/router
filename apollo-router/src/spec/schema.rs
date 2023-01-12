@@ -5,6 +5,10 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_compiler::hir;
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::AstDatabase;
+use apollo_compiler::HirDatabase;
 use apollo_parser::ast;
 use http::Uri;
 use itertools::Itertools;
@@ -17,6 +21,7 @@ use crate::error::SchemaError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
+use crate::spec::query::parse_hir_value;
 use crate::spec::query::parse_value;
 use crate::spec::FieldType;
 use crate::spec::SpecError;
@@ -25,7 +30,7 @@ use crate::Configuration;
 /// A GraphQL schema.
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
-    subtype_map: HashMap<String, HashSet<String>>,
+    subtype_map: Arc<HashMap<String, HashSet<String>>>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
@@ -37,7 +42,7 @@ pub(crate) struct Schema {
     root_operations: HashMap<OperationKind, String>,
 }
 
-/// YAML-like representation, more amenable to diffing
+/// YAML-like representation with sorted hashmap/sets, more amenable to diffing
 impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         fn sorted_map<V: std::fmt::Debug>(
@@ -128,6 +133,13 @@ impl std::fmt::Debug for Schema {
     }
 }
 
+fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
+    let s = api_schema::api_schema(schema)
+        .map_err(|e| SchemaError::Api(e.to_string()))?
+        .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
+    Ok(format!("{}\n", s))
+}
+
 impl Schema {
     pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
         Self::parse_with_ast(s, configuration)
@@ -135,21 +147,157 @@ impl Schema {
 
     pub(crate) fn parse_with_hir(
         s: &str,
-        _configuration: &Configuration,
+        configuration: &Configuration,
     ) -> Result<Self, SchemaError> {
-        Ok(Schema {
-            string: Arc::new(s.into()),
-            subtype_map: Default::default(),
-            subgraphs: Default::default(),
-            object_types: Default::default(),
-            interfaces: Default::default(),
-            input_types: Default::default(),
-            custom_scalars: Default::default(),
-            enums: Default::default(),
-            api_schema: Default::default(),
-            schema_id: Default::default(),
-            root_operations: Default::default(),
-        })
+        let mut schema = parse(s, configuration)?;
+        schema.api_schema = Some(Box::new(parse(&make_api_schema(s)?, configuration)?));
+        return Ok(schema);
+
+        fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
+            let mut compiler = ApolloCompiler::new();
+            compiler.create_schema(
+                include_str!("introspection_types.graphql"),
+                "introspection_types.graphql",
+            );
+            let id = compiler.create_schema(schema, "schema.graphql");
+
+            let ast = compiler.db.ast(id);
+
+            // Trace log recursion limit data
+            let recursion_limit = ast.recursion_limit();
+            tracing::trace!(?recursion_limit, "recursion limit data");
+
+            // TODO: run full compiler-based validation instead?
+            let errors = ast.errors().cloned().collect::<Vec<_>>();
+            if !errors.is_empty() {
+                let errors = ParseErrors {
+                    raw_schema: schema.to_string(),
+                    errors,
+                };
+                errors.print();
+                return Err(SchemaError::Parse(errors));
+            }
+
+            fn as_string(value: &hir::Value) -> Option<&String> {
+                if let hir::Value::String(string) = value {
+                    Some(string)
+                } else {
+                    None
+                }
+            }
+
+            let mut subgraphs = HashMap::new();
+            // TODO: error if not found?
+            if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
+                for (name, url) in join_enum
+                    .enum_values_definition()
+                    .iter()
+                    .filter_map(|value| {
+                        let join_directive = value
+                            .directives()
+                            .iter()
+                            .find(|directive| directive.name() == "join__graph")?;
+                        let name = as_string(join_directive.argument_by_name("name")?)?;
+                        let url = as_string(join_directive.argument_by_name("url")?)?;
+                        Some((name, url))
+                    })
+                {
+                    if url.is_empty() {
+                        return Err(SchemaError::MissingSubgraphUrl(name.clone()));
+                    }
+                    let url = Uri::from_str(url)
+                        .map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
+                    if subgraphs.insert(name.clone(), url).is_some() {
+                        return Err(SchemaError::Api(format!(
+                            "must not have several subgraphs with same name '{}'",
+                            name
+                        )));
+                    }
+                }
+            }
+
+            let object_types: HashMap<_, _> = compiler
+                .db
+                .object_types()
+                .iter()
+                .map(|(name, def)| (name.clone(), (&**def).into()))
+                .collect();
+
+            let interfaces: HashMap<_, _> = compiler
+                .db
+                .interfaces()
+                .iter()
+                .map(|(name, def)| (name.clone(), (&**def).into()))
+                .collect();
+
+            let input_types: HashMap<_, _> = compiler
+                .db
+                .input_objects()
+                .iter()
+                .map(|(name, def)| (name.clone(), (&**def).into()))
+                .collect();
+
+            let enums = compiler
+                .db
+                .enums()
+                .iter()
+                .map(|(name, def)| {
+                    let values = def
+                        .enum_values_definition()
+                        .iter()
+                        .map(|value| value.enum_value().to_owned())
+                        .collect();
+                    (name.clone(), values)
+                })
+                .collect();
+
+            let root_operations = compiler
+                .db
+                .schema()
+                .root_operation_type_definition()
+                .iter()
+                .filter(|def| def.loc().is_some()) // exclude implict operations
+                .map(|def| {
+                    (
+                        def.operation_type().into(),
+                        if let hir::Type::Named { name, .. } = def.named_type() {
+                            name.clone()
+                        } else {
+                            // FIXME: hir::RootOperationTypeDefinition should contain
+                            // the name directly, not a `Type` enum value which happens to always
+                            // be the `Named` variant.
+                            unreachable!()
+                        },
+                    )
+                })
+                .collect();
+
+            let custom_scalars = compiler
+                .db
+                .scalars()
+                .iter()
+                .filter(|(_name, def)| !def.is_built_in())
+                .map(|(name, _def)| name.clone())
+                .collect();
+
+            let mut hasher = Sha256::new();
+            hasher.update(schema.as_bytes());
+            let schema_id = Some(format!("{:x}", hasher.finalize()));
+
+            Ok(Schema {
+                raw_sdl: Arc::new(schema.into()),
+                subtype_map: compiler.db.subtype_map(),
+                subgraphs,
+                object_types,
+                interfaces,
+                input_types,
+                custom_scalars,
+                enums,
+                api_schema: None,
+                schema_id,
+                root_operations,
+            })
+        }
     }
 
     pub(crate) fn parse_with_ast(
@@ -157,21 +305,8 @@ impl Schema {
         configuration: &Configuration,
     ) -> Result<Self, SchemaError> {
         let mut schema = parse(s, configuration)?;
-        schema.api_schema = Some(Box::new(api_schema(s, configuration)?));
+        schema.api_schema = Some(Box::new(parse(&make_api_schema(s)?, configuration)?));
         return Ok(schema);
-
-        fn api_schema(schema: &str, configuration: &Configuration) -> Result<Schema, SchemaError> {
-            let api_schema = format!(
-                "{}\n",
-                api_schema::api_schema(schema)
-                    .map_err(|e| SchemaError::Api(e.to_string()))?
-                    .map_err(|e| {
-                        SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", "))
-                    })?
-            );
-
-            parse(&api_schema, configuration)
-        }
 
         fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
             let schema_with_introspection = Schema::with_introspection(schema);
@@ -572,7 +707,7 @@ impl Schema {
             let schema_id = Some(format!("{:x}", hasher.finalize()));
 
             Ok(Schema {
-                subtype_map,
+                subtype_map: Arc::new(subtype_map),
                 raw_sdl: Arc::new(schema.to_owned()),
                 subgraphs,
                 object_types,
@@ -633,7 +768,7 @@ impl Schema {
 pub(crate) struct InvalidObject;
 
 macro_rules! implement_object_type_or_interface {
-    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
+    ($visibility:vis $name:ident => $hir_ty:ty, $( $ast_ty:ty ),+ $(,)?) => {
         #[derive(Debug, Clone)]
         $visibility struct $name {
             pub(crate) name: String,
@@ -644,6 +779,34 @@ macro_rules! implement_object_type_or_interface {
         impl $name {
             pub(crate) fn field(&self, name: &str) -> Option<&FieldType> {
                 self.fields.get(name)
+            }
+        }
+
+        impl From<&'_ $hir_ty> for $name {
+            fn from(def: &'_ $hir_ty) -> Self {
+                Self {
+                    name: def.name().to_owned(),
+                    fields: def
+                        .fields_definition()
+                        .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.fields_definition()),
+                        )
+                        .map(|field| (field.name().to_owned(), field.ty().into()))
+                        .collect(),
+                    interfaces: def
+                        .implements_interfaces()
+                        .iter()
+                        .chain(
+                            def.extensions()
+                                .iter()
+                                .flat_map(|ext| ext.implements_interfaces()),
+                        )
+                        .map(|imp| imp.interface().to_owned())
+                        .collect(),
+                }
             }
         }
 
@@ -719,6 +882,7 @@ macro_rules! implement_object_type_or_interface {
 // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
 implement_object_type_or_interface!(
     pub(crate) ObjectType =>
+    hir::ObjectTypeDefinition,
     ast::ObjectTypeDefinition,
     ast::ObjectTypeExtension,
 );
@@ -726,6 +890,7 @@ implement_object_type_or_interface!(
 // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
 implement_object_type_or_interface!(
     pub(crate) Interface =>
+    hir::InterfaceTypeDefinition,
     ast::InterfaceTypeDefinition,
     ast::InterfaceTypeExtension,
 );
@@ -814,6 +979,32 @@ implement_input_object_type_or_interface!(
     ast::InputObjectTypeDefinition,
     ast::InputObjectTypeExtension,
 );
+
+impl From<&'_ hir::InputObjectTypeDefinition> for InputObjectType {
+    fn from(def: &'_ hir::InputObjectTypeDefinition) -> Self {
+        InputObjectType {
+            name: def.name().to_owned(),
+            fields: def
+                .input_fields_definition()
+                .iter()
+                .chain(
+                    def.extensions()
+                        .iter()
+                        .flat_map(|ext| ext.input_fields_definition()),
+                )
+                .map(|field| {
+                    (
+                        field.name().to_owned(),
+                        (
+                            field.ty().into(),
+                            field.default_value().and_then(parse_hir_value),
+                        ),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

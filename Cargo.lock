@@ -174,6 +174,7 @@ dependencies = [
  "access-json",
  "ansi_term",
  "anyhow",
+ "apollo-compiler",
  "apollo-encoder 0.4.0",
  "apollo-parser 0.4.1",
  "arc-swap",
