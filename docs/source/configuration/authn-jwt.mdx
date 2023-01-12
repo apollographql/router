@@ -36,8 +36,9 @@ The plugin is configured like other plugins. The typical configuration would loo
 
 ```yaml title="typical.yaml"
 authentication:
-  jwt:
-    jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
 ```
 
 Note: the jwks_url could be a `file://` url.
@@ -50,11 +51,12 @@ A more completely specified configuration may look like this. This is configurat
 
 ```yaml title="complete.yaml"
 authentication:
-  jwt:
-    jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-    header_name: Different
-    header_prefix: Prefix
-    cooldown: 30s
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+      header_name: Different
+      header_prefix: Prefix
+      cooldown: 30s
 ```
 
 There are some considerations for each of these parameters.
