@@ -61,7 +61,7 @@ schemar_fn!(remove_named, String, "Remove a header given a header name");
 schemar_fn!(
     remove_matching,
     String,
-    "Remove a header given a regex matching header name"
+    "Remove a header given a regex matching against the header name"
 );
 
 #[derive(Clone, JsonSchema, Deserialize)]
