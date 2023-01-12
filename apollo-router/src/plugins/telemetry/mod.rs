@@ -50,18 +50,17 @@ use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_opentelemetry::PreSampledTracer;
-use tracing_subscriber::fmt::format::Format;
-use tracing_subscriber::layer::Layered;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
-use tracing_subscriber::Registry;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
@@ -77,7 +76,6 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
-use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
@@ -142,7 +140,6 @@ pub struct Telemetry {
     field_level_instrumentation_ratio: f64,
 
     tracer_provider: Mutex<Option<opentelemetry::sdk::trace::TracerProvider>>,
-    meter_provider: Mutex<Option<AggregateMeterProvider>>,
 }
 
 #[derive(Debug)]
@@ -198,7 +195,6 @@ impl Plugin for Telemetry {
             apollo_metrics_sender: meter_provider_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
             tracer_provider: Mutex::new(Some(Self::create_tracer_provider(&config)?)),
-            meter_provider: Mutex::new(Some(meter_provider_builder.meter_provider())),
             config: Arc::new(config),
         })
     }
@@ -233,20 +229,9 @@ impl Plugin for Telemetry {
                 .expect("otel error handler lock poisoned, fatal");
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
-
-            // Set the meter provider
-            // opentelemetry::global::set_meter_provider(
-            //     self.meter_provider
-            //         .lock()
-            //         .expect("mutex poisoned")
-            //         .take()
-            //         .expect("must have new meter_provider"),
-            // );
-            // handle
-            // .reload(tracing_opentelemetry::layer().with_tracer(tracer).boxed())
-            // .expect("otel layer reload must succeed");
         }
         if let Some(handle) = METRICS_LAYER_HANDLE.get() {
+            // Global meter provider is already set when calling `create_metrics_exporters`
             handle
                 .reload(MetricsLayer::default())
                 .expect("metrics layer reload must succeed");
@@ -587,23 +572,28 @@ impl Telemetry {
         Ok(builder)
     }
 
+    #[allow(clippy::type_complexity)]
     fn create_fmt_layer(
         config: &config::Conf,
     ) -> Box<
-        dyn Layer<
-                Layered<
-                    tracing_subscriber::reload::Layer<
-                        Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-                        Layered<EnvFilter, Registry>,
-                    >,
-                    Layered<EnvFilter, Registry>,
+        (dyn Layer<
+            tracing_subscriber::layer::Layered<
+                OpenTelemetryLayer<
+                    tracing_subscriber::layer::Layered<EnvFilter, tracing_subscriber::Registry>,
+                    HotTracer<opentelemetry::sdk::trace::Tracer>,
                 >,
-            > + Send
-            + Sync,
+                tracing_subscriber::layer::Layered<EnvFilter, tracing_subscriber::Registry>,
+            >,
+        > + std::marker::Send
+             + std::marker::Sync
+             + 'static),
     > {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
+                .with_file(logging.display_filename)
+                .with_line_number(logging.display_line_number)
+                .with_target(logging.display_target)
                 .event_format(FilteringFormatter::new(
                     TextFormatter::new(),
                     filter_metric_events,
@@ -611,17 +601,19 @@ impl Telemetry {
                 .boxed(),
             config::LoggingFormat::Json => tracing_subscriber::fmt::layer()
                 .json()
-                .event_format(FilteringFormatter::new(
-                    Format::default()
-                        .json()
-                        .with_current_span(true)
-                        .with_span_list(true)
-                        .flatten_event(true)
-                        .with_target(logging.display_target)
-                        .with_line_number(logging.display_line_number)
-                        .with_file(logging.display_filename),
-                    filter_metric_events,
-                ))
+                .with_file(logging.display_filename)
+                .with_line_number(logging.display_line_number)
+                .with_target(logging.display_target)
+                .map_event_format(|e| {
+                    FilteringFormatter::new(
+                        e.json()
+                            .with_current_span(true)
+                            .with_span_list(true)
+                            .flatten_event(true),
+                        filter_metric_events,
+                    )
+                })
+                .map_fmt_fields(|_f| JsonFields::default())
                 .boxed(),
         };
         fmt
@@ -1812,7 +1804,7 @@ pub(crate) struct HotTracer<S> {
     parent: Arc<RwLock<S>>,
 }
 
-impl<S: Tracer + PreSampledTracer> PreSampledTracer for HotTracer<S> {
+impl<S: PreSampledTracer> PreSampledTracer for HotTracer<S> {
     fn sampled_context(
         &self,
         data: &mut tracing_opentelemetry::OtelData,

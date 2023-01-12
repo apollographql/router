@@ -146,13 +146,11 @@ async fn report(
     Extension(state): Extension<Arc<Mutex<Vec<Report>>>>,
     bytes: Bytes,
 ) -> Result<Json<()>, http::StatusCode> {
-    tracing::info!("received a report");
     let mut gz = GzDecoder::new(&*bytes);
     let mut buf = Vec::new();
     gz.read_to_end(&mut buf)
         .expect("could not decompress bytes");
     let report = Report::decode(&*buf).expect("could not deserialize report");
-    tracing::info!("report === {report:?}");
 
     state.lock().await.push(report);
     Ok(Json(()))
@@ -167,7 +165,6 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
             .expect("traces and stats required")
             .trace
             .is_empty();
-        dbg!(r);
         r
     })
     .await

@@ -32,6 +32,7 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::EnvFilter;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -911,6 +912,7 @@ async fn setup_router_and_registry(
 ) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
     let _ = tracing_subscriber::registry()
+        .with(EnvFilter::from_default_env())
         .with(tracing_subscriber::fmt::layer().pretty())
         .try_init();
     let router = apollo_router::TestHarness::builder()
@@ -1050,6 +1052,7 @@ impl ValueExt for Value {
     }
 }
 
+#[allow(unused)]
 // Useful to redact request_id in snapshot because it's not determinist
 fn redact_dynamic() -> Redaction {
     insta::dynamic_redaction(|value, _path| {

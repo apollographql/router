@@ -17,13 +17,15 @@ use clap::Parser;
 use clap::Subcommand;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
+use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use url::ParseError;
 use url::Url;
@@ -33,9 +35,7 @@ use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
-use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::HotTracer;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -60,75 +60,48 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 pub(crate) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     HotTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
+#[allow(clippy::type_complexity)]
 pub(crate) static METRICS_LAYER_HANDLE: OnceCell<
-    tracing_subscriber::reload::Handle<
+    Handle<
         MetricsLayer,
         Layered<
             tracing_subscriber::reload::Layer<
                 Box<
                     dyn Layer<
                             Layered<
-                                tracing_subscriber::reload::Layer<
-                                    Box<
-                                        dyn Layer<Layered<EnvFilter, tracing_subscriber::Registry>>
-                                            + Send
-                                            + Sync,
-                                    >,
-                                    Layered<EnvFilter, Registry>,
-                                >,
+                                OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
                                 Layered<EnvFilter, Registry>,
                             >,
                         > + Send
                         + Sync,
                 >,
                 Layered<
-                    tracing_subscriber::reload::Layer<
-                        Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-                        Layered<EnvFilter, Registry>,
-                    >,
-                    Layered<EnvFilter, Registry>,
+                    OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
                     Layered<EnvFilter, Registry>,
                 >,
             >,
             Layered<
-                tracing_subscriber::reload::Layer<
-                    Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-                    Layered<EnvFilter, Registry>,
-                >,
-                Layered<EnvFilter, Registry>,
-                Layered<EnvFilter, Registry>,
-            >,
-            Layered<
-                tracing_subscriber::reload::Layer<
-                    Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-                    Layered<EnvFilter, Registry>,
-                >,
-                Layered<EnvFilter, Registry>,
+                OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
                 Layered<EnvFilter, Registry>,
             >,
         >,
     >,
 > = OnceCell::new();
 
+#[allow(clippy::type_complexity)]
 pub(crate) static FMT_LAYER_HANDLE: OnceCell<
     Handle<
         Box<
             dyn Layer<
                     Layered<
-                        tracing_subscriber::reload::Layer<
-                            Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-                            Layered<EnvFilter, Registry>,
-                        >,
+                        OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
                         Layered<EnvFilter, Registry>,
                     >,
                 > + Send
                 + Sync,
         >,
         Layered<
-            tracing_subscriber::reload::Layer<
-                Box<dyn Layer<Layered<EnvFilter, Registry>> + Send + Sync>,
-                Layered<EnvFilter, Registry>,
-            >,
+            OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
             Layered<EnvFilter, Registry>,
         >,
     >,
@@ -424,7 +397,7 @@ impl Executable {
         }
 
         copy_args_to_env();
-        init_tracing(&opt.log_level)?;
+        init_telemetry(&opt.log_level)?;
         setup_panic_handler();
 
         if opt.schema {
@@ -650,15 +623,11 @@ fn copy_args_to_env() {
     });
 }
 
-pub(crate) fn init_tracing(log_level: &str) -> Result<()> {
+pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = HotTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("a", None, None),
     );
-    let (opentelemetry_layer, opentelemetry_handle) = tracing_subscriber::reload::Layer::new(
-        tracing_opentelemetry::layer()
-            .with_tracer(hot_tracer.clone())
-            .boxed(),
-    );
+    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
@@ -681,6 +650,7 @@ pub(crate) fn init_tracing(log_level: &str) -> Result<()> {
     let (metrics_layer, metrics_handle) =
         tracing_subscriber::reload::Layer::new(MetricsLayer::default());
 
+    println!("Init subscriber");
     // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(log_level)?)

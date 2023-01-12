@@ -89,7 +89,7 @@ impl<'a> TestHarness<'a> {
     /// Specifies the logging level. Note that this function may not be called more than once.
     /// log_level is in RUST_LOG format.
     pub fn log_level(self, log_level: &'a str) -> Self {
-        crate::executable::init_tracing(log_level).expect("failed to setup logging");
+        crate::executable::init_telemetry(log_level).expect("failed to setup logging");
         self
     }
 

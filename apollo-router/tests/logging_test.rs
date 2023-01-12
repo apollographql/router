@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
@@ -10,10 +9,9 @@ use tracing::field;
 use tracing::Level;
 use tracing::Metadata;
 use tracing::Subscriber;
-use tracing_core::{dispatcher, Dispatch};
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_core::dispatcher;
+use tracing_core::Dispatch;
 use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::Registry;
 
 struct TestLogSubscriber {

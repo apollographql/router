@@ -1,12 +1,8 @@
-use std::collections::HashMap;
 use std::task::Context;
 use std::task::Poll;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
-use once_cell::sync::OnceCell;
 use opentelemetry::sdk::export::metrics::aggregation;
 use opentelemetry::sdk::metrics::controllers;
 use opentelemetry::sdk::metrics::processors;
@@ -28,8 +24,6 @@ use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::router_factory::Endpoint;
 use crate::services::router;
 use crate::ListenAddr;
-
-pub(crate) static PROMETHEUS_REGISTRY: OnceCell<prometheus::Registry> = OnceCell::new();
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -71,7 +65,6 @@ impl MetricsConfigurator for Config {
                 self.listen,
                 self.path
             );
-            let registry = PROMETHEUS_REGISTRY.get_or_init(prometheus::Registry::new);
             let controller = controllers::basic(
                 processors::factory(
                     selectors::simple::histogram([
@@ -89,24 +82,7 @@ impl MetricsConfigurator for Config {
                     .map(|(k, v)| KeyValue::new(k, v)),
             ))
             .build();
-            let desc = prometheus::core::Desc::new(
-                format!(
-                    "desc_{}",
-                    SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .expect("time went backwards")
-                        .as_millis()
-                ),
-                String::from("Unique collector desc"),
-                Vec::new(),
-                HashMap::new(),
-            )
-            .expect("prometheus desc cannot fail with these criterias");
-
-            let exporter = opentelemetry_prometheus::exporter(controller)
-                .with_registry(registry.clone())
-                .with_description(desc)
-                .try_init()?;
+            let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
 
             builder = builder.with_custom_endpoint(
                 self.listen.clone(),

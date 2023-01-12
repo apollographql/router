@@ -231,7 +231,7 @@ dependencies = [
  "opentelemetry-jaeger",
  "opentelemetry-otlp",
  "opentelemetry-prometheus",
- "opentelemetry-semantic-conventions 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
  "paste",
  "pin-project-lite",
@@ -3191,6 +3191,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry"
 version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69d6c3d7288a106c0a363e4b0e8d308058d56902adefb16f4936f417ffef086e"
 dependencies = [
  "opentelemetry_api",
  "opentelemetry_sdk",
@@ -3199,6 +3201,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry-datadog"
 version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "171770efa142d2a19455b7e985037f560b2e75461f822dd1688bfd83c14856f6"
 dependencies = [
  "async-trait",
  "futures-core",
@@ -3208,7 +3212,7 @@ dependencies = [
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",
- "opentelemetry-semantic-conventions 0.10.0",
+ "opentelemetry-semantic-conventions",
  "reqwest",
  "rmp",
  "thiserror",
@@ -3218,6 +3222,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry-http"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1edc79add46364183ece1a4542592ca593e6421c60807232f5b8f7a31703825d"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3229,6 +3235,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry-jaeger"
 version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e785d273968748578931e4dc3b4f5ec86b26e09d9e0d66b55adda7fce742f7a"
 dependencies = [
  "async-trait",
  "futures",
@@ -3238,7 +3246,7 @@ dependencies = [
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",
- "opentelemetry-semantic-conventions 0.10.0",
+ "opentelemetry-semantic-conventions",
  "reqwest",
  "thiserror",
  "thrift",
@@ -3268,6 +3276,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry-prometheus"
 version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06c3d833835a53cf91331d2cfb27e9121f5a95261f31f08a1f79ab31688b8da8"
 dependencies = [
  "opentelemetry",
  "prometheus",
@@ -3291,13 +3301,6 @@ dependencies = [
 [[package]]
 name = "opentelemetry-semantic-conventions"
 version = "0.10.0"
-dependencies = [
- "opentelemetry",
-]
-
-[[package]]
-name = "opentelemetry-semantic-conventions"
-version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b02e0230abb0ab6636d18e2ba8fa02903ea63772281340ccac18e0af3ec9eeb"
 dependencies = [
@@ -3307,6 +3310,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry-zipkin"
 version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9bd6a5d672fe50f682d801f6737a54a633834cf8c91be419c0c9cae8ac85bf4d"
 dependencies = [
  "async-trait",
  "futures-core",
@@ -3314,7 +3319,7 @@ dependencies = [
  "once_cell",
  "opentelemetry",
  "opentelemetry-http",
- "opentelemetry-semantic-conventions 0.10.0",
+ "opentelemetry-semantic-conventions",
  "reqwest",
  "serde",
  "serde_json",
@@ -3325,6 +3330,8 @@ dependencies = [
 [[package]]
 name = "opentelemetry_api"
 version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c24f96e21e7acc813c7a8394ee94978929db2bcc46cf6b5014fc612bf7760c22"
 dependencies = [
  "fnv",
  "futures-channel",
@@ -3334,12 +3341,13 @@ dependencies = [
  "once_cell",
  "pin-project-lite",
  "thiserror",
- "urlencoding",
 ]
 
 [[package]]
 name = "opentelemetry_sdk"
 version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ca41c4933371b61c2a2f214bf16931499af4ec90543604ec828f7a625c09113"
 dependencies = [
  "async-trait",
  "crossbeam-channel",
