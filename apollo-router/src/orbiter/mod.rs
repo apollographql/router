@@ -132,7 +132,7 @@ fn create_report(
     configuration: Arc<Configuration>,
     _schema: Arc<Schema>,
 ) -> Result<UsageReport, BoxError> {
-    let mut configuration: Value = serde_yaml::from_str(&configuration.string)
+    let mut configuration: Value = serde_yaml::from_str(&configuration.raw_yaml)
         .map_err(|_| BoxError::from("configuration must be parseable"))?;
     let os = get_os();
     let mut usage = HashMap::new();
@@ -351,7 +351,7 @@ mod test {
         let config_string = include_str!("testdata/redaction.router.yaml").to_string();
         let mut config: Configuration =
             serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.string = Arc::new(config_string);
+        config.raw_yaml = Arc::new(config_string);
         let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()))
             .expect("report must be created");
         insta::with_settings!({sort_maps => true}, {
@@ -369,7 +369,7 @@ mod test {
         let config_string = include_str!("testdata/redaction.router.yaml").to_string();
         let mut config: Configuration =
             serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.string = Arc::new("".to_string());
+        config.raw_yaml = Arc::new("".to_string());
         assert!(create_report(Arc::new(config), Arc::new(crate::spec::Schema::default())).is_err());
     }
 

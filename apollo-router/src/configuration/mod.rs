@@ -80,7 +80,7 @@ pub enum ConfigurationError {
 pub struct Configuration {
     /// The raw configuration string.
     #[serde(skip)]
-    pub(crate) string: Arc<String>,
+    pub(crate) raw_yaml: Arc<String>,
 
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
@@ -178,7 +178,7 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
-        string: Option<String>,
+        raw_yaml: Option<String>,
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -190,7 +190,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
-            string: Arc::new(string.unwrap_or_default()),
+            raw_yaml: Arc::new(raw_yaml.unwrap_or_default()),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -318,7 +318,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
-            string: Default::default(),
+            raw_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),

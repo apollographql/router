@@ -263,7 +263,7 @@ pub(crate) fn validate_yaml_configuration(
             ),
         });
     }
-    config.string = Arc::new(raw_yaml.to_string());
+    config.raw_yaml = Arc::new(raw_yaml.to_string());
     Ok(config)
 }
 
