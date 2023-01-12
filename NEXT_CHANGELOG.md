@@ -53,9 +53,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 ## 🚀 Features
 ### Configuration upgrades ([Issue #2124](https://github.com/apollographql/router/issues/2124))
 
-The Router will now send anonymous usage telemetry to Apollo that includes a subset of the information listed in the [privacy policy](https://www.apollographql.com/docs/router/privacy/)
-
-It includes information about the environment that the Router is running in, version of the router, the command line args, and configuration shape.
+Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
 Note that strings are output as `set` so that we do not leak confidential or sensitive information. 
 Boolean and numerics are output.
 
