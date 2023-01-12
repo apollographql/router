@@ -23,7 +23,6 @@ use crate::spec::SpecError;
 use crate::Configuration;
 
 /// A GraphQL schema.
-#[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     subtype_map: HashMap<String, HashSet<String>>,
@@ -38,8 +37,125 @@ pub(crate) struct Schema {
     root_operations: HashMap<OperationKind, String>,
 }
 
+/// YAML-like representation, more amenable to diffing
+impl std::fmt::Debug for Schema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn sorted_map<V: std::fmt::Debug>(
+            f: &mut std::fmt::Formatter<'_>,
+            indent: &str,
+            name: &str,
+            map: &HashMap<String, V>,
+        ) -> std::fmt::Result {
+            writeln!(f, "{indent}{name}:")?;
+            for (k, v) in map.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+                writeln!(f, "{indent}  {k:?}: {v:?}")?;
+            }
+            Ok(())
+        }
+
+        fn sorted_map_of_sets(
+            f: &mut std::fmt::Formatter<'_>,
+            name: &str,
+            map: &HashMap<String, HashSet<String>>,
+        ) -> std::fmt::Result {
+            writeln!(f, "  {name}:")?;
+            for (k, set) in map.iter().sorted_by_key(|&(k, _set)| k.clone()) {
+                writeln!(f, "    {k:?}:")?;
+                for v in set.iter().sorted() {
+                    writeln!(f, "      {v:?}")?;
+                }
+            }
+            Ok(())
+        }
+
+        // Make sure we consider all fields
+        let Schema {
+            raw_sdl,
+            subtype_map,
+            subgraphs,
+            object_types,
+            interfaces,
+            input_types,
+            custom_scalars,
+            enums,
+            api_schema,
+            schema_id,
+            root_operations,
+        } = self;
+        writeln!(f, "Schema:")?;
+        writeln!(f, "  raw_sdl: {raw_sdl:?}")?;
+        let root = root_operations
+            .iter()
+            .map(|(k, v)| (format!("{k:?}"), v))
+            .collect();
+        sorted_map(f, "  ", "root_operations", &root)?;
+        writeln!(f, "  object_types:")?;
+        for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+            let ObjectType {
+                name: _,
+                fields,
+                interfaces,
+            } = v;
+            writeln!(f, "    {k:?}:")?;
+            writeln!(f, "      interfaces: {interfaces:?}")?;
+            sorted_map(f, "      ", "fields", fields)?
+        }
+        writeln!(f, "  interfaces:")?;
+        for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+            let Interface {
+                name: _,
+                fields,
+                interfaces,
+            } = v;
+            writeln!(f, "    {k:?}:")?;
+            writeln!(f, "      interfaces: {interfaces:?}")?;
+            sorted_map(f, "      ", "fields", fields)?
+        }
+        writeln!(f, "  input_types:")?;
+        for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+            let InputObjectType { name: _, fields } = v;
+            writeln!(f, "    {k:?}:")?;
+            sorted_map(f, "      ", "fields", fields)?
+        }
+        let scalars = custom_scalars.iter().sorted().collect::<Vec<_>>();
+        writeln!(f, "  custom_scalars: {scalars:?}")?;
+        sorted_map_of_sets(f, "enums", enums)?;
+        sorted_map_of_sets(f, "subtype_map", subtype_map)?;
+        sorted_map(f, "  ", "subgraphs", subgraphs)?;
+        writeln!(f, "  schema_id: {schema_id:?}")?;
+        writeln!(f, "  api_schema: {api_schema:?}")?;
+        Ok(())
+    }
+}
+
 impl Schema {
     pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+        Self::parse_with_ast(s, configuration)
+    }
+
+    pub(crate) fn parse_with_hir(
+        s: &str,
+        _configuration: &Configuration,
+    ) -> Result<Self, SchemaError> {
+        Ok(Schema {
+            string: Arc::new(s.into()),
+            subtype_map: Default::default(),
+            subgraphs: Default::default(),
+            object_types: Default::default(),
+            interfaces: Default::default(),
+            input_types: Default::default(),
+            custom_scalars: Default::default(),
+            enums: Default::default(),
+            api_schema: Default::default(),
+            schema_id: Default::default(),
+            root_operations: Default::default(),
+        })
+    }
+
+    pub(crate) fn parse_with_ast(
+        s: &str,
+        configuration: &Configuration,
+    ) -> Result<Self, SchemaError> {
         let mut schema = parse(s, configuration)?;
         schema.api_schema = Some(Box::new(api_schema(s, configuration)?));
         return Ok(schema);
