@@ -2,8 +2,9 @@
 # NOTE: a file URL cannot contain a relative path, so you must
 # specify an absolute path to make this example work.
 authentication:
-  jwt:
-    jwks_url: file:///Users/garypen/dev/router/examples/jwt-claims/rhai/jwks.json
+  experimental:
+    jwt:
+      jwks_url: file:///Users/garypen/dev/router/examples/jwt-claims/rhai/jwks.json
 
 rhai:
   scripts: src

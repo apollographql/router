@@ -76,12 +76,19 @@ struct JWTConf {
     cooldown: Option<Duration>,
 }
 
+// This is temporary. It will be removed when the plugin is promoted
+// from experimental.
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+struct ExperimentalConf {
+    jwt: JWTConf,
+}
+
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    jwt: JWTConf,
+    experimental: ExperimentalConf,
 }
 
 fn default_header_name() -> String {
@@ -97,7 +104,7 @@ impl Plugin for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let url: Url = Url::from_str(&init.config.jwt.jwks_url)?;
+        let url: Url = Url::from_str(&init.config.experimental.jwt.jwks_url)?;
         let getter: Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
             Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
                 let fut = async {
@@ -131,7 +138,7 @@ impl Plugin for AuthenticationPlugin {
         let deduplicator = Deduplicate::with_capacity(getter, 1);
 
         Ok(AuthenticationPlugin {
-            configuration: init.config.jwt,
+            configuration: init.config.experimental.jwt,
             jwks: Arc::new(deduplicator),
             jwks_url: url,
         })
@@ -510,18 +517,22 @@ mod tests {
         let jwks_url = format!("file://{}", jwks_file.display());
         let mut config = serde_json::json!({
             "authentication": {
-                "jwt" : {
-                    "jwks_url": &jwks_url
+                "experimental" : {
+                    "jwt" : {
+                        "jwks_url": &jwks_url
+                    }
                 }
             }
         });
 
         if let Some(hn) = header_name {
-            config["authentication"]["jwt"]["header_name"] = serde_json::Value::String(hn);
+            config["authentication"]["experimental"]["jwt"]["header_name"] =
+                serde_json::Value::String(hn);
         }
 
         if let Some(hp) = header_prefix {
-            config["authentication"]["jwt"]["header_prefix"] = serde_json::Value::String(hp);
+            config["authentication"]["experimental"]["jwt"]["header_prefix"] =
+                serde_json::Value::String(hp);
         }
 
         crate::TestHarness::builder()
