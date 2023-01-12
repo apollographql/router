@@ -305,8 +305,23 @@ pub(super) fn serve_router_on_listen_addr(
                                 continue;
                             }
 
+                            // ignored errors, these should not happen with accept()
+                            std::io::ErrorKind::NotFound |
+                            std::io::ErrorKind::AddrInUse |
+                            std::io::ErrorKind::AddrNotAvailable |
+                            std::io::ErrorKind::BrokenPipe|
+                            std::io::ErrorKind::AlreadyExists |
+                            std::io::ErrorKind::InvalidData |
+                            std::io::ErrorKind::WriteZero |
+                            std::io::ErrorKind::Unsupported |
+                            std::io::ErrorKind::UnexpectedEof |
+                            std::io::ErrorKind::OutOfMemory => {
+                                continue;
+                            }
+
                             // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
-                            std::io::ErrorKind::Other => {
+                            // We match on _ because max open file errors fall under ErrorKind::Uncategorized
+                            _ => {
                                 match e.raw_os_error() {
                                     Some(libc::EMFILE) | Some(libc::ENFILE) => {
                                         match max_open_file_warning {
@@ -314,30 +329,14 @@ pub(super) fn serve_router_on_listen_addr(
                                                 tracing::error!("reached the max open file limit, cannot accept any new connection");
                                                 max_open_file_warning = Some(Instant::now());
                                             }
-                                            Some(last) => if Instant::now() - last < Duration::from_secs(60) {
+                                            Some(last) => if Instant::now() - last > Duration::from_secs(60) {
                                                 tracing::error!("still at the max open file limit, cannot accept any new connection");
+                                                max_open_file_warning = Some(Instant::now());
                                             }
                                         }
                                     }
                                     _ => {}
                                 }
-                                continue;
-                            }
-
-                            /* we should ignore the remaining errors as they're not supposed
-                            to happen with the accept() call
-                            std::io::ErrorKind::NotFound => todo!(),
-                            std::io::ErrorKind::AddrInUse => todo!(),
-                            std::io::ErrorKind::AddrNotAvailable => todo!(),
-                            std::io::ErrorKind::BrokenPipe => todo!(),
-                            std::io::ErrorKind::AlreadyExists => todo!(),
-                            std::io::ErrorKind::InvalidData => todo!(),
-                            std::io::ErrorKind::WriteZero => todo!(),
-
-                            std::io::ErrorKind::Unsupported => todo!(),
-                            std::io::ErrorKind::UnexpectedEof => todo!(),
-                            std::io::ErrorKind::OutOfMemory => todo!(),*/
-                            _ => {
                                 continue;
                             }
 
