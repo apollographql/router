@@ -1,3 +1,4 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::HashMap;
 use std::env;
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use tower::BoxError;
 use uuid::Uuid;
 
 use crate::configuration::generate_config_schema;
-// With regards to ELv2 licensing, this entire file is license key functionality
+
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterSuperServiceFactory;
