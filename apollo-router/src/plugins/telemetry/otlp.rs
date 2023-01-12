@@ -34,7 +34,7 @@ pub(crate) struct Config {
     #[serde(default)]
     pub(crate) protocol: Protocol,
 
-    /// GRPC configuration settings
+    /// gRPC configuration settings
     #[serde(default)]
     pub(crate) grpc: GrpcExporter,
 
