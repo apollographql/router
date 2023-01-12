@@ -138,7 +138,7 @@ pub(crate) struct GrpcExporter {
     /// Note that domain name is will be defaulted to match the endpoint is not explicitly set.
     #[serde(default)]
     pub(crate) domain_name: Option<String>,
-    /// The optional ca for tls config
+    /// The optional certificate authority (CA) certificate to be used in TLS configuration.
     pub(crate) ca: Option<String>,
     /// The optional cert for tls config
     pub(crate) cert: Option<String>,
