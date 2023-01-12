@@ -197,8 +197,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
-            let (main_server, main_shutdown_sender) =
-                serve_router_on_listen_addr(main_listener, all_routers.main.1);
+            let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                main_listener,
+                actual_main_listen_address.clone(),
+                all_routers.main.1,
+            );
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
@@ -232,7 +235,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) =
-                            serve_router_on_listen_addr(listener, router);
+                            serve_router_on_listen_addr(listener, listen_addr.clone(), router);
                         (
                             server.map(|listener| (listen_addr, listener)),
                             shutdown_sender,

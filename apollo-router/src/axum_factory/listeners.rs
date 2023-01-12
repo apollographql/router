@@ -186,6 +186,7 @@ pub(super) async fn get_extra_listeners(
 
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
+    address: ListenAddr,
     router: axum::Router,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -199,6 +200,8 @@ pub(super) fn serve_router_on_listen_addr(
 
         let connection_shutdown = Arc::new(Notify::new());
         let mut max_open_file_warning = None;
+
+        let address = address.to_string();
 
         loop {
             tokio::select! {
@@ -216,6 +219,12 @@ pub(super) fn serve_router_on_listen_addr(
                                 max_open_file_warning = None;
                             }
 
+                            tracing::info!(
+                                counter.apollo_router_session_count = 1,
+                                listener = &address
+                            );
+
+                            let address = address.clone();
                             tokio::task::spawn(async move {
                                 match res {
                                     NetworkStream::Tcp(stream) => {
@@ -226,6 +235,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             );
                                             let connection = Http::new()
                                             .http1_keep_alive(true)
+                                            .http1_header_read_timeout(Duration::from_secs(10))
                                             .serve_connection(stream, app);
 
                                         tokio::pin!(connection);
@@ -267,6 +277,12 @@ pub(super) fn serve_router_on_listen_addr(
                                         }
                                     }
                                 }
+
+                                tracing::info!(
+                                    counter.apollo_router_session_count = -1,
+                                    listener = &address
+                                );
+
                             });
                         }
 
