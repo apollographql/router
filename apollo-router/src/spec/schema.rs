@@ -18,7 +18,9 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
 use crate::spec::query::parse_value;
-use crate::*;
+use crate::spec::FieldType;
+use crate::spec::SpecError;
+use crate::Configuration;
 
 /// A GraphQL schema.
 #[derive(Debug, Default, Clone)]

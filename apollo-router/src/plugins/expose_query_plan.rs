@@ -135,7 +135,7 @@ mod tests {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
+    use crate::spec::Schema;
 
     static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
         serde_json::from_str(include_str!(

@@ -44,8 +44,8 @@ use crate::register_plugin;
 use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
+use crate::services::SubgraphRequest;
 use crate::Configuration;
-use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -390,11 +390,11 @@ mod test {
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
+    use crate::spec::Schema;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())

@@ -36,7 +36,7 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
-use crate::SubgraphRequest;
+use crate::services::SubgraphRequest;
 
 register_plugin!("apollo", "headers", Headers);
 
@@ -395,9 +395,9 @@ mod test {
     use crate::plugins::headers::Config;
     use crate::plugins::headers::HeadersLayer;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::Context;
-    use crate::SubgraphRequest;
-    use crate::SubgraphResponse;
 
     #[test]
     fn test_subgraph_config() {

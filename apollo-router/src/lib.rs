@@ -102,7 +102,3 @@ pub mod _private {
     pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }
-
-// TODO: clean these up and import from relevant modules instead
-pub(crate) use crate::services::*;
-pub(crate) use crate::spec::*;

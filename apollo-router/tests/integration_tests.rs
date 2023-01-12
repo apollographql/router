@@ -614,7 +614,7 @@ async fn normal_query_with_defer_accept_header() {
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
         "supergraph": {
-            "preview_defer_support": false,
+            "defer_support": false,
         },
         "plugins": {
             "apollo.include_subgraph_errors": {
@@ -1066,8 +1066,16 @@ fn redact_dynamic() -> Redaction {
             if value_slice
                 .get(0)
                 .and_then(|v| {
-                    v.as_str()
-                        .map(|s| ["request.id", "response_headers", "trace_id"].contains(&s))
+                    v.as_str().map(|s| {
+                        [
+                            "request.id",
+                            "response_headers",
+                            "trace_id",
+                            "histogram.apollo_router_cache_miss_time",
+                            "histogram.apollo_router_cache_hit_time",
+                        ]
+                        .contains(&s)
+                    })
                 })
                 .unwrap_or_default()
             {

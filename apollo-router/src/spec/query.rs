@@ -9,7 +9,6 @@ use std::collections::HashSet;
 use apollo_parser::ast;
 use apollo_parser::ast::AstNode;
 use derivative::Derivative;
-use graphql::Error;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
@@ -17,6 +16,7 @@ use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
+use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -24,7 +24,13 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
-use crate::*;
+use crate::spec::FieldType;
+use crate::spec::Fragments;
+use crate::spec::InvalidValue;
+use crate::spec::Schema;
+use crate::spec::Selection;
+use crate::spec::SpecError;
+use crate::Configuration;
 
 pub(crate) const TYPENAME: &str = "__typename";
 
@@ -557,7 +563,7 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if field_name.as_str() == TYPENAME {
+                        if name.as_str() == TYPENAME {
                             if input_value.is_string() {
                                 *output_value = input_value.clone();
                             }
@@ -765,7 +771,7 @@ impl Query {
                         );
                         path.pop();
                         res?
-                    } else if field_name_str == TYPENAME {
+                    } else if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
                             output.insert(
                                 field_name.clone(),

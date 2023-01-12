@@ -63,12 +63,12 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -1654,7 +1654,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::SubgraphRequest;
+    use crate::services::SubgraphRequest;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {

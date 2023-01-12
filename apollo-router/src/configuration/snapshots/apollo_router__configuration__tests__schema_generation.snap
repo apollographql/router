@@ -238,7 +238,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "matching": {
-                                "description": "Remove a header given a regex matching header name",
+                                "description": "Remove a header given a regex matching against the header name",
                                 "type": "string"
                               }
                             },
@@ -429,7 +429,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "matching": {
-                                  "description": "Remove a header given a regex matching header name",
+                                  "description": "Remove a header given a regex matching against the header name",
                                   "type": "string"
                                 }
                               },
@@ -686,12 +686,12 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "main": {
-          "description": "The main rhai script name",
+          "description": "The main entry point for Rhai script evaluation",
           "type": "string",
           "nullable": true
         },
         "scripts": {
-          "description": "The directory where scripts are located",
+          "description": "The directory where Rhai scripts can be found",
           "type": "string",
           "nullable": true
         }
@@ -736,7 +736,7 @@ expression: "&schema"
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true,
+        "defer_support": true,
         "apq": {
           "experimental_cache": {
             "in_memory": {
@@ -798,6 +798,11 @@ expression: "&schema"
           },
           "additionalProperties": false
         },
+        "defer_support": {
+          "description": "Set to false to disable defer support",
+          "default": true,
+          "type": "boolean"
+        },
         "introspection": {
           "description": "Enable introspection Default: false",
           "default": false,
@@ -821,11 +826,6 @@ expression: "&schema"
           "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
           "default": "/",
           "type": "string"
-        },
-        "preview_defer_support": {
-          "description": "Set to false to disable preview defer support",
-          "default": true,
-          "type": "boolean"
         },
         "query_planning": {
           "description": "Query planning options",
@@ -970,7 +970,7 @@ expression: "&schema"
               "type": "string"
             },
             "field_level_instrumentation_sampler": {
-              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate Default: always_off",
+              "description": "Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses. 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
               "anyOf": [
                 {
                   "description": "Sample a given fraction. Fractions >= 1 will always sample.",
@@ -2147,7 +2147,7 @@ expression: "&schema"
                   "type": "string"
                 },
                 "grpc": {
-                  "description": "GRPC configuration settings",
+                  "description": "gRPC configuration settings",
                   "default": {
                     "domain_name": null,
                     "ca": null,
@@ -2158,7 +2158,7 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "description": "The optional ca for tls config",
+                      "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
@@ -2174,12 +2174,12 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "description": "The optional key for tls config",
+                      "description": "The optional private key file for TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
-                      "description": "GRPC metadata",
+                      "description": "gRPC metadata",
                       "default": {},
                       "type": "object",
                       "additionalProperties": true
@@ -2526,7 +2526,7 @@ expression: "&schema"
               "nullable": true
             },
             "otlp": {
-              "description": "Open Telemetry native exporter configuration",
+              "description": "OpenTelemetry native exporter configuration",
               "type": "object",
               "required": [
                 "endpoint"
@@ -2593,7 +2593,7 @@ expression: "&schema"
                   "type": "string"
                 },
                 "grpc": {
-                  "description": "GRPC configuration settings",
+                  "description": "gRPC configuration settings",
                   "default": {
                     "domain_name": null,
                     "ca": null,
@@ -2604,7 +2604,7 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "ca": {
-                      "description": "The optional ca for tls config",
+                      "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
@@ -2620,12 +2620,12 @@ expression: "&schema"
                       "nullable": true
                     },
                     "key": {
-                      "description": "The optional key for tls config",
+                      "description": "The optional private key file for TLS configuration.",
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
-                      "description": "GRPC metadata",
+                      "description": "gRPC metadata",
                       "default": {},
                       "type": "object",
                       "additionalProperties": true
