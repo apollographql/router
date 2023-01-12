@@ -67,14 +67,14 @@ impl<T: RouterSuperServiceFactory> OrbiterRouterSuperServiceFactory<T> {
 ///   "os": "linux",
 ///   "ci": null,
 ///   "usage": {
-///     "configuration.headers.all.request.propagate.named.redacted": 3
-///     "configuration.headers.all.request.propagate.default.redacted": 1
+///     "configuration.headers.all.request.propagate.named.<redacted>": 3
+///     "configuration.headers.all.request.propagate.default.<redacted>": 1
 ///     "configuration.headers.all.request.len": 3
-///     "configuration.headers.subgraphs.redacted.request.propagate.named.redacted": 2
-///     "configuration.headers.subgraphs.redacted.request.len": 2
+///     "configuration.headers.subgraphs.<redacted>.request.propagate.named.<redacted>": 2
+///     "configuration.headers.subgraphs.<redacted>.request.len": 2
 ///     "configuration.headers.subgraphs.len": 1
 ///     "configuration.homepage.enabled.true": 1
-///     "args.config-path.redacted": 1,
+///     "args.config-path.<redacted>": 1,
 ///     "args.hot-reload.true": 1,
 ///     //Many more keys. This is dynamic and will change over time.
 ///     //More...
@@ -190,14 +190,17 @@ fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
                     usage.insert(format!("args.{}.true", a.get_id()), 1);
                 }
             } else if defaults != values {
-                usage.insert(format!("args.{}.redacted", a.get_id()), 1);
+                usage.insert(format!("args.{}.<redacted>", a.get_id()), 1);
             }
         }
     });
 }
 
 async fn send(body: UsageReport) -> Result<String, BoxError> {
-    tracing::debug!("transmitting anonymous analytics: {}", serde_json::to_string_pretty(&body)?);
+    tracing::debug!(
+        "transmitting anonymous analytics: {}",
+        serde_json::to_string_pretty(&body)?
+    );
 
     #[cfg(not(test))]
     let url = "https://router.apollo.dev/telemetry";
@@ -255,7 +258,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
                 }
                 if &PathChunk::Keyword("additionalProperties") == chunk {
                     // This is free format properties. It's redacted
-                    path.push("redacted".to_string());
+                    path.push("<redacted>".to_string());
                 }
             }
 
@@ -279,7 +282,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
                 Value::String(_) => {
                     // Strings are never output
                     *usage
-                        .entry(format!("configuration.{}.redacted", path))
+                        .entry(format!("configuration.{}.<redacted>", path))
                         .or_default() += 1;
                 }
                 Value::Object(o) => {
@@ -328,8 +331,8 @@ mod test {
                 .map(|a| a.to_string())
                 .collect(),
         );
-        usage.remove("args.apollo_graph_ref.redacted");
-        usage.remove("args.apollo_key.redacted");
+        usage.remove("args.apollo_graph_ref.<redacted>");
+        usage.remove("args.apollo_key.<redacted>");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(usage);
         });
