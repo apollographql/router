@@ -20,6 +20,9 @@ use tracing_subscriber::registry::LookupSpan;
 #[derive(Debug, Clone)]
 pub(crate) struct TextFormatter {
     pub(crate) timer: SystemTime,
+    display_target: bool,
+    display_filename: bool,
+    display_line: bool,
 }
 
 impl Default for TextFormatter {
@@ -38,6 +41,30 @@ impl TextFormatter {
     pub(crate) fn new() -> Self {
         Self {
             timer: Default::default(),
+            display_target: false,
+            display_filename: false,
+            display_line: false,
+        }
+    }
+
+    pub(crate) fn with_target(self, display_target: bool) -> Self {
+        Self {
+            display_target,
+            ..self
+        }
+    }
+
+    pub(crate) fn with_filename(self, display_filename: bool) -> Self {
+        Self {
+            display_filename,
+            ..self
+        }
+    }
+
+    pub(crate) fn with_line(self, display_line: bool) -> Self {
+        Self {
+            display_line,
+            ..self
         }
     }
 
@@ -92,7 +119,15 @@ impl TextFormatter {
             if writer.has_ansi_escapes() {
                 let style = Style::new().dimmed();
                 write!(writer, "{}", style.prefix())?;
-                write!(writer, "{filename}:{line}")?;
+                if self.display_filename {
+                    write!(writer, "{filename}")?;
+                }
+                if self.display_filename && self.display_line {
+                    write!(writer, ":")?;
+                }
+                if self.display_line {
+                    write!(writer, "{line}")?;
+                }
                 write!(writer, "{}", style.suffix())?;
             } else {
                 write!(writer, "{filename}:{line}")?;
@@ -175,7 +210,9 @@ where
 
         self.format_level(meta.level(), &mut writer)?;
         self.format_request_id(ctx, &mut writer, event)?;
-        self.format_target(meta.target(), &mut writer)?;
+        if self.display_target {
+            self.format_target(meta.target(), &mut writer)?;
+        }
         let mut visitor = CustomVisitor::new(DefaultVisitor::new(writer.by_ref(), true));
         event.record(&mut visitor);
 

@@ -591,11 +591,11 @@ impl Telemetry {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
-                .with_file(logging.display_filename)
-                .with_line_number(logging.display_line_number)
-                .with_target(logging.display_target)
                 .event_format(FilteringFormatter::new(
-                    TextFormatter::new(),
+                    TextFormatter::new()
+                        .with_filename(logging.display_filename)
+                        .with_line(logging.display_line_number)
+                        .with_target(logging.display_target),
                     filter_metric_events,
                 ))
                 .boxed(),

@@ -631,18 +631,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
-        tracing_subscriber::fmt::Layer::new()
-            .with_target(false)
-            .with_line_number(false)
-            .with_file(false)
-            .boxed()
+        tracing_subscriber::fmt::Layer::new().boxed()
     } else {
-        tracing_subscriber::fmt::Layer::new()
-            .json()
-            .with_target(false)
-            .with_line_number(false)
-            .with_file(false)
-            .boxed()
+        tracing_subscriber::fmt::Layer::new().json().boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
