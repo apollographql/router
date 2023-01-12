@@ -43,7 +43,7 @@ struct ExternalPlugin {
     sdl: Arc<String>,
 }
 
-/// The
+/// What information is passed to a request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct BaseConf {
     /// Send the headers
