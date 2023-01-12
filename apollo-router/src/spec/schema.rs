@@ -619,7 +619,7 @@ macro_rules! implement_input_object_type_or_interface {
         #[derive(Debug, Clone)]
         $visibility struct $name {
             name: String,
-            fields: HashMap<String, (FieldType, Option<Value>)>,
+            pub(crate) fields: HashMap<String, (FieldType, Option<Value>)>,
         }
 
         impl $name {
