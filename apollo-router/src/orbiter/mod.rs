@@ -242,69 +242,73 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
     // For this to work ALL config must have an annotation, e.g. documentation.
     // For each config path we need to sanitize the it for arrays and also custom names e.g. header names.
     // This corresponds to the json schema keywords of `items` and `additionalProperties`
-    if let BasicOutput::Valid(output) = compiled_json_schema.apply(config).basic() {
-        for item in output {
-            let instance_ptr = item.instance_location();
-            let value = config
-                .pointer(&instance_ptr.to_string())
-                .expect("pointer must point to value");
+    match compiled_json_schema.apply(config).basic() {
+        BasicOutput::Valid(output) => {
+            for item in output {
+                let instance_ptr = item.instance_location();
+                let value = config
+                    .pointer(&instance_ptr.to_string())
+                    .expect("pointer must point to value");
 
-            // Compose the redacted path.
-            let mut path = Vec::new();
-            for chunk in item.keyword_location() {
-                if let PathChunk::Property(property) = chunk {
-                    // We hit a properties keyword, we can grab the next keyword as it'll be a property name.
-                    path.push(property.to_string());
-                }
-                if &PathChunk::Keyword("additionalProperties") == chunk {
-                    // This is free format properties. It's redacted
-                    path.push("<redacted>".to_string());
-                }
-            }
-
-            let path = path.join(".");
-            if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
-                *usage
-                    .entry(format!("configuration.{}.len", path))
-                    .or_default() += 1;
-            }
-            match value {
-                Value::Bool(value) => {
-                    *usage
-                        .entry(format!("configuration.{}.{}", path, value))
-                        .or_default() += 1;
-                }
-                Value::Number(value) => {
-                    *usage
-                        .entry(format!("configuration.{}.{}", path, value))
-                        .or_default() += 1;
-                }
-                Value::String(_) => {
-                    // Strings are never output
-                    *usage
-                        .entry(format!("configuration.{}.<redacted>", path))
-                        .or_default() += 1;
-                }
-                Value::Object(o) => {
-                    if matches!(
-                        item.keyword_location().last(),
-                        Some(&PathChunk::Property(_))
-                    ) {
-                        let schema_node = raw_json_schema
-                            .pointer(&item.keyword_location().to_string())
-                            .expect("schema node must resolve");
-                        if let Some(Value::Bool(true)) = schema_node.get("additionalProperties") {
-                            *usage
-                                .entry(format!("configuration.{}.len", path))
-                                .or_default() += o.len() as u64;
-                        }
+                // Compose the redacted path.
+                let mut path = Vec::new();
+                for chunk in item.keyword_location() {
+                    if let PathChunk::Property(property) = chunk {
+                        // We hit a properties keyword, we can grab the next keyword as it'll be a property name.
+                        path.push(property.to_string());
+                    }
+                    if &PathChunk::Keyword("additionalProperties") == chunk {
+                        // This is free format properties. It's redacted
+                        path.push("<redacted>".to_string());
                     }
                 }
-                _ => {}
+
+                let path = path.join(".");
+                if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
+                    *usage
+                        .entry(format!("configuration.{}.len", path))
+                        .or_default() += 1;
+                }
+                match value {
+                    Value::Bool(value) => {
+                        *usage
+                            .entry(format!("configuration.{}.{}", path, value))
+                            .or_default() += 1;
+                    }
+                    Value::Number(value) => {
+                        *usage
+                            .entry(format!("configuration.{}.{}", path, value))
+                            .or_default() += 1;
+                    }
+                    Value::String(_) => {
+                        // Strings are never output
+                        *usage
+                            .entry(format!("configuration.{}.<redacted>", path))
+                            .or_default() += 1;
+                    }
+                    Value::Object(o) => {
+                        if matches!(
+                            item.keyword_location().last(),
+                            Some(&PathChunk::Property(_))
+                        ) {
+                            let schema_node = raw_json_schema
+                                .pointer(&item.keyword_location().to_string())
+                                .expect("schema node must resolve");
+                            if let Some(Value::Bool(true)) = schema_node.get("additionalProperties")
+                            {
+                                *usage
+                                    .entry(format!("configuration.{}.len", path))
+                                    .or_default() += o.len() as u64;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
         }
-    } else {
-        panic!("schema should have been valid");
+        BasicOutput::Invalid(err) => {
+            panic!("schema should have been valid: {err:?}");
+        }
     }
 }
 
