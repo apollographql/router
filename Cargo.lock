@@ -188,7 +188,6 @@ dependencies = [
  "ci_info",
  "clap 4.0.32",
  "console-subscriber",
- "ctor",
  "dashmap",
  "derivative",
  "derive_more",
