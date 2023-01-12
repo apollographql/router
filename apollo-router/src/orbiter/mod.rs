@@ -10,6 +10,7 @@ use http::header::USER_AGENT;
 use jsonschema::output::BasicOutput;
 use jsonschema::paths::PathChunk;
 use jsonschema::JSONSchema;
+use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use serde::Serialize;
 use serde_json::Map;
@@ -207,7 +208,7 @@ async fn send(body: UsageReport) -> Result<String, BoxError> {
     Ok(reqwest::Client::new()
         .post(url)
         .header(USER_AGENT, "router")
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .json(&serde_json::to_value(body)?)
         .timeout(Duration::from_secs(10))
         .send()
