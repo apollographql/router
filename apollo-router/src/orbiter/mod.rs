@@ -26,7 +26,7 @@ use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
 use crate::Configuration;
 
-/// This session id is created once when the router starts. It persists between config reloads.
+/// This session id is created once when the router starts. It persists between config reloads and supergraph schema changes.
 static SESSION_ID: OnceCell<Uuid> = OnceCell::new();
 
 /// Platform represents the platform the CLI is being run from
