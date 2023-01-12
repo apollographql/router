@@ -25,6 +25,8 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
+# [1.8.1] (unreleased) - 2022-mm-dd
+
 ## 🚀 Features
 ### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124))
 
@@ -60,3 +62,12 @@ For example:
 Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173
+
+## 🛠 Maintenance
+
+### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
+
+Building the execution and subgraph services had to go through a factory trait before, which is not
+needed anymore since there is only one useful implementation.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
