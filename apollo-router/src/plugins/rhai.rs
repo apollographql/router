@@ -414,7 +414,7 @@ struct Rhai {
 pub(crate) struct Conf {
     /// The directory where scripts are located
     scripts: Option<PathBuf>,
-    /// The main rhai script name
+    /// The main entry point for Rhai script evaluation
     main: Option<String>,
 }
 
