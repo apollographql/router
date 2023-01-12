@@ -350,6 +350,7 @@ pub(super) fn serve_router_on_listen_addr(
                                                 max_open_file_warning = Some(Instant::now());
                                             }
                                         }
+                                        tokio::time::sleep(Duration::from_millis(1)).await;
                                     }
                                     _ => {}
                                 }
