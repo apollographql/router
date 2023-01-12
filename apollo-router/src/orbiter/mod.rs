@@ -113,13 +113,9 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
                     tokio::task::spawn(async {
                         tracing::debug!("sending anonymous usage data to Apollo");
-                        match create_report(configuration, schema) {
-                            Ok(report) => {
-                                if let Err(e) = send(report).await {
-                                    tracing::debug!("failed to send usage report: {}", e);
-                                }
-                            }
-                            Err(e) => tracing::debug!("failed to create usage report: {}", e),
+                        let report = create_report(configuration, schema);
+                        if let Err(e) = send(report).await {
+                            tracing::debug!("failed to send usage report: {}", e);
                         }
                     });
                 }
@@ -128,12 +124,8 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
     }
 }
 
-fn create_report(
-    configuration: Arc<Configuration>,
-    _schema: Arc<Schema>,
-) -> Result<UsageReport, BoxError> {
-    let mut configuration: Value = serde_yaml::from_str(&configuration.raw_yaml)
-        .map_err(|_| BoxError::from("configuration must be parseable"))?;
+fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> UsageReport {
+    let mut configuration: Value = (*configuration.validated_yaml).clone();
     let os = get_os();
     let mut usage = HashMap::new();
 
@@ -162,7 +154,7 @@ fn create_report(
     #[cfg(not(test))]
     visit_args(&mut usage, env::args().collect());
 
-    Ok(UsageReport {
+    UsageReport {
         session_id: *SESSION_ID.get_or_init(Uuid::new_v4),
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         platform: Platform {
@@ -173,7 +165,7 @@ fn create_report(
             .into_iter()
             .map(|(k, v)| (k, Value::Number(v.into())))
             .collect(),
-    })
+    }
 }
 
 fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
@@ -304,7 +296,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
             }
         }
     } else {
-        panic!("schema should have been valid");
+        panic!("config should have been valid");
     }
 }
 
@@ -315,6 +307,7 @@ mod test {
     use std::sync::Arc;
 
     use insta::assert_yaml_snapshot;
+    use serde_json::Value;
 
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
@@ -351,12 +344,13 @@ mod test {
 
     #[test]
     fn test_create_report() {
-        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
+        let config_yaml: Value =
+            serde_yaml::from_str(include_str!("testdata/redaction.router.yaml"))
+                .expect("test yaml must parse");
         let mut config: Configuration =
-            serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.raw_yaml = Arc::new(config_string);
-        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()))
-            .expect("report must be created");
+            serde_json::from_value(config_yaml.clone()).expect("yaml must be valid");
+        config.validated_yaml = Arc::new(config_yaml);
+        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
                 ".version" => "[version]",
@@ -365,15 +359,6 @@ mod test {
                 ".platform.continuous_integration" => "[ci]",
             });
         });
-    }
-
-    #[test]
-    fn test_create_report_invalid_yaml() {
-        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
-        let mut config: Configuration =
-            serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.raw_yaml = Arc::new("".to_string());
-        assert!(create_report(Arc::new(config), Arc::new(crate::spec::Schema::default())).is_err());
     }
 
     // TODO, enable once we are live.
