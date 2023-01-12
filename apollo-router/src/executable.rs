@@ -35,7 +35,7 @@ use crate::configuration::generate_upgrade;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
-use crate::plugins::telemetry::HotTracer;
+use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -57,7 +57,7 @@ pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell:
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(crate) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
-    HotTracer<opentelemetry::sdk::trace::Tracer>,
+    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
 #[allow(clippy::type_complexity)]
 pub(crate) static METRICS_LAYER_HANDLE: OnceCell<
@@ -68,19 +68,22 @@ pub(crate) static METRICS_LAYER_HANDLE: OnceCell<
                 Box<
                     dyn Layer<
                             Layered<
-                                OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
+                                OpenTelemetryLayer<
+                                    Layered<EnvFilter, Registry>,
+                                    ReloadTracer<Tracer>,
+                                >,
                                 Layered<EnvFilter, Registry>,
                             >,
                         > + Send
                         + Sync,
                 >,
                 Layered<
-                    OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
+                    OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
                     Layered<EnvFilter, Registry>,
                 >,
             >,
             Layered<
-                OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
+                OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
                 Layered<EnvFilter, Registry>,
             >,
         >,
@@ -93,14 +96,14 @@ pub(crate) static FMT_LAYER_HANDLE: OnceCell<
         Box<
             dyn Layer<
                     Layered<
-                        OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
+                        OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
                         Layered<EnvFilter, Registry>,
                     >,
                 > + Send
                 + Sync,
         >,
         Layered<
-            OpenTelemetryLayer<Layered<EnvFilter, Registry>, HotTracer<Tracer>>,
+            OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
             Layered<EnvFilter, Registry>,
         >,
     >,
@@ -624,7 +627,7 @@ fn copy_args_to_env() {
 }
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
-    let hot_tracer = HotTracer::new(
+    let hot_tracer = ReloadTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("a", None, None),
     );
     let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());

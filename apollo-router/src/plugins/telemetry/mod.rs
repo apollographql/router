@@ -1,12 +1,10 @@
 //! Telemetry plugin.
-use std::borrow::Cow;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::RwLock;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -24,7 +22,6 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
-use opentelemetry::metrics::MeterProvider;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -33,13 +30,11 @@ use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
-use opentelemetry::trace::SpanBuilder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
-use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use rand::Rng;
@@ -52,7 +47,6 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_opentelemetry::PreSampledTracer;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 
@@ -64,6 +58,7 @@ use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+use self::tracing::reload::ReloadTracer;
 use crate::executable::FMT_LAYER_HANDLE;
 use crate::executable::METRICS_LAYER_HANDLE;
 use crate::executable::OPENTELEMETRY_TRACER_HANDLE;
@@ -110,7 +105,7 @@ pub(crate) mod config;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
 mod otlp;
-mod tracing;
+pub(crate) mod tracing;
 // Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
@@ -580,7 +575,7 @@ impl Telemetry {
             tracing_subscriber::layer::Layered<
                 OpenTelemetryLayer<
                     tracing_subscriber::layer::Layered<EnvFilter, tracing_subscriber::Registry>,
-                    HotTracer<opentelemetry::sdk::trace::Tracer>,
+                    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
                 >,
                 tracing_subscriber::layer::Layered<EnvFilter, tracing_subscriber::Registry>,
             >,
@@ -1796,129 +1791,5 @@ mod tests {
             .sorted()
             .join("\n");
         assert_snapshot!(prom_metrics);
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct HotTracer<S> {
-    parent: Arc<RwLock<S>>,
-}
-
-impl<S: PreSampledTracer> PreSampledTracer for HotTracer<S> {
-    fn sampled_context(
-        &self,
-        data: &mut tracing_opentelemetry::OtelData,
-    ) -> opentelemetry::Context {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .sampled_context(data)
-    }
-
-    fn new_trace_id(&self) -> opentelemetry::trace::TraceId {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .new_trace_id()
-    }
-
-    fn new_span_id(&self) -> opentelemetry::trace::SpanId {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .new_span_id()
-    }
-}
-
-impl<S: Tracer> Tracer for HotTracer<S> {
-    type Span = S::Span;
-
-    fn start<T>(&self, name: T) -> Self::Span
-    where
-        T: Into<Cow<'static, str>>,
-    {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .start(name)
-    }
-
-    fn start_with_context<T>(&self, name: T, parent_cx: &opentelemetry::Context) -> Self::Span
-    where
-        T: Into<Cow<'static, str>>,
-    {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .start_with_context(name, parent_cx)
-    }
-
-    fn span_builder<T>(&self, name: T) -> SpanBuilder
-    where
-        T: Into<Cow<'static, str>>,
-    {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .span_builder(name)
-    }
-
-    fn build(&self, builder: SpanBuilder) -> Self::Span {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .build(builder)
-    }
-
-    fn build_with_context(
-        &self,
-        builder: SpanBuilder,
-        parent_cx: &opentelemetry::Context,
-    ) -> Self::Span {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .build_with_context(builder, parent_cx)
-    }
-
-    fn in_span<T, F, N>(&self, name: N, f: F) -> T
-    where
-        F: FnOnce(opentelemetry::Context) -> T,
-        N: Into<Cow<'static, str>>,
-        Self::Span: Send + Sync + 'static,
-    {
-        self.parent
-            .read()
-            .expect("parent tracer must be available")
-            .in_span(name, f)
-    }
-}
-
-impl<S: MeterProvider> MeterProvider for HotTracer<S> {
-    fn versioned_meter(
-        &self,
-        name: &'static str,
-        version: Option<&'static str>,
-        schema_url: Option<&'static str>,
-    ) -> opentelemetry::metrics::Meter {
-        self.parent
-            .read()
-            .expect("rwlock poisoned")
-            .versioned_meter(name, version, schema_url)
-    }
-}
-
-impl<S> HotTracer<S> {
-    pub(crate) fn new(parent: S) -> Self {
-        Self {
-            parent: Arc::new(RwLock::new(parent)),
-        }
-    }
-
-    pub(crate) fn reload(&self, new: S) {
-        *self
-            .parent
-            .write()
-            .expect("parent tracer must be available") = new;
     }
 }

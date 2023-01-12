@@ -28,6 +28,7 @@ pub(crate) mod datadog;
 pub(crate) mod jaeger;
 pub(crate) mod otlp;
 pub(crate) mod zipkin;
+pub(crate) mod reload;
 
 pub(crate) trait TracingConfigurator {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
