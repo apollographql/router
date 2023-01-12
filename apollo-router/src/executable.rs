@@ -439,7 +439,7 @@ impl Executable {
         };
 
         let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {
-            "anonymous usage data was disabled.".to_string()
+            "anonymous usage data was disabled".to_string()
         } else {
             "anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info".to_string()
         };
