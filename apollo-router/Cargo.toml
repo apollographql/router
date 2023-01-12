@@ -66,7 +66,6 @@ clap = { version = "4.0.32", default-features = false, features = [
 ] }
 console-subscriber = { version = "0.1.8", optional = true }
 ci_info = {version="0.14.8", features=["serde-1"] }
-ctor = "0.1.26"
 dashmap = { version = "5.4.0", features = ["serde"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
