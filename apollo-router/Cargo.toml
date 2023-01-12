@@ -38,9 +38,11 @@ default = []
 features = ["docs_rs"]
 
 [dependencies]
+askama = "0.11.1"
 access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
+apollo-encoder = "0.4.0"
 apollo-parser = "0.4.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
@@ -63,6 +65,7 @@ clap = { version = "4.0.32", default-features = false, features = [
     "help",
 ] }
 console-subscriber = { version = "0.1.8", optional = true }
+ci_info = {version="0.14.8", features=["serde-1"] }
 dashmap = { version = "5.4.0", features = ["serde"] }
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
@@ -79,6 +82,7 @@ graphql_client = "0.11.0"
 hex = "0.4.3"
 http = "0.2.8"
 http-body = "0.4.5"
+heck = "0.4.0"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.23", features = ["server", "client"] }
@@ -194,9 +198,7 @@ url = { version = "2.3.1", features = ["serde"] }
 urlencoding = "2.1.2"
 uuid = { version = "1.2.2", features = ["serde", "v4"] }
 yaml-rust = "0.4.5"
-askama = "0.11.1"
-heck = "0.4.0"
-apollo-encoder = "0.4.0"
+wsl = "0.1.0"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"

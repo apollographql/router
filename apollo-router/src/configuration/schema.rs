@@ -4,6 +4,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
@@ -234,7 +235,7 @@ pub(crate) fn validate_yaml_configuration(
         }
     }
 
-    let config: Configuration = serde_json::from_value(expanded_yaml)
+    let mut config: Configuration = serde_json::from_value(expanded_yaml)
         .map_err(ConfigurationError::DeserializeConfigError)?;
 
     // ------------- Check for unknown fields at runtime ----------------
@@ -262,7 +263,7 @@ pub(crate) fn validate_yaml_configuration(
             ),
         });
     }
-
+    config.raw_yaml = Arc::new(raw_yaml.to_string());
     Ok(config)
 }
 

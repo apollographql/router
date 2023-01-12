@@ -54,6 +54,7 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
+/// Traffic shaping options
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Shaping {
@@ -67,7 +68,7 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    //  *experimental feature*: Enables request retry
+    /// Retry configuration
     experimental_retry: Option<RetryConfig>,
 }
 
@@ -94,6 +95,7 @@ impl Merge for Shaping {
     }
 }
 
+/// Retry configuration
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RetryConfig {
@@ -142,9 +144,9 @@ struct RouterShaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
+/// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     #[serde(default)]
     /// Applied at the router level
