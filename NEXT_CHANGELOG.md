@@ -25,3 +25,11 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
+## 🚀 Features
+
+### Add support for `base64encode()` / `base64decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
+
+Two new functions, `base64encode()` and `base64decode()` may now be used to Base64-encode or Base64-decode strings, respectively.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2394
+
