@@ -9,22 +9,13 @@ description: Configure JWT authentication for the router
 
 Authentication is an important step in controlling access to a router.
 
-JSON Web Tokens [JWT](https://www.rfc-editor.org/rfc/rfc7519) are a very
-popular authentication technique and are now supported by the router.
+JSON Web Tokens [JWT](https://www.rfc-editor.org/rfc/rfc7519) are a very popular authentication technique and are now supported by the router.
 
-JSON Web Keys [JWK](https://www.rfc-editor.org/rfc/rfc7517)s provide the
-cryptographic mehanism for JWT validation. The router implements this
-via a JWK Set (JWKS), which is a JSON data structure used to represent a set
-of JWKs.
+JSON Web Keys [JWK](https://www.rfc-editor.org/rfc/rfc7517)s provide the cryptographic mehanism for JWT validation. The router implements this via a JWK Set (JWKS), which is a JSON data structure used to represent a set of JWKs.
 
-The cryptographic implementation is provided via the popular library
-[jsonwebtoken](https://crates.io/crates/jsonwebtoken) which supports 
-a wide-range of different algorithms (see link for details).
+The cryptographic implementation is provided via the popular library [jsonwebtoken](https://crates.io/crates/jsonwebtoken) which supports a wide-range of different algorithms (see link for details).
 
-When JWT support is configured within the router, requests will be processed
-for the presence of a JWT via a header. This JWT will be validated using
-keys from a configured JWKS and claims will be extracted and stored with
-the request context so they are available for further processing.
+When JWT support is configured within the router, requests will be processed for the presence of a JWT via a header. This JWT will be validated using keys from a configured JWKS and claims will be extracted and stored with the request context so they are available for further processing.
 
 ## Configuration
 
@@ -44,6 +35,7 @@ authentication:
 Note: the jwks_url could be a `file://` url.
 
 A more completely specified configuration may look like this. This is configurating the router so that:
+
  - JWKS are retrieved from the specified URL
  - The header containing the JWT is customized: Different
  - The header value prefix is customized: Prefix
@@ -63,19 +55,15 @@ There are some considerations for each of these parameters.
 
 ### jwks_url
 
-If you are using a symmetric algorithm (e.g.: HS256) **DO NOT** place your
-JWKS on the network. They should only be loaded from disk.
+If you are using a symmetric algorithm (e.g.: HS256) **DO NOT** place your JWKS on the network. They should only be loaded from disk.
 
 ### header_name and header_prefix
 
-Your chosen header must be a valid HTTP header name and your prefix should
-not contain any white space.
+Your chosen header must be a valid HTTP header name and your prefix should not contain any white space.
 
 ### cooldown
 
-The default value for this parameter, 15s, should be suitable for almost all
-use cases. However, it is provided so that advanced users can configure this
-if required.
+The default value for this parameter, 15s, should be suitable for almost all use cases. However, it is provided so that advanced users can configure this if required.
 
 ## Observability
 
@@ -103,15 +91,13 @@ apollo_authentication_cooldown_count{kind="JWT",service_name="apollo-router"} 3
 
 The router will validate that a token is correctly signed and will extract all claims from the token into the request context. The token will not be validated if the token has expired. 
 
-Note: synchronising times across the internet can be problematic, so the JWT
-validation allows 60s leeway for token expiry.
+Note: synchronising times across the internet can be problematic, so the JWT validation allows 60s leeway for token expiry.
 
 ## Context
 
 The claims are stored within request context at this key: `"apollo_authentication::JWT::claims"`.
 
-Further processing of these claims can be performed in the router either as
-a rust or a rhai plugin. Here's an example of a rhai plugin:
+Further processing of these claims can be performed in the router either as a rust or a rhai plugin. Here's an example of a rhai plugin:
 
 ```rhai title="jwt_claims.rhai"
 fn process_request(request) {
@@ -152,7 +138,4 @@ Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a rhai scope constant with a value of 
 
 ## Header Propagation
 
-The router already provides a mechanism for propagating headers to subgraphs
-which may be used in conjunction with authentication to allow for JWT
-verification in the router prior to JWT propagation to all or specific
-subgraphs.
+The router already provides a mechanism for propagating headers to subgraphs which may be used in conjunction with authentication to allow for JWT verification in the router prior to JWT propagation to all or specific subgraphs.
