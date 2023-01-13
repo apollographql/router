@@ -219,13 +219,13 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
 /// call_http makes http calls with modified graphql::Request (body)
 async fn call_http(
-    request: crate::SubgraphRequest,
+    request: SubgraphRequest,
     body: graphql::Request,
     context: Context,
     mut client: Decompression<Client<HttpsConnector<HttpConnector>>>,
     service_name: String,
-) -> Result<crate::SubgraphResponse, BoxError> {
-    let crate::SubgraphRequest {
+) -> Result<SubgraphResponse, BoxError> {
+    let SubgraphRequest {
         subgraph_request, ..
     } = request;
 
