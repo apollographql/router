@@ -3,12 +3,16 @@
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
+use std::fmt::Write;
+use std::sync::Arc;
 
 use itertools::Itertools;
+use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use schemars::gen::SchemaSettings;
 use schemars::schema::RootSchema;
+use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
 use super::expansion::expand_env_variables;
@@ -21,6 +25,8 @@ use super::ConfigurationError;
 use super::APOLLO_PLUGIN_PREFIX;
 pub(crate) use crate::configuration::upgrade::generate_upgrade;
 pub(crate) use crate::configuration::upgrade::upgrade_configuration;
+
+const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
 /// Generate a JSON schema for the configuration.
 pub(crate) fn generate_config_schema() -> RootSchema {
@@ -106,106 +112,120 @@ pub(crate) fn validate_yaml_configuration(
     log_used_experimental_conf(&yaml);
     let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
-    if let Err(errors) = schema.validate(&expanded_yaml) {
+    if let Err(errors_it) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
         // We have to reparse the yaml to get the line number information for each error.
         let yaml_split_by_lines = raw_yaml.split('\n').collect::<Vec<_>>();
 
-        let errors = errors
-            .enumerate()
-            .filter_map(|(idx, mut e)| {
-                if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
-                    const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
-                    match element {
-                        yaml::Value::String(value, marker) => {
-                            let lines = yaml_split_by_lines[0.max(
-                                marker
-                                    .line()
-                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            )
-                                ..marker.line()]
-                                .iter()
-                                .join("\n");
+        let mut errors = String::new();
 
-                            // Replace the value in the error message with the one from the raw config.
-                            // This guarantees that if the env variable contained a secret it won't be leaked.
-                            e.instance = Cow::Owned(coerce(value));
+        for (idx, mut e) in errors_it.enumerate() {
+            if let Some(element) = parsed_yaml.get_element(&e.instance_path) {
+                match element {
+                    yaml::Value::String(value, marker) => {
+                        let start_marker = marker;
+                        let end_marker = marker;
+                        let offset = start_marker
+                            .line()
+                            .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
 
-                            Some(format!(
-                                "{}. {}\n\n{}\n{}^----- {}",
-                                idx + 1,
-                                e.instance_path,
-                                lines,
-                                " ".repeat(0.max(marker.col())),
-                                e
-                            ))
-                        }
-                        seq_element @ yaml::Value::Sequence(_, m) => {
-                            let (start_marker, end_marker) = (m, seq_element.end_marker());
+                        let lines = yaml_split_by_lines[offset..end_marker.line()]
+                            .iter()
+                            .map(|line| format!("  {line}"))
+                            .join("\n");
 
-                            let offset = 0.max(
-                                start_marker
-                                    .line()
-                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            );
-                            let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, line)| {
-                                    let real_line = idx + offset;
-                                    match real_line.cmp(&start_marker.line()) {
-                                        Ordering::Equal => format!("┌ {line}"),
-                                        Ordering::Greater => format!("| {line}"),
-                                        Ordering::Less => line.to_string(),
-                                    }
-                                })
-                                .join("\n");
+                        // Replace the value in the error message with the one from the raw config.
+                        // This guarantees that if the env variable contained a secret it won't be leaked.
+                        e.instance = Cow::Owned(coerce(value));
 
-                            Some(format!(
-                                "{}. {}\n\n{}\n└-----> {}",
-                                idx + 1,
-                                e.instance_path,
-                                lines,
-                                e
-                            ))
-                        }
-                        map_value @ yaml::Value::Mapping(current_label, _value, _marker) => {
+                        let _ = write!(
+                            &mut errors,
+                            "{}. at line {}\n\n{}\n{}^----- {}\n\n",
+                            idx + 1,
+                            start_marker.line(),
+                            lines,
+                            " ".repeat(2 + marker.col()),
+                            e
+                        );
+                    }
+                    seq_element @ yaml::Value::Sequence(_, m) => {
+                        let (start_marker, end_marker) = (m, seq_element.end_marker());
+
+                        let lines = context_lines(&yaml_split_by_lines, start_marker, end_marker);
+
+                        let _ = write!(
+                            &mut errors,
+                            "{}. at line {}\n\n{}\n└-----> {}\n\n",
+                            idx + 1,
+                            start_marker.line(),
+                            lines,
+                            e
+                        );
+                    }
+                    map_value @ yaml::Value::Mapping(current_label, map, marker) => {
+                        // workaround because ValidationErrorKind is not Clone
+                        let unexpected_opt = match &e.kind {
+                            ValidationErrorKind::AdditionalProperties { unexpected } => {
+                                Some(unexpected.clone())
+                            }
+                            _ => None,
+                        };
+
+                        if let Some(unexpected) = unexpected_opt {
+                            for key in unexpected {
+                                if let Some((label, value)) =
+                                    map.iter().find(|(label, _)| label.name == key)
+                                {
+                                    let (start_marker, end_marker) = (
+                                        label.marker.as_ref().unwrap_or(marker),
+                                        value.end_marker(),
+                                    );
+
+                                    let lines = context_lines(
+                                        &yaml_split_by_lines,
+                                        start_marker,
+                                        end_marker,
+                                    );
+
+                                    e.kind = ValidationErrorKind::AdditionalProperties {
+                                        unexpected: vec![key.clone()],
+                                    };
+
+                                    let _ = write!(
+                                        &mut errors,
+                                        "{}. at line {}\n\n{}\n└-----> {}\n\n",
+                                        idx + 1,
+                                        start_marker.line(),
+                                        lines,
+                                        e
+                                    );
+                                }
+                            }
+                        } else {
                             let (start_marker, end_marker) = (
-                                current_label.as_ref()?.marker.as_ref()?,
+                                current_label
+                                    .as_ref()
+                                    .and_then(|label| label.marker.as_ref())
+                                    .unwrap_or(marker),
                                 map_value.end_marker(),
                             );
-                            let offset = 0.max(
-                                start_marker
-                                    .line()
-                                    .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY),
-                            );
-                            let lines = yaml_split_by_lines[offset..end_marker.line()]
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, line)| {
-                                    let real_line = idx + offset;
-                                    match real_line.cmp(&start_marker.line()) {
-                                        Ordering::Equal => format!("┌ {line}"),
-                                        Ordering::Greater => format!("| {line}"),
-                                        Ordering::Less => line.to_string(),
-                                    }
-                                })
-                                .join("\n");
 
-                            Some(format!(
-                                "{}. {}\n\n{}\n└-----> {}",
+                            let lines =
+                                context_lines(&yaml_split_by_lines, start_marker, end_marker);
+
+                            let _ = write!(
+                                &mut errors,
+                                "{}. at line {}\n\n{}\n└-----> {}\n\n",
                                 idx + 1,
-                                e.instance_path,
+                                start_marker.line(),
                                 lines,
                                 e
-                            ))
+                            );
                         }
                     }
-                } else {
-                    None
                 }
-            })
-            .join("\n\n");
+            }
+        }
 
         if !errors.is_empty() {
             return Err(ConfigurationError::InvalidConfiguration {
@@ -215,7 +235,7 @@ pub(crate) fn validate_yaml_configuration(
         }
     }
 
-    let config: Configuration = serde_json::from_value(expanded_yaml)
+    let mut config: Configuration = serde_json::from_value(expanded_yaml.clone())
         .map_err(ConfigurationError::DeserializeConfigError)?;
 
     // ------------- Check for unknown fields at runtime ----------------
@@ -243,6 +263,29 @@ pub(crate) fn validate_yaml_configuration(
             ),
         });
     }
-
+    config.validated_yaml = Arc::new(expanded_yaml);
     Ok(config)
+}
+
+fn context_lines(
+    yaml_split_by_lines: &[&str],
+    start_marker: &Marker,
+    end_marker: &Marker,
+) -> String {
+    let offset = start_marker
+        .line()
+        .saturating_sub(NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY);
+
+    yaml_split_by_lines[offset..end_marker.line()]
+        .iter()
+        .enumerate()
+        .map(|(idx, line)| {
+            let real_line = idx + offset + 1;
+            match real_line.cmp(&start_marker.line()) {
+                Ordering::Equal => format!("┌ {line}"),
+                Ordering::Greater => format!("| {line}"),
+                Ordering::Less => format!("  {line}"),
+            }
+        })
+        .join("\n")
 }

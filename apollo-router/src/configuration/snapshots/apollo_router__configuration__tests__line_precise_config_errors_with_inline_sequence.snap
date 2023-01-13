@@ -1,13 +1,15 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /cors/allow_headers/1
+1. at line 7
 
-  # The socket address and port to listen on
-  # Defaults to 127.0.0.1:4000
-  listen: 127.0.0.1:4000
-cors:
-  allow_headers: [ Content-Type, 5 ]
-                                 ^----- 5 is not of type "string"
+    # The socket address and port to listen on
+    # Defaults to 127.0.0.1:4000
+    listen: 127.0.0.1:4000
+  cors:
+    allow_headers: [ Content-Type, 5 ]
+                                   ^----- 5 is not of type "string"
+
+

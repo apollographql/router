@@ -140,15 +140,34 @@ impl Default for Config {
     }
 }
 
+schemar_fn!(
+    forward_headers_only,
+    Vec<String>,
+    "Send only the headers specified"
+);
+schemar_fn!(
+    forward_headers_except,
+    Vec<String>,
+    "Send all headers except those specified"
+);
+
+/// Forward headers
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardHeaders {
+    /// Don't send any headers
     None,
+
+    /// Send all headers
     All,
+
+    /// Send only the headers specified
+    #[schemars(schema_with = "forward_headers_only")]
     #[serde(deserialize_with = "deserialize_vec_header_name")]
-    #[schemars(with = "Vec<String>")]
     Only(Vec<HeaderName>),
-    #[schemars(with = "Vec<String>")]
+
+    /// Send all headers except those specified
+    #[schemars(schema_with = "forward_headers_except")]
     #[serde(deserialize_with = "deserialize_vec_header_name")]
     Except(Vec<HeaderName>),
 }
@@ -159,12 +178,31 @@ impl Default for ForwardHeaders {
     }
 }
 
+schemar_fn!(
+    forward_variables_except,
+    Vec<String>,
+    "Send all variables except those specified"
+);
+
+schemar_fn!(
+    forward_variables_only,
+    Vec<String>,
+    "Send only the variables specified"
+);
+
+/// Forward GraphQL variables
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardValues {
+    /// Dont send any variables
     None,
+    /// Send all variables
     All,
+    /// Send only the variables specified
+    #[schemars(schema_with = "forward_variables_only")]
     Only(Vec<String>),
+    /// Send all variables except those specified
+    #[schemars(schema_with = "forward_variables_except")]
     Except(Vec<String>),
 }
 
