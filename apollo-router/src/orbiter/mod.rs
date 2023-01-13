@@ -304,6 +304,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
 mod test {
     use std::collections::HashMap;
     use std::env;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use insta::assert_yaml_snapshot;
@@ -337,6 +338,18 @@ mod test {
             .expect("yaml must be valid");
         let mut usage = HashMap::new();
         visit_config(&mut usage, &config);
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(usage);
+        });
+    }
+
+    #[test]
+    fn test_visit_config_that_needed_upgrade() {
+        let config: Configuration =
+            Configuration::from_str("supergraph:\n  preview_defer_support: true")
+                .expect("config must be valid");
+        let mut usage = HashMap::new();
+        visit_config(&mut usage, &config.validated_yaml);
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(usage);
         });
