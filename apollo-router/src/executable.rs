@@ -644,7 +644,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let (metrics_layer, metrics_handle) =
         tracing_subscriber::reload::Layer::new(MetricsLayer::default());
 
-    println!("Init subscriber");
     // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
     tracing_subscriber::registry()
         .with(EnvFilter::try_new(log_level)?)
