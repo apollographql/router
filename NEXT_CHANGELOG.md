@@ -71,3 +71,9 @@ Building the execution and subgraph services had to go through a factory trait b
 needed anymore since there is only one useful implementation.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
+
+### Optimize header propagation plugin's regex matching ([PR #2391](https://github.com/apollographql/router/pull/2389))
+
+We've changed the plugin to reduce the chances of generating memory allocations when applying regex-based header propagation rules.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2389
