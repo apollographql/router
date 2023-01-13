@@ -47,7 +47,7 @@ authentication:
     jwt:
       jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
       header_name: Different
-      header_prefix: Prefix
+      header_value_prefix: Prefix
       cooldown: 30s
 ```
 
@@ -57,7 +57,7 @@ There are some considerations for each of these parameters.
 
 If you are using a symmetric algorithm (e.g.: HS256) **DO NOT** place your JWKS on the network. They should only be loaded from disk.
 
-### header_name and header_prefix
+### header_name and header_value_prefix
 
 Your chosen header must be a valid HTTP header name and your prefix should not contain any white space.
 

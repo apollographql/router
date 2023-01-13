@@ -45,7 +45,7 @@ type SharedDeduplicate = Arc<
     Deduplicate<Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static>, Url, JwkSet>,
 >;
 
-pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication plugin";
+pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -72,9 +72,9 @@ struct JWTConf {
     /// HTTP header expected to contain JWT
     #[serde(default = "default_header_name")]
     header_name: String,
-    /// Header prefix
-    #[serde(default = "default_header_prefix")]
-    header_prefix: String,
+    /// Header value prefix
+    #[serde(default = "default_header_value_prefix")]
+    header_value_prefix: String,
     /// JWKS retrieval cooldown
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
@@ -103,7 +103,7 @@ fn default_header_name() -> String {
     http::header::AUTHORIZATION.to_string()
 }
 
-fn default_header_prefix() -> String {
+fn default_header_value_prefix() -> String {
     "Bearer".to_string()
 }
 
@@ -276,13 +276,13 @@ impl Plugin for AuthenticationPlugin {
                     if !jwt_value
                         .to_uppercase()
                         .as_str()
-                        .starts_with(&my_config.header_prefix.to_uppercase())
+                        .starts_with(&my_config.header_value_prefix.to_uppercase())
                     {
                         return failure_message(
                             request.context,
                             format!(
                                 "Header Value: '{jwt_value_untrimmed}' is not correctly formatted. prefix should be '{}'",
-                                my_config.header_prefix
+                                my_config.header_value_prefix
                             ),
                             StatusCode::BAD_REQUEST,
                         );
@@ -513,7 +513,7 @@ mod tests {
 
     async fn build_a_test_harness(
         header_name: Option<String>,
-        header_prefix: Option<String>,
+        header_value_prefix: Option<String>,
     ) -> router::BoxCloneService {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
@@ -577,8 +577,8 @@ mod tests {
                 serde_json::Value::String(hn);
         }
 
-        if let Some(hp) = header_prefix {
-            config["authentication"]["experimental"]["jwt"]["header_prefix"] =
+        if let Some(hp) = header_value_prefix {
+            config["authentication"]["experimental"]["jwt"]["header_value_prefix"] =
                 serde_json::Value::String(hp);
         }
 

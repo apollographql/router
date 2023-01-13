@@ -35,7 +35,7 @@ use crate::services::external::PipelineStep;
 use crate::services::router;
 use crate::Context;
 
-pub(crate) const EXTERNAL_SPAN_NAME: &str = "external plugin";
+pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 #[derive(Debug)]
 struct ExternalPlugin {

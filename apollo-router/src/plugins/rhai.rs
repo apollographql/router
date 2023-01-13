@@ -80,6 +80,8 @@ trait OptionDance<T> {
 
 type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
+pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
+
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let mut guard = self.lock().expect("poisoned mutex");
@@ -609,7 +611,7 @@ macro_rules! gen_map_request {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($base::Request),
                         "otel.kind" = "INTERNAL"
                     )
@@ -674,7 +676,7 @@ macro_rules! gen_map_deferred_request {
             fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
                 move |_request: &$request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($request),
                         "otel.kind" = "INTERNAL"
                     )
