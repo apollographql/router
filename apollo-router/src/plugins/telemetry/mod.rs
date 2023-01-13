@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -134,7 +133,7 @@ pub struct Telemetry {
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
 
-    tracer_provider: Mutex<Option<opentelemetry::sdk::trace::TracerProvider>>,
+    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
 }
 
 #[derive(Debug)]
@@ -189,12 +188,12 @@ impl Plugin for Telemetry {
             metrics: BasicMetrics::default(),
             apollo_metrics_sender: meter_provider_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
-            tracer_provider: Mutex::new(Some(Self::create_tracer_provider(&config)?)),
+            tracer_provider: Some(Self::create_tracer_provider(&config)?),
             config: Arc::new(config),
         })
     }
 
-    fn activate(&self) {
+    fn activate(&mut self) {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
@@ -204,8 +203,6 @@ impl Plugin for Telemetry {
             // activate is infallible, so if we get here we know the new pipeline is ready to go.
             let tracer_provider = self
                 .tracer_provider
-                .lock()
-                .expect("mutex poisoned")
                 .take()
                 .expect("must have new tracer_provider");
 

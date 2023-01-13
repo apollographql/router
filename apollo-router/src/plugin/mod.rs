@@ -184,7 +184,7 @@ pub trait Plugin: Send + Sync + 'static {
 
     /// Called once all plugins have been initialized and it is safe to assume that this plugin will take effect.
     /// Interaction with globals is safe in this method.
-    fn activate(&self) {}
+    fn activate(&mut self) {}
 
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
@@ -281,7 +281,7 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     ) -> subgraph::BoxService;
 
     /// Called once all plugins have been initialized and it is safe to assume that this plugin will take effect.
-    fn activate(&self);
+    fn activate(&mut self);
 
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
@@ -314,7 +314,7 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn activate(&self) {
+    fn activate(&mut self) {
         self.activate()
     }
 

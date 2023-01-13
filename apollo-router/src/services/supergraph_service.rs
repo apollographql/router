@@ -334,18 +334,19 @@ impl PluggableSupergraphServiceBuilder {
         )
         .await;
 
-        let plugins = Arc::new(self.plugins);
+        let mut plugins = self.plugins;
+        // Activate all plugins.
+        // We must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+        for (_, plugin) in plugins.iter_mut() {
+            plugin.activate();
+        }
+
+        let plugins = Arc::new(plugins);
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
             plugins.clone(),
         ));
-
-        // Activate all plugins.
-        // We must NOT fail to go live with the new router from this point as some plugins may interact with globals.
-        for (_, plugin) in plugins.iter() {
-            plugin.activate();
-        }
 
         Ok(SupergraphCreator {
             query_planner_service,
