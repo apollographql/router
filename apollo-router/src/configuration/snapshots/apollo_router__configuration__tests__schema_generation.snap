@@ -23,7 +23,8 @@ expression: "&schema"
           "GET",
           "POST",
           "OPTIONS"
-        ]
+        ],
+        "max_age": null
       },
       "type": "object",
       "properties": {
@@ -61,6 +62,14 @@ expression: "&schema"
           "items": {
             "type": "string"
           },
+          "nullable": true
+        },
+        "max_age": {
+          "description": "The `Access-Control-Max-Age` header value in seconds",
+          "default": null,
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0.0,
           "nullable": true
         },
         "methods": {
