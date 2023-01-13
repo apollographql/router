@@ -59,6 +59,9 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
+  nightly:
+    type: boolean
+    default: false
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -415,6 +418,9 @@ jobs:
     parameters:
       platform:
         type: executor
+      nightly:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     environment:
       <<: *common_job_environment
@@ -424,15 +430,18 @@ jobs:
       MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
-      - run:
-          name: Initialize submodules
-          command: git submodule update --recursive --init
       - when:
           condition:
             equal: [*macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
             - macos_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -461,6 +470,12 @@ jobs:
                   sudo apt-get update
             - install_minimal_rust
             - linux_amd_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -481,6 +496,12 @@ jobs:
                   sudo apt-get update
             - install_minimal_rust
             - linux_arm_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -515,6 +536,12 @@ jobs:
                   git-fetch-with-cli = true
                   "@
             - windows_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -604,6 +631,8 @@ jobs:
 
 workflows:
   ci_checks:
+    when:
+      not: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
@@ -670,7 +699,18 @@ workflows:
           requires:
             - prepare_patch_release_approval
 
+  nightly:
+    when: << pipeline.parameters.nightly >>
+    jobs:
+      - build_release:
+          matrix:
+            parameters:
+              platform:
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+
   release:
+    when:
+      not: << pipeline.parameters.nightly >>
     jobs:
       - build_release:
           matrix:
