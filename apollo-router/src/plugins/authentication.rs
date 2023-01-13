@@ -18,6 +18,7 @@ use jsonwebtoken::decode_header;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
+use mime::APPLICATION_JSON;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
@@ -28,12 +29,14 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use url::Url;
 
+#[cfg(not(test))]
 use crate::error::LicenseError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+#[cfg(not(test))]
 use crate::services::apollo_graph_reference;
 use crate::services::router;
 use crate::Context;
@@ -51,6 +54,7 @@ const DEFAULT_AUTHENTICATION_COOLDOWN: Duration = Duration::from_secs(15);
 static COOLDOWN: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
+    #[cfg(not(test))]
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
     Ok(Client::new())
 });
@@ -109,6 +113,9 @@ impl Plugin for AuthenticationPlugin {
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let url: Url = Url::from_str(&init.config.experimental.jwt.jwks_url)?;
+        // This function is expected to return an Optional value, but we'd like to let
+        // users know the various failure conditions. Hence the various clumsy map_err()
+        // scattered through the processing.
         let getter: Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
             Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
                 let fut = async {
@@ -116,25 +123,61 @@ impl Plugin for AuthenticationPlugin {
                         #[cfg(not(test))]
                         apollo_graph_reference()
                             .ok_or(LicenseError::MissingGraphReference)
+                            .map_err(|e| {
+                                tracing::error!(%e, "could not activate commercial features");
+                                e
+                            })
                             .ok()?;
-                        let path = url.to_file_path().ok()?;
-                        read_to_string(path).await.ok()?
+                        let path = url
+                            .to_file_path()
+                            .map_err(|e| {
+                                tracing::error!("could not process url: {:?}", url);
+                                e
+                            })
+                            .ok()?;
+                        read_to_string(path)
+                            .await
+                            .map_err(|e| {
+                                tracing::error!(%e, "could not read JWKS path");
+                                e
+                            })
+                            .ok()?
                     } else {
-                        let my_client = CLIENT.as_ref().map_err(|e| e.to_string()).ok()?.clone();
+                        let my_client = CLIENT
+                            .as_ref()
+                            .map_err(|e| {
+                                tracing::error!(%e, "could not activate commercial features");
+                                e
+                            })
+                            .ok()?
+                            .clone();
 
                         my_client
                             .get(url)
-                            .header(ACCEPT, "application/json")
-                            .header(CONTENT_TYPE, "application/json")
+                            .header(ACCEPT, APPLICATION_JSON.essence_str())
+                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
                             .send()
                             .await
+                            .map_err(|e| {
+                                tracing::error!(%e, "could not get url");
+                                e
+                            })
                             .ok()?
                             .text()
                             .await
+                            .map_err(|e| {
+                                tracing::error!(%e, "could not process url content");
+                                e
+                            })
                             .ok()?
                     };
-                    let jwks: JwkSet = serde_json::from_str(&data).ok()?;
+                    let jwks: JwkSet = serde_json::from_str(&data)
+                        .map_err(|e| {
+                            tracing::error!(%e, "could not create JWKS from url content");
+                            e
+                        })
+                        .ok()?;
                     Some(jwks)
                 };
                 Box::pin(fut)
