@@ -1,19 +1,15 @@
 ---
 title: JWT Authentication in the Apollo Router
 sidebar_title: JWT Authentication
-description: Configure JWT authentication for the router
 ---
 
-> This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape,  add or remove features.
-> If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/2391).
+> **This Apollo Router feature is currently experimental.** As long as it's experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
+>
+> To provide feedback or otherwise participate in this feature, join [this GitHub discussion](https://github.com/apollographql/router/discussions/2391).
 
-Authentication is an important step in controlling access to a router.
-
-JSON Web Tokens [JWT](https://www.rfc-editor.org/rfc/rfc7519) are a very popular authentication technique and are now supported by the router.
+The Apollo Router provides experimental support for request authentication via [JSON Web Token (JWT)](https://www.rfc-editor.org/rfc/rfc7519). This feature uses the popular [jsonwebtoken](https://crates.io/crates/jsonwebtoken) Rust library, which supports a variety of signature algorithms.
 
 JSON Web Keys [JWK](https://www.rfc-editor.org/rfc/rfc7517)s provide the cryptographic mechanism for JWT validation. The router implements this via a JWK Set (JWKS), which is a JSON data structure used to represent a set of JWKs.
-
-The cryptographic implementation is provided via the popular library [jsonwebtoken](https://crates.io/crates/jsonwebtoken) which supports a wide-range of different algorithms (see link for details).
 
 When JWT support is configured within the router, requests will be processed for the presence of a JWT via a header. This JWT will be validated using keys from a configured JWKS and claims will be extracted and stored with the request context so they are available for further processing.
 
