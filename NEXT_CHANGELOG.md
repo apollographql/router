@@ -63,6 +63,16 @@ Users can disable the sending this data by using the command line flag `--anonym
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398
 
+
+## 🐛 Fixes
+
+### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
+
+When receiving requests with invalid content-type/accept header missmatch (e.g multipart requests) , it now specifies the right `content-type` header.
+
+By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
+
+
 ## 🛠 Maintenance
 
 ### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
