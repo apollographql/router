@@ -356,8 +356,8 @@ async fn call_http(
         );
     }
 
-    let graphql: graphql::Response = tracing::debug_span!("parse_subgraph_response")
-        .in_scope(|| {
+    let graphql: graphql::Response =
+        tracing::debug_span!("parse_subgraph_response").in_scope(|| {
             graphql::Response::from_bytes(&cloned_service_name, body).map_err(|error| {
                 FetchError::SubrequestMalformedResponse {
                     service: cloned_service_name.clone(),
@@ -694,7 +694,7 @@ mod tests {
                                     errors: vec![Error::builder()
                                         .message("Random message")
                                         .extension_code(
-                                            PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE
+                                            PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE,
                                         )
                                         .build()],
                                     ..Response::default()
@@ -904,7 +904,9 @@ mod tests {
             match graphql_request {
                 Ok(request) => {
                     if request.extensions.contains_key(PERSISTED_QUERY_KEY) {
-                        panic!("persistedQuery not expected when configuration has apq_enabled=false")
+                        panic!(
+                            "persistedQuery not expected when configuration has apq_enabled=false"
+                        )
                     }
 
                     return Ok(http::Response::builder()
