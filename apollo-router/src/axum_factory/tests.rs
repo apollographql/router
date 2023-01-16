@@ -1009,6 +1009,14 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE,);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"message":"'content-type' header can't be different from \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+    );
 
     server.shutdown().await
 }
@@ -1040,6 +1048,14 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"message":"'accept' header can't be different from \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+    );
 
     server.shutdown().await
 }

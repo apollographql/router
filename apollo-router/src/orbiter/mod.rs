@@ -113,13 +113,9 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
                     tokio::task::spawn(async {
                         tracing::debug!("sending anonymous usage data to Apollo");
-                        match create_report(configuration, schema) {
-                            Ok(report) => {
-                                if let Err(e) = send(report).await {
-                                    tracing::debug!("failed to send usage report: {}", e);
-                                }
-                            }
-                            Err(e) => tracing::debug!("failed to create usage report: {}", e),
+                        let report = create_report(configuration, schema);
+                        if let Err(e) = send(report).await {
+                            tracing::debug!("failed to send usage report: {}", e);
                         }
                     });
                 }
@@ -128,12 +124,8 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
     }
 }
 
-fn create_report(
-    configuration: Arc<Configuration>,
-    _schema: Arc<Schema>,
-) -> Result<UsageReport, BoxError> {
-    let mut configuration: Value = serde_yaml::from_str(&configuration.raw_yaml)
-        .map_err(|_| BoxError::from("configuration must be parseable"))?;
+fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> UsageReport {
+    let mut configuration: Value = (*configuration.validated_yaml).clone();
     let os = get_os();
     let mut usage = HashMap::new();
 
@@ -162,7 +154,7 @@ fn create_report(
     #[cfg(not(test))]
     visit_args(&mut usage, env::args().collect());
 
-    Ok(UsageReport {
+    UsageReport {
         session_id: *SESSION_ID.get_or_init(Uuid::new_v4),
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         platform: Platform {
@@ -173,7 +165,7 @@ fn create_report(
             .into_iter()
             .map(|(k, v)| (k, Value::Number(v.into())))
             .collect(),
-    })
+    }
 }
 
 fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
@@ -242,73 +234,69 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
     // For this to work ALL config must have an annotation, e.g. documentation.
     // For each config path we need to sanitize the it for arrays and also custom names e.g. header names.
     // This corresponds to the json schema keywords of `items` and `additionalProperties`
-    match compiled_json_schema.apply(config).basic() {
-        BasicOutput::Valid(output) => {
-            for item in output {
-                let instance_ptr = item.instance_location();
-                let value = config
-                    .pointer(&instance_ptr.to_string())
-                    .expect("pointer must point to value");
+    if let BasicOutput::Valid(output) = compiled_json_schema.apply(config).basic() {
+        for item in output {
+            let instance_ptr = item.instance_location();
+            let value = config
+                .pointer(&instance_ptr.to_string())
+                .expect("pointer must point to value");
 
-                // Compose the redacted path.
-                let mut path = Vec::new();
-                for chunk in item.keyword_location() {
-                    if let PathChunk::Property(property) = chunk {
-                        // We hit a properties keyword, we can grab the next keyword as it'll be a property name.
-                        path.push(property.to_string());
-                    }
-                    if &PathChunk::Keyword("additionalProperties") == chunk {
-                        // This is free format properties. It's redacted
-                        path.push("<redacted>".to_string());
-                    }
+            // Compose the redacted path.
+            let mut path = Vec::new();
+            for chunk in item.keyword_location() {
+                if let PathChunk::Property(property) = chunk {
+                    // We hit a properties keyword, we can grab the next keyword as it'll be a property name.
+                    path.push(property.to_string());
                 }
-
-                let path = path.join(".");
-                if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
-                    *usage
-                        .entry(format!("configuration.{}.len", path))
-                        .or_default() += 1;
-                }
-                match value {
-                    Value::Bool(value) => {
-                        *usage
-                            .entry(format!("configuration.{}.{}", path, value))
-                            .or_default() += 1;
-                    }
-                    Value::Number(value) => {
-                        *usage
-                            .entry(format!("configuration.{}.{}", path, value))
-                            .or_default() += 1;
-                    }
-                    Value::String(_) => {
-                        // Strings are never output
-                        *usage
-                            .entry(format!("configuration.{}.<redacted>", path))
-                            .or_default() += 1;
-                    }
-                    Value::Object(o) => {
-                        if matches!(
-                            item.keyword_location().last(),
-                            Some(&PathChunk::Property(_))
-                        ) {
-                            let schema_node = raw_json_schema
-                                .pointer(&item.keyword_location().to_string())
-                                .expect("schema node must resolve");
-                            if let Some(Value::Bool(true)) = schema_node.get("additionalProperties")
-                            {
-                                *usage
-                                    .entry(format!("configuration.{}.len", path))
-                                    .or_default() += o.len() as u64;
-                            }
-                        }
-                    }
-                    _ => {}
+                if &PathChunk::Keyword("additionalProperties") == chunk {
+                    // This is free format properties. It's redacted
+                    path.push("<redacted>".to_string());
                 }
             }
+
+            let path = path.join(".");
+            if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
+                *usage
+                    .entry(format!("configuration.{}.len", path))
+                    .or_default() += 1;
+            }
+            match value {
+                Value::Bool(value) => {
+                    *usage
+                        .entry(format!("configuration.{}.{}", path, value))
+                        .or_default() += 1;
+                }
+                Value::Number(value) => {
+                    *usage
+                        .entry(format!("configuration.{}.{}", path, value))
+                        .or_default() += 1;
+                }
+                Value::String(_) => {
+                    // Strings are never output
+                    *usage
+                        .entry(format!("configuration.{}.<redacted>", path))
+                        .or_default() += 1;
+                }
+                Value::Object(o) => {
+                    if matches!(
+                        item.keyword_location().last(),
+                        Some(&PathChunk::Property(_))
+                    ) {
+                        let schema_node = raw_json_schema
+                            .pointer(&item.keyword_location().to_string())
+                            .expect("schema node must resolve");
+                        if let Some(Value::Bool(true)) = schema_node.get("additionalProperties") {
+                            *usage
+                                .entry(format!("configuration.{}.len", path))
+                                .or_default() += o.len() as u64;
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
-        BasicOutput::Invalid(err) => {
-            panic!("schema should have been valid: {err:?}");
-        }
+    } else {
+        panic!("config should have been valid");
     }
 }
 
@@ -316,9 +304,11 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
 mod test {
     use std::collections::HashMap;
     use std::env;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use insta::assert_yaml_snapshot;
+    use serde_json::Value;
 
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
@@ -354,13 +344,26 @@ mod test {
     }
 
     #[test]
+    fn test_visit_config_that_needed_upgrade() {
+        let config: Configuration =
+            Configuration::from_str("supergraph:\n  preview_defer_support: true")
+                .expect("config must be valid");
+        let mut usage = HashMap::new();
+        visit_config(&mut usage, &config.validated_yaml);
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(usage);
+        });
+    }
+
+    #[test]
     fn test_create_report() {
-        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
+        let config_yaml: Value =
+            serde_yaml::from_str(include_str!("testdata/redaction.router.yaml"))
+                .expect("test yaml must parse");
         let mut config: Configuration =
-            serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.raw_yaml = Arc::new(config_string);
-        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()))
-            .expect("report must be created");
+            serde_json::from_value(config_yaml.clone()).expect("yaml must be valid");
+        config.validated_yaml = Arc::new(config_yaml);
+        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
                 ".version" => "[version]",
@@ -369,15 +372,6 @@ mod test {
                 ".platform.continuous_integration" => "[ci]",
             });
         });
-    }
-
-    #[test]
-    fn test_create_report_invalid_yaml() {
-        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
-        let mut config: Configuration =
-            serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.raw_yaml = Arc::new("".to_string());
-        assert!(create_report(Arc::new(config), Arc::new(crate::spec::Schema::default())).is_err());
     }
 
     // TODO, enable once we are live.
