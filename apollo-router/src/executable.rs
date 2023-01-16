@@ -629,7 +629,7 @@ fn copy_args_to_env() {
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
-        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("a", None, None),
+        opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("noop", None, None),
     );
     let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());
 
@@ -653,7 +653,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
         .with(opentelemetry_layer)
         .with(fmt_layer)
         .with(metrics_layer)
-        .init();
+        .try_init()?;
 
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE

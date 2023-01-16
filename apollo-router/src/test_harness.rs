@@ -93,6 +93,13 @@ impl<'a> TestHarness<'a> {
         self
     }
 
+    /// Specifies the logging level. Note that this function will silently fail if called more than once.
+    /// log_level is in RUST_LOG format.
+    pub fn try_log_level(self, log_level: &'a str) -> Self {
+        let _ = crate::executable::init_telemetry(log_level);
+        self
+    }
+
     /// Specifies the (static) supergraph schema definition.
     ///
     /// Panics if called more than once.

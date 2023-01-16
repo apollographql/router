@@ -41,6 +41,7 @@ use router_bridge::planner::UsageReporting;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -179,7 +180,10 @@ impl Drop for Telemetry {
         // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
         // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
         if let Some(tracer_provider) = self.tracer_provider.take() {
-            tokio::task::spawn_blocking(move || drop(tracer_provider));
+            // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
+            if let Ok(_) = Handle::try_current() {
+                tokio::task::spawn_blocking(move || drop(tracer_provider));
+            }
         }
     }
 }
