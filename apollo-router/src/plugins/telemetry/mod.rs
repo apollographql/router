@@ -70,6 +70,7 @@ use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
@@ -98,6 +99,7 @@ use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
+
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
@@ -134,6 +136,7 @@ pub struct Telemetry {
     field_level_instrumentation_ratio: f64,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
+    meter_provider: Option<AggregateMeterProvider>,
 }
 
 #[derive(Debug)]
@@ -173,6 +176,7 @@ impl Drop for Telemetry {
     fn drop(&mut self) {
         // If for some reason we didn't use the trace provider then safely discard it.
         // Tracer providers need to be dropped in a blocking task.
+        // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
         if let Some(tracer_provider) = self.tracer_provider.take() {
             tokio::task::spawn_blocking(move || drop(tracer_provider));
         }
@@ -187,18 +191,17 @@ impl Plugin for Telemetry {
         let config = init.config;
         config.logging.validate()?;
 
-        let mut meter_provider_builder = Self::create_metrics_exporters(&config)?;
-        opentelemetry::global::set_meter_provider(meter_provider_builder.meter_provider());
-
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
+        let mut metrics_builder = Self::create_metrics_builder(&config)?;
         Ok(Telemetry {
-            custom_endpoints: meter_provider_builder.custom_endpoints(),
-            _metrics_exporters: meter_provider_builder.exporters(),
+            custom_endpoints: metrics_builder.custom_endpoints(),
+            _metrics_exporters: metrics_builder.exporters(),
             metrics: BasicMetrics::default(),
-            apollo_metrics_sender: meter_provider_builder.apollo_metrics_provider(),
+            apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
+            meter_provider: Some(metrics_builder.meter_provider()),
             config: Arc::new(config),
         })
     }
@@ -226,11 +229,17 @@ impl Plugin for Telemetry {
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
             // To ensure we don't hang tracing providers are dropped in a blocking thread.
             // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
             tokio::task::spawn_blocking(move || drop(last_provider));
             opentelemetry::global::set_error_handler(handle_error)
                 .expect("otel error handler lock poisoned, fatal");
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+            opentelemetry::global::set_meter_provider(
+                self.meter_provider
+                    .take()
+                    .expect("must have meter_provider"),
+            );
         }
 
         if let Some(handle) = METRICS_LAYER_HANDLE.get() {
@@ -539,7 +548,7 @@ impl Telemetry {
         Ok(tracer_provider)
     }
 
-    fn create_metrics_exporters(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
+    fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
         let metrics_config = config.metrics.clone().unwrap_or_default();
         let metrics_common_config = &mut metrics_config.common.unwrap_or_default();
         // Set default service name for metrics
