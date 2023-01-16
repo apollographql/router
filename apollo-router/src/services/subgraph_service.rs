@@ -181,8 +181,8 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
 
             let mut apq_body = graphql::Request {
                 query: None,
-                operation_name: operation_name,
-                variables: variables,
+                operation_name,
+                variables,
                 extensions: extensions_with_apq,
             };
 
@@ -203,13 +203,13 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
             match get_apq_error(gql_response) {
                 APQError::PersistedQueryNotSupported => {
                     apq_enabled.store(false, Relaxed);
-                    return call_http(request, body, context, client, service_name).await;
+                    call_http(request, body, context, client, service_name).await
                 }
                 APQError::PersistedQueryNotFound => {
                     apq_body.query = query;
-                    return call_http(request, apq_body, context, client, service_name).await;
+                    call_http(request, apq_body, context, client, service_name).await
                 }
-                _ => return Ok(response),
+                _ => Ok(response)
             }
         };
 
@@ -384,15 +384,12 @@ fn get_apq_error(gql_response: &graphql::Response) -> APQError {
             _ => {}
         }
         // Check if extensions contains the APQ error in "code"
-        match error.extensions.get(CODE_STRING) {
-            Some(value) => {
-                if value == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
-                    return APQError::PersistedQueryNotFound;
-                } else if value == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
-                    return APQError::PersistedQueryNotSupported;
-                }
+        if let Some(value) = error.extensions.get(CODE_STRING) {
+            if value == PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE {
+                return APQError::PersistedQueryNotFound;
+            } else if value == PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE {
+                return APQError::PersistedQueryNotSupported;
             }
-            None => {}
         }
     }
     APQError::Other
@@ -746,7 +743,7 @@ mod tests {
                         panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
 
-                    if request.query == None {
+                    if request.query.is_none() {
                         return Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
@@ -806,7 +803,7 @@ mod tests {
                         panic!("Recieved request without persisted query in persisted_query_not_found test.")
                     }
 
-                    if request.query == None {
+                    if request.query.is_none() {
                         return Ok(http::Response::builder()
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
@@ -1075,9 +1072,9 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_message(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert_eq!(
+        assert!(
             subgraph_service.clone().apq_enabled.as_ref().load(Relaxed),
-            true
+            "{}", true
         );
 
         let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
@@ -1109,7 +1106,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert_eq!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
+        assert!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1120,7 +1117,7 @@ mod tests {
         ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert_eq!(
+        assert!(
             subgraph_service.clone().apq_enabled.as_ref().load(Relaxed),
             true
         );
@@ -1154,7 +1151,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert_eq!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
+        assert!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
     }
 
     #[tokio::test(flavor = "multi_thread")]
