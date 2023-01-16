@@ -2913,7 +2913,10 @@ fn it_parses_default_floats() {
         "#,
     );
 
-    Schema::parse(&schema, &Default::default()).unwrap();
+    let schema = Schema::parse(&schema, &Default::default()).unwrap();
+    let (_field_type, value) =
+        &schema.input_types["WithAllKindsOfFloats"].fields["a_float_that_doesnt_fit_an_int"];
+    assert_eq!(value.as_ref().unwrap().as_i64().unwrap(), 9876543210);
 }
 
 #[test]

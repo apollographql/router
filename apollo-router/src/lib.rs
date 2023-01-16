@@ -59,6 +59,7 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+mod orbiter;
 mod plugins;
 mod query_planner;
 mod request;

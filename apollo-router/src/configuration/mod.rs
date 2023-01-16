@@ -14,6 +14,7 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use derivative::Derivative;
 use displaydoc::Display;
@@ -77,22 +78,31 @@ pub enum ConfigurationError {
 #[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
 #[derivative(Debug)]
 pub struct Configuration {
+    /// The raw configuration string.
+    #[serde(skip)]
+    pub(crate) validated_yaml: Arc<Value>,
+
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
 
+    /// Healthcheck configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
 
+    /// Sandbox configuration
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
+    /// Homepage configuration
     #[serde(default)]
     pub(crate) homepage: Homepage,
 
+    /// Configuration for the supergraph
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
+
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
@@ -104,7 +114,7 @@ pub struct Configuration {
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
     #[serde(flatten)]
-    apollo_plugins: ApolloPlugins,
+    pub(crate) apollo_plugins: ApolloPlugins,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -168,6 +178,7 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
+        validated_yaml: Option<Value>,
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -179,6 +190,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
+            validated_yaml: Arc::new(validated_yaml.unwrap_or_default()),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -306,6 +318,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
+            validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
@@ -483,7 +496,7 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
-    /// Enable defer support
+    /// Set to false to disable defer support
     #[serde(default = "default_defer_support")]
     pub(crate) defer_support: bool,
 
@@ -551,15 +564,19 @@ impl Default for Supergraph {
     }
 }
 
+/// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
 }
 
+/// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
     /// Warm up the cache on reloads by running the query plan over
     /// a list of the most used queries
@@ -568,9 +585,9 @@ pub(crate) struct QueryPlanning {
     pub(crate) warmed_up_queries: usize,
 }
 
+/// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
@@ -608,6 +625,7 @@ pub(crate) struct RedisCache {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
+    /// Set to true to enable sandbox
     #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
@@ -647,6 +665,7 @@ impl Default for Sandbox {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Homepage {
+    /// Set to false to disable the homepage
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -691,6 +710,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
+    /// Set to false to disable the healthcheck endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }
