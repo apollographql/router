@@ -30,9 +30,6 @@ use serde_json_bytes::Value;
 use test_span::prelude::*;
 use tower::BoxError;
 use tower::ServiceExt;
-use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::util::SubscriberInitExt;
-use tracing_subscriber::EnvFilter;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
