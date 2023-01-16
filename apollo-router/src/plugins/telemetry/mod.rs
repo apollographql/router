@@ -169,6 +169,16 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
     Ok(builder)
 }
 
+impl Drop for Telemetry {
+    fn drop(&mut self) {
+        // If for some reason we didn't use the trace provider then safely discard it.
+        // Tracer providers need to be dropped in a blocking task.
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            tokio::task::spawn_blocking(move || drop(tracer_provider));
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for Telemetry {
     type Config = config::Conf;
@@ -222,6 +232,7 @@ impl Plugin for Telemetry {
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
+
         if let Some(handle) = METRICS_LAYER_HANDLE.get() {
             // Global meter provider is already set when calling `create_metrics_exporters`
             handle

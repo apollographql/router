@@ -911,10 +911,6 @@ async fn setup_router_and_registry(
     config: serde_json::Value,
 ) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
-    let _ = tracing_subscriber::registry()
-        .with(EnvFilter::from_default_env())
-        .with(tracing_subscriber::fmt::layer().pretty())
-        .try_init();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(config)
