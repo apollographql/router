@@ -209,7 +209,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                     apq_body.query = query;
                     call_http(request, apq_body, context, client, service_name).await
                 }
-                _ => Ok(response)
+                _ => Ok(response),
             }
         };
 
@@ -236,7 +236,7 @@ async fn call_http(
         .instrument(tracing::debug_span!("body_compression"))
         .await
         .map_err(|err| {
-            tracing::error!(compress_error = format!("{:?}", err).as_str());
+            tracing::error!(compress_error = format!("{err:?}").as_str());
 
             FetchError::CompressionError {
                 service: service_name.clone(),
@@ -296,7 +296,7 @@ async fn call_http(
             .call(request)
             .await
             .map_err(|err| {
-                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+                tracing::error!(fetch_error = format!("{err:?}").as_str());
 
                 FetchError::SubrequestHttpError {
                     service: service_name.clone(),
@@ -339,7 +339,7 @@ async fn call_http(
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
             .map_err(|err| {
-                tracing::error!(fetch_error = format!("{:?}", err).as_str());
+                tracing::error!(fetch_error = format!("{err:?}").as_str());
 
                 FetchError::SubrequestHttpError {
                     service: service_name.clone(),
@@ -424,8 +424,7 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
             unknown => {
                 tracing::error!("unknown content-encoding value '{:?}'", unknown);
                 Err(BoxError::from(format!(
-                    "unknown content-encoding value '{:?}'",
-                    unknown
+                    "unknown content-encoding value '{unknown:?}'",
                 )))
             }
         },
@@ -936,7 +935,7 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: Arc::new(
@@ -969,7 +968,7 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_bad_response_format(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let err = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: Arc::new(
@@ -1002,7 +1001,7 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_compressed_response(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(false));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: Arc::new(
@@ -1039,7 +1038,7 @@ mod tests {
         tokio::task::spawn(emulate_subgraph_unauthorized(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let err = subgraph_service
             .oneshot(SubgraphRequest {
                 supergraph_request: Arc::new(
@@ -1072,12 +1071,9 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_message(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert!(
-            subgraph_service.clone().apq_enabled.as_ref().load(Relaxed),
-            "{}", true
-        );
+        assert!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
             .oneshot(SubgraphRequest {
@@ -1106,7 +1102,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
+        assert!(!subgraph_service.apq_enabled.as_ref().load(Relaxed));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1117,12 +1113,9 @@ mod tests {
         ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert!(
-            subgraph_service.clone().apq_enabled.as_ref().load(Relaxed),
-            true
-        );
+        assert!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
             .oneshot(SubgraphRequest {
@@ -1151,7 +1144,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert!(subgraph_service.apq_enabled.as_ref().load(Relaxed), false);
+        assert!(!subgraph_service.apq_enabled.as_ref().load(Relaxed));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1160,7 +1153,7 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_found_message(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
             .oneshot(SubgraphRequest {
@@ -1199,7 +1192,7 @@ mod tests {
         ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
             .oneshot(SubgraphRequest {
@@ -1236,7 +1229,7 @@ mod tests {
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
             .oneshot(SubgraphRequest {
@@ -1273,7 +1266,7 @@ mod tests {
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(false));
 
-        let url = Uri::from_str(&format!("http://{}", socket_addr)).unwrap();
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
             .clone()
             .oneshot(SubgraphRequest {
