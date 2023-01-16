@@ -167,24 +167,26 @@ fn supergraph_service(service) {
 
 ## base64 encode/decode strings
 
-Your Rhai customization can use the functions `base64encode()` and `base64decode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
+Your Rhai customization can use the functions `base64::encode()` and `base64::decode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
 
 ```rhai
 fn supergraph_service(service) {
     let original = "alice and bob";
-    let encoded = base64encode(original);
+    let encoded = base64::encode(original);
     // encoded will be "YWxpY2UgYW5kIGJvYgo="
     try {
-        let and_back = base64decode(encoded);
+        let and_back = base64::decode(encoded);
         // and_back will be "alice and bob"
     }
     catch(err)
     {
         // log any errors
-        log_error(`base64decode error: ${err}`);
+        log_error(`base64::decode error: ${err}`);
     }
 }
 ```
+
+Note: You don't need to import the "base64" module. It is imported in the router.
 
 ### Headers with multiple values
 

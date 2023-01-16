@@ -29,9 +29,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
-### Add support for `base64encode()` / `base64decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
+### Add support for `base64::encode()` / `base64::decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
 
-Two new functions, `base64encode()` and `base64decode()` may now be used to Base64-encode or Base64-decode strings, respectively.
+Two new functions, `base64::encode()` and `base64::decode()` may now be used to Base64-encode or Base64-decode strings, respectively.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2394
 
