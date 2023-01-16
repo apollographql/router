@@ -136,7 +136,7 @@ pub struct Telemetry {
     field_level_instrumentation_ratio: f64,
 
     tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
-    meter_provider: Option<AggregateMeterProvider>,
+    meter_provider: AggregateMeterProvider,
 }
 
 #[derive(Debug)]
@@ -194,14 +194,15 @@ impl Plugin for Telemetry {
         let field_level_instrumentation_ratio =
             config.calculate_field_level_instrumentation_ratio()?;
         let mut metrics_builder = Self::create_metrics_builder(&config)?;
+        let meter_provider = metrics_builder.meter_provider();
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints(),
             _metrics_exporters: metrics_builder.exporters(),
-            metrics: BasicMetrics::default(),
+            metrics: BasicMetrics::new(&meter_provider),
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
-            meter_provider: Some(metrics_builder.meter_provider()),
+            meter_provider: metrics_builder.meter_provider(),
             config: Arc::new(config),
         })
     }
@@ -235,17 +236,11 @@ impl Plugin for Telemetry {
                 .expect("otel error handler lock poisoned, fatal");
 
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
-            opentelemetry::global::set_meter_provider(
-                self.meter_provider
-                    .take()
-                    .expect("must have meter_provider"),
-            );
         }
 
         if let Some(handle) = METRICS_LAYER_HANDLE.get() {
-            // Global meter provider is already set when calling `create_metrics_exporters`
             handle
-                .reload(MetricsLayer::default())
+                .reload(MetricsLayer::new(&self.meter_provider))
                 .expect("metrics layer reload must succeed");
         }
 

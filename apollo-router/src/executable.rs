@@ -16,6 +16,7 @@ use clap::Parser;
 use clap::Subcommand;
 use directories::ProjectDirs;
 use once_cell::sync::OnceCell;
+use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use tracing_opentelemetry::OpenTelemetryLayer;
@@ -642,7 +643,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
 
     let (metrics_layer, metrics_handle) =
-        tracing_subscriber::reload::Layer::new(MetricsLayer::default());
+        tracing_subscriber::reload::Layer::new(MetricsLayer::new(&NoopMeterProvider::default()));
 
     // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
     tracing_subscriber::registry()
