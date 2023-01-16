@@ -174,8 +174,9 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
 
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        // If for some reason we didn't use the trace provider then safely discard it.
-        // Tracer providers need to be dropped in a blocking task.
+        // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
+        // To ensure we don't hang tracing providers are dropped in a blocking task.
+        // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
         // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
         if let Some(tracer_provider) = self.tracer_provider.take() {
             tokio::task::spawn_blocking(move || drop(tracer_provider));
@@ -228,7 +229,7 @@ impl Plugin for Telemetry {
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            // To ensure we don't hang tracing providers are dropped in a blocking thread.
+            // To ensure we don't hang tracing providers are dropped in a blocking task.
             // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
             // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
             tokio::task::spawn_blocking(move || drop(last_provider));
