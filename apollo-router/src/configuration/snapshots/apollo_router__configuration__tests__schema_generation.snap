@@ -2968,7 +2968,7 @@ expression: "&schema"
           "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
-            "apq_enabled": {
+            "apq": {
               "description": "Enable APQ for outgoing subgraph requests",
               "type": "boolean",
               "nullable": true
@@ -3114,7 +3114,7 @@ expression: "&schema"
             "description": "Traffic shaping options",
             "type": "object",
             "properties": {
-              "apq_enabled": {
+              "apq": {
                 "description": "Enable APQ for outgoing subgraph requests",
                 "type": "boolean",
                 "nullable": true

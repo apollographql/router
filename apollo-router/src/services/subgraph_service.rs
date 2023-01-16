@@ -96,10 +96,10 @@ pub(crate) struct SubgraphService {
     /// Whether apq is enabled in the router for subgraph calls
     /// This is enabled by default can be configured as
     /// subgraph:
-    ///      apq_enabled: <bool>
+    ///      apq: <bool>
     /// If a subgraph sends the error message PERSISTED_QUERY_NOT_SUPPORTED,
-    /// apq_enabled is set to false
-    apq_enabled: Arc<AtomicBool>,
+    /// apq is set to false
+    apq: Arc<AtomicBool>,
 }
 
 impl SubgraphService {
@@ -120,7 +120,7 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            apq_enabled: Arc::new(<AtomicBool>::new(apq_enabled.unwrap_or(true))),
+            apq: Arc::new(<AtomicBool>::new(apq_enabled.unwrap_or(true))),
         }
     }
 }
@@ -149,7 +149,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
         let client = std::mem::replace(&mut self.client, clone);
         let service_name = (*self.service).to_owned();
 
-        let arc_apq_enabled = self.apq_enabled.clone();
+        let arc_apq_enabled = self.apq.clone();
 
         let make_calls = async move {
             // If APQ is not enabled, simply make the graphql call
@@ -1071,7 +1071,7 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_message(socket_addr));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed));
+        assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -1102,7 +1102,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert!(!subgraph_service.apq_enabled.as_ref().load(Relaxed));
+        assert!(!subgraph_service.apq.as_ref().load(Relaxed));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1113,7 +1113,7 @@ mod tests {
         ));
         let subgraph_service = SubgraphService::new("test", Some(true));
 
-        assert!(subgraph_service.clone().apq_enabled.as_ref().load(Relaxed));
+        assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -1144,7 +1144,7 @@ mod tests {
         };
 
         assert_eq!(resp.response.body(), &expected_resp);
-        assert!(!subgraph_service.apq_enabled.as_ref().load(Relaxed));
+        assert!(!subgraph_service.apq.as_ref().load(Relaxed));
     }
 
     #[tokio::test(flavor = "multi_thread")]

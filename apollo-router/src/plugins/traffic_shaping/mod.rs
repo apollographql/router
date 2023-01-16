@@ -69,7 +69,7 @@ struct Shaping {
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
     /// Enable APQ for outgoing subgraph requests
-    apq_enabled: Option<bool>,
+    apq: Option<bool>,
     /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
@@ -83,7 +83,7 @@ impl Merge for Shaping {
                 deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
-                apq_enabled: self.apq_enabled.or(fallback.apq_enabled),
+                apq: self.apq.or(fallback.apq),
                 global_rate_limit: self
                     .global_rate_limit
                     .as_ref()
@@ -363,8 +363,8 @@ impl TrafficShaping {
         }
     }
 
-    pub(crate) fn get_apq_enabled(&self, name: &str) -> Option<bool> {
-        self.config.subgraphs.get(name)?.apq_enabled
+    pub(crate) fn get_apq(&self, name: &str) -> Option<bool> {
+        self.config.subgraphs.get(name)?.apq
     }
 }
 

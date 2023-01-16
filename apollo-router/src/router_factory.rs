@@ -150,7 +150,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             {
                 Some(shaping) => Either::A(shaping.subgraph_service_internal(
                     name,
-                    SubgraphService::new(name, shaping.get_apq_enabled(name)),
+                    SubgraphService::new(name, shaping.get_apq(name)),
                 )),
                 None => Either::B(SubgraphService::new(name, None)),
             };
@@ -207,7 +207,7 @@ impl YamlRouterFactory {
             {
                 Some(shaping) => Either::A(shaping.subgraph_service_internal(
                     name,
-                    SubgraphService::new(name, shaping.get_apq_enabled(name)),
+                    SubgraphService::new(name, shaping.get_apq(name)),
                 )),
                 None => Either::B(SubgraphService::new(name, None)),
             };
