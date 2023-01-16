@@ -7,7 +7,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
 use derivative::Derivative;
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -1197,7 +1196,8 @@ pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
         ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
         ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
         ast::Value::IntValue(i) => {
-            let s = i.source_string();
+            let token = i.int_token()?;
+            let s = token.text();
             s.parse::<i64>()
                 .ok()
                 .map(Into::into)
