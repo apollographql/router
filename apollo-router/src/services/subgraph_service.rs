@@ -42,9 +42,9 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
+use crate::services::layers::apq;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
-use crate::services::layers::apq;
 use crate::Context;
 
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
