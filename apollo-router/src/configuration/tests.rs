@@ -678,3 +678,27 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
         _ => {}
     }
 }
+
+#[test]
+fn test_configuration_validate_and_sanitize() {
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/*");
+
+    assert!(Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*/whatever").build())
+        .build()
+        .is_err());
+}
