@@ -67,26 +67,13 @@ pub(crate) static METRICS_LAYER_HANDLE: OnceCell<
         Layered<
             tracing_subscriber::reload::Layer<
                 Box<
-                    dyn Layer<
-                            Layered<
-                                OpenTelemetryLayer<
-                                    Layered<EnvFilter, Registry>,
-                                    ReloadTracer<Tracer>,
-                                >,
-                                Layered<EnvFilter, Registry>,
-                            >,
-                        > + Send
+                    dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
+                        + Send
                         + Sync,
                 >,
-                Layered<
-                    OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
-                    Layered<EnvFilter, Registry>,
-                >,
+                Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>,
             >,
-            Layered<
-                OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
-                Layered<EnvFilter, Registry>,
-            >,
+            Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>,
         >,
     >,
 > = OnceCell::new();
@@ -95,18 +82,11 @@ pub(crate) static METRICS_LAYER_HANDLE: OnceCell<
 pub(crate) static FMT_LAYER_HANDLE: OnceCell<
     Handle<
         Box<
-            dyn Layer<
-                    Layered<
-                        OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
-                        Layered<EnvFilter, Registry>,
-                    >,
-                > + Send
+            dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
+                + Send
                 + Sync,
         >,
-        Layered<
-            OpenTelemetryLayer<Layered<EnvFilter, Registry>, ReloadTracer<Tracer>>,
-            Layered<EnvFilter, Registry>,
-        >,
+        Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>,
     >,
 > = OnceCell::new();
 
@@ -649,10 +629,10 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
     // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
     tracing_subscriber::registry()
-        .with(EnvFilter::try_new(log_level)?)
         .with(opentelemetry_layer)
         .with(fmt_layer)
         .with(metrics_layer)
+        .with(EnvFilter::try_new(log_level)?)
         .try_init()?;
 
     // Stash the reload handles so that we can hot reload later

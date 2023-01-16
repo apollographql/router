@@ -47,7 +47,6 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
@@ -588,17 +587,16 @@ impl Telemetry {
     fn create_fmt_layer(
         config: &config::Conf,
     ) -> Box<
-        (dyn Layer<
-            tracing_subscriber::layer::Layered<
-                OpenTelemetryLayer<
-                    tracing_subscriber::layer::Layered<EnvFilter, tracing_subscriber::Registry>,
-                    ReloadTracer<opentelemetry::sdk::trace::Tracer>,
+        dyn Layer<
+                ::tracing_subscriber::layer::Layered<
+                    OpenTelemetryLayer<
+                        ::tracing_subscriber::Registry,
+                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
+                    >,
+                    ::tracing_subscriber::Registry,
                 >,
-                tracing_subscriber::layer::Layered<EnvFilter, tracing_subscriber::Registry>,
-            >,
-        > + std::marker::Send
-             + std::marker::Sync
-             + 'static),
+            > + Send
+            + Sync,
     > {
         let logging = &config.logging;
         let fmt = match logging.format {
