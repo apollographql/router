@@ -203,7 +203,7 @@ impl Plugin for Telemetry {
             apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
             field_level_instrumentation_ratio,
             tracer_provider: Some(Self::create_tracer_provider(&config)?),
-            meter_provider: metrics_builder.meter_provider(),
+            meter_provider,
             config: Arc::new(config),
         })
     }
