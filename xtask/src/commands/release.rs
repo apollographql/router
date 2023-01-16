@@ -106,7 +106,6 @@ impl Prepare {
                 std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN env variable must be set"),
             ),
         )?;
-
         self.update_lock()?;
         self.check_compliance()?;
 
