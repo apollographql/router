@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Error, Result};
 use cargo_metadata::MetadataCommand;
+use octorust::types::PullsCreateRequest;
+use octorust::Client;
 use std::str::FromStr;
 use structopt::StructOpt;
+use tap::TapFallible;
 use walkdir::WalkDir;
 use xtask::*;
 
