@@ -180,7 +180,7 @@ impl Drop for Telemetry {
         // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
         if let Some(tracer_provider) = self.tracer_provider.take() {
             // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
-            if let Ok(_) = Handle::try_current() {
+            if Handle::try_current().is_ok() {
                 tokio::task::spawn_blocking(move || drop(tracer_provider));
             }
         }
