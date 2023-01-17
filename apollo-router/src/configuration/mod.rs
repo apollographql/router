@@ -554,7 +554,7 @@ impl Default for Supergraph {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
-    /// Activates Automatic Persisted Queries
+    /// Activates Automatic Persisted Queries (enabled by default)
     #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
     pub(crate) experimental_cache: Cache,
