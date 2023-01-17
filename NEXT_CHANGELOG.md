@@ -92,9 +92,9 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### Add documentation to create custom metrics in plugins ([Issue #2294](https://github.com/apollographql/router/issues/2294))
 
-To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event. If you respect a specific naming for your event you'll be able to generate your own custom metrics directly in Prometheus.
+To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event. If you observe a specific naming pattern for your event you'll be able to generate your own custom metrics directly in Prometheus.
 
-To publish a new metric, use tracing macros to generate an event that contains following prefixes:
+To publish a new metric, use tracing macros to generate an event that contains one of the following prefixes:
 
 `monotonic_counter.` (non-negative numbers): Used when the counter should only ever increase
 `counter.`: Used when the counter can go up or down
