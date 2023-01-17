@@ -2,25 +2,8 @@
 title: Traffic shaping in the Apollo Router
 ---
 
-<<<<<<< HEAD
 The Apollo Router provides various features to improve the performance and reliability of
 the traffic between the client and router and between the router and subgraphs.
-=======
-The Apollo Router supports the following types of traffic shaping between itself and your subgraphs:
-
-- **Sub-query deduplication** - Whenever the router is sending multiple identical in-flight query operations to a subgraph, it can consolidate them into a single request.
-  - Mutation operations are never deduplicated.
-  - Only in-flight requests are deduplicated.
-- **Variable deduplication** - If a request to a subgraph includes multiple GraphQL variables with the same value, the router can replace those with a single variable.
-- **Compression** - The router can compress request bodies to subgraphs (along with response bodies to clients) with a supported algorithm
-  - The router currently supports `gzip`, `br`, and `deflate`.
-- **Global rate limiting** - If you want to rate limit requests to subgraphs or to the router itself.
-- **Timeout**: - Set a timeout to subgraphs and router requests.
-- **APQ**: - Whether to use Automatic Persisted Queries (APQ) in subgraph calls.
-- **Request Retry**: - retry subgraph requests if they fail due to network errors. This implements Finagle's retry buckets mechanism. **Experimental feature**: retry configuration might change in the future.
-
-Each of these optimizations can reduce network bandwidth and CPU usage for your subgraphs.
->>>>>>> dev
 
 ## Configuration
 
