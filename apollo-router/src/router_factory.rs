@@ -148,10 +148,22 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => Either::A(shaping.subgraph_service_internal(
-                    name,
-                    SubgraphService::new(name, shaping.get_apq(name)),
-                )),
+                Some(shaping) => Either::A(
+                    shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(
+                            name,
+                            configuration
+                                .supergraph
+                                .apq
+                                .subgraph
+                                .subgraphs
+                                .get(name)
+                                .map(|apq| apq.enabled)
+                                .or(Some(configuration.supergraph.apq.subgraph.all.enabled)),
+                        ),
+                    ),
+                ),
                 None => Either::B(SubgraphService::new(name, None)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
@@ -197,7 +209,7 @@ impl YamlRouterFactory {
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        builder = builder.with_configuration(configuration);
+        builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
             let subgraph_service = match plugins
@@ -205,10 +217,22 @@ impl YamlRouterFactory {
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => Either::A(shaping.subgraph_service_internal(
-                    name,
-                    SubgraphService::new(name, shaping.get_apq(name)),
-                )),
+                Some(shaping) => Either::A(
+                    shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(
+                            name,
+                            configuration
+                                .supergraph
+                                .apq
+                                .subgraph
+                                .subgraphs
+                                .get(name)
+                                .map(|apq| apq.enabled)
+                                .or(Some(configuration.supergraph.apq.subgraph.all.enabled)),
+                        ),
+                    ),
+                ),
                 None => Either::B(SubgraphService::new(name, None)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);

@@ -9,6 +9,7 @@ mod tests;
 mod upgrade;
 mod yaml;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -576,6 +577,28 @@ impl Default for Supergraph {
 pub(crate) struct Apq {
     /// Cache configuration
     pub(crate) experimental_cache: Cache,
+
+    pub(crate) subgraph: ApqSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ApqSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: SubgraphApq,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, SubgraphApq>,
+}
+
+/// Subgraph level Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SubgraphApq {
+    /// Enable
+    pub(crate) enabled: bool,
 }
 
 /// Query planning cache configuration
