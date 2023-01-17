@@ -297,8 +297,8 @@ impl Prepare {
 
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
-            "version: \"v[^\"]+\"",
-            format!("version: \"{}\"", version)
+            "^version:.*?$",
+            format!("version: {}", version)
         );
 
         replace_in_file!(
