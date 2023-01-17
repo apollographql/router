@@ -59,6 +59,7 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+mod orbiter;
 mod plugins;
 mod query_planner;
 mod request;
@@ -100,4 +101,17 @@ pub mod _private {
     // For tests
     pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
+
+    /// Retuns the `Debug` fomatting of two `Result<Schema, SchemaError>`,
+    /// from `parse_with_ast` and `parse_with_hir` respectively.
+    ///
+    /// The two strings are expected to be equal.
+    pub fn compare_schema_parsing(schema: &str) -> (String, String) {
+        use crate::spec::Schema;
+        let conf = Default::default();
+        (
+            format!("{:?}", Schema::parse_with_ast(schema, &conf)),
+            format!("{:?}", Schema::parse_with_hir(schema, &conf)),
+        )
+    }
 }
