@@ -392,6 +392,21 @@ The Apollo Router automatically supports APQ via its in-memory cache. See the [c
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 
+### TLS
+
+TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. It is possible to override the list, for all subgraphs or per subgraph:
+
+```yaml title="router.yaml"
+tls:
+  subgraph:
+  all:
+    certificate_authorities: "${file./path/to/ca.crt}"
+  # override per subgraph
+  subgraphs:
+    products:
+      certificate_authorities: "${file./path/to/product_ca.crt}"
+```
+
 ### Plugins
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
