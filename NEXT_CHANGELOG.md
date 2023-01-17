@@ -28,6 +28,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [1.8.1] (unreleased) - 2022-mm-dd
 
 ## 🚀 Features
+
 ### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397))
 
 Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
@@ -65,6 +66,22 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 
 ## 🐛 Fixes
+
+
+### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
+
+You can now use wildcard in supergraph endpoint path like this:
+
+```yaml
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /g*
+```
+
+if you want the supergraph to answer on `/graphql` or `/gateway` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2410
+
 
 ### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
 
