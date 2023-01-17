@@ -19,6 +19,7 @@ use tower::Layer;
 use tower::Service;
 use tower::ServiceExt;
 
+use crate::graphql;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::layers::ServiceExt as _;
 use crate::services::router;
@@ -51,11 +52,21 @@ where
                 {
                     let response: http::Response<hyper::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
-                        .body(hyper::Body::from(format!(
-                            r#"'content-type' header can't be different from {:?} or {:?}"#,
-                            APPLICATION_JSON.essence_str(),
-                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                        )))
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .body(
+                            hyper::Body::from(
+                                serde_json::to_string(
+                                    &graphql::Error::builder()
+                                        .message(format!(
+                                            r#"'content-type' header can't be different from {:?} or {:?}"#,
+                                            APPLICATION_JSON.essence_str(),
+                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                        ))
+                                        .extension_code("INVALID_ACCEPT_HEADER")
+                                        .build(),
+                                )
+                                .unwrap_or_else(|_| String::from("Invalid request"))
+                        ))
                         .expect("cannot fail");
 
                     return Ok(ControlFlow::Break(response.into()));
@@ -77,14 +88,20 @@ where
 
                     Ok(ControlFlow::Continue(req))
                 } else {
-                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).body(
+                    let response: http::Response<hyper::Body> = http::Response::builder().status(StatusCode::NOT_ACCEPTABLE).header(CONTENT_TYPE, APPLICATION_JSON.essence_str()).body(
                             hyper::Body::from(
-                            format!(
-                                r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                APPLICATION_JSON.essence_str(),
-                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                MULTIPART_DEFER_CONTENT_TYPE
-                            )
+                                serde_json::to_string(
+                                    &graphql::Error::builder()
+                                        .message(format!(
+                                            r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
+                                            APPLICATION_JSON.essence_str(),
+                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                            MULTIPART_DEFER_CONTENT_TYPE
+                                        ))
+                                        .extension_code("INVALID_ACCEPT_HEADER")
+                                        .build(),
+                                )
+                                .unwrap_or_else(|_| String::from("Invalid request"))
                         )).expect("cannot fail");
 
                     Ok(ControlFlow::Break(response.into()))

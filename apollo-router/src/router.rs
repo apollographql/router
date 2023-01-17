@@ -38,6 +38,7 @@ use crate::axum_factory::AxumHttpServerFactory;
 use crate::axum_factory::ListenAddrAndRouter;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::orbiter::OrbiterRouterSuperServiceFactory;
 use crate::plugin::DynPlugin;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
@@ -546,7 +547,7 @@ impl RouterHttpServer {
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlRouterFactory::default();
+        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
         let state_machine = StateMachine::new(server_factory, router_factory);
         let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
         let graphql_listen_address = state_machine.graphql_listen_address.clone();

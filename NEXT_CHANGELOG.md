@@ -25,196 +25,65 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 -->
 
-# [1.8.0] (unreleased) - 2022-mm-dd
-
-## 📃 Configuration
-
-Configuration will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However you should update your source configuration files.
-
-### Defer support GA docs and config ([Issue #2368](https://github.com/apollographql/router/issues/2368))
-
-`@defer` has reached GA, however there were still mentions of it being in preview. These have now been removed.
-
-If you had disabled defer support via config then you will need to update your router.yaml
-
-Before:
-```yaml
-supergraph:
-  preview_defer_support: true
-```
-
-After:
-```yaml
-supergraph:
-  defer_support: true
-```
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2378
-
-### Remove timeout from otlp exporter ([Issue #2337](https://github.com/apollographql/router/issues/2337))
-
-`batch_processor` configuration contains timeout, so the existing timeout property has been removed from the parent configuration element.
-
-Before:
-```yaml
-telemetry:
-  tracing:
-    otlp:
-      timeout: 5s
-```
-After:
-```yaml
-telemetry:
-  tracing:
-    otlp:
-      batch_processor:
-        timeout: 5s
-```
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
+# [1.8.1] (unreleased) - 2022-mm-dd
 
 ## 🚀 Features
+### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397))
 
-### Add cache hit/miss metrics ([Issue #1985](https://github.com/apollographql/router/issues/1985))
+Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
+Note that strings are output as `<redacted>` so that we do not leak confidential or sensitive information.
+Boolean and numerics are output.
 
-Add several metrics around the cache.
-Each cache metrics it contains `kind` attribute to know what kind of cache it was (`query planner`, `apq`, `introspection`)
-and the `storage` attribute to know where the cache is coming from.
-
-`apollo_router_cache_hit_count` to know when it hits the cache.
-
-`apollo_router_cache_miss_count` to know when it misses the cache.
-
-`apollo_router_cache_hit_time` to know how much time it takes when it hits the cache.
-
-`apollo_router_cache_miss_time` to know how much time it takes when it misses the cache.
-
-Example
-```
-# TYPE apollo_router_cache_hit_count counter
-apollo_router_cache_hit_count{kind="query planner",new_test="my_version",service_name="apollo-router",storage="memory"} 2
-# TYPE apollo_router_cache_hit_time histogram
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.001"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.005"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.015"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.05"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.1"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.2"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.3"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.4"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.5"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="1"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="5"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="10"} 2
-apollo_router_cache_hit_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="+Inf"} 2
-apollo_router_cache_hit_time_sum{kind="query planner",service_name="apollo-router",storage="memory"} 0.000236782
-apollo_router_cache_hit_time_count{kind="query planner",service_name="apollo-router",storage="memory"} 2
-# HELP apollo_router_cache_miss_count apollo_router_cache_miss_count
-# TYPE apollo_router_cache_miss_count counter
-apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 1
-# HELP apollo_router_cache_miss_time apollo_router_cache_miss_time
-# TYPE apollo_router_cache_miss_time histogram
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.001"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.005"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.015"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.05"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.1"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.2"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.3"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.4"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="0.5"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="1"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="5"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="10"} 1
-apollo_router_cache_miss_time_bucket{kind="query planner",service_name="apollo-router",storage="memory",le="+Inf"} 1
-apollo_router_cache_miss_time_sum{kind="query planner",service_name="apollo-router",storage="memory"} 0.000186783
-apollo_router_cache_miss_time_count{kind="query planner",service_name="apollo-router",storage="memory"} 1
+For example:
+```json
+{
+   "session_id": "fbe09da3-ebdb-4863-8086-feb97464b8d7", // Randomly generated at Router startup.
+   "version": "1.4.0", // The version of the router
+   "os": "linux",
+   "ci": null, // If CI is detected then this will name the CI vendor
+   "usage": {
+     "configuration.headers.all.request.propagate.named.<redacted>": 3,
+     "configuration.headers.all.request.propagate.default.<redacted>": 1,
+     "configuration.headers.all.request.len": 3
+     "configuration.headers.subgraphs.<redacted>.request.propagate.named.<redacted>": 2,
+     "configuration.headers.subgraphs.<redacted>.request.len": 2,
+     "configuration.headers.subgraphs.len": 1,
+     "configuration.homepage.enabled.true": 1,
+     "args.config-path.redacted": 1,
+     "args.hot-reload.true": 1,
+     //Many more keys. This is dynamic and will change over time.
+     //More...
+     //More...
+     //More...
+   }
+ }
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2327
+Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
 
-### Add support for single instance Redis ([Issue #2300](https://github.com/apollographql/router/issues/2300))
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398
 
-For `experimental_cache` with redis caching it now works with only a single Redis instance if you provide only one URL.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2310
-
-### Support TLS connections to single instance Redis ([Issue #2332](https://github.com/apollographql/router/issues/2332))
-
-TLS support is mandatory for some hosted Redis providers.
-TLS connections for clusters are not supported yet, see [Issue #2332](https://github.com/apollographql/router/issues/2332) for updates.
-
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2336
 
 ## 🐛 Fixes
 
-### Correctly handle aliased __typename ([Issue #2330](https://github.com/apollographql/router/issues/2330))
+### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
 
-If you aliased a `__typename` like in this example query:
+When receiving requests with invalid content-type/accept header missmatch (e.g multipart requests) , it now specifies the right `content-type` header.
 
-```graphql
-{
-  myproducts: products {
-       total
-       __typename
-  }
-  _0___typename: __typename
-}
-```
-
-Before this fix, `_0___typename` was set to `null`. Thanks to this fix it returns `"Query"`.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2357
-
-### Change the default value of `apollo.field_level_instrumentation_sampler` ([Issue #2339](https://github.com/apollographql/router/issues/2339))
-
-Change the default value of `apollo.field_level_instrumentation_sampler` to `always_off` instead of `0.01`
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2356
-
-### `subgraph_request` span is set as the parent of traces coming from subgraphs ([Issue #2344](https://github.com/apollographql/router/issues/2344))
-
-Before this fix, the context injected in headers to subgraphs was wrong, it was not the right parent span id.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2345
+By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
 
 
 ## 🛠 Maintenance
 
-### Simplify telemetry config code ([Issue #2337](https://github.com/apollographql/router/issues/2337))
+### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
 
-This brings the telemetry plugin configuration closer to standards recommended in the [yaml design guidance](dev-docs/yaml-design-guidance.md).
+Building the execution and subgraph services had to go through a factory trait before, which is not
+needed anymore since there is only one useful implementation.
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2338
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
 
-### Upgrade the clap version in scaffold template ([Issue #2165](https://github.com/apollographql/router/issues/2165))
+### Optimize header propagation plugin's regex matching ([PR #2391](https://github.com/apollographql/router/pull/2389))
 
-Upgrade clap deps version to the right one to be able to create new scaffolded plugins thanks to xtask.
+We've changed the plugin to reduce the chances of generating memory allocations when applying regex-based header propagation rules.
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2343
-
-### Upgrade axum to `0.6.1` ([PR #2303](https://github.com/apollographql/router/pull/2303))
-
-For more details about the new axum release, please read the [changelog](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0)
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2303
-
-### Specify content type to `application/json` when it throws an invalid GraphQL request error ([Issue #2320](https://github.com/apollographql/router/issues/2320))
-
-When throwing a `INVALID_GRAPHQL_REQUEST` error, it now specifies the right `content-type` header.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2321
-
-### Move APQ and EnsureQueryPresence in the router service ([PR #2296](https://github.com/apollographql/router/pull/2296))
-
-Moving APQ from the axum level to the supergraph service reintroduced a `Buffer` in the service pipeline.
-Now the APQ and`EnsureQueryPresence ` layers are part of the router service, to remove that `Buffer`.
-
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2296
-
-### Refactor yaml validation error reports ([Issue #2180](https://github.com/apollographql/router/issues/2180))
-
-YAML configuration file validation prints a report of the errors it encountered, but that report was missing some
-information, and had small mistakes around alignment and pointing out the right line.
-
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2347
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2389

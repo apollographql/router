@@ -25,16 +25,24 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The endpoint to send data to
     #[serde(deserialize_with = "deser_endpoint")]
     #[schemars(with = "String")]
     pub(crate) endpoint: Endpoint,
+
+    /// The protocol to use when sending data
     #[serde(default)]
     pub(crate) protocol: Protocol,
+
+    /// gRPC configuration settings
     #[serde(default)]
     pub(crate) grpc: GrpcExporter,
+
+    /// HTTP configuration settings
     #[serde(default)]
     pub(crate) http: HttpExporter,
 
+    /// Batch processor settings
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 }
@@ -118,6 +126,7 @@ pub(crate) enum EndpointDefault {
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct HttpExporter {
+    /// Headers to send on report requests
     #[serde(default)]
     pub(crate) headers: HashMap<String, String>,
 }
@@ -125,12 +134,18 @@ pub(crate) struct HttpExporter {
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct GrpcExporter {
+    /// The optional domain name for tls config.
+    /// Note that domain name is will be defaulted to match the endpoint is not explicitly set.
     #[serde(default)]
     pub(crate) domain_name: Option<String>,
+    /// The optional certificate authority (CA) certificate to be used in TLS configuration.
     pub(crate) ca: Option<String>,
+    /// The optional cert for tls config
     pub(crate) cert: Option<String>,
+    /// The optional private key file for TLS configuration.
     pub(crate) key: Option<String>,
 
+    /// gRPC metadata
     #[serde(
         deserialize_with = "metadata_map_serde::deserialize",
         serialize_with = "metadata_map_serde::serialize",

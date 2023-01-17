@@ -1,0 +1,36 @@
+headers:
+  all:
+    request:
+      - insert:
+          name: "k1"
+          value: "v1"
+      - propagate:
+          named: "l"
+      - propagate:
+          named: "b"
+  subgraphs:
+    products:
+      request:
+        - insert:
+            name: "k2"
+            value: "v2"
+        - remove:
+            named: "k3"
+
+telemetry:
+  apollo:
+    send_headers:
+      except:
+        - "foo"
+        - "bar"
+  tracing:
+    otlp:
+      protocol: grpc
+      endpoint: default
+      grpc:
+        metadata:
+          foo: bar
+          bar: baz
+
+override_subgraph_url:
+  products: http://example.com
