@@ -412,12 +412,12 @@ TLS connections to subgraphs are verified using the list of certificate authorit
 ```yaml title="router.yaml"
 tls:
   subgraph:
-  all:
-    certificate_authorities: "${file./path/to/ca.crt}"
-  # override per subgraph
-  subgraphs:
-    products:
-      certificate_authorities: "${file./path/to/product_ca.crt}"
+    all:
+      certificate_authorities: "${file./path/to/ca.crt}"
+    # override per subgraph
+    subgraphs:
+      products:
+        certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
 
 ### Plugins

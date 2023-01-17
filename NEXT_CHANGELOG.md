@@ -71,12 +71,12 @@ This adds a configuration option to set the list of certificate authorities for 
 ```yaml
 tls:
   subgraph:
-  all:
-    certificate_authorities: "${file./path/to/ca.crt}"
-  # override per subgraph
-  subgraphs:
-    products:
-      certificate_authorities: "${file./path/to/product_ca.crt}"
+    all:
+      certificate_authorities: "${file./path/to/ca.crt}"
+    # override per subgraph
+    subgraphs:
+      products:
+        certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
 
 The file is expected to be a list of certificates in PEM format, concatenated (as in Apache configuration).
