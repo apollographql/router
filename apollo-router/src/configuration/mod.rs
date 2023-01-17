@@ -618,41 +618,51 @@ pub(crate) struct RedisCache {
     pub(crate) urls: Vec<String>,
 }
 
-/// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+/// TLS related configuration options.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Tls {
     #[serde(default)]
-    pub(crate) all: Subgraph,
+    pub(crate) subgraph: TlsSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraphWrapper {
+    /// options applying to all subgraphs
     #[serde(default)]
-    pub(crate) subgraphs: HashMap<String, Subgraph>,
+    pub(crate) all: TlsSubgraph,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
 }
 
 #[buildstructor::buildstructor]
-impl Tls {
+impl TlsSubgraphWrapper {
     #[builder]
-    pub(crate) fn new(all: Subgraph, subgraphs: HashMap<String, Subgraph>) -> Self {
+    pub(crate) fn new(all: TlsSubgraph, subgraphs: HashMap<String, TlsSubgraph>) -> Self {
         Self { all, subgraphs }
     }
 }
 
-impl Default for Tls {
+impl Default for TlsSubgraphWrapper {
     fn default() -> Self {
-        Self::builder().all(Subgraph::default()).build()
+        Self::builder().all(TlsSubgraph::default()).build()
     }
 }
 
 /// Configuration options pertaining to the subgraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Subgraph {
+pub(crate) struct TlsSubgraph {
     /// list of certificate authorities in PEM format
     #[serde(default)]
     pub(crate) certificate_authorities: Option<String>,
 }
 
 #[buildstructor::buildstructor]
-impl Subgraph {
+impl TlsSubgraph {
     #[builder]
     pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
         Self {
@@ -661,7 +671,7 @@ impl Subgraph {
     }
 }
 
-impl Default for Subgraph {
+impl Default for TlsSubgraph {
     fn default() -> Self {
         Self::builder().build()
     }

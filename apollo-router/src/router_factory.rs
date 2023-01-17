@@ -18,7 +18,7 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
-use crate::configuration::Subgraph;
+use crate::configuration::TlsSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
@@ -144,6 +144,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         let tls_root_store: Option<RootCertStore> = configuration
             .tls
+            .subgraph
             .all
             .create_certificate_store()
             .transpose()?;
@@ -154,6 +155,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         for (name, _) in schema.subgraphs() {
             let subgraph_root_store = configuration
                 .tls
+                .subgraph
                 .subgraphs
                 .get(name)
                 .as_ref()
@@ -216,6 +218,7 @@ impl YamlRouterFactory {
 
         let tls_root_store = configuration
             .tls
+            .subgraph
             .all
             .create_certificate_store()
             .transpose()?;
@@ -226,6 +229,7 @@ impl YamlRouterFactory {
         for (name, _) in schema.subgraphs() {
             let subgraph_root_store = configuration
                 .tls
+                .subgraph
                 .subgraphs
                 .get(name)
                 .as_ref()
@@ -255,7 +259,7 @@ impl YamlRouterFactory {
     }
 }
 
-impl Subgraph {
+impl TlsSubgraph {
     fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
         self.certificate_authorities
             .as_deref()

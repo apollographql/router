@@ -23,6 +23,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Description! And a link to a [reference](http://url)
 
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
+-->
 
 ## 🚀 Features
 
@@ -33,8 +34,13 @@ This adds a configuration option to set the list of certificate authorities for 
 
 ```yaml
 tls:
-  subgraphs:
+  subgraph:
+  all:
     certificate_authorities: "${file./path/to/ca.crt}"
+  # override per subgraph
+  subgraphs:
+    products:
+      certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
 
 The file is expected to be a list of certificates in PEM format, concatenated (as in Apache configuration).
