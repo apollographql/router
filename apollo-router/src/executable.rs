@@ -26,7 +26,6 @@ use url::Url;
 use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -432,9 +431,7 @@ impl Executable {
                 }
             }) {
                 Some(configuration) => configuration,
-                None => Configuration::builder()
-                    .build()
-                    .map(std::convert::Into::into)?,
+                None => Default::default(),
             },
         };
 
