@@ -4,7 +4,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
@@ -263,7 +262,7 @@ pub(crate) fn validate_yaml_configuration(
             ),
         });
     }
-    config.validated_yaml = Arc::new(expanded_yaml);
+    config.validated_yaml = Some(expanded_yaml);
     Ok(config)
 }
 

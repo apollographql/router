@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::hir;
 use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
 use derivative::Derivative;
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -1166,6 +1166,16 @@ impl Operation {
     }
 }
 
+impl From<hir::OperationType> for OperationKind {
+    fn from(operation_type: hir::OperationType) -> Self {
+        match operation_type {
+            hir::OperationType::Query => Self::Query,
+            hir::OperationType::Mutation => Self::Mutation,
+            hir::OperationType::Subscription => Self::Subscription,
+        }
+    }
+}
+
 impl From<ast::OperationType> for OperationKind {
     // Spec: https://spec.graphql.org/draft/#OperationType
     fn from(operation_type: ast::OperationType) -> Self {
@@ -1191,13 +1201,31 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
         .and_then(|value| parse_value(&value))
 }
 
+pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
+    match value {
+        hir::Value::Variable(_) => None,
+        hir::Value::Int(val) => Some((val.get() as i64).into()),
+        hir::Value::Float(val) => Some(val.get().into()),
+        hir::Value::Null => Some(Value::Null),
+        hir::Value::String(val) => Some(val.as_str().into()),
+        hir::Value::Boolean(val) => Some((*val).into()),
+        hir::Value::Enum(name) => Some(name.src().into()),
+        hir::Value::List(list) => list.iter().map(parse_hir_value).collect(),
+        hir::Value::Object(obj) => obj
+            .iter()
+            .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
+            .collect(),
+    }
+}
+
 pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
         ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
         ast::Value::IntValue(i) => {
-            let s = i.source_string();
+            let token = i.int_token()?;
+            let s = token.text();
             s.parse::<i64>()
                 .ok()
                 .map(Into::into)
