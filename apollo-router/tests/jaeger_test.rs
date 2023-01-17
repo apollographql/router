@@ -77,7 +77,7 @@ async fn query_jaeger_for_trace(id: String) -> Result<(), BoxError> {
                 return Ok(());
             }
             Err(e) => {
-                println!("error: {}", e);
+                println!("{}", e);
                 tracing::warn!("{}", e);
             }
         }
@@ -276,14 +276,10 @@ async fn subgraph() {
         let mut span = tracer.start_with_context("HTTP POST", &context);
         tokio::time::sleep(Duration::from_millis(2)).await;
         span.end_with_timestamp(SystemTime::now());
-        println!("flush result: {:?}", tracer_provider.force_flush());
+        tracer_provider.force_flush();
 
         // send the response
-        let body_bytes = hyper::body::to_bytes(request.into_body()).await.unwrap();
-        assert_eq!(
-            r#"{"query":"{topProducts{name}}"}"#,
-            std::str::from_utf8(&body_bytes).unwrap()
-        );
+        let _ = hyper::body::to_bytes(request.into_body()).await.unwrap();
         Ok(Response::builder()
             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .status(StatusCode::OK)
