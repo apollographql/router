@@ -82,8 +82,24 @@ needed anymore since there is only one useful implementation.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
 
-### Optimize header propagation plugin's regex matching ([PR #2391](https://github.com/apollographql/router/pull/2389))
+### Optimize header propagation plugin's regex matching ([PR #2392](https://github.com/apollographql/router/pull/2392))
 
 We've changed the plugin to reduce the chances of generating memory allocations when applying regex-based header propagation rules.
 
-By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2389
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2392
+
+## 📚 Documentation
+
+### Add documentation to create custom metrics in plugins ([Issue #2294](https://github.com/apollographql/router/issues/2294))
+
+To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event. If you respect a specific naming for your event you'll be able to generate your own custom metrics directly in Prometheus.
+
+To publish a new metric, use tracing macros to generate an event that contains following prefixes:
+
+`monotonic_counter.` (non-negative numbers): Used when the counter should only ever increase
+`counter.`: Used when the counter can go up or down
+`value.`: Used for discrete data points (i.e., summing them does not make semantic sense)
+`histogram.`: Used for histograms (takes f64)
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
+
