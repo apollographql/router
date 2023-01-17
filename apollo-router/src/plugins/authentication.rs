@@ -429,7 +429,7 @@ impl Plugin for AuthenticationPlugin {
                             // set, to minimise the impact of DOS attacks via this vector.
                             //
                             // If there is no COOLDOWN, we'll trigger a cache update and set a
-                            // COOLDOWN,
+                            // COOLDOWN.
                             if COOLDOWN.load(Ordering::SeqCst) {
                                 // This is a metric and will not appear in the logs
                                 tracing::info!(
