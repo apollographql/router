@@ -79,8 +79,7 @@ Compression is automatically supported on the client side, depending on the `Acc
 
 ## Subgraph traffic shaping
 
-The Apollo Router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs,
-or overriden per subgraph:
+The Apollo Router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -104,8 +103,7 @@ traffic_shaping:
 
 ### Rate limiting
 
-Subgraph request rate limiting uses the same configuration as client rate limiting, and is calculated
-per subgraph, not per backend host.
+Subgraph request rate limiting uses the same configuration as client rate limiting, and is calculated per subgraph, not per backend host.
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -117,13 +115,7 @@ traffic_shaping:
 
 ### Experimental request retry
 
-On failure, subgraph requests can be retried automatically. This is deactivated by default for mutations.
-This uses [Finagle's *RetryBudget* algorithm](https://finagle.github.io/blog/2016/02/08/retry-budgets/),
-in which every successful request adds an expirable token to a bucket, and every retry consumes a number
-of those tokens. On top of that, a minimal number of retries per second is available, to test regularly
-when the retry budget was entirely consumed or on startup when very few requests have been sent.
-The tokens expire so the budget has a large number of available retries if a lot of recent requests were
-successful but reduces quickly on frequent failures to avoid sending too much traffic to the subgraph.
+On failure, subgraph requests can be retried automatically. This is deactivated by default for mutations. This uses [Finagle's *RetryBudget* algorithm](https://finagle.github.io/blog/2016/02/08/retry-budgets/), in which every successful request adds an expirable token to a bucket, and every retry consumes a number of those tokens. On top of that, a minimal number of retries per second is available, to test regularly when the retry budget was entirely consumed or on startup when very few requests have been sent. The tokens expire so the budget has a large number of available retries if a lot of recent requests were successful but reduces quickly on frequent failures to avoid sending too much traffic to the subgraph.
 
 It is configurable as follows:
 
@@ -141,8 +133,7 @@ traffic_shaping:
 
 When subgraphs are sent entity requests by the Router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
 
-To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent
-can be deduplicated. This is activated with the `deduplicate_variables` option:
+To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent can be deduplicated. This is activated with the `deduplicate_variables` option:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -161,8 +152,7 @@ traffic_shaping:
 
 ### Ordering
 
-Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour.
-Declaration order in the configuration will not affect the runtime order:
+Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour. Declaration order in the configuration will not affect the runtime order:
 
 - preparing the subgraph request
 - variable deduplication
