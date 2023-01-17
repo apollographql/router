@@ -342,30 +342,6 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // Prepare our cooldown closure in case we need it later...
-                    let closure_jwks = my_jwks.clone();
-                    // If we ever find that we have a kid that we don't know about
-                    // We need to do some additional processing to set a cooldown.
-                    let set_cooldown = move || {
-                        // The COOLDOWN controls attempts to retrieve based on a new "kid".
-                        tracing::info!("Clearing cached JWKS");
-                        closure_jwks.clear();
-                        // Impose the COOLDOWN
-                        // Only spawn 1 task to remove the cooldown
-                        if COOLDOWN
-                            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                            .is_ok()
-                        {
-                            tokio::spawn(async move {
-                                let t = my_config
-                                    .cooldown
-                                    .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
-                                tokio::time::sleep(t).await;
-                                COOLDOWN.store(false, Ordering::SeqCst);
-                            });
-                        }
-                    };
-
                     // Get the JWKS here
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
@@ -453,7 +429,7 @@ impl Plugin for AuthenticationPlugin {
                             // set, to minimise the impact of DOS attacks via this vector.
                             //
                             // If there is no COOLDOWN, we'll trigger a cache update and set a
-                            // COOLDOWN (via the call to set_cooldown()).
+                            // COOLDOWN,
                             if COOLDOWN.load(Ordering::SeqCst) {
                                 // This is a metric and will not appear in the logs
                                 tracing::info!(
@@ -482,7 +458,24 @@ impl Plugin for AuthenticationPlugin {
                                     .build()?;
                                 Ok(ControlFlow::Break(response))
                             } else {
-                                set_cooldown();
+                                // We don't recognise this "kid". Clear our cache and impose a
+                                // COOLDOWN.
+                                // The COOLDOWN controls attempts to retrieve based on a new "kid".
+                                tracing::info!("Clearing cached JWKS");
+                                my_jwks.clear();
+                                // Only spawn 1 task to remove the cooldown
+                                if COOLDOWN
+                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok()
+                                {
+                                    tokio::spawn(async move {
+                                        let t = my_config
+                                            .cooldown
+                                            .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
+                                        tokio::time::sleep(t).await;
+                                        COOLDOWN.store(false, Ordering::SeqCst);
+                                    });
+                                }
                                 failure_message(
                                     request.context,
                                     format!("Could not find kid: '{kid}' in JWKS set"),
