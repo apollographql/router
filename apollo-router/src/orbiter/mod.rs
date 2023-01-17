@@ -113,13 +113,9 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
                     tokio::task::spawn(async {
                         tracing::debug!("sending anonymous usage data to Apollo");
-                        match create_report(configuration, schema) {
-                            Ok(report) => {
-                                if let Err(e) = send(report).await {
-                                    tracing::debug!("failed to send usage report: {}", e);
-                                }
-                            }
-                            Err(e) => tracing::debug!("failed to create usage report: {}", e),
+                        let report = create_report(configuration, schema);
+                        if let Err(e) = send(report).await {
+                            tracing::debug!("failed to send usage report: {}", e);
                         }
                     });
                 }
@@ -128,12 +124,11 @@ impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
     }
 }
 
-fn create_report(
-    configuration: Arc<Configuration>,
-    _schema: Arc<Schema>,
-) -> Result<UsageReport, BoxError> {
-    let mut configuration: Value = serde_yaml::from_str(&configuration.raw_yaml)
-        .map_err(|_| BoxError::from("configuration must be parseable"))?;
+fn create_report(configuration: Arc<Configuration>, _schema: Arc<Schema>) -> UsageReport {
+    let mut configuration: Value = configuration
+        .validated_yaml
+        .clone()
+        .unwrap_or_else(|| Value::Object(Default::default()));
     let os = get_os();
     let mut usage = HashMap::new();
 
@@ -146,6 +141,11 @@ fn create_report(
             .map(|plugins| plugins.len())
             .unwrap_or_default() as u64,
     );
+
+    // Make sure the config is an object, but don't fail if it wasn't
+    if !configuration.is_object() {
+        configuration = Value::Object(Default::default());
+    }
 
     // Delete the plugins block so that we don't report on it.
     // A custom plugin may have configuration that is sensitive.
@@ -162,7 +162,7 @@ fn create_report(
     #[cfg(not(test))]
     visit_args(&mut usage, env::args().collect());
 
-    Ok(UsageReport {
+    UsageReport {
         session_id: *SESSION_ID.get_or_init(Uuid::new_v4),
         version: std::env!("CARGO_PKG_VERSION").to_string(),
         platform: Platform {
@@ -173,7 +173,7 @@ fn create_report(
             .into_iter()
             .map(|(k, v)| (k, Value::Number(v.into())))
             .collect(),
-    })
+    }
 }
 
 fn visit_args(usage: &mut HashMap<String, u64>, args: Vec<String>) {
@@ -303,8 +303,6 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
                 _ => {}
             }
         }
-    } else {
-        panic!("schema should have been valid");
     }
 }
 
@@ -312,9 +310,12 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
 mod test {
     use std::collections::HashMap;
     use std::env;
+    use std::str::FromStr;
     use std::sync::Arc;
 
     use insta::assert_yaml_snapshot;
+    use serde_json::json;
+    use serde_json::Value;
 
     use crate::orbiter::create_report;
     use crate::orbiter::visit_args;
@@ -340,10 +341,34 @@ mod test {
 
     #[test]
     fn test_visit_config() {
-        let config = serde_yaml::from_str(include_str!("testdata/redaction.router.yaml"))
+        let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("yaml must be valid");
         let mut usage = HashMap::new();
-        visit_config(&mut usage, &config);
+        visit_config(
+            &mut usage,
+            config
+                .validated_yaml
+                .as_ref()
+                .expect("config should have had validated_yaml"),
+        );
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(usage);
+        });
+    }
+
+    #[test]
+    fn test_visit_config_that_needed_upgrade() {
+        let config: Configuration =
+            Configuration::from_str("supergraph:\n  preview_defer_support: true")
+                .expect("config must be valid");
+        let mut usage = HashMap::new();
+        visit_config(
+            &mut usage,
+            config
+                .validated_yaml
+                .as_ref()
+                .expect("config should have had validated_yaml"),
+        );
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(usage);
         });
@@ -351,12 +376,11 @@ mod test {
 
     #[test]
     fn test_create_report() {
-        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
-        let mut config: Configuration =
-            serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.raw_yaml = Arc::new(config_string);
-        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()))
-            .expect("report must be created");
+        let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
+            .expect("config must be valid");
+        let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
                 ".version" => "[version]",
@@ -368,12 +392,39 @@ mod test {
     }
 
     #[test]
-    fn test_create_report_invalid_yaml() {
-        let config_string = include_str!("testdata/redaction.router.yaml").to_string();
-        let mut config: Configuration =
-            serde_yaml::from_str(&config_string).expect("yaml must be valid");
-        config.raw_yaml = Arc::new("".to_string());
-        assert!(create_report(Arc::new(config), Arc::new(crate::spec::Schema::default())).is_err());
+    fn test_create_report_incorrect_type_validated_yaml() {
+        let mut config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
+            .expect("config must be valid");
+        config.validated_yaml = Some(Value::Null);
+        let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let report = create_report(Arc::new(config), Arc::new(schema));
+        insta::with_settings!({sort_maps => true}, {
+                    assert_yaml_snapshot!(report, {
+                ".version" => "[version]",
+                ".session_id" => "[session_id]",
+                ".platform.os" => "[os]",
+                ".platform.continuous_integration" => "[ci]",
+            });
+        });
+    }
+
+    #[test]
+    fn test_create_report_invalid_validated_yaml() {
+        let mut config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
+            .expect("config must be valid");
+        config.validated_yaml = Some(json!({"garbage": "garbage"}));
+        let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let report = create_report(Arc::new(config), Arc::new(schema));
+        insta::with_settings!({sort_maps => true}, {
+                    assert_yaml_snapshot!(report, {
+                ".version" => "[version]",
+                ".session_id" => "[session_id]",
+                ".platform.os" => "[os]",
+                ".platform.continuous_integration" => "[ci]",
+            });
+        });
     }
 
     // TODO, enable once we are live.

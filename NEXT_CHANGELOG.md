@@ -45,7 +45,7 @@ Until the documentation is published to the website, you can read [it](https://g
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2348
 
-### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124))
+### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397), [Issue #2412](https://github.com/apollographql/router/issues/2412))
 
 Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
 Note that strings are output as `<redacted>` so that we do not leak confidential or sensitive information.
@@ -78,7 +78,17 @@ For example:
 
 Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398, https://github.com/apollographql/router/pull/2413
+
+
+## 🐛 Fixes
+
+### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
+
+When receiving requests with invalid content-type/accept header missmatch (e.g multipart requests) , it now specifies the right `content-type` header.
+
+By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
+
 
 ## 🛠 Maintenance
 
@@ -88,3 +98,9 @@ Building the execution and subgraph services had to go through a factory trait b
 needed anymore since there is only one useful implementation.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
+
+### Optimize header propagation plugin's regex matching ([PR #2391](https://github.com/apollographql/router/pull/2389))
+
+We've changed the plugin to reduce the chances of generating memory allocations when applying regex-based header propagation rules.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2389

@@ -3014,6 +3014,11 @@ expression: "&schema"
           "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
+            "apq": {
+              "description": "Enable APQ for outgoing subgraph requests",
+              "type": "boolean",
+              "nullable": true
+            },
             "compression": {
               "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
               "oneOf": [
@@ -3155,6 +3160,11 @@ expression: "&schema"
             "description": "Traffic shaping options",
             "type": "object",
             "properties": {
+              "apq": {
+                "description": "Enable APQ for outgoing subgraph requests",
+                "type": "boolean",
+                "nullable": true
+              },
               "compression": {
                 "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
                 "oneOf": [

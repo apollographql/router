@@ -14,7 +14,6 @@ use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use derivative::Derivative;
 use displaydoc::Display;
@@ -75,12 +74,12 @@ pub enum ConfigurationError {
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-#[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
+#[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// The raw configuration string.
     #[serde(skip)]
-    pub(crate) raw_yaml: Arc<String>,
+    pub(crate) validated_yaml: Option<Value>,
 
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
@@ -178,7 +177,6 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
-        raw_yaml: Option<String>,
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -190,7 +188,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
-            raw_yaml: Arc::new(raw_yaml.unwrap_or_default()),
+            validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -302,6 +300,14 @@ impl Configuration {
     }
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        Configuration::builder()
+            .build()
+            .expect("default configuration must be valid")
+    }
+}
+
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
@@ -318,7 +324,7 @@ impl Configuration {
         dev: Option<bool>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
-            raw_yaml: Default::default(),
+            validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
