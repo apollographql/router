@@ -2,11 +2,12 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::task::Context;
 use std::task::Poll;
 
 use pin_project_lite::pin_project;
 use tokio::time::Sleep;
+
+use crate::Context;
 
 use super::error::Elapsed;
 
@@ -20,12 +21,18 @@ pin_project! {
         response: T,
         #[pin]
         sleep: Pin<Box<Sleep>>,
+        #[pin]
+        context: Context,
     }
 }
 
 impl<T> ResponseFuture<T> {
-    pub(crate) fn new(response: T, sleep: Pin<Box<Sleep>>) -> Self {
-        ResponseFuture { response, sleep }
+    pub(crate) fn new(response: T, sleep: Pin<Box<Sleep>>, context: Context) -> Self {
+        ResponseFuture {
+            response,
+            sleep,
+            context,
+        }
     }
 }
 
@@ -33,10 +40,11 @@ impl<F, T, E> Future for ResponseFuture<F>
 where
     F: Future<Output = Result<T, E>>,
     E: Into<tower::BoxError>,
+    T: From<Elapsed>,
 {
     type Output = Result<T, tower::BoxError>;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
         // First, try polling the future
@@ -50,7 +58,7 @@ where
             Poll::Pending => Poll::Pending,
             Poll::Ready(_) => {
                 tracing::info!(monotonic_counter.apollo_router_timeout = 1,);
-                Poll::Ready(Err(Elapsed::new().into()))
+                Poll::Ready(Ok(Elapsed::new(this.context.clone()).into()))
             }
         }
     }

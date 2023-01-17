@@ -171,6 +171,10 @@ impl Default for Context {
     }
 }
 
+pub(crate) trait HasContext {
+    fn context(&self) -> &Context;
+}
+
 #[cfg(test)]
 mod test {
     use crate::Context;

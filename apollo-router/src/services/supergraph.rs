@@ -16,6 +16,7 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use crate::context::HasContext;
 use crate::error::Error;
 use crate::graphql;
 use crate::http_ext::header_map;
@@ -56,6 +57,12 @@ impl std::fmt::Debug for Request {
             // .field("supergraph_request", &self.supergraph_request)
             .field("context", &self.context)
             .finish()
+    }
+}
+
+impl HasContext for Request {
+    fn context(&self) -> &Context {
+        &self.context
     }
 }
 

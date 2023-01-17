@@ -43,7 +43,6 @@ use crate::configuration::ListenAddr;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::plugins::traffic_shaping::Elapsed;
 use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
@@ -335,15 +334,9 @@ async fn handle_graphql(
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
                 }
-                if source_err.is::<Elapsed>() {
-                    return Elapsed::new().into_response();
-                }
             }
             if e.is::<RateLimited>() {
                 return RateLimited::new().into_response();
-            }
-            if e.is::<Elapsed>() {
-                return Elapsed::new().into_response();
             }
 
             (
