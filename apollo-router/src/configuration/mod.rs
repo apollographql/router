@@ -9,6 +9,7 @@ mod tests;
 mod upgrade;
 mod yaml;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -68,6 +69,9 @@ pub enum ConfigurationError {
 
     /// could not migrate configuration: {error}.
     MigrationFailure { error: String },
+
+    /// could not load certificate authorities: {error}
+    CertificateAuthorities { error: String },
 }
 
 /// The configuration for the router.
@@ -106,6 +110,9 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) cors: Cors,
 
+    #[serde(default)]
+    pub(crate) tls: Tls,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -143,6 +150,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
+            #[serde(default)]
+            tls: Tls,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -155,6 +164,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
+            .tls(ad_hoc.tls)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -186,6 +196,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
             validated_yaml: Default::default(),
@@ -201,6 +212,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -322,6 +334,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
             validated_yaml: Default::default(),
@@ -337,6 +350,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -625,6 +639,65 @@ impl Default for InMemoryCache {
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<String>,
+}
+
+/// TLS related configuration options.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Tls {
+    #[serde(default)]
+    pub(crate) subgraph: TlsSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: TlsSubgraph,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraphWrapper {
+    #[builder]
+    pub(crate) fn new(all: TlsSubgraph, subgraphs: HashMap<String, TlsSubgraph>) -> Self {
+        Self { all, subgraphs }
+    }
+}
+
+impl Default for TlsSubgraphWrapper {
+    fn default() -> Self {
+        Self::builder().all(TlsSubgraph::default()).build()
+    }
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraph {
+    /// list of certificate authorities in PEM format
+    #[serde(default)]
+    pub(crate) certificate_authorities: Option<String>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraph {
+    #[builder]
+    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
+        Self {
+            certificate_authorities,
+        }
+    }
+}
+
+impl Default for TlsSubgraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 /// Configuration options pertaining to the sandbox page.
