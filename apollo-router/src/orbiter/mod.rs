@@ -363,7 +363,9 @@ mod test {
         let mut config: Configuration =
             serde_json::from_value(config_yaml.clone()).expect("yaml must be valid");
         config.validated_yaml = Arc::new(config_yaml);
-        let report = create_report(Arc::new(config), Arc::new(crate::spec::Schema::default()));
+        let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
+        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
                 ".version" => "[version]",
