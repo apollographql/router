@@ -20,8 +20,7 @@ use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
-use super::subgraph_service::SubgraphCreator;
-use super::ExecutionCreator;
+use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
@@ -56,18 +55,18 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct SupergraphService<ExecutionFactory> {
-    execution_service_factory: ExecutionFactory,
+pub(crate) struct SupergraphService {
+    execution_service_factory: ExecutionServiceFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
 }
 
 #[buildstructor::buildstructor]
-impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
+impl SupergraphService {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-        execution_service_factory: ExecutionFactory,
+        execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
     ) -> Self {
         SupergraphService {
@@ -78,10 +77,7 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     }
 }
 
-impl<ExecutionFactory> Service<SupergraphRequest> for SupergraphService<ExecutionFactory>
-where
-    ExecutionFactory: ExecutionServiceFactory,
-{
+impl Service<SupergraphRequest> for SupergraphService {
     type Response = SupergraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -347,14 +343,14 @@ impl PluggableSupergraphServiceBuilder {
 
         let plugins = Arc::new(self.plugins);
 
-        let subgraph_creator = Arc::new(SubgraphCreator::new(
+        let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
             plugins.clone(),
         ));
 
         Ok(SupergraphCreator {
             query_planner_service,
-            subgraph_creator,
+            subgraph_service_factory,
             schema: self.schema,
             plugins,
         })
@@ -387,7 +383,7 @@ pub(crate) trait SupergraphFactory:
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    subgraph_creator: Arc<SubgraphCreator>,
+    subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
@@ -420,10 +416,10 @@ impl SupergraphCreator {
     > + Send {
         let supergraph_service = SupergraphService::builder()
             .query_planner_service(self.query_planner_service.clone())
-            .execution_service_factory(ExecutionCreator {
+            .execution_service_factory(ExecutionServiceFactory {
                 schema: self.schema.clone(),
                 plugins: self.plugins.clone(),
-                subgraph_creator: self.subgraph_creator.clone(),
+                subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
             .build();

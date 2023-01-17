@@ -170,9 +170,9 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             {
                 Some(shaping) => Either::A(shaping.subgraph_service_internal(
                     name,
-                    SubgraphService::new(name, subgraph_root_store),
+                    SubgraphService::new(name, shaping.get_apq(name), subgraph_root_store),
                 )),
-                None => Either::B(SubgraphService::new(name, subgraph_root_store)),
+                None => Either::B(SubgraphService::new(name, None, subgraph_root_store)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -244,9 +244,9 @@ impl YamlRouterFactory {
             {
                 Some(shaping) => Either::A(shaping.subgraph_service_internal(
                     name,
-                    SubgraphService::new(name, subgraph_root_store),
+                    SubgraphService::new(name, shaping.get_apq(name), subgraph_root_store),
                 )),
-                None => Either::B(SubgraphService::new(name, subgraph_root_store)),
+                None => Either::B(SubgraphService::new(name, None, subgraph_root_store)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -515,8 +515,10 @@ mod test {
     #[derive(Debug)]
     struct AlwaysStartsAndStopsPlugin {}
 
+    /// Configuration for the test plugin
     #[derive(Debug, Default, Deserialize, JsonSchema)]
     struct Conf {
+        /// The name of the test
         name: String,
     }
 
