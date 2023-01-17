@@ -555,6 +555,9 @@ jobs:
           root: artifacts
           paths:
             - "*"
+      - store_artifacts:
+          path: artifacts/
+          destination: "artifacts-<< parameters.platform >>"
 
   publish_github_release:
     docker:
