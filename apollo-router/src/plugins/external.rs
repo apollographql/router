@@ -318,7 +318,7 @@ impl Plugin for ExternalPlugin {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffer(20_000)
+            .buffered()
             .service(service)
             .boxed()
     }

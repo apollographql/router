@@ -112,6 +112,17 @@ impl Plugin for AuthenticationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        if init
+            .config
+            .experimental
+            .jwt
+            .header_value_prefix
+            .as_bytes()
+            .iter()
+            .any(u8::is_ascii_whitespace)
+        {
+            return Err("header_value_prefix must not contain whitespace".into());
+        }
         let url: Url = Url::from_str(&init.config.experimental.jwt.jwks_url)?;
         // This function is expected to return an Optional value, but we'd like to let
         // users know the various failure conditions. Hence the various clumsy map_err()
@@ -273,10 +284,11 @@ impl Plugin for AuthenticationPlugin {
                     // Make sure the format of our message matches our expectations
                     // Technically, the spec is case sensitive, but let's accept
                     // case variations
-                    if !jwt_value
-                        .to_uppercase()
-                        .as_str()
-                        .starts_with(&my_config.header_value_prefix.to_uppercase())
+                    //
+                    let prefix_len = my_config.header_value_prefix.len();
+                    if jwt_value.len() < prefix_len ||
+                      !&jwt_value[..prefix_len]
+                        .eq_ignore_ascii_case(&my_config.header_value_prefix)
                     {
                         return failure_message(
                             request.context,
@@ -298,8 +310,8 @@ impl Plugin for AuthenticationPlugin {
                         );
                     }
 
-                    // Trim off any trailing white space (not valid in BASE64 encoding)
-                    let jwt = jwt_parts[1].trim_end();
+                    // We have our jwt
+                    let jwt = jwt_parts[1];
 
                     // Try to create a valid header to work with
                     let jwt_header = match decode_header(jwt) {
@@ -325,42 +337,34 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // Get the JWKS here
+                    // Prepare our cooldown closure in case we need it later...
                     let closure_jwks = my_jwks.clone();
-                    // If we ever find that:
-                    //  - we can't retrieve a JWKS (a)
-                    //  - the retrieved JWKS is None (b)
-                    //  - we have a kid that we don't know about (c)
-                    // We need to do some additional processing.  (I've tagged with comments a/b/c below)
-                    let err_cleanup = move |cache_clear| {
-                        // If cache_clear is set, then we clear the cache so that subsequent
-                        // requests will retrieve new JWKS.
-                        // The COOLDOWN controls attempts to retrieve based on a new "kid", but not
-                        // repeated attempts due to failure to retrieve JWKS.
-                        if cache_clear {
-                            tracing::info!("Clearing cached JWKS");
-                            closure_jwks.clear();
-                            // Impose the COOLDOWN
-                            // Only spawn 1 task to remove the cooldown
-                            if COOLDOWN
-                                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                                .is_ok()
-                            {
-                                tokio::spawn(async move {
-                                    let t = my_config
-                                        .cooldown
-                                        .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
-                                    tokio::time::sleep(t).await;
-                                    COOLDOWN.store(false, Ordering::SeqCst);
-                                });
-                            }
+                    // If we ever find that we have a kid that we don't know about
+                    // We need to do some additional processing to set a cooldown.
+                    let set_cooldown = move || {
+                        // The COOLDOWN controls attempts to retrieve based on a new "kid".
+                        tracing::info!("Clearing cached JWKS");
+                        closure_jwks.clear();
+                        // Impose the COOLDOWN
+                        // Only spawn 1 task to remove the cooldown
+                        if COOLDOWN
+                            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok()
+                        {
+                            tokio::spawn(async move {
+                                let t = my_config
+                                    .cooldown
+                                    .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
+                                tokio::time::sleep(t).await;
+                                COOLDOWN.store(false, Ordering::SeqCst);
+                            });
                         }
                     };
 
+                    // Get the JWKS here
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
-                            err_cleanup(false); // a.
                             return failure_message(
                                 request.context,
                                 format!("Could not retrieve JWKS set: {e}"),
@@ -372,7 +376,6 @@ impl Plugin for AuthenticationPlugin {
                     let jwks = match jwks_opt {
                         Some(k) => k,
                         None => {
-                            err_cleanup(false); // b.
                             return failure_message(
                                 request.context,
                                 "Could not find JWKS set at the configured location".to_string(),
@@ -445,7 +448,7 @@ impl Plugin for AuthenticationPlugin {
                             // set, to minimise the impact of DOS attacks via this vector.
                             //
                             // If there is no COOLDOWN, we'll trigger a cache update and set a
-                            // COOLDOWN (via the true flag to err_cleanup(true).
+                            // COOLDOWN (via the call to set_cooldown()).
                             if COOLDOWN.load(Ordering::SeqCst) {
                                 // This is a metric and will not appear in the logs
                                 tracing::info!(
@@ -474,7 +477,7 @@ impl Plugin for AuthenticationPlugin {
                                     .build()?;
                                 Ok(ControlFlow::Break(response))
                             } else {
-                                err_cleanup(true); // c.
+                                set_cooldown();
                                 failure_message(
                                     request.context,
                                     format!("Could not find kid: '{kid}' in JWKS set"),
@@ -485,9 +488,9 @@ impl Plugin for AuthenticationPlugin {
                     }
                 }
             })
-            .buffer(20_000)
+            .buffered()
             .service(service)
-            .boxed()
+        .boxed()
     }
 }
 
@@ -940,5 +943,17 @@ mod tests {
         let expected_mock_response_data = "response created within the mock";
         // with the expected message
         assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
+        let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string())).await;
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
+        let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string())).await;
     }
 }
