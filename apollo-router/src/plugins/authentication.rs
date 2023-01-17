@@ -1,7 +1,9 @@
 //! Authentication plugin
 // With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::future::Future;
 use std::ops::ControlFlow;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -9,7 +11,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use deduplicate::Deduplicate;
-use deduplicate::DeduplicateFuture;
+use futures::future::BoxFuture;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::StatusCode;
@@ -41,9 +43,8 @@ use crate::services::apollo_graph_reference;
 use crate::services::router;
 use crate::Context;
 
-type SharedDeduplicate = Arc<
-    Deduplicate<Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static>, Url, JwkSet>,
->;
+type SharedDeduplicate =
+    Arc<Deduplicate<fn(Url) -> BoxFuture<'static, Option<JwkSet>>, Url, JwkSet>>;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 
@@ -107,6 +108,76 @@ fn default_header_value_prefix() -> String {
     "Bearer".to_string()
 }
 
+fn getter(url: Url) -> BoxFuture<'static, Option<JwkSet>> {
+    Box::pin(get_jwks(url))
+}
+
+// This function is expected to return an Optional value, but we'd like to let
+// users know the various failure conditions. Hence the various clumsy map_err()
+// scattered through the processing.
+async fn get_jwks(url: Url) -> Option<JwkSet> {
+    let data = if url.scheme() == "file" {
+        #[cfg(not(test))]
+        apollo_graph_reference()
+            .ok_or(LicenseError::MissingGraphReference)
+            .map_err(|e| {
+                tracing::error!(%e, "could not activate commercial features");
+                e
+            })
+            .ok()?;
+        let path = url
+            .to_file_path()
+            .map_err(|e| {
+                tracing::error!("could not process url: {:?}", url);
+                e
+            })
+            .ok()?;
+        read_to_string(path)
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, "could not read JWKS path");
+                e
+            })
+            .ok()?
+    } else {
+        let my_client = CLIENT
+            .as_ref()
+            .map_err(|e| {
+                tracing::error!(%e, "could not activate commercial features");
+                e
+            })
+            .ok()?
+            .clone();
+
+        my_client
+            .get(url)
+            .header(ACCEPT, APPLICATION_JSON.essence_str())
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+            .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
+            .send()
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, "could not get url");
+                e
+            })
+            .ok()?
+            .text()
+            .await
+            .map_err(|e| {
+                tracing::error!(%e, "could not process url content");
+                e
+            })
+            .ok()?
+    };
+    let jwks: JwkSet = serde_json::from_str(&data)
+        .map_err(|e| {
+            tracing::error!(%e, "could not create JWKS from url content");
+            e
+        })
+        .ok()?;
+    Some(jwks)
+}
+
 #[async_trait::async_trait]
 impl Plugin for AuthenticationPlugin {
     type Config = Conf;
@@ -124,76 +195,10 @@ impl Plugin for AuthenticationPlugin {
             return Err("header_value_prefix must not contain whitespace".into());
         }
         let url: Url = Url::from_str(&init.config.experimental.jwt.jwks_url)?;
-        // This function is expected to return an Optional value, but we'd like to let
-        // users know the various failure conditions. Hence the various clumsy map_err()
-        // scattered through the processing.
-        let getter: Box<dyn Fn(Url) -> DeduplicateFuture<JwkSet> + Send + Sync + 'static> =
-            Box::new(|url: Url| -> DeduplicateFuture<JwkSet> {
-                let fut = async {
-                    let data = if url.scheme() == "file" {
-                        #[cfg(not(test))]
-                        apollo_graph_reference()
-                            .ok_or(LicenseError::MissingGraphReference)
-                            .map_err(|e| {
-                                tracing::error!(%e, "could not activate commercial features");
-                                e
-                            })
-                            .ok()?;
-                        let path = url
-                            .to_file_path()
-                            .map_err(|e| {
-                                tracing::error!("could not process url: {:?}", url);
-                                e
-                            })
-                            .ok()?;
-                        read_to_string(path)
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(%e, "could not read JWKS path");
-                                e
-                            })
-                            .ok()?
-                    } else {
-                        let my_client = CLIENT
-                            .as_ref()
-                            .map_err(|e| {
-                                tracing::error!(%e, "could not activate commercial features");
-                                e
-                            })
-                            .ok()?
-                            .clone();
-
-                        my_client
-                            .get(url)
-                            .header(ACCEPT, APPLICATION_JSON.essence_str())
-                            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                            .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
-                            .send()
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(%e, "could not get url");
-                                e
-                            })
-                            .ok()?
-                            .text()
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(%e, "could not process url content");
-                                e
-                            })
-                            .ok()?
-                    };
-                    let jwks: JwkSet = serde_json::from_str(&data)
-                        .map_err(|e| {
-                            tracing::error!(%e, "could not create JWKS from url content");
-                            e
-                        })
-                        .ok()?;
-                    Some(jwks)
-                };
-                Box::pin(fut)
-            });
-        let deduplicator = Deduplicate::with_capacity(getter, 1);
+        // We have to help the compiler out a bit by casting our function item to be a function
+        // pointer.
+        let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
+        let deduplicator = Deduplicate::with_capacity(g_f, 1);
 
         Ok(AuthenticationPlugin {
             configuration: init.config.experimental.jwt,
