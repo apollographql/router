@@ -494,11 +494,7 @@ pub(crate) struct BusyTimer {
 
 impl BusyTimer {
     pub(crate) fn new() -> Self {
-        BusyTimer {
-            active_subgraph_requests: 0,
-            busy_ns: 0,
-            start: Some(Instant::now()),
-        }
+        BusyTimer::default()
     }
 
     pub(crate) fn increment_subgraph_requests(&mut self) {
@@ -524,6 +520,16 @@ impl BusyTimer {
             self.busy_ns + start.elapsed().as_nanos()
         } else {
             self.busy_ns
+        }
+    }
+}
+
+impl Default for BusyTimer {
+    fn default() -> Self {
+        Self {
+            active_subgraph_requests: 0,
+            busy_ns: 0,
+            start: Some(Instant::now()),
         }
     }
 }

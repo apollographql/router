@@ -12,7 +12,6 @@ use async_compression::tokio::write::BrotliEncoder;
 use async_compression::tokio::write::GzipEncoder;
 use async_compression::tokio::write::ZlibEncoder;
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
@@ -45,7 +44,6 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
-use crate::router_factory::BusyTimer;
 use crate::services::layers::apq;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -309,18 +307,24 @@ async fn call_http(
         );
     });
     let cloned_service_name = service_name.clone();
+    let cloned_context = context.clone();
     let (parts, body) = async move {
-        let response = client
+        cloned_context.busy_timer.lock().await.increment_subgraph_requests();
+        let response = match client
             .call(request)
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = format!("{err:?}").as_str());
+            .await {
+                Err(err) => {
+                    tracing::error!(fetch_error = format!("{err:?}").as_str());
+                    cloned_context.busy_timer.lock().await.decrement_subgraph_requests();
 
-                FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: err.to_string(),
+                    return Err(FetchError::SubrequestHttpError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }.into());
                 }
-            })?;
+                Ok(response) => response,
+            };
+
         // Keep our parts, we'll need them later
         let (parts, body) = response.into_parts();
         if display_headers {
@@ -334,7 +338,10 @@ async fn call_http(
                 if !content_type_str.contains(APPLICATION_JSON.essence_str())
                     && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 {
+                    cloned_context.busy_timer.lock().await.decrement_subgraph_requests();
+
                     return if !parts.status.is_success() {
+
                         Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!(
@@ -353,17 +360,21 @@ async fn call_http(
             }
         }
 
-        let body = hyper::body::to_bytes(body)
+        let body = match hyper::body::to_bytes(body)
             .instrument(tracing::debug_span!("aggregate_response_data"))
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = format!("{err:?}").as_str());
+            .await {
+                Err(err) => {
+                    cloned_context.busy_timer.lock().await.decrement_subgraph_requests();
 
-                FetchError::SubrequestHttpError {
+                    tracing::error!(fetch_error = format!("{err:?}").as_str());
+
+                return Err(FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: err.to_string(),
-                }
-            })?;
+                }.into())
+
+                }, Ok(body) => body,
+            };
 
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;
@@ -454,19 +465,16 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 impl SubgraphServiceFactory {
     pub(crate) fn new(
         services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
         plugins: Arc<Plugins>,
-        busy_timer: Arc<Mutex<BusyTimer>>,
     ) -> Self {
         SubgraphServiceFactory {
             services: Arc::new(services.into_iter().collect()),
             plugins,
-            busy_timer,
         }
     }
 

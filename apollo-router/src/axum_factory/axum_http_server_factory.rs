@@ -329,7 +329,14 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    match service.oneshot(http_request.into()).await {
+    let request: router::Request = http_request.into();
+    let context = request.context.clone();
+
+    let res = service.oneshot(request).await;
+    let overhead_seconds = (context.busy_timer.lock().await.current() / 1000_000_000) as f64;
+    tracing::info!(histogram.apollo_router_overhead_time = overhead_seconds,);
+
+    match res {
         Err(e) => {
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {

@@ -9,11 +9,13 @@ use std::time::Instant;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
+use futures::lock::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
+use crate::router_factory::BusyTimer;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -38,6 +40,9 @@ pub struct Context {
     #[serde(skip)]
     #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
+
+    #[serde(skip)]
+    pub(crate) busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 impl Context {
@@ -46,6 +51,7 @@ impl Context {
         Context {
             entries: Default::default(),
             created_at: Instant::now(),
+            busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }
     }
 }

@@ -148,8 +148,15 @@ impl Plugin for ExternalPlugin {
                             my_sdl,
                         )?;
 
+                        request
+                            .context
+                            .busy_timer
+                            .lock()
+                            .await
+                            .increment_subgraph_requests();
+
                         // Second, call our co-processor and get a reply.
-                        let co_processor_output = call_external(
+                        let res = call_external(
                             proto_url,
                             timeout,
                             PipelineStep::RouterRequest,
@@ -158,7 +165,16 @@ impl Plugin for ExternalPlugin {
                             context,
                             sdl,
                         )
-                        .await?;
+                        .await;
+
+                        request
+                            .context
+                            .busy_timer
+                            .lock()
+                            .await
+                            .decrement_subgraph_requests();
+
+                        let co_processor_output = res?;
 
                         tracing::debug!(?co_processor_output, "co-processor returned");
 

@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
 use futures::stream::StreamExt;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -37,7 +36,6 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::router_factory::BusyTimer;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -62,7 +60,6 @@ pub(crate) struct SupergraphService {
     execution_service_factory: ExecutionServiceFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
-    busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 #[buildstructor::buildstructor]
@@ -72,13 +69,11 @@ impl SupergraphService {
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
         execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
-        busy_timer: Arc<Mutex<BusyTimer>>,
     ) -> Self {
         SupergraphService {
             query_planner_service,
             execution_service_factory,
             schema,
-            busy_timer,
         }
     }
 }
@@ -101,14 +96,13 @@ impl Service<SupergraphRequest> for SupergraphService {
         let planning = std::mem::replace(&mut self.query_planner_service, clone);
         let execution = self.execution_service_factory.create();
 
-        let busy_timer = Arc::new(Mutex::new(BusyTimer::new()));
-
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let fut = service_call(planning, execution, schema, busy_timer.clone(), req)
+        let timer = req.context.busy_timer.clone();
+        let fut = service_call(planning, execution, schema, req)
             .then(|res| async move {
-                let busy_ns = busy_timer.lock().await.current();
+                let busy_ns = timer.lock().await.current();
                 tracing::info!("was busy for {busy_ns}ns",);
                 res
             })
@@ -140,7 +134,6 @@ async fn service_call<ExecutionService>(
     planning: CachingQueryPlanner<BridgeQueryPlanner>,
     execution: ExecutionService,
     schema: Arc<Schema>,
-    busy_timer: Arc<Mutex<BusyTimer>>,
     req: SupergraphRequest,
 ) -> Result<SupergraphResponse, BoxError>
 where
@@ -357,12 +350,9 @@ impl PluggableSupergraphServiceBuilder {
 
         let plugins = Arc::new(self.plugins);
 
-        let busy_timer = Arc::new(Mutex::new(BusyTimer::new()));
-
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
             plugins.clone(),
-            busy_timer.clone(),
         ));
 
         Ok(SupergraphCreator {
@@ -370,7 +360,6 @@ impl PluggableSupergraphServiceBuilder {
             subgraph_service_factory,
             schema: self.schema,
             plugins,
-            busy_timer,
         })
     }
 }
@@ -404,7 +393,6 @@ pub(crate) struct SupergraphCreator {
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
-    busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 pub(crate) trait HasPlugins {
@@ -441,7 +429,6 @@ impl SupergraphCreator {
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
-            .busy_timer(self.busy_timer.clone())
             .build();
 
         let supergraph_service = match self
