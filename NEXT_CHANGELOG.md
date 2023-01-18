@@ -28,6 +28,13 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 # [1.8.1] (unreleased) - 2022-mm-dd
 
 ## 🚀 Features
+
+### Add support for `base64::encode()` / `base64::decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
+
+Two new functions, `base64::encode()` and `base64::decode()` may now be used to Base64-encode or Base64-decode strings, respectively.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2394
+
 ### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397), [Issue #2412](https://github.com/apollographql/router/issues/2412))
 
 Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
@@ -151,4 +158,3 @@ To publish a new metric, use tracing macros to generate an event that contains o
 `histogram.`: Used for histograms (takes f64)
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
-
