@@ -53,7 +53,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::Schema::parse(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -105,7 +105,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::Schema::parse(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -634,5 +634,47 @@ fn upgrade_old_configuration() {
                 }
             }
         }
+    }
+}
+
+#[test]
+fn all_properties_are_documented() {
+    let schema = serde_json::to_value(&generate_config_schema())
+        .expect("must be able to convert the schema to json");
+
+    let mut errors = Vec::new();
+    visit_schema("", &schema, &mut errors);
+    if !errors.is_empty() {
+        panic!(
+            "There were errors in the configuration schema: {}",
+            errors.join("\n")
+        )
+    }
+}
+
+fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
+    match schema {
+        Value::Array(arr) => {
+            for element in arr {
+                visit_schema(path, element, errors)
+            }
+        }
+        Value::Object(o) => {
+            for (k, v) in o {
+                if k.as_str() == "properties" {
+                    let properties = v.as_object().expect("properties must be an object");
+                    for (k, v) in properties {
+                        let path = format!("{}.{}", path, k);
+                        if v.as_object().and_then(|o| o.get("description")).is_none() {
+                            errors.push(format!("{} was missing a description", path));
+                        }
+                        visit_schema(&path, v, errors)
+                    }
+                } else {
+                    visit_schema(path, v, errors)
+                }
+            }
+        }
+        _ => {}
     }
 }

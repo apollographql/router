@@ -6,7 +6,7 @@ use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::*;
+use crate::spec::Schema;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.

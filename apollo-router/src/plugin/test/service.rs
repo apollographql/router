@@ -1,12 +1,12 @@
 #![allow(dead_code, unreachable_pub)]
 #![allow(missing_docs)] // FIXME
 
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 
 /// Build a mock service handler for the router pipeline.
 macro_rules! mock_service {

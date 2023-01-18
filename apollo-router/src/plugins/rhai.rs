@@ -63,12 +63,12 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -117,6 +117,20 @@ mod execution {
 
 mod subgraph {
     pub(crate) use crate::services::subgraph::*;
+}
+
+#[export_module]
+mod router_base64_mod {
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
+        String::from_utf8(base64::decode(input.as_bytes()).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure)]
+    pub(crate) fn encode(input: &mut ImmutableString) -> String {
+        base64::encode(input.as_bytes())
+    }
 }
 
 #[export_module]
@@ -412,7 +426,9 @@ struct Rhai {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Conf {
+    /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
+    /// The main entry point for Rhai script evaluation
     main: Option<String>,
 }
 
@@ -1235,6 +1251,8 @@ impl Rhai {
         // The macro call creates a Rhai module from the plugin module.
         let module = exported_module!(router_plugin_mod);
 
+        let base64_module = exported_module!(router_base64_mod);
+
         // Configure our engine for execution
         engine
             .set_max_expr_depths(0, 0)
@@ -1243,6 +1261,8 @@ impl Rhai {
             })
             // Register our plugin module
             .register_global_module(module.into())
+            // Register our base64 module (not global)
+            .register_static_module("base64", base64_module.into())
             // Register types accessible in plugin scripts
             .register_type::<Context>()
             .register_type::<HeaderMap>()
@@ -1652,7 +1672,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::SubgraphRequest;
+    use crate::services::SubgraphRequest;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {
@@ -2092,6 +2112,24 @@ mod tests {
         let engine = Rhai::new_rhai_engine(None);
         let decoded: String = engine
             .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
+            .expect("can decode string");
+        assert_eq!(decoded, "This has an ümlaut in it.");
+    }
+
+    #[test]
+    fn it_can_base64encode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let encoded: String = engine
+            .eval(r#"base64::encode("This has an ümlaut in it.")"#)
+            .expect("can encode string");
+        assert_eq!(encoded, "VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=");
+    }
+
+    #[test]
+    fn it_can_base64decode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let decoded: String = engine
+            .eval(r#"base64::decode("VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=")"#)
             .expect("can decode string");
         assert_eq!(decoded, "This has an ümlaut in it.");
     }

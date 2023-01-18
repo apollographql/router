@@ -21,8 +21,8 @@ use tracing::Instrument;
 
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use super::new_service::ServiceFactory;
-use super::subgraph_service::SubgraphServiceFactory;
 use super::Plugins;
+use super::SubgraphServiceFactory;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -31,21 +31,18 @@ use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::router_factory::BusyTimer;
 use crate::services::execution;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::Schema;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::spec::Schema;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
-pub(crate) struct ExecutionService<SF: SubgraphServiceFactory> {
+pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_creator: Arc<SF>,
+    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }
 
-impl<SF> Service<ExecutionRequest> for ExecutionService<SF>
-where
-    SF: SubgraphServiceFactory,
-{
+impl Service<ExecutionRequest> for ExecutionService {
     type Response = ExecutionResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -81,7 +78,7 @@ where
                 .query_plan
                 .execute(
                     &context,
-                    &this.subgraph_creator,
+                    &this.subgraph_service_factory,
                     &Arc::new(req.supergraph_request),
                     &this.schema,
                     sender,
@@ -327,29 +324,14 @@ async fn consume_responses(
     }
 }
 
-pub(crate) trait ExecutionServiceFactory:
-    ServiceFactory<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
-{
-    type ExecutionService: Service<
-            ExecutionRequest,
-            Response = ExecutionResponse,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
-}
-
 #[derive(Clone)]
-pub(crate) struct ExecutionCreator<SF: SubgraphServiceFactory> {
+pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) subgraph_creator: Arc<SF>,
+    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }
 
-impl<SF> ServiceFactory<ExecutionRequest> for ExecutionCreator<SF>
-where
-    SF: SubgraphServiceFactory,
-{
+impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
     type Service = execution::BoxService;
 
     fn create(&self) -> Self::Service {
@@ -359,7 +341,7 @@ where
                 self.plugins.iter().rev().fold(
                     crate::services::execution_service::ExecutionService {
                         schema: self.schema.clone(),
-                        subgraph_creator: self.subgraph_creator.clone(),
+                        subgraph_service_factory: self.subgraph_service_factory.clone(),
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),
@@ -367,12 +349,4 @@ where
             )
             .boxed()
     }
-}
-
-impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
-    type ExecutionService = execution::BoxService;
-    type Future =
-        <<ExecutionCreator<SF> as ServiceFactory<ExecutionRequest>>::Service as Service<
-            ExecutionRequest,
-        >>::Future;
 }

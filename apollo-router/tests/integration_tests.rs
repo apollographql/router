@@ -614,7 +614,7 @@ async fn normal_query_with_defer_accept_header() {
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
         "supergraph": {
-            "preview_defer_support": false,
+            "defer_support": false,
         },
         "plugins": {
             "apollo.include_subgraph_errors": {

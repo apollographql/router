@@ -12,8 +12,8 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -116,6 +116,12 @@ fn query_matches_hash(query: &str, hash: &[u8]) -> bool {
 
 fn redis_key(query_hash: &str) -> String {
     format!("apq\0{query_hash}")
+}
+
+pub(crate) fn calculate_hash_for_query(query: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(query);
+    hex::encode(hasher.finalize())
 }
 
 #[cfg(test)]

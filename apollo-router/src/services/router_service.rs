@@ -47,13 +47,13 @@ use crate::graphql;
 use crate::plugin::test::MockSupergraphService;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
-use crate::RouterRequest;
-use crate::RouterResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -62,14 +62,14 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
-    apq_layer: APQLayer,
+    apq_layer: Option<APQLayer>,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
+    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: Option<APQLayer>) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
@@ -222,8 +222,13 @@ where
                         context,
                     };
 
+                    let request_res = match apq {
+                        None => Ok(request),
+                        Some(apq) => apq.request(request).await,
+                    };
+
                     let SupergraphResponse { response, context } =
-                        match apq.request(request).await.and_then(|request| {
+                        match request_res.and_then(|request| {
                             let query = request.supergraph_request.body().query.as_ref();
 
                             if query.is_none() || query.unwrap().trim().is_empty() {
@@ -363,15 +368,23 @@ where
                                 Ok(router::Response {
                                 response: http::Response::builder()
                                     .status(StatusCode::NOT_ACCEPTABLE)
-                                    .body(Body::from(
-                                        format!(
-                                            r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                            APPLICATION_JSON.essence_str(),
-                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                            MULTIPART_DEFER_CONTENT_TYPE
+                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                                    .body(
+                                    Body::from(
+                                        serde_json::to_string(
+                                            &graphql::Error::builder()
+                                                .message(format!(
+                                                    r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
+                                                    APPLICATION_JSON.essence_str(),
+                                                    GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                                    MULTIPART_DEFER_CONTENT_TYPE
+                                                ))
+                                                .extension_code("INVALID_ACCEPT_HEADER")
+                                                .build(),
                                         )
-                                    ))
-                                    .expect("cannot fail"),
+                                        .unwrap_or_else(|_| String::from("Invalid request"))
+                                    )
+                                ).expect("cannot fail"),
                                 context,
                             })
                             }
@@ -426,7 +439,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
-    apq_layer: APQLayer,
+    apq_layer: Option<APQLayer>,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -477,13 +490,17 @@ where
 {
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
-            )
-            .await,
-        );
+        let apq_layer = if configuration.supergraph.apq.enabled {
+            Some(APQLayer::with_cache(
+                DeduplicatingCache::from_configuration(
+                    &configuration.supergraph.apq.experimental_cache,
+                    "APQ",
+                )
+                .await,
+            ))
+        } else {
+            None
+        };
 
         Self {
             supergraph_creator,
