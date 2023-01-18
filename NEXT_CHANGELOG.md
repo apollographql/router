@@ -135,7 +135,11 @@ By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/rout
 
 ### Add a metric for existing connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
 
-The new counter `apollo_router_session_count` indicates the number of currently connected clients. This also fixes the behaviour when we reach the maximum number of file descriptors: instead of going into a busy loop, the router will wait a bit before accepting a new connection.
+New metrics are available to track the client connections:
+- `apollo_router_session_count` indicates the number of currently connected clients
+- `apollo_router_active_session_count` indicates the number of in flight GraphQL requests from connected clients.
+
+This also fixes the behaviour when we reach the maximum number of file descriptors: instead of going into a busy loop, the router will wait a bit before accepting a new connection.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
 
