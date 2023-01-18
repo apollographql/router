@@ -255,7 +255,7 @@ impl Plugin for Telemetry {
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
-                    "apollo_private.http.request_headers" = Self::filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
+                    "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
                     "apollo_private.http.response_headers" = field::Empty
                 );
                 span
@@ -741,45 +741,6 @@ impl Telemetry {
             );
 
             span
-        }
-    }
-
-    fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
-        let headers_map = headers
-            .iter()
-            .filter(|(name, _value)| {
-                name != &header::AUTHORIZATION
-                    && name != &header::COOKIE
-                    && name != &header::SET_COOKIE
-            })
-            .map(|(name, value)| {
-                if match &forward_rules {
-                    ForwardHeaders::None => false,
-                    ForwardHeaders::All => true,
-                    ForwardHeaders::Only(only) => only.contains(name),
-                    ForwardHeaders::Except(except) => !except.contains(name),
-                } {
-                    (
-                        name.to_string(),
-                        value.to_str().unwrap_or("<unknown>").to_string(),
-                    )
-                } else {
-                    (name.to_string(), "".to_string())
-                }
-            })
-            .fold(BTreeMap::new(), |mut acc, (name, value)| {
-                acc.entry(name).or_insert_with(Vec::new).push(value);
-                acc
-            });
-
-        match serde_json::to_string(&headers_map) {
-            Ok(result) => result,
-            Err(_err) => {
-                ::tracing::warn!(
-                    "could not serialize header, trace will not have header information"
-                );
-                Default::default()
-            }
         }
     }
 
@@ -1287,6 +1248,41 @@ impl Telemetry {
     }
 }
 
+fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+    let headers_map = headers
+        .iter()
+        .filter(|(name, _value)| {
+            name != &header::AUTHORIZATION && name != &header::COOKIE && name != &header::SET_COOKIE
+        })
+        .filter_map(|(name, value)| {
+            let send_header = match &forward_rules {
+                ForwardHeaders::None => false,
+                ForwardHeaders::All => true,
+                ForwardHeaders::Only(only) => only.contains(name),
+                ForwardHeaders::Except(except) => !except.contains(name),
+            };
+
+            send_header.then(|| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or("<unknown>").to_string(),
+                )
+            })
+        })
+        .fold(BTreeMap::new(), |mut acc, (name, value)| {
+            acc.entry(name).or_insert_with(Vec::new).push(value);
+            acc
+        });
+
+    match serde_json::to_string(&headers_map) {
+        Ok(result) => result,
+        Err(_err) => {
+            ::tracing::warn!("could not serialize header, trace will not have header information");
+            Default::default()
+        }
+    }
+}
+
 // Planner errors return stats report key that start with `## `
 // while successful planning stats report key start with `# `
 fn operation_count(stats_report_key: &str) -> u64 {
@@ -1437,6 +1433,9 @@ impl TextMapPropagator for CustomTraceIdPropagator {
 mod tests {
     use std::str::FromStr;
 
+    use axum::headers::HeaderName;
+    use http::HeaderMap;
+    use http::HeaderValue;
     use http::StatusCode;
     use insta::assert_snapshot;
     use itertools::Itertools;
@@ -1447,6 +1446,7 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
+    use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
     use crate::graphql::Error;
     use crate::graphql::Request;
@@ -1898,5 +1898,41 @@ mod tests {
             .sorted()
             .join("\n");
         assert_snapshot!(prom_metrics);
+    }
+
+    #[test]
+    fn it_test_send_headers_to_studio() {
+        let fw_headers = ForwardHeaders::Only(vec![
+            HeaderName::from_static("test"),
+            HeaderName::from_static("apollo-x-name"),
+        ]);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("xxx"),
+        );
+        headers.insert(
+            HeaderName::from_static("test"),
+            HeaderValue::from_static("content"),
+        );
+        headers.insert(
+            HeaderName::from_static("referer"),
+            HeaderValue::from_static("test"),
+        );
+        headers.insert(
+            HeaderName::from_static("foo"),
+            HeaderValue::from_static("bar"),
+        );
+        headers.insert(
+            HeaderName::from_static("apollo-x-name"),
+            HeaderValue::from_static("polaris"),
+        );
+        let filtered_headers = super::filter_headers(&headers, &fw_headers);
+        assert_eq!(
+            filtered_headers.as_str(),
+            r#"{"apollo-x-name":["polaris"],"test":["content"]}"#
+        );
+        let filtered_headers = super::filter_headers(&headers, &ForwardHeaders::None);
+        assert_eq!(filtered_headers.as_str(), "{}");
     }
 }
