@@ -88,7 +88,7 @@ expression: get_spans()
               ],
               [
                 "apollo_private.http.request_headers",
-                "{\"content-type\":[\"\"]}"
+                "{}"
               ],
               [
                 "apollo_private.duration_ns",
