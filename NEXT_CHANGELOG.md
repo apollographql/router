@@ -133,6 +133,11 @@ When receiving requests with invalid content-type/accept header missmatch (e.g m
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
 
+### Add a metric for existing connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
+
+The new counter `apollo_router_session_count` indicates the number of currently connected clients. This also fixes the behaviour when we reach the maximum number of file descriptors: instead of going into a busy loop, the router will wait a bit before accepting a new connection.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
 
 ## 🛠 Maintenance
 
