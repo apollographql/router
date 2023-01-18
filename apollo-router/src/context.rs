@@ -15,7 +15,6 @@ use serde::Serialize;
 use tower::BoxError;
 
 use crate::json_ext::Value;
-use crate::router_factory::BusyTimer;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -174,6 +173,60 @@ impl Context {
 impl Default for Context {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Measures the total overhead of the router
+///
+/// This works by measuring the time spent executing when there is no active subgraph request.
+/// This is still not a perfect solution, there are cases where preprocessing a subgraph request
+/// happens while another one is running and still shifts the end of the span, but for now this
+/// should serve as a reasonable solution without complex post processing of spans
+pub(crate) struct BusyTimer {
+    active_subgraph_requests: u32,
+    busy_ns: u128,
+    start: Option<Instant>,
+}
+
+impl BusyTimer {
+    pub(crate) fn new() -> Self {
+        BusyTimer::default()
+    }
+
+    pub(crate) fn increment_subgraph_requests(&mut self) {
+        if self.active_subgraph_requests == 0 {
+            if let Some(start) = self.start.take() {
+                self.busy_ns += start.elapsed().as_nanos();
+            }
+        }
+
+        self.active_subgraph_requests += 1;
+    }
+
+    pub(crate) fn decrement_subgraph_requests(&mut self) {
+        self.active_subgraph_requests -= 1;
+
+        if self.active_subgraph_requests == 0 {
+            self.start = Some(Instant::now());
+        }
+    }
+
+    pub(crate) fn current(&mut self) -> u128 {
+        if let Some(start) = self.start {
+            self.busy_ns + start.elapsed().as_nanos()
+        } else {
+            self.busy_ns
+        }
+    }
+}
+
+impl Default for BusyTimer {
+    fn default() -> Self {
+        Self {
+            active_subgraph_requests: 0,
+            busy_ns: 0,
+            start: Some(Instant::now()),
+        }
     }
 }
 
