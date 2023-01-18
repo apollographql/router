@@ -3006,6 +3006,68 @@ expression: "&schema"
         }
       }
     },
+    "tls": {
+      "description": "TLS related configuration options.",
+      "default": {
+        "subgraph": {
+          "all": {
+            "certificate_authorities": null
+          },
+          "subgraphs": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "subgraph": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": {
+            "all": {
+              "certificate_authorities": null
+            },
+            "subgraphs": {}
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "certificate_authorities": null
+              },
+              "type": "object",
+              "properties": {
+                "certificate_authorities": {
+                  "description": "list of certificate authorities in PEM format",
+                  "default": null,
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Configuration options pertaining to the subgraph server component.",
+                "type": "object",
+                "properties": {
+                  "certificate_authorities": {
+                    "description": "list of certificate authorities in PEM format",
+                    "default": null,
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "traffic_shaping": {
       "description": "Configuration for the experimental traffic shaping plugin",
       "type": "object",

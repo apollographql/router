@@ -162,6 +162,8 @@ reqwest = { version = "0.11.13", default-features = false, features = [
 ] }
 router-bridge = "0.1.12"
 rust-embed="6.4.2"
+rustls = "0.20.7"
+rustls-pemfile = "1.0.1"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "3.0.0"
 sha2 = "0.10.6"
