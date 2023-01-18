@@ -7,8 +7,9 @@ use std::task::Poll;
 use pin_project_lite::pin_project;
 use tokio::time::Sleep;
 
-use super::error::Elapsed;
 use crate::Context;
+
+use super::error::Elapsed;
 
 pin_project! {
     /// [`Timeout`] response future
