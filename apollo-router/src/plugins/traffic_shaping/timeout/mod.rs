@@ -9,12 +9,10 @@ pub(crate) mod error;
 pub(crate) mod future;
 mod layer;
 
-use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
 
-use http::StatusCode;
 use tower::util::Oneshot;
 use tower::Service;
 use tower::ServiceExt;
