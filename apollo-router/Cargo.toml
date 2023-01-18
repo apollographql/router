@@ -219,8 +219,10 @@ reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",
 ] }
+rstack = { version = "0.3.2", features = ["dw"], default-features = false }
 similar-asserts = "1.4.2"
 tempfile = "3.3.0"
+test-binary = "2.0.0"
 test-log = { version = "0.2.11", default-features = false, features = [
     "trace",
 ] }
@@ -235,6 +237,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
+
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.23.1" }
 
 [build-dependencies]
 tonic-build = "0.8.4"

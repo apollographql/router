@@ -3,7 +3,7 @@ use std::path::Path;
 
 use tower::BoxError;
 
-use crate::common::TracingTest;
+use crate::common::IntegrationTest;
 
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
@@ -12,10 +12,10 @@ async fn test_datadog_tracing() -> Result<(), BoxError> {
         .with_service_name("my_app")
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let router = TracingTest::new(
+    let router = IntegrationTest::new(
         tracer,
         opentelemetry_datadog::DatadogPropagator::new(),
-        Path::new("datadog.router.yaml"),
+        include_str!("fixtures/datadog.router.yaml"),
     );
     router.run_query().await;
     Ok(())
