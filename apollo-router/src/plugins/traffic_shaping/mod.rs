@@ -21,7 +21,6 @@ use futures::future::BoxFuture;
 use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
-use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::retry::Retry;

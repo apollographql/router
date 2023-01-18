@@ -9,19 +9,16 @@ pub(crate) mod error;
 pub(crate) mod future;
 mod layer;
 
-use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
 
-use http::StatusCode;
 use tower::util::Oneshot;
 use tower::Service;
 use tower::ServiceExt;
 
 use self::future::ResponseFuture;
 pub(crate) use self::layer::TimeoutLayer;
-use crate::context::HasContext;
 pub(crate) use crate::plugins::traffic_shaping::timeout::error::Elapsed;
 
 /// Applies a timeout to requests.
@@ -42,10 +39,8 @@ impl<T: Clone> Timeout<T> {
 
 impl<S, Request> Service<Request> for Timeout<S>
 where
-    Request: HasContext,
     S: Service<Request> + Clone,
     S::Error: Into<tower::BoxError>,
-    S::Response: From<Elapsed>,
 {
     type Response = S::Response;
     type Error = tower::BoxError;
@@ -58,13 +53,8 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         let service = self.inner.clone();
 
-        let context = request.context().clone();
         let response = service.oneshot(request);
 
-        ResponseFuture::new(
-            response,
-            Box::pin(tokio::time::sleep(self.timeout)),
-            context,
-        )
+        ResponseFuture::new(response, Box::pin(tokio::time::sleep(self.timeout)))
     }
 }

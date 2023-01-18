@@ -9,7 +9,6 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-use crate::context::HasContext;
 use crate::error::Error;
 use crate::graphql;
 use crate::json_ext::Object;
@@ -101,12 +100,6 @@ impl Clone for Request {
             operation_kind: self.operation_kind,
             context: self.context.clone(),
         }
-    }
-}
-
-impl HasContext for Request {
-    fn context(&self) -> &Context {
-        &self.context
     }
 }
 

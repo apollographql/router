@@ -1,7 +1,5 @@
-use std::sync::Arc;
 use std::time::Duration;
 
-use http::StatusCode;
 use tower::Layer;
 
 use super::Timeout;
