@@ -114,12 +114,13 @@ checksum = "2cb2f989d18dd141ab8ae82f64d1a8cdd37e0840f73a406896cf5e99502fab61"
 
 [[package]]
 name = "apollo-compiler"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f1466d86c8bec27cd5c28c80538a298729cf57ab3127389741336ac586634ec8"
+checksum = "3af79860291cff25966e4d35fa1b67b271043c5cfc6433e7a155b3fc800d926a"
 dependencies = [
  "apollo-parser 0.4.1",
- "miette 4.7.1",
+ "indexmap",
+ "miette",
  "ordered-float 2.10.0",
  "rowan",
  "salsa",
@@ -173,6 +174,7 @@ dependencies = [
  "access-json",
  "ansi_term",
  "anyhow",
+ "apollo-compiler",
  "apollo-encoder 0.4.0",
  "apollo-parser 0.4.1",
  "arc-swap",
@@ -219,7 +221,7 @@ dependencies = [
  "maplit",
  "mediatype",
  "memchr",
- "miette 5.5.0",
+ "miette",
  "mime",
  "mockall",
  "multer",
@@ -248,6 +250,8 @@ dependencies = [
  "rhai",
  "router-bridge",
  "rust-embed",
+ "rustls",
+ "rustls-pemfile",
  "schemars",
  "serde",
  "serde_json",
@@ -256,6 +260,7 @@ dependencies = [
  "serde_yaml",
  "sha2",
  "shellexpand",
+ "similar-asserts",
  "static_assertions",
  "strum_macros",
  "sys-info",
@@ -660,7 +665,9 @@ version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba3569f383e8f1598449f1a423e72e99569137b47740b1da11ef19af3d5c3223"
 dependencies = [
+ "lazy_static",
  "memchr",
+ "regex-automata",
 ]
 
 [[package]]
@@ -2803,33 +2810,13 @@ dependencies = [
 
 [[package]]
 name = "miette"
-version = "4.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c90329e44f9208b55f45711f9558cec15d7ef8295cc65ecd6d4188ae8edc58c"
-dependencies = [
- "atty",
- "backtrace",
- "miette-derive 4.7.1",
- "once_cell",
- "owo-colors",
- "supports-color",
- "supports-hyperlinks",
- "supports-unicode",
- "terminal_size",
- "textwrap 0.15.2",
- "thiserror",
- "unicode-width",
-]
-
-[[package]]
-name = "miette"
 version = "5.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4afd9b301defa984bbdbe112b4763e093ed191750a0d914a78c1106b2d0fe703"
 dependencies = [
  "atty",
  "backtrace",
- "miette-derive 5.5.0",
+ "miette-derive",
  "once_cell",
  "owo-colors",
  "supports-color",
@@ -2839,17 +2826,6 @@ dependencies = [
  "textwrap 0.15.2",
  "thiserror",
  "unicode-width",
-]
-
-[[package]]
-name = "miette-derive"
-version = "4.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b5bc45b761bcf1b5e6e6c4128cd93b84c218721a8d9b894aa0aff4ed180174c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -4723,6 +4699,20 @@ name = "similar"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "420acb44afdae038210c99e69aae24109f32f15500aa708e81d46c9f29d55fcf"
+dependencies = [
+ "bstr",
+ "unicode-segmentation",
+]
+
+[[package]]
+name = "similar-asserts"
+version = "1.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbf644ad016b75129f01a34a355dcb8d66a5bc803e417c7a77cc5d5ee9fa0f18"
+dependencies = [
+ "console 0.15.4",
+ "similar",
+]
 
 [[package]]
 name = "slab"

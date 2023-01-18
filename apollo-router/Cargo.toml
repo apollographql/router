@@ -42,6 +42,7 @@ askama = "0.11.1"
 access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
+apollo-compiler = "0.5.0"
 apollo-encoder = "0.4.0"
 apollo-parser = "0.4.1"
 arc-swap = "1.6.0"
@@ -159,6 +160,8 @@ reqwest = { version = "0.11.13", default-features = false, features = [
 ] }
 router-bridge = "0.1.12"
 rust-embed="6.4.2"
+rustls = "0.20.7"
+rustls-pemfile = "1.0.1"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "3.0.0"
 sha2 = "0.10.6"
@@ -217,6 +220,7 @@ reqwest = { version = "0.11.13", default-features = false, features = [
     "json",
     "stream",
 ] }
+similar-asserts = "1.4.2"
 tempfile = "3.3.0"
 test-log = { version = "0.2.11", default-features = false, features = [
     "trace",
