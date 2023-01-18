@@ -2161,7 +2161,6 @@ async fn test_supergraph_timeout() {
 
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
-    /////////////////////////////////////
     let schema = Schema::parse(
         include_str!("..//testdata/minimal_supergraph.graphql"),
         &conf,
