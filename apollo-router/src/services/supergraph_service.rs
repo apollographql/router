@@ -5,7 +5,6 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
-use futures::FutureExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
@@ -99,14 +98,8 @@ impl Service<SupergraphRequest> for SupergraphService {
         let schema = self.schema.clone();
 
         let context_cloned = req.context.clone();
-        let timer = req.context.busy_timer.clone();
-        let fut = service_call(planning, execution, schema, req)
-            .then(|res| async move {
-                let busy_ns = timer.lock().await.current();
-                tracing::info!("was busy for {busy_ns}ns",);
-                res
-            })
-            .or_else(|error: BoxError| async move {
+        let fut =
+            service_call(planning, execution, schema, req).or_else(|error: BoxError| async move {
                 let errors = vec![crate::error::Error {
                     message: error.to_string(),
                     extensions: serde_json_bytes::json!({
