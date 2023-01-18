@@ -745,7 +745,7 @@ expression: "&schema"
           },
           "subgraph": {
             "all": {
-              "enable": false
+              "enabled": true
             },
             "subgraphs": {}
           }
@@ -771,19 +771,20 @@ expression: "&schema"
             },
             "subgraph": {
               "all": {
-                "enable": false
+                "enabled": true
               },
               "subgraphs": {}
             }
           },
           "type": "object",
-          "required": [
-            "experimental_cache",
-            "subgraph"
-          ],
           "properties": {
             "experimental_cache": {
               "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                }
+              },
               "type": "object",
               "required": [
                 "in_memory"
@@ -810,20 +811,24 @@ expression: "&schema"
             },
             "subgraph": {
               "description": "Configuration options pertaining to the subgraph server component.",
+              "default": {
+                "all": {
+                  "enabled": true
+                },
+                "subgraphs": {}
+              },
               "type": "object",
               "properties": {
                 "all": {
                   "description": "options applying to all subgraphs",
                   "default": {
-                    "enable": false
+                    "enabled": true
                   },
                   "type": "object",
-                  "required": [
-                    "enable"
-                  ],
                   "properties": {
-                    "enable": {
+                    "enabled": {
                       "description": "Enable",
+                      "default": true,
                       "type": "boolean"
                     }
                   },
@@ -836,12 +841,10 @@ expression: "&schema"
                   "additionalProperties": {
                     "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
                     "type": "object",
-                    "required": [
-                      "enable"
-                    ],
                     "properties": {
-                      "enable": {
+                      "enabled": {
                         "description": "Enable",
+                        "default": true,
                         "type": "boolean"
                       }
                     },

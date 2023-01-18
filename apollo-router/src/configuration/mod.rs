@@ -576,8 +576,10 @@ impl Default for Supergraph {
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
     /// Cache configuration
+    #[serde(default)]
     pub(crate) experimental_cache: Cache,
 
+    #[serde(default)]
     pub(crate) subgraph: ApqSubgraphWrapper,
 }
 
@@ -594,11 +596,22 @@ pub(crate) struct ApqSubgraphWrapper {
 }
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphApq {
     /// Enable
+    #[serde(default = "default_subgraph_apq")]
     pub(crate) enabled: bool,
+}
+
+impl Default for SubgraphApq {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
+fn default_subgraph_apq() -> bool {
+    true
 }
 
 /// Query planning cache configuration
