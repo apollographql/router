@@ -113,6 +113,18 @@ openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2008
 
+### Make APQ optional ([PR #2386](https://github.com/apollographql/router/pull/2386))
+
+Automatic persisted queries support is enabled by default, this adds an option to deactivate it:
+
+```yaml
+supergraph:
+  apq:
+    enabled: false
+```
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
+
 ## 🐛 Fixes
 
 ### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
