@@ -148,6 +148,12 @@ When receiving requests with invalid content-type/accept header missmatch (e.g m
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
 
+### Fix `APOLLO_USAGE_REPORTING_INGRESS_URL` application when router is run without a configuration file
+
+The env variable `APOLLO_USAGE_REPORTING_INGRESS_URL` was not being applied correctly when the router was being run without a configuration file.
+In addition, defaulting of env variables now directly injects the variable rather than injecting an expansion expression. This means that `APOLLO_ROUTER_CONFIG_ENV_PREFIX` doesn't affect injected defaults.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2432
 
 ## 🛠 Maintenance
 
