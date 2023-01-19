@@ -137,6 +137,12 @@ supergraph:
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
 
+### Measure the router's processing time ([Issue #1949](https://github.com/apollographql/router/issues/1949) [Issue #2057](https://github.com/apollographql/router/issues/2057))
+
+There is a new metric called `apollo_router_processing_time` that measures the time spent executing the request minus the time spent waiting for an external request (subgraph request or external plugin). This accounts both for the time spent actually executing on the request, and the time spent waiting for concurrent client requests to be executed.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
+
 ## 🐛 Fixes
 
 ### Don't send header names to Studio if `send_headers` is `none` ([Issue #2403](https://github.com/apollographql/router/issues/2403))
