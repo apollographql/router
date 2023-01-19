@@ -6,10 +6,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::hir;
 use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
 use derivative::Derivative;
-use graphql::Error;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
@@ -17,6 +16,7 @@ use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
+use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -24,7 +24,13 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
-use crate::*;
+use crate::spec::FieldType;
+use crate::spec::Fragments;
+use crate::spec::InvalidValue;
+use crate::spec::Schema;
+use crate::spec::Selection;
+use crate::spec::SpecError;
+use crate::Configuration;
 
 pub(crate) const TYPENAME: &str = "__typename";
 
@@ -557,7 +563,7 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if field_name.as_str() == TYPENAME {
+                        if name.as_str() == TYPENAME {
                             if input_value.is_string() {
                                 *output_value = input_value.clone();
                             }
@@ -765,7 +771,7 @@ impl Query {
                         );
                         path.pop();
                         res?
-                    } else if field_name_str == TYPENAME {
+                    } else if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
                             output.insert(
                                 field_name.clone(),
@@ -1160,6 +1166,16 @@ impl Operation {
     }
 }
 
+impl From<hir::OperationType> for OperationKind {
+    fn from(operation_type: hir::OperationType) -> Self {
+        match operation_type {
+            hir::OperationType::Query => Self::Query,
+            hir::OperationType::Mutation => Self::Mutation,
+            hir::OperationType::Subscription => Self::Subscription,
+        }
+    }
+}
+
 impl From<ast::OperationType> for OperationKind {
     // Spec: https://spec.graphql.org/draft/#OperationType
     fn from(operation_type: ast::OperationType) -> Self {
@@ -1185,13 +1201,31 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
         .and_then(|value| parse_value(&value))
 }
 
+pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
+    match value {
+        hir::Value::Variable(_) => None,
+        hir::Value::Int(val) => Some((val.get() as i64).into()),
+        hir::Value::Float(val) => Some(val.get().into()),
+        hir::Value::Null => Some(Value::Null),
+        hir::Value::String(val) => Some(val.as_str().into()),
+        hir::Value::Boolean(val) => Some((*val).into()),
+        hir::Value::Enum(name) => Some(name.src().into()),
+        hir::Value::List(list) => list.iter().map(parse_hir_value).collect(),
+        hir::Value::Object(obj) => obj
+            .iter()
+            .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
+            .collect(),
+    }
+}
+
 pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
         ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
         ast::Value::IntValue(i) => {
-            let s = i.source_string();
+            let token = i.int_token()?;
+            let s = token.text();
             s.parse::<i64>()
                 .ok()
                 .map(Into::into)

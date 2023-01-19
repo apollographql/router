@@ -6,6 +6,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
+use super::agent_endpoint;
 use super::deser_endpoint;
 use super::AgentEndpoint;
 use crate::plugins::telemetry::config::GenericWith;
@@ -17,15 +18,14 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The endpoint to send to
     #[serde(deserialize_with = "deser_endpoint")]
-    #[schemars(with = "String", default = "default_agent_endpoint")]
+    #[schemars(schema_with = "agent_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
 
+    /// batch processor configuration
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
-}
-const fn default_agent_endpoint() -> &'static str {
-    "default"
 }
 
 impl TracingConfigurator for Config {
@@ -39,7 +39,7 @@ impl TracingConfigurator for Config {
             .with(&url, |b, e| {
                 b.with_agent_endpoint(e.to_string().trim_end_matches('/'))
             })
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with_trace_config(trace_config.into())
             .build_exporter()?;
         Ok(builder.with_span_processor(

@@ -36,6 +36,7 @@ use reqwest::Client;
 use reqwest::Method;
 use reqwest::StatusCode;
 use serde_json::json;
+use serde_json_bytes::Value;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
@@ -66,6 +67,7 @@ use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service;
+use crate::services::supergraph;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
@@ -545,7 +547,26 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
         .send()
         .await
         .unwrap();
+    assert_eq!(
+        response.headers().get(CONTENT_TYPE).unwrap(),
+        &HeaderValue::from_static("application/json")
+    );
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let invalid_gql_req: graphql::Error = response.json().await.unwrap();
+    assert_eq!(
+        invalid_gql_req.extensions.get("code").unwrap(),
+        &Value::from(String::from("INVALID_GRAPHQL_REQUEST"))
+    );
+    assert_eq!(
+        invalid_gql_req.extensions.get("details").unwrap(),
+        &Value::from(String::from(
+            "failed to deserialize the request body into JSON: expected value at line 1 column 1"
+        ))
+    );
+    assert_eq!(
+        invalid_gql_req.message,
+        "Invalid GraphQL request".to_string()
+    );
     server.shutdown().await
 }
 
@@ -894,7 +915,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .cors(Cors::builder().build())
         .supergraph(
             crate::configuration::Supergraph::fake_builder()
-                .path(String::from("/graphql/*"))
+                .path(String::from("/graphql"))
                 .build(),
         )
         .build()
@@ -910,7 +931,7 @@ async fn cors_preflight() -> Result<(), ApolloRouterError> {
         .request(
             Method::OPTIONS,
             &format!(
-                "{}/graphql/",
+                "{}/graphql",
                 server.graphql_listen_address().as_ref().unwrap()
             ),
         )
@@ -988,6 +1009,14 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE,);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"message":"'content-type' header can't be different from \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+    );
 
     server.shutdown().await
 }
@@ -1019,6 +1048,14 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"message":"'accept' header can't be different from \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+    );
 
     server.shutdown().await
 }
@@ -1974,7 +2011,7 @@ Accept: application/json\r
 #[tokio::test]
 async fn test_health_check() {
     let router_service = router_service::from_supergraph_mock_callback(|_| {
-        Ok(crate::supergraph::Response::builder()
+        Ok(supergraph::Response::builder()
             .data(json!({ "__typename": "Query"}))
             .context(Context::new())
             .build()

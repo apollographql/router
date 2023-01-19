@@ -1,9 +1,0 @@
----
-source: apollo-router/src/configuration/expansion.rs
-expression: value
----
-hi: there
-telemetry:
-  apollo:
-    endpoint: "${env.APOLLO_USAGE_REPORTING_INGRESS_URL:-https://usage-reporting.api.apollographql.com/api/ingress/traces}"
-

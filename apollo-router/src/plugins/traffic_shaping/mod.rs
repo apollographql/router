@@ -44,8 +44,8 @@ use crate::register_plugin;
 use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
+use crate::services::SubgraphRequest;
 use crate::Configuration;
-use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -54,6 +54,7 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
+/// Traffic shaping options
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Shaping {
@@ -67,6 +68,9 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
+    /// Enable APQ for outgoing subgraph requests
+    apq: Option<bool>,
+    /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
 }
@@ -79,6 +83,7 @@ impl Merge for Shaping {
                 deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
+                apq: self.apq.or(fallback.apq),
                 global_rate_limit: self
                     .global_rate_limit
                     .as_ref()
@@ -94,6 +99,7 @@ impl Merge for Shaping {
     }
 }
 
+/// Retry configuration
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RetryConfig {
@@ -142,9 +148,9 @@ struct RouterShaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
+/// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     #[serde(default)]
     /// Applied at the router level
@@ -356,6 +362,10 @@ impl TrafficShaping {
             Either::B(service)
         }
     }
+
+    pub(crate) fn get_apq(&self, name: &str) -> Option<bool> {
+        self.config.subgraphs.get(name)?.apq
+    }
 }
 
 impl TrafficShaping {
@@ -388,11 +398,11 @@ mod test {
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
+    use crate::spec::Schema;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
@@ -502,6 +512,7 @@ mod test {
             Arc::new(builder.build().await.expect("should build")),
             &Configuration::default(),
         )
+        .await
         .make()
         .boxed()
     }

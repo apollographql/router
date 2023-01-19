@@ -1,10 +1,6 @@
 use anyhow::{anyhow, Error, Result};
 use cargo_metadata::MetadataCommand;
-use itertools::Itertools;
-use octorust::types::{
-    IssuesCreateMilestoneRequest, IssuesListMilestonesSort, IssuesListState, IssuesUpdateRequest,
-    Milestone, Order, PullsCreateRequest, State, TitleOneOf,
-};
+use octorust::types::PullsCreateRequest;
 use octorust::Client;
 use std::str::FromStr;
 use structopt::StructOpt;
@@ -93,16 +89,12 @@ impl Prepare {
             .enable_all()
             .build()
             .unwrap()
-            .block_on(async {
-                let result = self.prepare_release().await;
-                if self.dry_run {
-                    git!("reset", "--hard");
-                }
-                result
-            })
+            .block_on(async { self.prepare_release().await })
     }
 
     async fn prepare_release(&self) -> Result<(), Error> {
+        self.ensure_pristine_checkout()?;
+        self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
         let github = octorust::Client::new(
             "router-release".to_string(),
@@ -113,10 +105,9 @@ impl Prepare {
         if !self.current_branch && !self.dry_run {
             self.switch_to_release_branch(&version)?;
         }
-        self.assign_issues_to_milestone(&github, &version).await?;
         self.update_install_script(&version)?;
-        self.update_docs(&version)?;
         self.update_helm_charts(&version)?;
+        self.update_docs(&version)?;
         self.docker_files(&version)?;
         self.finalize_changelog(&version)?;
         self.update_lock()?;
@@ -127,216 +118,55 @@ impl Prepare {
         Ok(())
     }
 
+    fn ensure_pristine_checkout(&self) -> Result<(), anyhow::Error> {
+        let git = which::which("git")?;
+        let output = std::process::Command::new(git)
+            .args(["status", "--untracked-files=no", "--porcelain"])
+            .output()?;
+
+        if !output.stdout.is_empty() {
+            return Err(anyhow!(
+                "git workspace was not clean and requires 'git stash' before releasing"
+            ));
+        }
+        Ok(())
+    }
+
+    fn ensure_prereqs(&self) -> Result<()> {
+        if which::which("git").is_err() {
+            return Err(anyhow!(
+                "the 'git' executable could not be found in your PATH"
+            ));
+        }
+
+        if which::which("helm").is_err() {
+            return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+        }
+
+        if which::which("helm-docs").is_err() {
+            return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+        }
+
+        if which::which("cargo-about").is_err() {
+            return Err(anyhow!("the 'cargo-about' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-about"));
+        }
+
+        if which::which("cargo-deny").is_err() {
+            return Err(anyhow!("the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"));
+        }
+
+        if std::env::var("GITHUB_TOKEN").is_err() {
+            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
+        }
+        Ok(())
+    }
+
     /// Create a new branch "#.#.#" where "#.#.#" is this release's version
     /// (release) or "#.#.#-rc.#" (release candidate)
     fn switch_to_release_branch(&self, version: &str) -> Result<()> {
         println!("creating release branch");
         git!("fetch", "origin", &format!("dev:{}", version));
         git!("checkout", &version);
-        Ok(())
-    }
-
-    /// Go through NEXT_CHANGELOG.md find all issues and assign to the milestone.
-    /// Any PR that doesn't have an issue assign to the milestone.
-    async fn assign_issues_to_milestone(&self, github: &Client, version: &str) -> Result<()> {
-        println!("assigning issues and PRs to milestone v{}", version);
-        let change_log = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
-
-        let re =
-            regex::Regex::new(r"(?ms)https://github.com/apollographql/router/(pull|issues)/(\d+)")?;
-
-        let milestone = self.get_or_create_milestone(&github, version).await?;
-        let mut errors_encountered = false;
-        for (issues_or_pull, number) in re
-            .captures_iter(&change_log)
-            .map(|m| {
-                (
-                    m.get(1).expect("expected issues or pull").as_str(),
-                    m.get(2).expect("expected issue or pull number").as_str(),
-                )
-            })
-            .sorted()
-            .dedup()
-        {
-            if let Err(e) = self
-                .handle_issue_or_pr(&github, &milestone, issues_or_pull, number)
-                .await
-            {
-                eprintln!("{}", e);
-                errors_encountered = true;
-            }
-        }
-        if errors_encountered {
-            return Err(anyhow!("errors encountered, aborting"));
-        }
-        Ok(())
-    }
-
-    async fn get_or_create_milestone(&self, github: &Client, version: &str) -> Result<Milestone> {
-        Ok(
-            match github
-                .issues()
-                .list_milestones(
-                    "apollographql",
-                    "router",
-                    IssuesListState::Open,
-                    IssuesListMilestonesSort::FallthroughString,
-                    Order::FallthroughString,
-                    30,
-                    1,
-                )
-                .await?
-                .into_iter()
-                .find(|m| m.title == format!("v{}", version))
-            {
-                Some(milestone) => milestone,
-                None => {
-                    println!("milestone not found, creating...");
-                    if !self.dry_run {
-                        github
-                            .issues()
-                            .create_milestone(
-                                "apollographql",
-                                "router",
-                                &IssuesCreateMilestoneRequest {
-                                    description: format!("Release v{}", version),
-                                    due_on: None,
-                                    state: Some(State::Open),
-                                    title: format!("v{}", version),
-                                },
-                            )
-                            .await
-                            .tap_err(|_| eprintln!("Failed to create milestone"))?
-                    } else {
-                        Milestone {
-                            closed_at: None,
-                            closed_issues: 0,
-                            created_at: None,
-                            creator: None,
-                            description: "".to_string(),
-                            due_on: None,
-                            html_url: "".to_string(),
-                            id: 0,
-                            labels_url: "".to_string(),
-                            node_id: "".to_string(),
-                            number: 0,
-                            open_issues: 0,
-                            state: Default::default(),
-                            title: "".to_string(),
-                            updated_at: None,
-                            url: "".to_string(),
-                        }
-                    }
-                }
-            },
-        )
-    }
-
-    async fn handle_issue_or_pr(
-        &self,
-        github: &Client,
-        milestone: &Milestone,
-        issues_or_pull: &str,
-        number: &str,
-    ) -> Result<()> {
-        match issues_or_pull {
-            "issues" => {
-                let issue = github
-                    .issues()
-                    .get("apollographql", "router", number.parse()?)
-                    .await
-                    .tap_err(|_| {
-                        eprintln!(
-                            "could not find issue {}, there is an error in NEXT_CHANGELOG.md",
-                            number
-                        )
-                    })?;
-                match issue.milestone {
-                    None => {
-                        println!("assigning milestone to https://github.com/apollographql/router/issues/{}", number);
-                        self.update_milestone(github, &milestone, issue.number)
-                            .await?;
-                    }
-                    Some(issue_milestone) if issue_milestone.id != milestone.id => {
-                        return Err(anyhow!("issue https://github.com/apollographql/router/issues/{} was assigned to an existing milestone", number));
-                    }
-                    _ => {}
-                }
-                if issue.assignees.is_empty() {
-                    return Err(anyhow!(
-                        "https://github.com/apollographql/router/issues/{} has no assignee",
-                        number
-                    ));
-                }
-            }
-            "pull" => {
-                let pull = github
-                    .pulls()
-                    .get("apollographql", "router", number.parse()?)
-                    .await
-                    .tap_err(|_| {
-                        eprintln!(
-                            "could not find PR {}, there is an error in NEXT_CHANGELOG.md",
-                            number
-                        )
-                    })?;
-                match pull.milestone {
-                    None => {
-                        println!(
-                            "assigning milestone to https://github.com/apollographql/router/pull/{}",
-                            number
-                        );
-                        self.update_milestone(github, &milestone, pull.number)
-                            .await?;
-                    }
-                    Some(pull_milestone) if pull_milestone.id != milestone.id => {
-                        return Err(anyhow!("issue https://github.com/apollographql/router/pull/{} was assigned to an existing milestone", number));
-                    }
-                    _ => {}
-                }
-                if pull.assignees.is_empty() {
-                    return Err(anyhow!(
-                        "https://github.com/apollographql/router/pull/{} has no assignee",
-                        number
-                    ));
-                }
-                if pull.state == State::Open {
-                    return Err(anyhow!(
-                        "https://github.com/apollographql/router/pull/{} is still open",
-                        number
-                    ));
-                }
-            }
-            _ => panic!("expected issues or pull"),
-        }
-        Ok(())
-    }
-
-    async fn update_milestone(
-        &self,
-        github: &Client,
-        milestone: &Milestone,
-        issue: i64,
-    ) -> Result<()> {
-        if !self.dry_run {
-            github
-                .issues()
-                .update(
-                    "apollographql",
-                    "router",
-                    issue,
-                    &IssuesUpdateRequest {
-                        assignee: "".to_string(),
-                        assignees: vec![],
-                        body: "".to_string(),
-                        labels: vec![],
-                        milestone: Some(TitleOneOf::I64(milestone.number)),
-                        state: None,
-                        title: None,
-                    },
-                )
-                .await?;
-        }
         Ok(())
     }
 
@@ -386,13 +216,16 @@ impl Prepare {
         }
         replace_in_file!(
             "./apollo-router-scaffold/templates/base/Cargo.toml",
-            "^apollo-router\\s*=\\s*\"\\d+.\\d+.\\d+\"",
+            "^apollo-router\\s*=\\s*\"[^\"]+\"",
             format!("apollo-router = \"{}\"", version)
         );
         replace_in_file!(
             "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
-            "^apollo-router-scaffold = \\{ git=\"https://github.com/apollographql/router.git\", tag\\s*=\\s*\"v\\d+.\\d+.\\d+\"\\s*\\}",
-            format!("apollo-router-scaffold = {{ git=\"https://github.com/apollographql/router.git\", tag = \"v{}\" }}", version)
+            r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
+            format!(
+                r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#,
+                version
+            )
         );
 
         Ok(version)
@@ -419,13 +252,16 @@ impl Prepare {
         println!("updating docs");
         replace_in_file!(
             "./docs/source/containerization/docker.mdx",
-            "with your chosen version. e.g.: `v\\d+.\\d+.\\d+`",
+            "with your chosen version. e.g.: `v[^`]+`",
             format!("with your chosen version. e.g.: `v{}`", version)
         );
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
-            "router/tree/v\\d+.\\d+.\\d+",
-            format!("router/tree/v{}", version)
+            "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
+            format!(
+                "https://github.com/apollographql/router/tree/v{}/helm/chart/router",
+                version
+            )
         );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
@@ -435,9 +271,9 @@ impl Prepare {
                     "--set",
                     "router.configuration.telemetry.metrics.prometheus.enabled=true",
                     "--set",
-                    "managedFederation.apiKey=\"REDACTED\"",
+                    "managedFederation.apiKey=REDACTED",
                     "--set",
-                    "managedFederation.graphRef=\"REDACTED\"",
+                    "managedFederation.graphRef=REDACTED",
                     "--debug",
                     ".",
                 ])
@@ -458,6 +294,19 @@ impl Prepare {
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm charts");
+
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "^version:.*?$",
+            format!("version: {}", version)
+        );
+
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "appVersion: \"v[^\"]+\"",
+            format!("appVersion: \"v{}\"", version)
+        );
+
         if !std::process::Command::new(which::which("helm-docs")?)
             .current_dir("./helm/chart")
             .args(["helm-docs", "router"])
@@ -466,12 +315,6 @@ impl Prepare {
         {
             return Err(anyhow!("failed to generate helm docs"));
         }
-
-        replace_in_file!(
-            "./helm/chart/router/Chart.yaml",
-            "appVersion: \"v\\d+.\\d+.\\d+\"",
-            format!("appVersion: \"v{}\"", version)
-        );
 
         Ok(())
     }
@@ -487,8 +330,11 @@ impl Prepare {
             {
                 replace_in_file!(
                     entry.path(),
-                    r"ghcr.io/apollographql/router:v\d+.\d+.\d+",
-                    format!("ghcr.io/apollographql/router:v{}", version)
+                    r#"^(?P<indentation>\s+)image:\s*ghcr.io/apollographql/router:v.*$"#,
+                    format!(
+                        "${{indentation}}image: ghcr.io/apollographql/router:v{}",
+                        version
+                    )
                 );
             }
         }
@@ -503,26 +349,33 @@ impl Prepare {
         println!("finalizing changelog");
         let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex =
-            regex::Regex::new(r"(?ms)(.*# \[x.x.x\] \(unreleased\) - ....-mm-dd\n)(.*)")?;
+        let changes_regex = regex::Regex::new(r"(?ms)(^<!-- <KEEP>.*?$^(?:.*)^<\/KEEP> -->\s+)(.*)?")?;
         let captures = changes_regex
             .captures(&next_changelog)
             .expect("changelog format was unexpected");
-        let template = captures
-            .get(1)
-            .expect("changelog format was unexpected")
-            .as_str();
         let changes = captures
             .get(2)
             .expect("changelog format was unexpected")
             .as_str();
 
-        let update_regex = regex::Regex::new(
-            r"(?ms)This project adheres to \[Semantic Versioning v2.0.0\]\(https://semver.org/spec/v2.0.0.html\).\n",
-        )?;
-        let updated = update_regex.replace(&changelog, format!("This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).\n\n# [{}] - {}\n{}\n", version, chrono::Utc::now().date_naive(), changes));
+        let new_next_changelog = changes_regex.replace(&next_changelog, "$1");
+
+        let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).";
+
+        let update_regex =
+            regex::Regex::new(format!("(?ms){}\n", regex::escape(semver_heading)).as_str())?;
+        let updated = update_regex.replace(
+            &changelog,
+            format!(
+                "{}\n\n# [{}] - {}\n\n{}\n",
+                semver_heading,
+                version,
+                chrono::Utc::now().date_naive(),
+                changes
+            ),
+        );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;
-        std::fs::write("./NEXT_CHANGELOG.md", template.to_string())?;
+        std::fs::write("./NEXT_CHANGELOG.md", new_next_changelog.to_string())?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.

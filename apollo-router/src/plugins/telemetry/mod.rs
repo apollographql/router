@@ -102,17 +102,17 @@ use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::services::subgraph::Request;
+use crate::services::subgraph::Response;
 use crate::services::supergraph;
-use crate::subgraph::Request;
-use crate::subgraph::Response;
+use crate::services::ExecutionRequest;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
-use crate::ExecutionRequest;
 use crate::ListenAddr;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
@@ -255,7 +255,7 @@ impl Plugin for Telemetry {
                     "otel.kind" = "INTERNAL",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
-                    "apollo_private.http.request_headers" = Self::filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
+                    "apollo_private.http.request_headers" = filter_headers(request.router_request.headers(), &apollo.send_headers).as_str(),
                     "apollo_private.http.response_headers" = field::Empty
                 );
                 span
@@ -632,22 +632,22 @@ impl Telemetry {
         // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
-        if propagation.jaeger.unwrap_or_default() || tracing.jaeger.is_some() {
+        if propagation.jaeger || tracing.jaeger.is_some() {
             propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
         }
-        if propagation.baggage.unwrap_or_default() {
+        if propagation.baggage {
             propagators.push(Box::new(BaggagePropagator::default()));
         }
-        if propagation.trace_context.unwrap_or_default() || tracing.otlp.is_some() {
+        if propagation.trace_context || tracing.otlp.is_some() {
             propagators.push(Box::new(TraceContextPropagator::default()));
         }
-        if propagation.zipkin.unwrap_or_default() || tracing.zipkin.is_some() {
+        if propagation.zipkin || tracing.zipkin.is_some() {
             propagators.push(Box::new(opentelemetry_zipkin::Propagator::default()));
         }
-        if propagation.datadog.unwrap_or_default() || tracing.datadog.is_some() {
+        if propagation.datadog || tracing.datadog.is_some() {
             propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
         }
-        if let Some(from_request_header) = &propagation.request.as_ref().map(|r| &r.header_name) {
+        if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
                 from_request_header.to_string(),
             )));
@@ -741,45 +741,6 @@ impl Telemetry {
             );
 
             span
-        }
-    }
-
-    fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
-        let headers_map = headers
-            .iter()
-            .filter(|(name, _value)| {
-                name != &header::AUTHORIZATION
-                    && name != &header::COOKIE
-                    && name != &header::SET_COOKIE
-            })
-            .map(|(name, value)| {
-                if match &forward_rules {
-                    ForwardHeaders::None => false,
-                    ForwardHeaders::All => true,
-                    ForwardHeaders::Only(only) => only.contains(name),
-                    ForwardHeaders::Except(except) => !except.contains(name),
-                } {
-                    (
-                        name.to_string(),
-                        value.to_str().unwrap_or("<unknown>").to_string(),
-                    )
-                } else {
-                    (name.to_string(), "".to_string())
-                }
-            })
-            .fold(BTreeMap::new(), |mut acc, (name, value)| {
-                acc.entry(name).or_insert_with(Vec::new).push(value);
-                acc
-            });
-
-        match serde_json::to_string(&headers_map) {
-            Ok(result) => result,
-            Err(_err) => {
-                ::tracing::warn!(
-                    "could not serialize header, trace will not have header information"
-                );
-                Default::default()
-            }
         }
     }
 
@@ -1287,6 +1248,41 @@ impl Telemetry {
     }
 }
 
+fn filter_headers(headers: &HeaderMap, forward_rules: &ForwardHeaders) -> String {
+    let headers_map = headers
+        .iter()
+        .filter(|(name, _value)| {
+            name != &header::AUTHORIZATION && name != &header::COOKIE && name != &header::SET_COOKIE
+        })
+        .filter_map(|(name, value)| {
+            let send_header = match &forward_rules {
+                ForwardHeaders::None => false,
+                ForwardHeaders::All => true,
+                ForwardHeaders::Only(only) => only.contains(name),
+                ForwardHeaders::Except(except) => !except.contains(name),
+            };
+
+            send_header.then(|| {
+                (
+                    name.to_string(),
+                    value.to_str().unwrap_or("<unknown>").to_string(),
+                )
+            })
+        })
+        .fold(BTreeMap::new(), |mut acc, (name, value)| {
+            acc.entry(name).or_insert_with(Vec::new).push(value);
+            acc
+        });
+
+    match serde_json::to_string(&headers_map) {
+        Ok(result) => result,
+        Err(_err) => {
+            ::tracing::warn!("could not serialize header, trace will not have header information");
+            Default::default()
+        }
+    }
+}
+
 // Planner errors return stats report key that start with `## `
 // while successful planning stats report key start with `# `
 fn operation_count(stats_report_key: &str) -> u64 {
@@ -1437,6 +1433,9 @@ impl TextMapPropagator for CustomTraceIdPropagator {
 mod tests {
     use std::str::FromStr;
 
+    use axum::headers::HeaderName;
+    use http::HeaderMap;
+    use http::HeaderValue;
     use http::StatusCode;
     use insta::assert_snapshot;
     use itertools::Itertools;
@@ -1447,6 +1446,7 @@ mod tests {
     use tower::Service;
     use tower::ServiceExt;
 
+    use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
     use crate::graphql::Error;
     use crate::graphql::Request;
@@ -1457,8 +1457,8 @@ mod tests {
     use crate::plugin::DynPlugin;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn plugin_registered() {
@@ -1898,5 +1898,41 @@ mod tests {
             .sorted()
             .join("\n");
         assert_snapshot!(prom_metrics);
+    }
+
+    #[test]
+    fn it_test_send_headers_to_studio() {
+        let fw_headers = ForwardHeaders::Only(vec![
+            HeaderName::from_static("test"),
+            HeaderName::from_static("apollo-x-name"),
+        ]);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("authorization"),
+            HeaderValue::from_static("xxx"),
+        );
+        headers.insert(
+            HeaderName::from_static("test"),
+            HeaderValue::from_static("content"),
+        );
+        headers.insert(
+            HeaderName::from_static("referer"),
+            HeaderValue::from_static("test"),
+        );
+        headers.insert(
+            HeaderName::from_static("foo"),
+            HeaderValue::from_static("bar"),
+        );
+        headers.insert(
+            HeaderName::from_static("apollo-x-name"),
+            HeaderValue::from_static("polaris"),
+        );
+        let filtered_headers = super::filter_headers(&headers, &fw_headers);
+        assert_eq!(
+            filtered_headers.as_str(),
+            r#"{"apollo-x-name":["polaris"],"test":["content"]}"#
+        );
+        let filtered_headers = super::filter_headers(&headers, &ForwardHeaders::None);
+        assert_eq!(filtered_headers.as_str(), "{}");
     }
 }
