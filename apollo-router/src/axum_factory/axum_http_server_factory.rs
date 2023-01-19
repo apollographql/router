@@ -333,8 +333,8 @@ async fn handle_graphql(
     let context = request.context.clone();
 
     let res = service.oneshot(request).await;
-    let dur = context.busy_time_ns().await;
-    let processing_seconds = dur as f64 / 1_000_000_000f64;
+    let dur = context.busy_time().await;
+    let processing_seconds = dur.as_secs_f64();
 
     tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
 

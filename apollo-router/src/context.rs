@@ -4,6 +4,7 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;
@@ -180,7 +181,7 @@ impl Context {
     }
 
     /// How much time was spent working on the request
-    pub(crate) async fn busy_time_ns(&self) -> u128 {
+    pub(crate) async fn busy_time(&self) -> Duration {
         self.busy_timer.lock().await.current()
     }
 }
@@ -199,7 +200,7 @@ impl Default for Context {
 /// should serve as a reasonable solution without complex post processing of spans
 pub(crate) struct BusyTimer {
     active_requests: u32,
-    busy_ns: u128,
+    busy_ns: Duration,
     start: Option<Instant>,
 }
 
@@ -211,7 +212,7 @@ impl BusyTimer {
     pub(crate) fn increment_active_requests(&mut self) {
         if self.active_requests == 0 {
             if let Some(start) = self.start.take() {
-                self.busy_ns += start.elapsed().as_nanos();
+                self.busy_ns += start.elapsed();
             }
             self.start = None;
         }
@@ -227,9 +228,9 @@ impl BusyTimer {
         }
     }
 
-    pub(crate) fn current(&mut self) -> u128 {
+    pub(crate) fn current(&mut self) -> Duration {
         if let Some(start) = self.start {
-            self.busy_ns + start.elapsed().as_nanos()
+            self.busy_ns + start.elapsed()
         } else {
             self.busy_ns
         }
@@ -240,7 +241,7 @@ impl Default for BusyTimer {
     fn default() -> Self {
         Self {
             active_requests: 0,
-            busy_ns: 0,
+            busy_ns: Duration::new(0, 0),
             start: Some(Instant::now()),
         }
     }
