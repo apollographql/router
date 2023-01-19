@@ -705,9 +705,9 @@ workflows:
     when: << pipeline.parameters.nightly >>
     jobs:
       - build_release:
+          nightly: true
           matrix:
             parameters:
-              nightly: true
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
 
