@@ -86,7 +86,7 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "healthcheck endpoint exposed at {}/health",
+            "Health check endpoint exposed at {}/health",
             configuration.health_check.listen
         );
         endpoints.insert(
