@@ -110,6 +110,7 @@ impl SubgraphService {
         apq_enabled: Option<bool>,
         tls_cert_store: Option<RootCertStore>,
     ) -> Self {
+        println!("apq_enabled was: {apq_enabled:?}");
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -136,7 +137,9 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            apq: Arc::new(<AtomicBool>::new(apq_enabled.unwrap_or(true))),
+            apq: Arc::new(<AtomicBool>::new(
+                /*apq_enabled.unwrap_or(true)*/ false,
+            )),
         }
     }
 }
@@ -321,6 +324,7 @@ async fn call_http(
             })?;
         // Keep our parts, we'll need them later
         let (parts, body) = response.into_parts();
+        println!("got parts: {parts:?}") ;
         if display_headers {
             tracing::info!(
                         http.response.headers = ?parts.headers, apollo.subgraph.name = %service_name, "Response headers from subgraph {service_name:?}"
@@ -366,7 +370,8 @@ async fn call_http(
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;
 
-    if display_body {
+    if true {
+        //display_body {
         tracing::info!(
             http.response.body = %String::from_utf8_lossy(&body), apollo.subgraph.name = %cloned_service_name, "Raw response body from subgraph {cloned_service_name:?} received"
         );
