@@ -148,12 +148,7 @@ impl Plugin for ExternalPlugin {
                             my_sdl,
                         )?;
 
-                        request
-                            .context
-                            .busy_timer
-                            .lock()
-                            .await
-                            .increment_active_requests();
+                        request.context.enter_active_request().await;
 
                         // Second, call our co-processor and get a reply.
                         let res = call_external(
@@ -167,12 +162,7 @@ impl Plugin for ExternalPlugin {
                         )
                         .await;
 
-                        request
-                            .context
-                            .busy_timer
-                            .lock()
-                            .await
-                            .decrement_active_requests();
+                        request.context.leave_active_request().await;
 
                         let co_processor_output = res?;
 

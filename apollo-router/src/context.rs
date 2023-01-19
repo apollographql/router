@@ -41,7 +41,7 @@ pub struct Context {
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
-    pub(crate) busy_timer: Arc<Mutex<BusyTimer>>,
+    busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 impl Context {
@@ -167,6 +167,21 @@ impl Context {
     /// Iterate mutably over the entries.
     pub fn iter_mut(&self) -> impl Iterator<Item = RefMutMulti<'_, String, Value>> + '_ {
         self.entries.iter_mut()
+    }
+
+    /// Notify the busy timer that we're waiting on a network request
+    pub async fn enter_active_request(&self) {
+        self.busy_timer.lock().await.increment_active_requests()
+    }
+
+    /// Notify the busy timer that we stopped waiting on a network request
+    pub async fn leave_active_request(&self) {
+        self.busy_timer.lock().await.decrement_active_requests()
+    }
+
+    /// How much time was spent working on the request
+    pub async fn busy_time_ns(&self) -> u128 {
+        self.busy_timer.lock().await.current()
     }
 }
 
