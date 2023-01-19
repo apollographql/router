@@ -163,7 +163,7 @@ By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/rout
 The env variable `APOLLO_USAGE_REPORTING_INGRESS_URL` was not being applied correctly when the router was being run without a configuration file.
 In addition, defaulting of env variables now directly injects the variable rather than injecting an expansion expression. This means that `APOLLO_ROUTER_CONFIG_ENV_PREFIX` doesn't affect injected defaults.
 
-By [@bryncooke](https://github.com/bryncopoke) in https://github.com/apollographql/router/pull/2432
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2432
 
 ## 🛠 Maintenance
 
