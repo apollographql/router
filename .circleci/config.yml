@@ -202,26 +202,48 @@ commands:
       - restore_cache:
           keys:
             - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-      - run:
-          name: Install cargo deny if not present
-          command: |
-            set -e -o pipefail
-            cargo deny --version || cargo install cargo-deny
-      - run:
-          name: Install cargo about if not present
-          command: |
-            set -e -o pipefail
-            cargo about --version || cargo install cargo-about
-      - run:
-          name: Install cargo edit if not present
-          command: |
-            set -e -o pipefail
-            cargo edit --version || cargo install cargo-edit
-      - save_cache:
-          key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-          paths:
-            - ~/.cargo/bin/cargo-deny
-            - ~/.cargo/bin/cargo-about
+
+      - when:
+          condition:
+            equal: [windows, << parameters.os >>]
+          steps:
+            - run:
+                name: Install cargo deny, about, edit
+                command: |
+                  cargo install --locked cargo-deny cargo-about cargo-edit
+            - save_cache:
+                name: Save .cargo
+                key: rust-cargo-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                paths:
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-about.exe
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-deny.exe
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-edit.exe
+      - when:
+          condition:
+            and:
+              - not:
+                  equal: [windows, << parameters.os >>]
+          steps:
+            - run:
+                name: Install cargo deny if not present
+                command: |
+                  set -e -o pipefail
+                  cargo deny --version || cargo install cargo-deny
+            - run:
+                name: Install cargo about if not present
+                command: |
+                  set -e -o pipefail
+                  cargo about --version || cargo install cargo-about
+            - run:
+                name: Install cargo edit if not present
+                command: |
+                  set -e -o pipefail
+                  cargo edit --version || cargo install cargo-edit
+            - save_cache:
+                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                paths:
+                  - ~/.cargo/bin/cargo-deny
+                  - ~/.cargo/bin/cargo-about
 
   xtask_lint:
     parameters:
@@ -436,11 +458,12 @@ jobs:
           steps:
             - install_minimal_rust
             - macos_install_baseline
-            # This will set the version to inlude current date and commit hash
             - when:
                 condition:
                   equal: [true, << parameters.nightly >>]
                 steps:
+                  - install_extra_tools:
+                      os: macos
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
@@ -475,6 +498,8 @@ jobs:
                 condition:
                   equal: [true, << parameters.nightly >>]
                 steps:
+                  - install_extra_tools:
+                      os: linux_amd
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
@@ -501,6 +526,8 @@ jobs:
                 condition:
                   equal: [true, << parameters.nightly >>]
                 steps:
+                  - install_extra_tools:
+                      os: linux_arm
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
@@ -541,6 +568,8 @@ jobs:
                 condition:
                   equal: [true, << parameters.nightly >>]
                 steps:
+                  - install_extra_tools:
+                      os: windows
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
