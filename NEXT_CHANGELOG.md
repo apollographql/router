@@ -139,6 +139,19 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
+### Don't send header names to Studio if `send_headers` is `none` ([Issue #2403](https://github.com/apollographql/router/issues/2403))
+
+Before when `send_headers` was set to `none` (like in the following example of configuration) we sent header names with empty header values. Now we don't send anything to Studio.
+
+```yaml
+telemetry:
+  apollo:
+    send_headers: none
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2425
+
+
 ### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
 
 When receiving requests with invalid content-type/accept header missmatch (e.g multipart requests) , it now specifies the right `content-type` header.
