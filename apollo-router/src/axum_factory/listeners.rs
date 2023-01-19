@@ -220,7 +220,7 @@ pub(super) fn serve_router_on_listen_addr(
                             }
 
                             tracing::info!(
-                                counter.apollo_router_session_count = 1,
+                                counter.apollo_router_session_count_total = 1,
                                 listener = &address
                             );
 
@@ -279,7 +279,7 @@ pub(super) fn serve_router_on_listen_addr(
                                 }
 
                                 tracing::info!(
-                                    counter.apollo_router_session_count = -1,
+                                    counter.apollo_router_session_count_total = -1,
                                     listener = &address
                                 );
 

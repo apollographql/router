@@ -61,7 +61,7 @@ The following metrics are available using Prometheus:
 - HTTP router request duration: `apollo_router_http_request_duration_seconds_bucket`
 - HTTP request duration by subgraph: `apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`
 - Total number of HTTP requests by HTTP Status: `apollo_router_http_requests_total`
-- Number of currently connected clients: `apollo_router_session_count`
+- Number of currently connected clients: `apollo_router_session_count_total`
 - Number of in flight GraphQL requests: `apollo_router_session_count_active`
 - Number of cache hits for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_count`
 - Number of cache misses for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_count`
