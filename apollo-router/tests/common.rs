@@ -9,14 +9,12 @@ use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::Method;
-use http::Request;
-use http::Uri;
 use jsonpath_lib::Selector;
+use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
-use opentelemetry_http::HttpClient;
+use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 use tracing::info_span;
@@ -65,8 +63,8 @@ impl TracingTest {
         Self {
             test_config_location: test_config_location.clone(),
             router: Command::new(router_location)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit())
                 .args([
                     "--hr",
                     "--config",
@@ -89,44 +87,57 @@ impl TracingTest {
         Ok(())
     }
 
-    pub async fn run_query(&self) -> String {
+    pub async fn run_query(&self) -> (String, reqwest::Response) {
         let client = reqwest::Client::new();
         let id = Uuid::new_v4().to_string();
         let span = info_span!("client_request", unit_test = id.as_str());
         let _span_guard = span.enter();
 
         for _i in 0..100 {
-            let mut request = Request::builder()
-                .method(Method::POST)
-                .header(CONTENT_TYPE, "application/json")
+            let mut request = client
+                .post("http://localhost:4000")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
-                .uri(Uri::from_static("http://localhost:4000"))
-                .body(r#"{"query":"{topProducts{name}}","variables":{}}"#.into())
+                .json(&json!({"query":"{topProducts{name}}","variables":{}}))
+                .build()
                 .unwrap();
 
             global::get_text_map_propagator(|propagator| {
                 propagator.inject_context(
                     &span.context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-                )
+                );
             });
             request.headers_mut().remove(ACCEPT);
-            match client.send(request).await {
+            match client.execute(request).await {
                 Ok(result) => {
-                    tracing::debug!(
-                        "got {}",
-                        String::from_utf8(result.body().to_vec()).unwrap_or_default()
-                    );
-                    return id;
+                    tracing::debug!("got {result:?}");
+                    return (id, result);
                 }
                 Err(e) => {
-                    tracing::debug!("query failed: {}", e);
+                    eprintln!("query failed: {}", e);
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("unable to send successful request to router")
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_metrics(&self) -> reqwest::Result<String> {
+        let client = reqwest::Client::new();
+
+        let request = client
+            .get("http://localhost:4000/metrics")
+            .header("apollographql-client-name", "custom_name")
+            .header("apollographql-client-version", "1.0")
+            .build()
+            .unwrap();
+
+        let res = client.execute(request).await?;
+
+        res.text().await
     }
 }
 

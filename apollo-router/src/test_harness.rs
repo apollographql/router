@@ -2,23 +2,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use tower::BoxError;
-use tower::Layer;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_http::trace::MakeSpan;
+use tracing_futures::Instrument;
 
+use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
-use crate::router_factory::SupergraphServiceConfigurator;
-use crate::router_factory::YamlSupergraphServiceFactory;
+use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
-use crate::services::layers::apq::APQLayer;
+use crate::services::router;
+use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::services::RouterCreator;
-use crate::Schema;
+use crate::services::SupergraphCreator;
+use crate::spec::Schema;
 
 #[cfg(test)]
 pub(crate) mod http_client;
@@ -55,9 +58,9 @@ pub(crate) mod http_client;
 ///     .unwrap();
 /// let response = TestHarness::builder()
 ///     .configuration_json(config)?
-///     .build()
+///     .build_router()
 ///     .await?
-///     .oneshot(request)
+///     .oneshot(request.try_into().unwrap())
 ///     .await?
 ///     .next_response()
 ///     .await
@@ -121,11 +124,8 @@ impl<'a> TestHarness<'a> {
     /// These extra plugins are added after plugins specified in configuration.
     pub fn extra_plugin<P: Plugin>(mut self, plugin: P) -> Self {
         let type_id = std::any::TypeId::of::<P>();
-        let name = match crate::plugin::plugins()
-            .iter()
-            .find(|(_name, factory)| factory.type_id == type_id)
-        {
-            Some((name, _factory)) => name.clone(),
+        let name = match crate::plugin::plugins().find(|factory| factory.type_id == type_id) {
+            Some(factory) => factory.name.clone(),
             None => format!(
                 "extra_plugins.{}.{}",
                 self.extra_plugins.len(),
@@ -135,6 +135,14 @@ impl<'a> TestHarness<'a> {
 
         self.extra_plugins.push((name, Box::new(plugin)));
         self
+    }
+
+    /// Adds a callback-based hook similar to [`Plugin::router_service`]
+    pub fn router_hook(
+        self,
+        callback: impl Fn(router::BoxService) -> router::BoxService + Send + Sync + 'static,
+    ) -> Self {
+        self.extra_plugin(RouterServicePlugin(callback))
     }
 
     /// Adds a callback-based hook similar to [`Plugin::supergraph_service`]
@@ -172,7 +180,7 @@ impl<'a> TestHarness<'a> {
         self
     }
 
-    async fn build_common(self) -> Result<(Arc<Configuration>, RouterCreator), BoxError> {
+    async fn build_common(self) -> Result<(Arc<Configuration>, SupergraphCreator), BoxError> {
         let builder = if self.schema.is_none() {
             self.subgraph_hook(|subgraph_name, default| match subgraph_name {
                 "products" => canned::products_subgraph().boxed(),
@@ -201,38 +209,55 @@ impl<'a> TestHarness<'a> {
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
         let schema = Arc::new(Schema::parse(schema, &config)?);
-        let router_creator = YamlSupergraphServiceFactory
-            .create(config.clone(), schema, None, Some(builder.extra_plugins))
+        let supergraph_creator = YamlRouterFactory
+            .create_supergraph(config.clone(), schema, None, Some(builder.extra_plugins))
             .await?;
 
-        Ok((config, router_creator))
+        Ok((config, supergraph_creator))
     }
 
-    /// Builds the GraphQL service
+    /// Builds the supergraph service
+    #[deprecated = "use build_supergraph instead"]
     pub async fn build(self) -> Result<supergraph::BoxCloneService, BoxError> {
-        let (_config, router_creator) = self.build_common().await?;
-        let apq = APQLayer::new().await;
+        self.build_supergraph().await
+    }
+
+    /// Builds the supergraph service
+    pub async fn build_supergraph(self) -> Result<supergraph::BoxCloneService, BoxError> {
+        let (_config, supergraph_creator) = self.build_common().await?;
 
         Ok(tower::service_fn(move |request| {
-            // APQ must be added here because it is implemented in the HTTP server
-            let service = apq.layer(router_creator.make()).boxed();
+            let router = supergraph_creator.make();
 
-            async move { service.oneshot(request).await }
+            async move { router.oneshot(request).await }
+        })
+        .boxed_clone())
+    }
+
+    /// Builds the router service
+    pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
+        let (config, supergraph_creator) = self.build_common().await?;
+        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
+
+        Ok(tower::service_fn(move |request: router::Request| {
+            let router = ServiceBuilder::new().service(router_creator.make()).boxed();
+            let span = PropagatingMakeSpan::default().make_span(&request.router_request);
+            async move { router.oneshot(request).await }.instrument(span)
         })
         .boxed_clone())
     }
 
     #[cfg(test)]
     pub(crate) async fn build_http_service(self) -> Result<HttpService, BoxError> {
-        use crate::axum_factory::make_axum_router;
+        use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
-        use crate::router_factory::SupergraphServiceFactory;
+        use crate::router_factory::RouterFactory;
 
-        let (config, router_creator) = self.build_common().await?;
+        let (config, supergraph_creator) = self.build_common().await?;
+        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
         let web_endpoints = router_creator.web_endpoints();
-        let apq = APQLayer::new().await;
 
-        let routers = make_axum_router(router_creator, &config, web_endpoints, apq)?;
+        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
     }
@@ -246,9 +271,26 @@ pub(crate) type HttpService = tower::util::BoxService<
     std::convert::Infallible,
 >;
 
+struct RouterServicePlugin<F>(F);
 struct SupergraphServicePlugin<F>(F);
 struct ExecutionServicePlugin<F>(F);
 struct SubgraphServicePlugin<F>(F);
+
+#[async_trait::async_trait]
+impl<F> Plugin for RouterServicePlugin<F>
+where
+    F: 'static + Send + Sync + Fn(router::BoxService) -> router::BoxService,
+{
+    type Config = ();
+
+    async fn new(_: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        unreachable!()
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        (self.0)(service)
+    }
+}
 
 #[async_trait::async_trait]
 impl<F> Plugin for SupergraphServicePlugin<F>

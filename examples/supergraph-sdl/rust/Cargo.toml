@@ -6,8 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
 anyhow = "1"
-apollo-compiler = "0.3.0"
-apollo-parser = "0.3.2"
+apollo-compiler = "0.6.0"
+apollo-parser = "0.4.0"
 apollo-router = { path = "../../../apollo-router" }
 async-trait = "0.1"
 futures = "0.3"

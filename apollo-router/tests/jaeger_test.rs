@@ -16,6 +16,7 @@ use hyper::server::Server;
 use hyper::service::make_service_fn;
 use hyper::service::service_fn;
 use hyper::Body;
+use mime::APPLICATION_JSON;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::trace::Span;
 use opentelemetry::trace::Tracer;
@@ -28,8 +29,8 @@ use crate::common::TracingTest;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing() -> Result<(), BoxError> {
-    let tracer = opentelemetry_jaeger::new_pipeline()
+async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
+    let tracer = opentelemetry_jaeger::new_agent_pipeline()
         .with_service_name("my_app")
         .install_simple()?;
 
@@ -42,11 +43,23 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
     tokio::task::spawn(subgraph());
 
     for _ in 0..10 {
-        let id = router.run_query().await;
+        let (id, result) = router.run_query().await;
+        assert!(!result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .is_empty());
         query_jaeger_for_trace(id).await?;
         router.touch_config()?;
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+
+    let metrics = router.get_metrics().await.unwrap();
+    assert!(metrics.contains(r#"apollo_router_cache_hit_count{kind="query planner",service_name="apollo-router",storage="memory"} 9"#));
+    assert!(metrics.contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 1"#));
+    assert!(metrics.contains("apollo_router_cache_hit_time"));
+    assert!(metrics.contains("apollo_router_cache_miss_time"));
+
     Ok(())
 }
 
@@ -92,6 +105,9 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
     // Verify that all spans have a path to the root 'client_request' span
     verify_span_parenting(&trace)?;
 
+    // Verify that supergraph span fields are present
+    verify_supergraph_span_fields(&trace)?;
+
     // Verify that router span fields are present
     verify_router_span_fields(&trace)?;
 
@@ -99,20 +115,8 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
 }
 
 fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
-    let router_span = trace.select_path("$..spans[?(@.operationName == 'supergraph')]")?[0];
+    let router_span = trace.select_path("$..spans[?(@.operationName == 'router')]")?[0];
     // We can't actually assert the values on a span. Only that a field has been set.
-    assert_eq!(
-        router_span
-            .select_path("$.tags[?(@.key == 'graphql.document')].value")?
-            .get(0),
-        Some(&&Value::String("{topProducts{name}}".to_string()))
-    );
-    assert_eq!(
-        router_span
-            .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
-            .get(0),
-        Some(&&Value::String("".to_string()))
-    );
     assert_eq!(
         router_span
             .select_path("$.tags[?(@.key == 'client.name')].value")?
@@ -124,6 +128,25 @@ fn verify_router_span_fields(trace: &Value) -> Result<(), BoxError> {
             .select_path("$.tags[?(@.key == 'client.version')].value")?
             .get(0),
         Some(&&Value::String("1.0".to_string()))
+    );
+
+    Ok(())
+}
+
+fn verify_supergraph_span_fields(trace: &Value) -> Result<(), BoxError> {
+    let supergraph_span = trace.select_path("$..spans[?(@.operationName == 'supergraph')]")?[0];
+    // We can't actually assert the values on a span. Only that a field has been set.
+    assert_eq!(
+        supergraph_span
+            .select_path("$.tags[?(@.key == 'graphql.document')].value")?
+            .get(0),
+        Some(&&Value::String("{topProducts{name}}".to_string()))
+    );
+    assert_eq!(
+        supergraph_span
+            .select_path("$.tags[?(@.key == 'graphql.operation.name')].value")?
+            .get(0),
+        Some(&&Value::String("".to_string()))
     );
 
     Ok(())
@@ -227,7 +250,7 @@ fn parent_span<'a>(trace: &'a Value, span: &'a Value) -> Option<&'a Value> {
 async fn subgraph() {
     async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
         // create the opentelemetry-jaeger tracing infrastructure
-        let tracer_provider = opentelemetry_jaeger::new_pipeline()
+        let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
             .with_service_name("products")
             .build_simple()
             .unwrap();
@@ -262,7 +285,7 @@ async fn subgraph() {
             std::str::from_utf8(&body_bytes).unwrap()
         );
         Ok(Response::builder()
-            .header(CONTENT_TYPE, "application/json")
+            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
             .status(StatusCode::OK)
             .body(
                 r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#
@@ -273,7 +296,5 @@ async fn subgraph() {
 
     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
     let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
-    if let Err(e) = server.await {
-        eprintln!("server error: {}", e);
-    }
+    server.await.unwrap();
 }

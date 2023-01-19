@@ -9,11 +9,8 @@ use http::response::Parts;
 use http::HeaderMap;
 use multimap::MultiMap;
 use opentelemetry::metrics::Counter;
-use opentelemetry::metrics::Meter;
+use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry::metrics::Number;
-use opentelemetry::metrics::ValueRecorder;
-use opentelemetry::KeyValue;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -28,13 +25,21 @@ use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::MetricsCommon;
+use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
 
+mod aggregation;
 pub(crate) mod apollo;
+pub(crate) mod layer;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
+pub(crate) mod span_metrics_exporter;
+
+pub(crate) const METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
+pub(crate) const METRIC_PREFIX_COUNTER: &str = "counter.";
+pub(crate) const METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 
@@ -43,20 +48,22 @@ pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 /// Configuration to add custom attributes/labels on metrics
 pub(crate) struct MetricsAttributesConf {
     /// Configuration to forward header values or body values from router request/response in metric attributes/labels
-    pub(crate) router: Option<AttributesForwardConf>,
+    pub(crate) supergraph: Option<AttributesForwardConf>,
     /// Configuration to forward header values or body values from subgraph request/response in metric attributes/labels
     pub(crate) subgraph: Option<SubgraphAttributesConf>,
 }
 
+/// Configuration to add custom attributes/labels on metrics to subgraphs
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphAttributesConf {
-    // Apply to all subgraphs
+    /// Attributes for all subgraphs
     pub(crate) all: Option<AttributesForwardConf>,
-    // Apply to specific subgraph
+    /// Attributes per subgraph
     pub(crate) subgraphs: Option<HashMap<String, AttributesForwardConf>>,
 }
 
+/// Configuration to add custom attributes/labels on metrics to subgraphs
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AttributesForwardConf {
@@ -77,10 +84,13 @@ pub(crate) struct AttributesForwardConf {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to insert custom attributes/labels in metrics
 pub(crate) struct Insert {
+    /// The name of the attribute to insert
     pub(crate) name: String,
+    /// The value of the attribute to insert
     pub(crate) value: String,
 }
 
+/// Configuration to forward from headers/body
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Forward {
@@ -100,22 +110,33 @@ pub(crate) struct ErrorsForward {
     pub(crate) extensions: Option<Vec<BodyForward>>,
 }
 
+schemar_fn!(
+    forward_header_matching,
+    String,
+    "Using a regex on the header name"
+);
+
 #[derive(Clone, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
 /// Configuration to forward header values in metric labels
 pub(crate) enum HeaderForward {
-    /// Using a named header
+    /// Match via header name
     Named {
-        #[schemars(schema_with = "string_schema")]
+        /// The name of the header
+        #[schemars(with = "String")]
         #[serde(deserialize_with = "deserialize_header_name")]
         named: HeaderName,
+        /// The optional output name
         rename: Option<String>,
+        /// The optional default value
         default: Option<String>,
     },
-    /// Using a regex on the header name
+
+    /// Match via rgex
     Matching {
-        #[schemars(schema_with = "string_schema")]
+        /// Using a regex on the header name
+        #[schemars(schema_with = "forward_header_matching")]
         #[serde(deserialize_with = "deserialize_regex")]
         matching: Regex,
     },
@@ -125,10 +146,13 @@ pub(crate) enum HeaderForward {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
-    #[schemars(schema_with = "string_schema")]
+    /// The path in the body
+    #[schemars(with = "String")]
     #[serde(deserialize_with = "deserialize_json_query")]
     pub(crate) path: JSONQuery,
+    /// The name of the attribute
     pub(crate) name: String,
+    /// The optional default value
     pub(crate) default: Option<String>,
 }
 
@@ -136,8 +160,11 @@ pub(crate) struct BodyForward {
 #[serde(deny_unknown_fields)]
 /// Configuration to forward context values in metric attributes/labels
 pub(crate) struct ContextForward {
+    /// The name of the value in the context
     pub(crate) named: String,
+    /// The optional output name
     pub(crate) rename: Option<String>,
+    /// The optional default value
     pub(crate) default: Option<String>,
 }
 
@@ -445,10 +472,6 @@ impl AttributesForwardConf {
     }
 }
 
-fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    String::json_schema(gen)
-}
-
 #[derive(Default)]
 pub(crate) struct MetricsBuilder {
     exporters: Vec<MetricsExporterHandle>,
@@ -508,97 +531,22 @@ pub(crate) trait MetricsConfigurator {
 
 #[derive(Clone)]
 pub(crate) struct BasicMetrics {
-    pub(crate) http_requests_total: AggregateCounter<u64>,
-    pub(crate) http_requests_error_total: AggregateCounter<u64>,
-    pub(crate) http_requests_duration: AggregateValueRecorder<f64>,
+    pub(crate) http_requests_total: Counter<u64>,
+    pub(crate) http_requests_duration: Histogram<f64>,
 }
 
-impl BasicMetrics {
-    pub(crate) fn new(meter_provider: &AggregateMeterProvider) -> BasicMetrics {
-        let meter = meter_provider.meter("apollo/router", None);
+impl Default for BasicMetrics {
+    fn default() -> BasicMetrics {
+        let meter = opentelemetry::global::meter_provider().meter("apollo/router");
         BasicMetrics {
-            http_requests_total: meter.build_counter(|m| {
-                m.u64_counter("apollo_router_http_requests_total")
-                    .with_description("Total number of HTTP requests made.")
-                    .init()
-            }),
-            http_requests_error_total: meter.build_counter(|m| {
-                m.u64_counter("apollo_router_http_requests_error_total")
-                    .with_description("Total number of HTTP requests in error made.")
-                    .init()
-            }),
-            http_requests_duration: meter.build_value_recorder(|m| {
-                m.f64_value_recorder("apollo_router_http_request_duration_seconds")
-                    .with_description("Total number of HTTP requests made.")
-                    .init()
-            }),
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct AggregateMeterProvider(Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>);
-impl AggregateMeterProvider {
-    pub(crate) fn new(
-        meters: Vec<Arc<dyn MeterProvider + Send + Sync + 'static>>,
-    ) -> AggregateMeterProvider {
-        AggregateMeterProvider(meters)
-    }
-
-    pub(crate) fn meter(
-        &self,
-        instrumentation_name: &'static str,
-        instrumentation_version: Option<&'static str>,
-    ) -> AggregateMeter {
-        AggregateMeter(
-            self.0
-                .iter()
-                .map(|p| Arc::new(p.meter(instrumentation_name, instrumentation_version)))
-                .collect(),
-        )
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AggregateMeter(Vec<Arc<Meter>>);
-impl AggregateMeter {
-    pub(crate) fn build_counter<T: Into<Number> + Copy>(
-        &self,
-        build: fn(&Meter) -> Counter<T>,
-    ) -> AggregateCounter<T> {
-        AggregateCounter(self.0.iter().map(|m| build(m)).collect())
-    }
-
-    pub(crate) fn build_value_recorder<T: Into<Number> + Copy>(
-        &self,
-        build: fn(&Meter) -> ValueRecorder<T>,
-    ) -> AggregateValueRecorder<T> {
-        AggregateValueRecorder(self.0.iter().map(|m| build(m)).collect())
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AggregateCounter<T: Into<Number> + Copy>(Vec<Counter<T>>);
-impl<T> AggregateCounter<T>
-where
-    T: Into<Number> + Copy,
-{
-    pub(crate) fn add(&self, value: T, attributes: &[KeyValue]) {
-        for counter in &self.0 {
-            counter.add(value, attributes)
-        }
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct AggregateValueRecorder<T: Into<Number> + Copy>(Vec<ValueRecorder<T>>);
-impl<T> AggregateValueRecorder<T>
-where
-    T: Into<Number> + Copy,
-{
-    pub(crate) fn record(&self, value: T, attributes: &[KeyValue]) {
-        for value_recorder in &self.0 {
-            value_recorder.record(value, attributes)
+            http_requests_total: meter
+                .u64_counter("apollo_router_http_requests_total")
+                .with_description("Total number of HTTP requests made.")
+                .init(),
+            http_requests_duration: meter
+                .f64_histogram("apollo_router_http_request_duration_seconds")
+                .with_description("Total number of HTTP requests made.")
+                .init(),
         }
     }
 }

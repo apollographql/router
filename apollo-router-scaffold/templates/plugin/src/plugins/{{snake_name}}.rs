@@ -3,6 +3,7 @@ use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
 use apollo_router::services::supergraph;
 {{#if type_basic}}
+use apollo_router::services::router;
 use apollo_router::services::execution;
 use apollo_router::services::subgraph;
 {{/if}}
@@ -43,6 +44,22 @@ impl Plugin for {{pascal_name}} {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         tracing::info!("{}", init.config.message);
         Ok({{pascal_name}} { configuration: init.config })
+    }
+
+    // Delete this function if you are not customizing it.
+    fn router_service(
+        &self,
+        service: router::BoxService,
+    ) -> router::BoxService {
+        // Always use service builder to compose your plugins.
+        // It provides off the shelf building blocks for your plugin.
+        //
+        // ServiceBuilder::new()
+        //             .service(service)
+        //             .boxed()
+
+        // Returning the original service means that we didn't add any extra functionality at this point in the lifecycle.
+        service
     }
 
     // Delete this function if you are not customizing it.
@@ -147,6 +164,7 @@ register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
 mod tests {
     use apollo_router::TestHarness;
     use apollo_router::services::supergraph;
+    use apollo_router::graphql;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -161,16 +179,17 @@ mod tests {
                 }
             }))
             .unwrap()
-            .build()
+            .build_router()
             .await
             .unwrap();
         let request = supergraph::Request::canned_builder().build().unwrap();
-        let mut streamed_response = test_harness.oneshot(request).await?;
+        let mut streamed_response = test_harness.oneshot(request.try_into()?).await?;
 
-        let first_response = streamed_response
-            .next_response()
-            .await
-            .expect("couldn't get primary response");
+        let first_response: graphql::Response =
+            serde_json::from_slice(streamed_response
+                .next_response()
+                .await
+                .expect("couldn't get primary response")?.to_vec().as_slice()).unwrap();
 
         assert!(first_response.data.is_some());
 

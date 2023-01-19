@@ -4,9 +4,13 @@ use std::fmt;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -19,11 +23,19 @@ use http::uri::PathAndQuery;
 use http::HeaderMap;
 use http::StatusCode;
 use http::Uri;
-use opentelemetry::trace::SpanKind;
+use notify::event::DataChange;
+use notify::event::MetadataKind;
+use notify::event::ModifyKind;
+use notify::Config;
+use notify::EventKind;
+use notify::PollWatcher;
+use notify::RecursiveMode;
+use notify::Watcher;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
 use rhai::serde::to_dynamic;
+use rhai::Array;
 use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
@@ -51,12 +63,12 @@ use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 trait OptionDance<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R;
@@ -67,6 +79,8 @@ trait OptionDance<T> {
 }
 
 type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
+
+pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
 
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
@@ -105,6 +119,20 @@ mod execution {
 
 mod subgraph {
     pub(crate) use crate::services::subgraph::*;
+}
+
+#[export_module]
+mod router_base64_mod {
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
+        String::from_utf8(base64::decode(input.as_bytes()).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure)]
+    pub(crate) fn encode(input: &mut ImmutableString) -> String {
+        base64::encode(input.as_bytes())
+    }
 }
 
 #[export_module]
@@ -355,19 +383,61 @@ mod router_plugin_mod {
     }
 }
 
-/// Plugin which implements Rhai functionality
-#[derive(Default, Clone)]
-pub(crate) struct Rhai {
+struct EngineBlock {
     ast: AST,
     engine: Arc<Engine>,
     scope: Arc<Mutex<Scope<'static>>>,
+}
+
+impl EngineBlock {
+    fn try_new(
+        scripts: Option<PathBuf>,
+        main: PathBuf,
+        sdl: Arc<String>,
+    ) -> Result<Self, BoxError> {
+        let engine = Arc::new(Rhai::new_rhai_engine(scripts));
+        let ast = engine.compile_file(main)?;
+        let mut scope = Scope::new();
+        // Keep these two lower cases ones as mistakes until 2.0
+        // At 2.0 (or maybe before), replace with upper case
+        scope.push_constant("apollo_sdl", sdl.to_string());
+        scope.push_constant("apollo_start", Instant::now());
+
+        scope.push_constant(
+            "APOLLO_AUTHENTICATION_JWT_CLAIMS",
+            "apollo_authentication::JWT::claims".to_string(),
+        );
+
+        // Run the AST with our scope to put any global variables
+        // defined in scripts into scope.
+        engine.run_ast_with_scope(&mut scope, &ast)?;
+
+        Ok(EngineBlock {
+            ast,
+            engine,
+            scope: Arc::new(Mutex::new(scope)),
+        })
+    }
+}
+
+/// Plugin which implements Rhai functionality
+/// Note: We use ArcSwap here in preference to a shared RwLock. Updates to
+/// the engine block will be infrequent in relation to the accesses of it.
+/// We'd love to use AtomicArc if such a thing existed, but since it doesn't
+/// we'll use ArcSwap to accomplish our goal.
+struct Rhai {
+    block: Arc<ArcSwap<EngineBlock>>,
+    park_flag: Arc<AtomicBool>,
+    watcher_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 /// Configuration for the Rhai Plugin
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Conf {
+    /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
+    /// The main entry point for Rhai script evaluation
     main: Option<String>,
 }
 
@@ -376,6 +446,7 @@ impl Plugin for Rhai {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let sdl = init.supergraph_sdl.clone();
         let scripts_path = match init.config.scripts {
             Some(path) => path,
             None => "./rhai".into(),
@@ -387,21 +458,91 @@ impl Plugin for Rhai {
         };
 
         let main = scripts_path.join(&main_file);
-        let sdl = init.supergraph_sdl.clone();
-        let engine = Arc::new(Rhai::new_rhai_engine(Some(scripts_path)));
-        let ast = engine.compile_file(main)?;
-        let mut scope = Scope::new();
-        scope.push_constant("apollo_sdl", sdl.to_string());
-        scope.push_constant("apollo_start", Instant::now());
 
-        // Run the AST with our scope to put any global variables
-        // defined in scripts into scope.
-        engine.run_ast_with_scope(&mut scope, &ast)?;
+        let watched_path = scripts_path.clone();
+        let watched_main = main.clone();
+        let watched_sdl = sdl.clone();
+
+        let block = Arc::new(ArcSwap::from_pointee(EngineBlock::try_new(
+            Some(scripts_path),
+            main,
+            sdl,
+        )?));
+        let watched_block = block.clone();
+
+        let park_flag = Arc::new(AtomicBool::new(false));
+        let watching_flag = park_flag.clone();
+
+        let watcher_handle = std::thread::spawn(move || {
+            let watching_path = watched_path.clone();
+            let config = Config::default()
+                .with_poll_interval(Duration::from_secs(3))
+                .with_compare_contents(true);
+            let mut watcher = PollWatcher::new(
+                move |res: Result<notify::Event, notify::Error>| {
+                    match res {
+                        Ok(event) => {
+                            // Let's limit the events we are interested in to:
+                            //  - Modified files
+                            //  - Created/Remove files
+                            //  - with suffix "rhai"
+                            if matches!(
+                                event.kind,
+                                EventKind::Modify(ModifyKind::Metadata(MetadataKind::WriteTime))
+                                    | EventKind::Modify(ModifyKind::Data(DataChange::Any))
+                                    | EventKind::Create(_)
+                                    | EventKind::Remove(_)
+                            ) {
+                                let mut proceed = false;
+                                for path in event.paths {
+                                    if path.extension().map_or(false, |ext| ext == "rhai") {
+                                        proceed = true;
+                                        break;
+                                    }
+                                }
+
+                                if proceed {
+                                    match EngineBlock::try_new(
+                                        Some(watching_path.clone()),
+                                        watched_main.clone(),
+                                        watched_sdl.clone(),
+                                    ) {
+                                        Ok(eb) => {
+                                            tracing::info!("updating rhai execution engine");
+                                            watched_block.store(Arc::new(eb))
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "could not create new rhai execution engine: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => tracing::error!("rhai watching event error: {:?}", e),
+                    }
+                },
+                config,
+            )
+            .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
+            watcher
+                .watch(&watched_path, RecursiveMode::Recursive)
+                .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
+            // Park the thread until this Rhai instance is dropped (see Drop impl)
+            // We may actually unpark() before this code executes or exit from park() spuriously.
+            // Use the watching_flag to control a loop which waits from the flag to be updated
+            // from Drop.
+            while !watching_flag.load(Ordering::Acquire) {
+                std::thread::park();
+            }
+        });
 
         Ok(Self {
-            ast,
-            engine,
-            scope: Arc::new(Mutex::new(scope)),
+            block,
+            park_flag,
+            watcher_handle: Some(watcher_handle),
         })
     }
 
@@ -416,7 +557,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Supergraph(shared_service.clone()),
-            self.scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -434,7 +575,7 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             None,
             ServiceStep::Execution(shared_service.clone()),
-            self.scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
@@ -452,11 +593,21 @@ impl Plugin for Rhai {
             FUNCTION_NAME_SERVICE,
             Some(name),
             ServiceStep::Subgraph(shared_service.clone()),
-            self.scope.clone(),
+            self.block.load().scope.clone(),
         ) {
             tracing::error!("service callback failed: {error}");
         }
         shared_service.take_unwrap()
+    }
+}
+
+impl Drop for Rhai {
+    fn drop(&mut self) {
+        if let Some(wh) = self.watcher_handle.take() {
+            self.park_flag.store(true, Ordering::Release);
+            wh.thread().unpark();
+            wh.join().expect("rhai file watcher thread terminating");
+        }
     }
 }
 
@@ -474,9 +625,9 @@ macro_rules! gen_map_request {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($base::Request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     )
                 }
             }
@@ -501,32 +652,26 @@ macro_rules! gen_map_request {
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
                     let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
-                        $callback
-                            .call(
-                                &$rhai_service.engine,
-                                &$rhai_service.ast,
-                                (shared_request.clone(),),
-                            )
+                        $callback.call(
+                            &$rhai_service.engine,
+                            &$rhai_service.ast,
+                            (shared_request.clone(),),
+                        )
                     } else {
                         let mut guard = $rhai_service.scope.lock().unwrap();
-                        $rhai_service
-                            .engine
-                            .call_fn(
-                                &mut guard,
-                                &$rhai_service.ast,
-                                $callback.fn_name(),
-                                (shared_request.clone(),),
-                            )
+                        $rhai_service.engine.call_fn(
+                            &mut guard,
+                            &$rhai_service.ast,
+                            $callback.fn_name(),
+                            (shared_request.clone(),),
+                        )
                     };
                     if let Err(error) = result {
                         let error_details = process_error(error);
                         tracing::error!("map_request callback failed: {error_details}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(
-                            request_opt.unwrap().context,
-                            error_details,
-                        );
+                        return failure_message(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -545,9 +690,9 @@ macro_rules! gen_map_deferred_request {
             fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
                 move |_request: &$request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($request),
-                        "otel.kind" = %SpanKind::Internal
+                        "otel.kind" = "INTERNAL"
                     )
                 }
             }
@@ -577,10 +722,7 @@ macro_rules! gen_map_deferred_request {
                         let error_details = process_error(error);
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
-                        return failure_message(
-                            request_opt.unwrap().context,
-                            error_details
-                        );
+                        return failure_message(request_opt.unwrap().context, error_details);
                     }
                     let mut guard = shared_request.lock().unwrap();
                     let request_opt = guard.take();
@@ -964,6 +1106,7 @@ struct ErrorDetails {
     status: StatusCode,
     message: String,
     position: Option<Position>,
+    // Add support for extension_code ?
 }
 
 impl fmt::Display for ErrorDetails {
@@ -1068,11 +1211,12 @@ impl Rhai {
         service: ServiceStep,
         scope: Arc<Mutex<Scope<'static>>>,
     ) -> Result<(), String> {
+        let block = self.block.load();
         let rhai_service = RhaiService {
             scope: scope.clone(),
             service,
-            engine: self.engine.clone(),
-            ast: self.ast.clone(),
+            engine: block.engine.clone(),
+            ast: block.ast.clone(),
         };
         let mut guard = scope.lock().unwrap();
         // Note: We don't use `process_error()` here, because this code executes in the context of
@@ -1082,18 +1226,20 @@ impl Rhai {
         // change and one that requires more thought in the future.
         match subgraph {
             Some(name) => {
-                self.engine
+                block
+                    .engine
                     .call_fn(
                         &mut guard,
-                        &self.ast,
+                        &block.ast,
                         function_name,
                         (rhai_service, name.to_string()),
                     )
                     .map_err(|err| err.to_string())?;
             }
             None => {
-                self.engine
-                    .call_fn(&mut guard, &self.ast, function_name, (rhai_service,))
+                block
+                    .engine
+                    .call_fn(&mut guard, &block.ast, function_name, (rhai_service,))
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -1114,6 +1260,8 @@ impl Rhai {
         // The macro call creates a Rhai module from the plugin module.
         let module = exported_module!(router_plugin_mod);
 
+        let base64_module = exported_module!(router_base64_mod);
+
         // Configure our engine for execution
         engine
             .set_max_expr_depths(0, 0)
@@ -1122,6 +1270,8 @@ impl Rhai {
             })
             // Register our plugin module
             .register_global_module(module.into())
+            // Register our base64 module (not global)
+            .register_static_module("base64", base64_module.into())
             // Register types accessible in plugin scripts
             .register_type::<Context>()
             .register_type::<HeaderMap>()
@@ -1196,6 +1346,39 @@ impl Rhai {
                 );
                 Ok(())
             })
+            // Register an additional getter which allows us to get multiple values for the same
+            // key.
+            // Note: We can't register this as an indexer, because that would simply override the
+            // existing one, which would break code. When router 2.0 is released, we should replace
+            // the existing indexer_get for HeaderMap with this function and mark it as an
+            // incompatible change.
+            .register_fn("values",
+                |x: &mut HeaderMap, key: &str| -> Result<Array, Box<EvalAltResult>> {
+                    let search_name =
+                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+                    let mut response = Array::new();
+                    for value in x.get_all(search_name).iter() {
+                        response.push(value
+                            .to_str()
+                            .map_err(|e| e.to_string())?
+                            .to_string()
+                            .into())
+                    }
+                    Ok(response)
+                }
+            )
+            // Register an additional setter which allows us to set multiple values for the same
+            // key.
+            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: Array| {
+                let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+                for v in value {
+                    x.append(
+                        h_key.clone(),
+                        HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+                    );
+                }
+                Ok(())
+            })
             // Register a Context indexer so we can get/set context
             .register_indexer_get(
                 |x: &mut Context, key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
@@ -1205,7 +1388,7 @@ impl Rhai {
                 },
             )
             .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
-                x.insert(key, value)
+                let _= x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
@@ -1473,7 +1656,11 @@ impl Rhai {
     }
 
     fn ast_has_function(&self, name: &str) -> bool {
-        self.ast.iter_fn_def().any(|fn_def| fn_def.name == name)
+        self.block
+            .load()
+            .ast
+            .iter_fn_def()
+            .any(|fn_def| fn_def.name == name)
     }
 }
 
@@ -1494,7 +1681,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
-    use crate::SubgraphRequest;
+    use crate::services::SubgraphRequest;
 
     #[tokio::test]
     async fn rhai_plugin_router_service() -> Result<(), BoxError> {
@@ -1511,7 +1698,7 @@ mod tests {
             });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1562,7 +1749,7 @@ mod tests {
         });
 
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1607,7 +1794,7 @@ mod tests {
 
         assert_eq!(
             body.errors.get(0).unwrap().message.as_str(),
-            "rhai execution error: 'Runtime error: An error occured (line 30, position 5) in call to function execution_request'"
+            "rhai execution error: 'Runtime error: An error occured (line 30, position 5)\nin call to function 'execution_request''"
         );
         Ok(())
     }
@@ -1680,7 +1867,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_access_sdl_constant() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(r#"{"scripts":"tests/fixtures", "main":"test.rhai"}"#).unwrap(),
@@ -1692,15 +1879,17 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
         // Call our function to make sure we can access the sdl
-        let sdl: String = rhai_instance
+        let sdl: String = block
             .engine
-            .call_fn(&mut guard, &rhai_instance.ast, "get_sdl", ())
+            .call_fn(&mut guard, &block.ast, "get_sdl", ())
             .expect("can get sdl");
         assert_eq!(sdl.as_str(), "");
     }
@@ -1730,7 +1919,7 @@ mod tests {
     macro_rules! gen_request_test {
         ($base: ident, $fn_name: literal) => {
             let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-                .get("apollo.rhai")
+                .find(|factory| factory.name == "apollo.rhai")
                 .expect("Plugin not found")
                 .create_instance_without_schema(
                     &Value::from_str(
@@ -1745,8 +1934,10 @@ mod tests {
             let it: &dyn std::any::Any = dyn_plugin.as_any();
             let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+            let block = rhai_instance.block.load();
+
             // Get a scope to use for our test
-            let scope = rhai_instance.scope.clone();
+            let scope = block.scope.clone();
 
             let mut guard = scope.lock().unwrap();
 
@@ -1756,9 +1947,9 @@ mod tests {
 
             // Call our rhai test function. If it return an error, the test failed.
             let result: Result<(), Box<rhai::EvalAltResult>> =
-                rhai_instance
+                block
                     .engine
-                    .call_fn(&mut guard, &rhai_instance.ast, $fn_name, (request,));
+                    .call_fn(&mut guard, &block.ast, $fn_name, (request,));
             result.expect("test failed");
         };
     }
@@ -1766,7 +1957,7 @@ mod tests {
     macro_rules! gen_response_test {
         ($base: ident, $fn_name: literal) => {
             let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-                .get("apollo.rhai")
+                .find(|factory| factory.name == "apollo.rhai")
                 .expect("Plugin not found")
                 .create_instance_without_schema(
                     &Value::from_str(
@@ -1781,8 +1972,10 @@ mod tests {
             let it: &dyn std::any::Any = dyn_plugin.as_any();
             let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+            let block = rhai_instance.block.load();
+
             // Get a scope to use for our test
-            let scope = rhai_instance.scope.clone();
+            let scope = block.scope.clone();
 
             let mut guard = scope.lock().unwrap();
 
@@ -1792,9 +1985,9 @@ mod tests {
 
             // Call our rhai test function. If it return an error, the test failed.
             let result: Result<(), Box<rhai::EvalAltResult>> =
-                rhai_instance
+                block
                     .engine
-                    .call_fn(&mut guard, &rhai_instance.ast, $fn_name, (response,));
+                    .call_fn(&mut guard, &block.ast, $fn_name, (response,));
             result.expect("test failed");
         };
     }
@@ -1802,7 +1995,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_process_supergraph_request() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(
@@ -1817,8 +2010,10 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
@@ -1832,9 +2027,9 @@ mod tests {
         )));
 
         // Call our rhai test function. If it return an error, the test failed.
-        let result: Result<(), Box<rhai::EvalAltResult>> = rhai_instance.engine.call_fn(
+        let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
             &mut guard,
-            &rhai_instance.ast,
+            &block.ast,
             "process_supergraph_request",
             (request,),
         );
@@ -1877,7 +2072,7 @@ mod tests {
     #[tokio::test]
     async fn it_can_process_subgraph_response() {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(
@@ -1892,8 +2087,9 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
@@ -1902,9 +2098,9 @@ mod tests {
         let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
 
         // Call our rhai test function. If it return an error, the test failed.
-        let result: Result<(), Box<rhai::EvalAltResult>> = rhai_instance.engine.call_fn(
+        let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
             &mut guard,
-            &rhai_instance.ast,
+            &block.ast,
             "process_subgraph_response",
             (response,),
         );
@@ -1929,9 +2125,27 @@ mod tests {
         assert_eq!(decoded, "This has an ümlaut in it.");
     }
 
+    #[test]
+    fn it_can_base64encode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let encoded: String = engine
+            .eval(r#"base64::encode("This has an ümlaut in it.")"#)
+            .expect("can encode string");
+        assert_eq!(encoded, "VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=");
+    }
+
+    #[test]
+    fn it_can_base64decode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let decoded: String = engine
+            .eval(r#"base64::decode("VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=")"#)
+            .expect("can decode string");
+        assert_eq!(decoded, "This has an ümlaut in it.");
+    }
+
     async fn base_process_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult>> {
         let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
-            .get("apollo.rhai")
+            .find(|factory| factory.name == "apollo.rhai")
             .expect("Plugin not found")
             .create_instance_without_schema(
                 &Value::from_str(
@@ -1946,8 +2160,10 @@ mod tests {
         let it: &dyn std::any::Any = dyn_plugin.as_any();
         let rhai_instance: &Rhai = it.downcast_ref::<Rhai>().expect("downcast");
 
+        let block = rhai_instance.block.load();
+
         // Get a scope to use for our test
-        let scope = rhai_instance.scope.clone();
+        let scope = block.scope.clone();
 
         let mut guard = scope.lock().unwrap();
 
@@ -1956,9 +2172,9 @@ mod tests {
         let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
 
         // Call our rhai test function. If it doesn't return an error, the test failed.
-        rhai_instance
+        block
             .engine
-            .call_fn(&mut guard, &rhai_instance.ast, fn_name, (response,))
+            .call_fn(&mut guard, &block.ast, fn_name, (response,))
     }
 
     #[tokio::test]
@@ -1978,7 +2194,7 @@ mod tests {
         if let Err(error) = base_process_function("process_subgraph_response_string").await {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5) in call to function process_subgraph_response_string'");
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5)\nin call to function 'process_subgraph_response_string''");
         } else {
             // Test failed
             panic!("error processed incorrectly");
@@ -2004,7 +2220,7 @@ mod tests {
         {
             let processed_error = process_error(error);
             assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5) in call to function process_subgraph_response_om_missing_message'");
+            assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5)\nin call to function 'process_subgraph_response_om_missing_message''");
         } else {
             // Test failed
             panic!("error processed incorrectly");

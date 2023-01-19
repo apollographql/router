@@ -1,10 +1,12 @@
+use apollo_compiler::hir;
 use apollo_parser::ast;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::*;
+use crate::spec::Schema;
+use crate::spec::SpecError;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
@@ -157,6 +159,23 @@ impl FieldType {
 
     pub(crate) fn is_non_null(&self) -> bool {
         matches!(self, FieldType::NonNull(_))
+    }
+}
+
+impl From<&'_ hir::Type> for FieldType {
+    fn from(ty: &'_ hir::Type) -> Self {
+        match ty {
+            hir::Type::NonNull { ty, .. } => Self::NonNull(Box::new((&**ty).into())),
+            hir::Type::List { ty, .. } => Self::List(Box::new((&**ty).into())),
+            hir::Type::Named { name, .. } => match name.as_str() {
+                "String" => Self::String,
+                "Int" => Self::Int,
+                "Float" => Self::Float,
+                "ID" => Self::Id,
+                "Boolean" => Self::Boolean,
+                _ => Self::Named(name.clone()),
+            },
+        }
     }
 }
 

@@ -47,7 +47,7 @@ mod json_ext;
 #[macro_use]
 pub mod plugin;
 
-mod axum_factory;
+pub(crate) mod axum_factory;
 mod cache;
 mod configuration;
 mod context;
@@ -59,6 +59,7 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+mod orbiter;
 mod plugins;
 mod query_planner;
 mod request;
@@ -66,7 +67,6 @@ mod response;
 mod router;
 mod router_factory;
 pub mod services;
-mod spaceport;
 pub(crate) mod spec;
 mod state_machine;
 mod test_harness;
@@ -91,15 +91,27 @@ pub use crate::test_harness::TestHarness;
 #[doc(hidden)]
 pub mod _private {
     // Reexports for macros
-    pub use ctor;
+    pub use linkme;
+    pub use once_cell;
     pub use router_bridge;
     pub use serde_json;
 
+    pub use crate::plugin::PluginFactory;
+    pub use crate::plugin::PLUGINS;
     // For tests
     pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
-}
 
-// TODO: clean these up and import from relevant modules instead
-pub(crate) use crate::services::*;
-pub(crate) use crate::spec::*;
+    /// Retuns the `Debug` fomatting of two `Result<Schema, SchemaError>`,
+    /// from `parse_with_ast` and `parse_with_hir` respectively.
+    ///
+    /// The two strings are expected to be equal.
+    pub fn compare_schema_parsing(schema: &str) -> (String, String) {
+        use crate::spec::Schema;
+        let conf = Default::default();
+        (
+            format!("{:?}", Schema::parse_with_ast(schema, &conf)),
+            format!("{:?}", Schema::parse_with_hir(schema, &conf)),
+        )
+    }
+}

@@ -2,8 +2,8 @@
 use tower::Service;
 
 /// Trait
-pub(crate) trait NewService<Request> {
+pub(crate) trait ServiceFactory<Request> {
     type Service: Service<Request>;
 
-    fn new_service(&self) -> Self::Service;
+    fn create(&self) -> Self::Service;
 }

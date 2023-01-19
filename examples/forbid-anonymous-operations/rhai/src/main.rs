@@ -21,26 +21,10 @@ mod tests {
     async fn test_router_forbids_anonymous_operation() {
         let mut mock_service = test::MockSupergraphService::new();
         // create a mock service we will use to test our plugin
-
-        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
-        let expected_mock_response_data = "response created within the mock";
-
         // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().return_once(move || {
-            let mut mock_service = test::MockSupergraphService::new();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: supergraph::Request| {
-                    // Preserve our context from request to response
-                    Ok(supergraph::Response::fake_builder()
-                        .context(req.context)
-                        .data(expected_mock_response_data)
-                        .build()
-                        .unwrap())
-                });
-            mock_service
-        });
+        mock_service
+            .expect_clone()
+            .return_once(test::MockSupergraphService::new);
 
         let config = serde_json::json!({
             "rhai": {
@@ -52,7 +36,7 @@ mod tests {
             .configuration_json(config)
             .unwrap()
             .supergraph_hook(move |_| mock_service.clone().boxed())
-            .build()
+            .build_router()
             .await
             .unwrap();
 
@@ -60,7 +44,10 @@ mod tests {
         let request_with_no_name = supergraph::Request::canned_builder().build().unwrap();
 
         // ...And call our service stack with it
-        let mut service_response = test_harness.oneshot(request_with_no_name).await.unwrap();
+        let mut service_response = test_harness
+            .oneshot(request_with_no_name.try_into().unwrap())
+            .await
+            .unwrap();
 
         let _response = service_response.next_response().await.unwrap();
         println!("RESPONSE: {:?}", _response);

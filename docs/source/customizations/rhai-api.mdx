@@ -165,9 +165,40 @@ fn supergraph_service(service) {
 }
 ```
 
+## base64 encode/decode strings
+
+Your Rhai customization can use the functions `base64::encode()` and `base64::decode()` to encode/decode strings. `encode()` does not fail, but `decode()` can fail, so always handle exceptions when using the `decode()` function.
+
+```rhai
+fn supergraph_service(service) {
+    let original = "alice and bob";
+    let encoded = base64::encode(original);
+    // encoded will be "YWxpY2UgYW5kIGJvYgo="
+    try {
+        let and_back = base64::decode(encoded);
+        // and_back will be "alice and bob"
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`base64::decode error: ${err}`);
+    }
+}
+```
+
+Note: You don't need to import the "base64" module. It is imported in the router.
+
+### Headers with multiple values
+
+The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
+
+If you wish to get multiple values for a header key, then you must use the `values()` fn, NOT the indexed accessor. If you do use the indexed accessor, it will only return the first value (as a string) associated with the key.
+
+Look at the examples to see how this works in practice.
+
 ## `Request` interface
 
-All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place:
+All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
 
 ```
 request.context
@@ -192,7 +223,7 @@ request.subgraph.uri.host
 request.subgraph.uri.path
 ```
 
-All of these fields are read/write.
+These additional fields are shared across all subgraph invocations and are thus read-only.
 
 ### `request.context`
 
@@ -250,6 +281,15 @@ request.headers["x-my-new-header"] = 42.to_string(); // Inserts a new header "x-
 print(`${request.headers["x-my-new-header"]}`); // Writes "42" into the router log at info level
 // Rhai also supports extended dot notation for indexed variables, so this is equivalent
 request.headers.x-my-new-header = 42.to_string();
+// You can also set an header value from an array. Useful with the "set-cookie" header,
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+request.headers["set-cookie"] = [
+  "foo=bar; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+  "foo2=bar2; Domain=localhost; Path=/; Expires=Wed, 04 Jan 2023 17:25:27 GMT; HttpOnly; Secure; SameSite=None",
+];
+// You can also get multiple header values for a header using the values() fn
+// Note: It's probably more useful to do this on response headers. Simply illustrating the syntax here.
+print(`${request.headers.values("set-cookie")}`);
 ```
 
 ### `request.body.query`
@@ -367,7 +407,7 @@ print(`${response.body.label}`); // logs the response label
 
 A response may contain data (some responses with errors do not contain data). Be careful when manipulating data (and errors) to make sure that response remain valid. `data` is exposed to Rhai as an [Object Map](https://rhai.rs/book/language/object-maps.html).
 
-There is a complete example of interacting with the response data in the [examples/rhai-data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-data-response-mutate).
+There is a complete example of interacting with the response data in the [examples/data-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/data-response-mutate).
 
 ```rhai
 print(`${response.body.data}`); // logs the response data
@@ -385,7 +425,7 @@ Each Error must contain at least:
 
 Optionally, an error may also contain extensions, which are represented as an Object Map.
 
-There is a complete example of interacting with the response errors in the [examples/rhai-error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/rhai-error-response-mutate).
+There is a complete example of interacting with the response errors in the [examples/error-response-mutate directory](https://github.com/apollographql/router/tree/main/examples/error-response-mutate).
 
 ```rhai
 // Create an error with our message

@@ -1,15 +1,24 @@
 ---
-source: apollo-router/src/configuration/mod.rs
+source: apollo-router/src/configuration/tests.rs
 expression: error.to_string()
 ---
 configuration had errors: 
-1. /supergraph
+1. at line 6
+
+  supergraph:
+    # The socket address and port to listen on
+    # Defaults to 127.0.0.1:4000
+    listen: 127.0.0.1:4000
+┌   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
+└-----> Additional properties are not allowed ('${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}' was unexpected)
+
+1. at line 7
+
+    # The socket address and port to listen on
+    # Defaults to 127.0.0.1:4000
+    listen: 127.0.0.1:4000
+    ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
+┌   another_one: foo
+└-----> Additional properties are not allowed ('another_one' was unexpected)
 
 
-supergraph:
-┌   # The socket address and port to listen on
-|   # Defaults to 127.0.0.1:4000
-|   listen: 127.0.0.1:4000
-|   ${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}: 5
-|   another_one: foo
-└-----> Additional properties are not allowed ('${TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}', 'another_one' were unexpected)

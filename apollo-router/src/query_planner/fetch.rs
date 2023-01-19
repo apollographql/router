@@ -14,13 +14,16 @@ use super::selection::select_object;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::graphql;
 use crate::graphql::Request;
+use crate::http_ext;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::services::subgraph_service::SubgraphServiceFactory;
-use crate::*;
+use crate::services::SubgraphRequest;
+use crate::spec::Schema;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -184,15 +187,12 @@ impl Variables {
 
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a, SF>(
+    pub(crate) async fn fetch_node<'a>(
         &'a self,
-        parameters: &'a ExecutionParameters<'a, SF>,
+        parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
-    ) -> Result<(Value, Vec<Error>), FetchError>
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> Result<(Value, Vec<Error>), FetchError> {
         let FetchNode {
             operation,
             operation_kind,
@@ -228,7 +228,7 @@ impl FetchNode {
                         parameters
                             .schema
                             .subgraphs()
-                            .find_map(|(name, url)| (name == service_name).then(|| url))
+                            .find_map(|(name, url)| (name == service_name).then_some(url))
                             .unwrap_or_else(|| {
                                 panic!(
                                     "schema uri for subgraph '{}' should already have been checked",
@@ -253,7 +253,7 @@ impl FetchNode {
 
         let service = parameters
             .service_factory
-            .new_service(service_name)
+            .create(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -367,6 +367,7 @@ impl FetchNode {
                         "Subgraph response from '{}' was missing key `_entities`",
                         self.service_name
                     ))
+                    .extension_code("PARSE_ERROR")
                     .build(),
             );
 

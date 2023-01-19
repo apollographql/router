@@ -182,7 +182,24 @@ The default value is `10s` (ten seconds), which is also the minimum allowed valu
 <tr>
 <td style="min-width: 150px;">
 
-##### `--schema`
+##### `--apollo-uplink-timeout`
+
+`APOLLO_UPLINK_TIMEOUT`
+
+</td>
+<td>
+
+The timeout for each of the polls to Apollo Uplink.
+
+The default value is `30s` (thirty seconds).
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `schema`
 
 </td>
 <td>
@@ -195,12 +212,66 @@ Prints out a JSON schema of the router's configuration file, including [plugin c
 <tr>
 <td style="min-width: 150px;">
 
+##### `--anonymous-telemetry-disabled`
+
+`APOLLO_TELEMETRY_DISABLED`
+
+</td>
+<td>
+
+Disable sending anonymous usage information to Apollo.
+
+</td>
+</tr>
+<tr>
+<td>
+
 ##### `-V` / `--version`
 
 </td>
 <td>
 
 Prints out the Apollo Router's version.
+
+</td>
+</tr>
+</tbody>
+</table>
+
+## Config subcommand
+
+<table class="field-table api-ref">
+  <thead>
+    <tr>
+      <th>Argument / Environment Variable</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+
+<tr class="required">
+<td>
+
+##### `schema`
+
+</td>
+<td>
+
+Prints out a JSON schema of the Router's configuration file, including [plugin configuration](#plugins).
+
+</td>
+</tr>
+
+<tr class="required">
+<td>
+
+##### `upgrade`
+
+</td>
+<td>
+
+Print configuration that has been upgraded to the current Router version.
 
 </td>
 </tr>
@@ -319,6 +390,14 @@ See [Sending HTTP headers to subgraphs](./header-propagation/).
 
 See [Configuring CORS in the Apollo Router](./cors).
 
+### Defer support
+
+See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
+
+### External Extensibility
+
+See [External Extensibility in the Apollo Router](./external).
+
 ### OpenTelemetry tracing
 
 See [Tracing in the Apollo Router](./tracing/).
@@ -326,9 +405,31 @@ See [Tracing in the Apollo Router](./tracing/).
 ### Automatic persisted queries (APQ)
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
-The Apollo Router automatically supports APQ via its in-memory cache. **No configuration options are supported at this time.** Support for external data stores like Redis and Memcached will be supported in a future release.
+The Apollo Router automatically supports APQ via its in-memory cache. See the [caching documentation](./caching) for related options.
+It is enabled by default, but can be disabled from the configuration:
+
+```yaml
+supergraph:
+  apq:
+    enabled: false
+```
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
+
+### TLS
+
+TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. It is possible to override the list, for all subgraphs or per subgraph:
+
+```yaml title="router.yaml"
+tls:
+  subgraph:
+    all:
+      certificate_authorities: "${file./path/to/ca.crt}"
+    # override per subgraph
+    subgraphs:
+      products:
+        certificate_authorities: "${file./path/to/product_ca.crt}"
+```
 
 ### Plugins
 
@@ -389,7 +490,7 @@ The Apollo Router can generate a JSON schema for config validation in your text 
 Generate the schema with the following command:
 
 ```bash
-./router --schema > configuration_schema.json
+./router config schema > configuration_schema.json
 ```
 
 After you generate the schema, configure your text editor. Here are the instructions for some commonly used editors:
@@ -399,3 +500,25 @@ After you generate the schema, configure your text editor. Here are the instruct
 - [IntelliJ](https://www.jetbrains.com/help/idea/json.html#ws_json_using_schemas)
 - [Sublime](https://github.com/sublimelsp/LSP-yaml)
 - [Vim](https://github.com/Quramy/vison)
+
+## Upgrading your Router configuration
+
+Occasionally breaking changes are made to the Apollo Router yaml format. Usually to extend functionality or improve usability.
+
+When running the Router with old configuration:
+
+1. if you have errors in your config then a warning will be emitted on startup.
+2. if the Router config can be upgraded automatically with no validation errors then it will continue to load.
+3. if the Router config had validation errors after automatic upgrade loading will stop.
+
+When you are notified that configuration can be upgraded use the `router config upgrade` command to see what your configuration should look like:
+
+```bash
+./router config upgrade <path_to_router.yaml>
+```
+
+To see what changes were made output the upgraded config diff using:
+
+```bash
+./router config upgrade --diff <path_to_router.yaml>
+```

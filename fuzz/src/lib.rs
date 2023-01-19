@@ -1,5 +1,6 @@
 // The fuzzer won't compile on windows as of 1.63.0
 #![cfg(not(windows))]
+use std::convert::TryFrom;
 use std::fs;
 
 use apollo_parser::Parser;
@@ -29,7 +30,10 @@ pub fn generate_valid_operation(input: &[u8], schema_path: &'static str) -> Resu
     }
 
     let mut u = Unstructured::new(input);
-    let mut gql_doc = DocumentBuilder::with_document(&mut u, Document::from(tree.document()))?;
+    let mut gql_doc = DocumentBuilder::with_document(
+        &mut u,
+        Document::try_from(tree.document()).expect("tree should not have errors"),
+    )?;
     let operation_def = gql_doc.operation_definition()?.unwrap();
 
     Ok(operation_def.into())

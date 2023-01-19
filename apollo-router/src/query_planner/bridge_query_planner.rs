@@ -5,7 +5,6 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use futures::future::BoxFuture;
-use opentelemetry::trace::SpanKind;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -19,12 +18,17 @@ use tracing::Instrument;
 use super::PlanNode;
 use super::QueryKey;
 use super::QueryPlanOptions;
-use super::TYPENAME;
 use crate::error::QueryPlannerError;
+use crate::graphql;
 use crate::introspection::Introspection;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
-use crate::*;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::spec::query::TYPENAME;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
@@ -55,7 +59,7 @@ impl BridgeQueryPlanner {
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.supergraph.preview_defer_support),
+                            enable_defer: Some(configuration.supergraph.defer_support),
                         }),
                     },
                 )
@@ -73,7 +77,7 @@ impl BridgeQueryPlanner {
         let configuration = self.configuration.clone();
         let query_parsing_future =
             tokio::task::spawn_blocking(move || Query::parse(query, &schema, &configuration))
-                .instrument(tracing::info_span!("parse_query", "otel.kind" = %SpanKind::Internal));
+                .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"));
         match query_parsing_future.await {
             Ok(res) => res.map_err(QueryPlannerError::from),
             Err(err) => {
@@ -122,10 +126,10 @@ impl BridgeQueryPlanner {
                     },
                 usage_reporting,
             } => {
-                let subselections = node.parse_subselections(&*self.schema)?;
+                let subselections = node.parse_subselections(&self.schema)?;
                 selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
-                    plan: Arc::new(query_planner::QueryPlan {
+                    plan: Arc::new(super::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,

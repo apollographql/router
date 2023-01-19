@@ -2,6 +2,9 @@ use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
 use http::HeaderValue;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
@@ -24,13 +27,21 @@ struct ExposeQueryPlan {
     enabled: bool,
 }
 
+/// Expose query plan
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ExposeQueryPlanConfig(
+    /// Enabled
+    bool,
+);
+
 #[async_trait::async_trait]
 impl Plugin for ExposeQueryPlan {
-    type Config = bool;
+    type Config = ExposeQueryPlanConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ExposeQueryPlan {
-            enabled: init.config
+            enabled: init.config.0
                 || std::env::var(ENABLE_EXPOSE_QUERY_PLAN_ENV).as_deref() == Ok("true"),
         })
     }
@@ -124,7 +135,7 @@ mod tests {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
     use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
+    use crate::spec::Schema;
 
     static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
         serde_json::from_str(include_str!(
@@ -141,7 +152,7 @@ mod tests {
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
-    async fn build_mock_supergraph(plugin: Box<dyn DynPlugin>) -> supergraph::BoxCloneService {
+    async fn build_mock_supergraph(plugin: Box<dyn DynPlugin>) -> supergraph::BoxService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -185,12 +196,12 @@ mod tests {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        builder.build().await.expect("should build").test_service()
+        builder.build().await.expect("should build").make().boxed()
     }
 
     async fn get_plugin(config: &jValue) -> Box<dyn DynPlugin> {
         crate::plugin::plugins()
-            .get("experimental.expose_query_plan")
+            .find(|factory| factory.name == "experimental.expose_query_plan")
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -200,7 +211,7 @@ mod tests {
     async fn execute_supergraph_test(
         query: &str,
         body: &Response,
-        mut supergraph_service: supergraph::BoxCloneService,
+        mut supergraph_service: supergraph::BoxService,
     ) {
         let request = supergraph::Request::fake_builder()
             .query(query.to_string())
@@ -226,15 +237,20 @@ mod tests {
     #[tokio::test]
     async fn it_expose_query_plan() {
         let plugin = get_plugin(&serde_json::json!(true)).await;
-        let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITH_QUERY_PLAN,
-            supergraph.clone(),
+            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            build_mock_supergraph(plugin).await,
         )
         .await;
         // let's try that again
-        execute_supergraph_test(VALID_QUERY, &*EXPECTED_RESPONSE_WITH_QUERY_PLAN, supergraph).await;
+        let plugin = get_plugin(&serde_json::json!(true)).await;
+        execute_supergraph_test(
+            VALID_QUERY,
+            &EXPECTED_RESPONSE_WITH_QUERY_PLAN,
+            build_mock_supergraph(plugin).await,
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -243,7 +259,7 @@ mod tests {
         let supergraph = build_mock_supergraph(plugin).await;
         execute_supergraph_test(
             VALID_QUERY,
-            &*EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
+            &EXPECTED_RESPONSE_WITHOUT_QUERY_PLAN,
             supergraph,
         )
         .await;

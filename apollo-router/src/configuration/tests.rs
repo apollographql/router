@@ -6,6 +6,7 @@ use http::Uri;
 #[cfg(unix)]
 use insta::assert_json_snapshot;
 use regex::Regex;
+use rust_embed::RustEmbed;
 #[cfg(unix)]
 use schemars::gen::SchemaSettings;
 use walkdir::DirEntry;
@@ -52,7 +53,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::Schema::parse(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -104,7 +105,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::Schema::parse(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -166,9 +167,25 @@ subgraphs:
   account: true
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
-    assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            r#"configuration had errors: 
+1. at line 4
+
+  
+  supergraph:
+    path: /
+┌ subgraphs:
+|   account: true
+└-----> Additional properties are not allowed ('subgraphs' was unexpected)
+
+"#
+        )
+    );
 }
 
 #[test]
@@ -179,12 +196,21 @@ unknown:
   foo: true
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     assert_eq!(
         error.to_string(),
         String::from(
-            "unknown fields: additional properties are not allowed ('unknown' was/were unexpected)"
+            r#"configuration had errors: 
+1. at line 2
+
+  
+┌ unknown:
+|   foo: true
+└-----> Additional properties are not allowed ('unknown' was unexpected)
+
+"#
         )
     );
 }
@@ -195,6 +221,7 @@ fn empty_config() {
         r#"
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should have been ok with an empty config");
 }
@@ -221,6 +248,7 @@ telemetry:
   another_non_existant: 3
   "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -238,6 +266,7 @@ supergraph:
   another_one: true
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -253,6 +282,7 @@ supergraph:
   listen: true
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -270,6 +300,7 @@ cors:
   allow_headers: [ Content-Type, 5 ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -289,6 +320,7 @@ cors:
     - 5
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -303,6 +335,7 @@ cors:
   allow_headers: [ "*" ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -321,6 +354,7 @@ cors:
   methods: [ GET, "*" ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -339,6 +373,7 @@ cors:
   allow_any_origin: true
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
     let error = cfg
@@ -401,7 +436,11 @@ fn validate_project_config_files() {
             };
 
             for yaml in yamls {
-                if let Err(e) = validate_yaml_configuration(&yaml, Expansion::default().unwrap()) {
+                if let Err(e) = validate_yaml_configuration(
+                    &yaml,
+                    Expansion::default().unwrap(),
+                    Mode::NoUpgrade,
+                ) {
                     panic!(
                         "{} configuration error: \n{}",
                         entry.path().to_string_lossy(),
@@ -422,6 +461,7 @@ supergraph:
   introspection: ${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("Must have an error because we expect a boolean");
     insta::assert_snapshot!(error.to_string());
@@ -440,6 +480,7 @@ cors:
   allow_headers: [ Content-Type, "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE}" ]
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -461,6 +502,7 @@ cors:
     - "${env.TEST_CONFIG_NUMERIC_ENV_UNIQUE:-true}"
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -478,6 +520,7 @@ supergraph:
   another_one: foo
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
     insta::assert_snapshot!(error.to_string());
@@ -491,6 +534,7 @@ supergraph:
   introspection: ${env.TEST_CONFIG_UNKNOWN_WITH_NO_DEFAULT}
         "#,
         Expansion::default().unwrap(),
+        Mode::NoUpgrade,
     )
     .expect_err("must have an error because the env variable is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -507,6 +551,7 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
+        Mode::NoUpgrade,
     )
     .expect_err("must have an error because the mode is unknown");
     insta::assert_snapshot!(error.to_string());
@@ -524,6 +569,7 @@ supergraph:
             .prefix("TEST_CONFIG")
             .supported_mode("env")
             .build(),
+        Mode::NoUpgrade,
     )
     .expect("must have expanded successfully");
 }
@@ -544,8 +590,91 @@ supergraph:
             path.to_string_lossy()
         ),
         Expansion::builder().supported_mode("file").build(),
+        Mode::NoUpgrade,
     )
     .expect("must have expanded successfully");
 
     assert!(config.supergraph.introspection);
+}
+
+#[derive(RustEmbed)]
+#[folder = "src/configuration/testdata/migrations"]
+struct Asset;
+
+#[test]
+fn upgrade_old_configuration() {
+    for file_name in Asset::iter() {
+        if file_name.ends_with(".yaml") {
+            let source = Asset::get(&file_name).expect("test file must exist");
+            let input = std::str::from_utf8(&source.data)
+                .expect("expected utf8")
+                .to_string();
+            let new_config = crate::configuration::upgrade::upgrade_configuration(
+                &serde_yaml::from_str(&input).expect("config must be valid yaml"),
+                true,
+            )
+            .expect("configuration could not be updated");
+            let new_config =
+                serde_yaml::to_string(&new_config).expect("must be able to serialize config");
+
+            let result = validate_yaml_configuration(
+                &new_config,
+                Expansion::builder().build(),
+                Mode::NoUpgrade,
+            );
+
+            match result {
+                Ok(_) => {
+                    insta::with_settings!({snapshot_suffix => file_name}, {
+                        insta::assert_snapshot!(new_config)
+                    });
+                }
+                Err(e) => {
+                    panic!("migrated configuration had validation errors:\n{}\n\noriginal configuration:\n{}\n\nmigrated configuration:\n{}", e, input, new_config)
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn all_properties_are_documented() {
+    let schema = serde_json::to_value(&generate_config_schema())
+        .expect("must be able to convert the schema to json");
+
+    let mut errors = Vec::new();
+    visit_schema("", &schema, &mut errors);
+    if !errors.is_empty() {
+        panic!(
+            "There were errors in the configuration schema: {}",
+            errors.join("\n")
+        )
+    }
+}
+
+fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
+    match schema {
+        Value::Array(arr) => {
+            for element in arr {
+                visit_schema(path, element, errors)
+            }
+        }
+        Value::Object(o) => {
+            for (k, v) in o {
+                if k.as_str() == "properties" {
+                    let properties = v.as_object().expect("properties must be an object");
+                    for (k, v) in properties {
+                        let path = format!("{}.{}", path, k);
+                        if v.as_object().and_then(|o| o.get("description")).is_none() {
+                            errors.push(format!("{} was missing a description", path));
+                        }
+                        visit_schema(&path, v, errors)
+                    }
+                } else {
+                    visit_schema(path, v, errors)
+                }
+            }
+        }
+        _ => {}
+    }
 }
