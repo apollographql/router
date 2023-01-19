@@ -332,10 +332,10 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    tracing::info!(counter.apollo_router_active_session_count = 1,);
+    tracing::info!(counter.apollo_router_session_count_active = 1,);
     match service.oneshot(http_request.into()).await {
         Err(e) => {
-            tracing::info!(counter.apollo_router_active_session_count = -1,);
+            tracing::info!(counter.apollo_router_session_count_active = -1,);
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -352,7 +352,7 @@ async fn handle_graphql(
                 .into_response()
         }
         Ok(response) => {
-            tracing::info!(counter.apollo_router_active_session_count = -1,);
+            tracing::info!(counter.apollo_router_session_count_active = -1,);
             response.response.into_response()
         }
     }
