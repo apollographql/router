@@ -188,3 +188,11 @@ To publish a new metric, use tracing macros to generate an event that contains o
 `histogram.`: Used for histograms (takes f64)
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
+
+## 🥼 Experimental
+
+### Experimental 🥼 Redis cache for APQ and query planning ([PR #2431](https://github.com/apollographql/router/pull/2431))
+
+Experimental caching was [already available for APQ and query planning](https://github.com/apollographql/router/blob/dev/CHANGELOG.md#experimental--apq-and-query-planner-redis-caching-fixes-pr-2176) but required a custom router build with the `experimental_cache ` Cargo feature. That feature is now removed to make that cache easier to test.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2431
