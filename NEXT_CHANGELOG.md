@@ -183,8 +183,9 @@ Here's a typical sample configuration fragment:
 
 ```yaml
 authentication:
-  jwt:
-    jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
 ```
 
 Until the documentation is published to the website, you can read [it](https://github.com/apollographql/router/blob/dev/docs/source/configuration/authn-jwt.mdx) from the repository.
