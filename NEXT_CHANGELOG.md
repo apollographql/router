@@ -158,7 +158,7 @@ When receiving requests with invalid content-type/accept header missmatch (e.g m
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
 
-### Add a metric for existing connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
+### Emit metrics showing number of client connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
 
 New metrics are available to track the client connections:
 - `apollo_router_session_count` indicates the number of currently connected clients
