@@ -34,7 +34,7 @@ pub(crate) fn log_used_experimental_conf(conf: &Value) {
             .collect();
         if !needed_discussions.is_empty() {
             tracing::info!(
-                r#"You're using some "experimental" features (configuration prefixed by "experimental_"), we may make breaking changes in future releases.
+                r#"You're using some "experimental" features (configuration prefixed by "experimental_" or contained within an "experimental" section), we may make breaking changes in future releases.
 To help us design the stable version we need your feedback, here is a list of links where you can give your opinion:
 
 {}
@@ -60,6 +60,10 @@ pub(crate) fn visit_experimental_configurations(
         object.iter().for_each(|(field_name, val)| {
             if field_name.starts_with("experimental_") {
                 experimental_fields.push(field_name.clone());
+            }
+            // TODO: Remove when JWT authentication is generally available
+            if field_name == "experimental" {
+                experimental_fields.push("experimental_jwt_authentication".to_string());
             }
             visit_experimental_configurations(val, experimental_fields);
         });

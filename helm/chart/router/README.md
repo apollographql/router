@@ -41,7 +41,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | autoscaling.maxReplicas | int | `100` |  |
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
-| containerPorts.health | int | `8088` | For exposing the healthcheck endpoint |
+| containerPorts.health | int | `8088` | For exposing the health check endpoint |
 | containerPorts.http | int | `80` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
 | containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
 | extraEnvVars | list | `[]` |  |
