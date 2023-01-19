@@ -158,6 +158,11 @@ When receiving requests with invalid content-type/accept header missmatch (e.g m
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
 
+### Return a proper timeout response ([Issue #2360](https://github.com/apollographql/router/issues/2360) [Issue #2400](https://github.com/apollographql/router/issues/240))
+
+There was a regression where timeouts generated a HTTP response with status `500 Internal Server Error`. This is now fixed with a test to guarantee it, the status code is now `504 Gateway Timeout` (Instead of previously `408 Request Timeout` which blamed the client). There is also a new metric `apollo_router_timeout` to track when timeouts are triggered.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2419
 
 ## 🛠 Maintenance
 

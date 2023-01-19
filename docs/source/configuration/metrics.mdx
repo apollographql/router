@@ -65,6 +65,7 @@ The following metrics are available using Prometheus:
 - Number of cache misses for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_count`
 - Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_time`
 - Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_time`
+- Number of triggered timeouts: `apollo_router_timeout`
 
 ## Using OpenTelemetry Collector
 
