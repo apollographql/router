@@ -8,6 +8,52 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "authentication": {
+      "description": "Authentication",
+      "type": "object",
+      "required": [
+        "experimental"
+      ],
+      "properties": {
+        "experimental": {
+          "description": "The experimental configuration",
+          "type": "object",
+          "required": [
+            "jwt"
+          ],
+          "properties": {
+            "jwt": {
+              "description": "The JWT configuration",
+              "type": "object",
+              "required": [
+                "jwks_url"
+              ],
+              "properties": {
+                "cooldown": {
+                  "description": "JWKS retrieval cooldown",
+                  "default": null,
+                  "type": "string"
+                },
+                "header_name": {
+                  "description": "HTTP header expected to contain JWT",
+                  "default": "authorization",
+                  "type": "string"
+                },
+                "header_value_prefix": {
+                  "description": "Header value prefix",
+                  "default": "Bearer",
+                  "type": "string"
+                },
+                "jwks_url": {
+                  "description": "Retrieve our JWK Set from here",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "cors": {
       "description": "Cross origin request headers.",
       "default": {
@@ -738,6 +784,7 @@ expression: "&schema"
         "introspection": false,
         "defer_support": true,
         "apq": {
+          "enabled": true,
           "experimental_cache": {
             "in_memory": {
               "limit": 512
@@ -758,6 +805,7 @@ expression: "&schema"
         "apq": {
           "description": "Configures automatic persisted queries",
           "default": {
+            "enabled": true,
             "experimental_cache": {
               "in_memory": {
                 "limit": 512
@@ -769,6 +817,11 @@ expression: "&schema"
             "experimental_cache"
           ],
           "properties": {
+            "enabled": {
+              "description": "Activates Automatic Persisted Queries (enabled by default)",
+              "default": true,
+              "type": "boolean"
+            },
             "experimental_cache": {
               "description": "Cache configuration",
               "type": "object",
@@ -2959,6 +3012,68 @@ expression: "&schema"
           "type": "string"
         }
       }
+    },
+    "tls": {
+      "description": "TLS related configuration options.",
+      "default": {
+        "subgraph": {
+          "all": {
+            "certificate_authorities": null
+          },
+          "subgraphs": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "subgraph": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": {
+            "all": {
+              "certificate_authorities": null
+            },
+            "subgraphs": {}
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "certificate_authorities": null
+              },
+              "type": "object",
+              "properties": {
+                "certificate_authorities": {
+                  "description": "list of certificate authorities in PEM format",
+                  "default": null,
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Configuration options pertaining to the subgraph server component.",
+                "type": "object",
+                "properties": {
+                  "certificate_authorities": {
+                    "description": "list of certificate authorities in PEM format",
+                    "default": null,
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
     },
     "traffic_shaping": {
       "description": "Configuration for the experimental traffic shaping plugin",

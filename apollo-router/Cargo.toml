@@ -42,7 +42,7 @@ askama = "0.11.1"
 access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
-apollo-compiler = "0.5.0"
+apollo-compiler = "0.6.0"
 apollo-encoder = "0.4.0"
 apollo-parser = "0.4.1"
 arc-swap = "1.6.0"
@@ -68,6 +68,7 @@ clap = { version = "4.1.1", default-features = false, features = [
 console-subscriber = { version = "0.1.8", optional = true }
 ci_info = {version="0.14.9", features=["serde-1"] }
 dashmap = { version = "5.4.0", features = ["serde"] }
+deduplicate = "0.3.5"
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
@@ -92,6 +93,7 @@ indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
 jsonpath_lib = "0.3.0"
 jsonschema = { version = "0.16.1", default-features = false }
+jsonwebtoken = "8.2.0"
 lazy_static = "1.4.0"
 libc = "0.2.139"
 linkme = "0.3.7"
@@ -160,6 +162,8 @@ reqwest = { version = "0.11.13", default-features = false, features = [
 ] }
 router-bridge = "0.1.12"
 rust-embed="6.4.2"
+rustls = "0.20.7"
+rustls-pemfile = "1.0.1"
 schemars = { version = "0.8.11", features = ["url"] }
 shellexpand = "3.0.0"
 sha2 = "0.10.6"

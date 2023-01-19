@@ -155,11 +155,11 @@ impl Schema {
 
         fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
             let mut compiler = ApolloCompiler::new();
-            compiler.create_schema(
+            compiler.add_type_system(
                 include_str!("introspection_types.graphql"),
                 "introspection_types.graphql",
             );
-            let id = compiler.create_schema(schema, "schema.graphql");
+            let id = compiler.add_type_system(schema, "schema.graphql");
 
             let ast = compiler.db.ast(id);
 
@@ -259,7 +259,7 @@ impl Schema {
                 .filter(|def| def.loc().is_some()) // exclude implict operations
                 .map(|def| {
                     (
-                        def.operation_type().into(),
+                        def.operation_ty().into(),
                         if let hir::Type::Named { name, .. } = def.named_type() {
                             name.clone()
                         } else {

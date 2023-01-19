@@ -349,7 +349,7 @@ impl Prepare {
         println!("finalizing changelog");
         let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex = regex::Regex::new(r"(?ms)(^<!--.*?^(?:# .*)^-->\s+)(.*)?")?;
+        let changes_regex = regex::Regex::new(r"(?ms)(^<!-- <KEEP>.*?$^(?:.*)^<\/KEEP> -->\s+)(.*)?")?;
         let captures = changes_regex
             .captures(&next_changelog)
             .expect("changelog format was unexpected");
