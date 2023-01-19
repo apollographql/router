@@ -170,17 +170,17 @@ impl Context {
     }
 
     /// Notify the busy timer that we're waiting on a network request
-    pub async fn enter_active_request(&self) {
+    pub(crate) async fn enter_active_request(&self) {
         self.busy_timer.lock().await.increment_active_requests()
     }
 
     /// Notify the busy timer that we stopped waiting on a network request
-    pub async fn leave_active_request(&self) {
+    pub(crate) async fn leave_active_request(&self) {
         self.busy_timer.lock().await.decrement_active_requests()
     }
 
     /// How much time was spent working on the request
-    pub async fn busy_time_ns(&self) -> u128 {
+    pub(crate) async fn busy_time_ns(&self) -> u128 {
         self.busy_timer.lock().await.current()
     }
 }
