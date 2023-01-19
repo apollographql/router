@@ -80,6 +80,8 @@ trait OptionDance<T> {
 
 type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
+pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
+
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let mut guard = self.lock().expect("poisoned mutex");
@@ -396,8 +398,15 @@ impl EngineBlock {
         let engine = Arc::new(Rhai::new_rhai_engine(scripts));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
+        // Keep these two lower cases ones as mistakes until 2.0
+        // At 2.0 (or maybe before), replace with upper case
         scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
+
+        scope.push_constant(
+            "APOLLO_AUTHENTICATION_JWT_CLAIMS",
+            "apollo_authentication::JWT::claims".to_string(),
+        );
 
         // Run the AST with our scope to put any global variables
         // defined in scripts into scope.
@@ -616,7 +625,7 @@ macro_rules! gen_map_request {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($base::Request),
                         "otel.kind" = "INTERNAL"
                     )
@@ -681,7 +690,7 @@ macro_rules! gen_map_deferred_request {
             fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
                 move |_request: &$request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($request),
                         "otel.kind" = "INTERNAL"
                     )
