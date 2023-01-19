@@ -4,10 +4,8 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- <THIS IS AN EXAMPLE, DO NOT REMOVE>
+<!-- <KEEP> THIS IS AN SET OF TEMPLATES TO USE WHEN ADDING TO THE CHANGELOG.
 
-# [x.x.x] (unreleased) - 2022-mm-dd
-> Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
@@ -23,9 +21,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Description! And a link to a [reference](http://url)
 
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
--->
-
-# [1.9.0] (unreleased) - 2023-mm-dd
+</KEEP> -->
 
 ## 🚀 Features
 
@@ -126,6 +122,19 @@ supergraph:
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
 
 ## 🐛 Fixes
+
+### Don't send header names to Studio if `send_headers` is `none` ([Issue #2403](https://github.com/apollographql/router/issues/2403))
+
+Before when `send_headers` was set to `none` (like in the following example of configuration) we sent header names with empty header values. Now we don't send anything to Studio.
+
+```yaml
+telemetry:
+  apollo:
+    send_headers: none
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2425
+
 
 ### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
 
