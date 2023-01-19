@@ -198,6 +198,7 @@ impl BusyTimer {
             if let Some(start) = self.start.take() {
                 self.busy_ns += start.elapsed().as_nanos();
             }
+            self.start = None;
         }
 
         self.active_subgraph_requests += 1;

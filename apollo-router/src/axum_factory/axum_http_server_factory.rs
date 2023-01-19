@@ -333,7 +333,9 @@ async fn handle_graphql(
     let context = request.context.clone();
 
     let res = service.oneshot(request).await;
-    let overhead_seconds = (context.busy_timer.lock().await.current() / 1000_000_000) as f64;
+    let dur = context.busy_timer.lock().await.current();
+    let overhead_seconds = dur as f64 / 1_000_000_000f64;
+
     tracing::info!(histogram.apollo_router_overhead_time = overhead_seconds,);
 
     match res {

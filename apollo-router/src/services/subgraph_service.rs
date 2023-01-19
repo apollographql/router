@@ -376,6 +376,8 @@ async fn call_http(
                 }, Ok(body) => body,
             };
 
+            cloned_context.busy_timer.lock().await.decrement_subgraph_requests();
+
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;
 
