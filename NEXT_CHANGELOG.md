@@ -25,22 +25,6 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
-### JWT authentication for the router ([Issue #912](https://github.com/apollographql/router/issues/912))
-
-JWT authentication is now configurable for the router.
-
-Here's a typical sample configuration fragment:
-
-```yaml
-authentication:
-  jwt:
-    jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-```
-
-Until the documentation is published to the website, you can read [it](https://github.com/apollographql/router/blob/53d7b710a6bdc0fbef4d7fd0d13f49002ee70e84/docs/source/configuration/authn-jwt.mdx) from the pull request.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2348
-
 ### Add support for `base64::encode()` / `base64::decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
 
 Two new functions, `base64::encode()` and `base64::decode()` may now be used to Base64-encode or Base64-decode strings, respectively.
@@ -188,3 +172,23 @@ To publish a new metric, use tracing macros to generate an event that contains o
 `histogram.`: Used for histograms (takes f64)
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
+
+## 🥼 Experimental
+
+### JWT authentication for the router ([Issue #912](https://github.com/apollographql/router/issues/912))
+
+Experimental JWT authentication is now configurable for the router.
+
+Here's a typical sample configuration fragment:
+
+```yaml
+authentication:
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+```
+
+Until the documentation is published to the website, you can read [it](https://github.com/apollographql/router/blob/dev/docs/source/configuration/authn-jwt.mdx) from the repository.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2348
+
