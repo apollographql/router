@@ -213,7 +213,7 @@ commands:
                   cargo install --locked cargo-deny cargo-about cargo-edit
             - save_cache:
                 name: Save .cargo
-                key: rust-cargo-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
                 paths:
                   - C:\\Users\\circleci\\.cargo\\bin\\cargo-about.exe
                   - C:\\Users\\circleci\\.cargo\\bin\\cargo-deny.exe
