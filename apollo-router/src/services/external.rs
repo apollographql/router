@@ -20,7 +20,6 @@ use tower::BoxError;
 
 use crate::error::LicenseError;
 use crate::services::apollo_graph_reference;
-use crate::services::apollo_key;
 use crate::tracer::TraceId;
 use crate::Context;
 
@@ -28,7 +27,6 @@ const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    apollo_key().ok_or(LicenseError::MissingKey)?;
     Ok(Client::new())
 });
 
