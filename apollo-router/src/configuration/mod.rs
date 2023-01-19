@@ -639,6 +639,7 @@ impl Default for Apq {
         Self {
             enabled: default_apq(),
             experimental_cache: Default::default(),
+            subgraph: Default::default(),
         }
     }
 }
