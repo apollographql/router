@@ -622,7 +622,7 @@ pub(crate) struct SubgraphApq {
 
 impl Default for SubgraphApq {
     fn default() -> Self {
-        Self { enabled: true }
+        Self { enabled: false }
     }
 }
 

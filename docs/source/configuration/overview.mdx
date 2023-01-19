@@ -414,7 +414,7 @@ supergraph:
     enabled: false
 ```
 
-Subgraph requests from the Router will attempt to use APQ by default.  Disabling APQ on a subgraph can be done either globally or on a per-subgraph request.   The following example shows how to use a mixture of both global and per-subgraph configuration to accomplish enabling APQ on the `products` subgraph, while otherwise disabling it:
+Subgraph requests from the Router can use APQ (disabled by default). Enabling APQ on a subgraph can be done either globally or on a per-subgraph request. The following example shows how to use a mixture of both global and per-subgraph configuration to accomplish enabling APQ on the `products` subgraph, while otherwise disabling it:
 
 ```yaml title="router.yaml"
 supergraph:
