@@ -89,7 +89,7 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
-    /// Healthcheck configuration
+    /// Health check configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
@@ -805,7 +805,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the healthcheck endpoint
+    /// Set to false to disable the health check endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }
