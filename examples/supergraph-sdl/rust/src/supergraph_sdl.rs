@@ -38,8 +38,9 @@ impl Plugin for SupergraphSDL {
                 // If we have a query
                 if let Some(query) = &req.supergraph_request.body().query {
                     // Compile our supergraph_sdl and query
-                    let input = format!("{}\n{}", supergraph_sdl, query);
-                    let ctx = ApolloCompiler::new(&input);
+                    let mut ctx = ApolloCompiler::new();
+                    ctx.create_schema(&supergraph_sdl, "supergraph_sdl");
+                    ctx.create_executable(query, "query");
                     // Do we have any diagnostics we'd like to print?
                     let diagnostics = ctx.validate();
                     for diagnostic in diagnostics {
