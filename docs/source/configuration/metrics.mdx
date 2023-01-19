@@ -63,8 +63,9 @@ The following metrics are available using Prometheus:
 - Total number of HTTP requests by HTTP Status (`apollo_router_http_requests_total`)
 - Number of cache hits for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_count`
 - Number of cache misses for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_count`
-- Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_time`
-- Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_time`
+- Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`), in seconds: `apollo_router_cache_hit_time`
+- Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`), in seconds: `apollo_router_cache_miss_time`
+- Time spent processing a request, outside of waiting for external or subgraph requests, in seconds (`apollo_router_processing_time`)
 
 ## Using OpenTelemetry Collector
 
