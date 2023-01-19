@@ -153,7 +153,7 @@ impl Plugin for ExternalPlugin {
                             .busy_timer
                             .lock()
                             .await
-                            .increment_subgraph_requests();
+                            .increment_active_requests();
 
                         // Second, call our co-processor and get a reply.
                         let res = call_external(
@@ -172,7 +172,7 @@ impl Plugin for ExternalPlugin {
                             .busy_timer
                             .lock()
                             .await
-                            .decrement_subgraph_requests();
+                            .decrement_active_requests();
 
                         let co_processor_output = res?;
 

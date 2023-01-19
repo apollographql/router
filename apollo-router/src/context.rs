@@ -183,7 +183,7 @@ impl Default for Context {
 /// happens while another one is running and still shifts the end of the span, but for now this
 /// should serve as a reasonable solution without complex post processing of spans
 pub(crate) struct BusyTimer {
-    active_subgraph_requests: u32,
+    active_requests: u32,
     busy_ns: u128,
     start: Option<Instant>,
 }
@@ -193,21 +193,21 @@ impl BusyTimer {
         BusyTimer::default()
     }
 
-    pub(crate) fn increment_subgraph_requests(&mut self) {
-        if self.active_subgraph_requests == 0 {
+    pub(crate) fn increment_active_requests(&mut self) {
+        if self.active_requests == 0 {
             if let Some(start) = self.start.take() {
                 self.busy_ns += start.elapsed().as_nanos();
             }
             self.start = None;
         }
 
-        self.active_subgraph_requests += 1;
+        self.active_requests += 1;
     }
 
-    pub(crate) fn decrement_subgraph_requests(&mut self) {
-        self.active_subgraph_requests -= 1;
+    pub(crate) fn decrement_active_requests(&mut self) {
+        self.active_requests -= 1;
 
-        if self.active_subgraph_requests == 0 {
+        if self.active_requests == 0 {
             self.start = Some(Instant::now());
         }
     }
@@ -224,7 +224,7 @@ impl BusyTimer {
 impl Default for BusyTimer {
     fn default() -> Self {
         Self {
-            active_subgraph_requests: 0,
+            active_requests: 0,
             busy_ns: 0,
             start: Some(Instant::now()),
         }
