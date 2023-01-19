@@ -342,10 +342,13 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
+                    request.context.enter_active_request().await;
                     // Get the JWKS here
                     let jwks_opt = match my_jwks.get(my_jwks_url).await {
                         Ok(k) => k,
                         Err(e) => {
+                            request.context.leave_active_request().await;
+
                             return failure_message(
                                 request.context,
                                 format!("Could not retrieve JWKS set: {e}"),
@@ -353,6 +356,8 @@ impl Plugin for AuthenticationPlugin {
                             );
                         }
                     };
+                    request.context.leave_active_request().await;
+
 
                     let jwks = match jwks_opt {
                         Some(k) => k,
