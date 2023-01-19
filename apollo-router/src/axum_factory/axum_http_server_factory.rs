@@ -86,7 +86,7 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "healthcheck endpoint exposed at {}/health",
+            "Health check endpoint exposed at {}/health",
             configuration.health_check.listen
         );
         endpoints.insert(
@@ -333,7 +333,17 @@ async fn handle_graphql(
     http_request: Request<Body>,
 ) -> impl IntoResponse {
     tracing::info!(counter.apollo_router_session_count_active = 1,);
-    match service.oneshot(http_request.into()).await {
+
+    let request: router::Request = http_request.into();
+    let context = request.context.clone();
+
+    let res = service.oneshot(request).await;
+    let dur = context.busy_time().await;
+    let processing_seconds = dur.as_secs_f64();
+
+    tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
+
+    match res {
         Err(e) => {
             tracing::info!(counter.apollo_router_session_count_active = -1,);
             if let Some(source_err) = e.source() {
