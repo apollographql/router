@@ -390,6 +390,10 @@ See [Sending HTTP headers to subgraphs](./header-propagation/).
 
 See [Configuring CORS in the Apollo Router](./cors).
 
+### Defer support
+
+See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
+
 ### External Extensibility
 
 See [External Extensibility in the Apollo Router](./external).
@@ -402,6 +406,13 @@ See [Tracing in the Apollo Router](./tracing/).
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
 The Apollo Router automatically supports APQ via its in-memory cache. See the [caching documentation](./caching) for related options.
+It is enabled by default, but can be disabled from the configuration:
+
+```yaml
+supergraph:
+  apq:
+    enabled: false
+```
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 

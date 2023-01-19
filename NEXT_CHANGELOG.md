@@ -4,10 +4,8 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- <THIS IS AN EXAMPLE, DO NOT REMOVE>
+<!-- <KEEP> THIS IS AN SET OF TEMPLATES TO USE WHEN ADDING TO THE CHANGELOG.
 
-# [x.x.x] (unreleased) - 2022-mm-dd
-> Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
@@ -23,11 +21,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Description! And a link to a [reference](http://url)
 
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
--->
-
-# [1.8.1] (unreleased) - 2022-mm-dd
+</KEEP> -->
 
 ## 🚀 Features
+
+### JWT authentication for the router ([Issue #912](https://github.com/apollographql/router/issues/912))
+
+JWT authentication is now configurable for the router.
+
+Here's a typical sample configuration fragment:
+
+```yaml
+authentication:
+  jwt:
+    jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+```
+
+Until the documentation is published to the website, you can read [it](https://github.com/apollographql/router/blob/53d7b710a6bdc0fbef4d7fd0d13f49002ee70e84/docs/source/configuration/authn-jwt.mdx) from the pull request.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2348
 
 ### Add support for `base64::encode()` / `base64::decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
 
@@ -113,7 +125,32 @@ openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2008
 
+### Make APQ optional ([PR #2386](https://github.com/apollographql/router/pull/2386))
+
+Automatic persisted queries support is enabled by default, this adds an option to deactivate it:
+
+```yaml
+supergraph:
+  apq:
+    enabled: false
+```
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
+
 ## 🐛 Fixes
+
+### Don't send header names to Studio if `send_headers` is `none` ([Issue #2403](https://github.com/apollographql/router/issues/2403))
+
+Before when `send_headers` was set to `none` (like in the following example of configuration) we sent header names with empty header values. Now we don't send anything to Studio.
+
+```yaml
+telemetry:
+  apollo:
+    send_headers: none
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2425
+
 
 ### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
 
