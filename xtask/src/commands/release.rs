@@ -173,8 +173,12 @@ impl Prepare {
             return Err(anyhow!("the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"));
         }
 
-        if std::env::var("GITHUB_TOKEN").is_err() {
-            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."))
+        if let Version::Nightly = &self.version {
+            println!("Skipping requirement that GITHUB_TOKEN is set in the environment because this is a nightly release which doesn't yet need it.");
+        } else {
+            if std::env::var("GITHUB_TOKEN").is_err() {
+                return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."))
+            }
         }
         Ok(())
     }
