@@ -707,6 +707,7 @@ workflows:
       - build_release:
           matrix:
             parameters:
+              nightly: true
               platform:
                 [macos_build, windows_build, amd_linux_build, arm_linux_build]
 
