@@ -153,8 +153,12 @@ impl Prepare {
             ));
         }
 
-        if which::which("helm").is_err() {
-            return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+        if let Version::Nightly = &self.version {
+            println!("Skipping requirement that helm is installed because we're building a nightly that doesn't require helm.");
+        } else {
+            if which::which("helm").is_err() {
+                return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+            }
         }
 
         if which::which("helm-docs").is_err() {
