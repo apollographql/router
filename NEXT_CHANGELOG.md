@@ -137,6 +137,25 @@ supergraph:
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
 
+### APQ support in subgraph requests ([PR #2284](https://github.com/apollographql/router/pull/2284))
+
+Automatic persisted queries can now be used for subgraph requests. It is disabled by default, and can be configured for all subgraphs or per subgraph:
+
+```yaml title="router.yaml"
+supergraph:
+  apq:
+    subgraph:
+      # override for all subgraphs
+      all:
+        enabled: false
+      # override per subgraph
+      subgraphs:
+        products:
+          enabled: true
+```
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2284 and https://github.com/apollographql/router/pull/2418
+
 ## 🐛 Fixes
 
 ### Don't send header names to Studio if `send_headers` is `none` ([Issue #2403](https://github.com/apollographql/router/issues/2403))
