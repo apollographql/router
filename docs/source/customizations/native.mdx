@@ -49,7 +49,7 @@ Create your configuration struct like so:
 ```rust title="hello_world.rs"
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // Put your plugin confguration here. It's deserialzed from YAML automatically.
+    // Put your plugin configuration here. It's deserialized from YAML automatically.
 }
 ```
 
@@ -154,7 +154,7 @@ fn supergraph_service(
 The [tower-rs](https://github.com/tower-rs) library (which the Apollo Router is built on) comes with many "off-the-shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third-party products.
 
 Some notable layers are:
-* **buffered** - Make a service `Clone`. Typically requred for any `async` layers.
+* **buffered** - Make a service `Clone`. Typically required for any `async` layers.
 * **checkpoint** - Perform a sync call to decide if a request should proceed or not. Useful for validation.
 * **checkpoint_async** - Perform an async call to decide if the request should proceed or not. e.g. for Authentication. Requires `buffered`.
 * **instrument** - Add a tracing span around a service.
