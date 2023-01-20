@@ -11,7 +11,6 @@ To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  deduplicate_variables: true # Enable the variable deduplication optimization.
   router: # Rules applied to requests from clients to the router
     global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
       capacity: 10
@@ -133,12 +132,7 @@ traffic_shaping:
 
 When subgraphs are sent entity requests by the Router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
 
-To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent can be deduplicated. This is activated with the `deduplicate_variables` option:
-
-```yaml title="router.yaml"
-traffic_shaping:
-  deduplicate_variables: true # Enable the variable deduplication optimization.
-```
+To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent can be deduplicated. This is always active.
 
 ### Query deduplication
 

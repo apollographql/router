@@ -129,6 +129,11 @@ Users can disable this mechanism by setting the environment variable `APOLLO_TEL
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398, https://github.com/apollographql/router/pull/2413
 
+### Always deduplicate variables ([Issue #2387](https://github.com/apollographql/router/issues/2387))
+
+Variable deduplication allows the router to reduce the number of entities that are requested from subgraphs if some of them are redundant, and as such reduce the size of subgraph responses. It has been available for a while but was not active by default. This is now always on.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2445
 
 ## 🐛 Fixes
 
