@@ -176,6 +176,12 @@ In addition, defaulting of environment variables now directly injects the variab
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2432
 
+### Always accept compressed subgraph responses  ([Issue #2415](https://github.com/apollographql/router/issues/2415))
+
+Subgraph response decompression was only supported when subgraph request compression was configured. This is now always active.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2450
+
 ## 🛠 Maintenance
 
 ### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
