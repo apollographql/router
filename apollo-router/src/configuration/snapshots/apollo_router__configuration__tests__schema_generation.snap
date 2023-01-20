@@ -792,7 +792,7 @@ expression: "&schema"
           },
           "subgraph": {
             "all": {
-              "enabled": true
+              "enabled": false
             },
             "subgraphs": {}
           }
@@ -819,7 +819,7 @@ expression: "&schema"
             },
             "subgraph": {
               "all": {
-                "enabled": true
+                "enabled": false
               },
               "subgraphs": {}
             }
@@ -866,7 +866,7 @@ expression: "&schema"
               "description": "Configuration options pertaining to the subgraph server component.",
               "default": {
                 "all": {
-                  "enabled": true
+                  "enabled": false
                 },
                 "subgraphs": {}
               },
@@ -875,13 +875,13 @@ expression: "&schema"
                 "all": {
                   "description": "options applying to all subgraphs",
                   "default": {
-                    "enabled": true
+                    "enabled": false
                   },
                   "type": "object",
                   "properties": {
                     "enabled": {
                       "description": "Enable",
-                      "default": true,
+                      "default": false,
                       "type": "boolean"
                     }
                   },
@@ -897,7 +897,7 @@ expression: "&schema"
                     "properties": {
                       "enabled": {
                         "description": "Enable",
-                        "default": true,
+                        "default": false,
                         "type": "boolean"
                       }
                     },
