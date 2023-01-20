@@ -12,7 +12,6 @@ use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
-#[cfg(feature = "experimental_cache")]
 use super::redis::*;
 
 pub(crate) trait KeyType:
@@ -50,7 +49,6 @@ where
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     caller: String,
     inner: Arc<Mutex<LruCache<K, V>>>,
-    #[cfg(feature = "experimental_cache")]
     redis: Option<RedisCacheStorage>,
 }
 
@@ -67,7 +65,6 @@ where
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-            #[cfg(feature = "experimental_cache")]
             redis: if let Some(urls) = _redis_urls {
                 match RedisCacheStorage::new(urls, None).await {
                     Err(e) => {
@@ -104,7 +101,6 @@ where
                 );
                 Some(v.clone())
             }
-            #[cfg(feature = "experimental_cache")]
             None => {
                 let duration = instant_memory.elapsed().as_secs_f64();
                 tracing::info!(
@@ -156,27 +152,10 @@ where
                     None
                 }
             }
-            #[cfg(not(feature = "experimental_cache"))]
-            None => {
-                // Cache miss
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_miss_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-                None
-            }
         }
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        #[cfg(feature = "experimental_cache")]
         if let Some(redis) = self.redis.as_ref() {
             redis
                 .insert(RedisKey(key.clone()), RedisValue(value.clone()))
@@ -202,7 +181,6 @@ where
 }
 
 enum CacheStorageName {
-    #[cfg(feature = "experimental_cache")]
     Redis,
     Memory,
 }
@@ -210,7 +188,6 @@ enum CacheStorageName {
 impl Display for CacheStorageName {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            #[cfg(feature = "experimental_cache")]
             CacheStorageName::Redis => write!(f, "redis"),
             CacheStorageName::Memory => write!(f, "memory"),
         }
