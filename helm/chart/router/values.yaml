@@ -9,7 +9,7 @@ router:
   configuration:
     supergraph:
       listen: 0.0.0.0:80
-    health-check:
+    health_check:
       listen: 0.0.0.0:8088
     telemetry:
       metrics:

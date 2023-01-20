@@ -176,6 +176,28 @@ In addition, defaulting of environment variables now directly injects the variab
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2432
 
+## 📃 Configuration
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
+
+### `health-check` renamed to `health_check`
+
+The health_check key in router.yaml has been renamed to snake case for consistency. 
+
+Before:
+```yaml
+health-check:
+  enabled: true
+```
+
+After:
+```yaml
+health_check:
+  enabled: true
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2451
+
+
 ## 🛠 Maintenance
 
 ### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))

@@ -21,7 +21,7 @@
       "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
     },
     "Monitoring & Metrics": {
-      "Health check": "/configuration/health-checks",
+      "Health check": "/configuration/health_checks",
       "Apollo Studio reporting": "/configuration/apollo-telemetry",
       "Collecting metrics": "/configuration/metrics",
       "Tracing": "/configuration/tracing"
