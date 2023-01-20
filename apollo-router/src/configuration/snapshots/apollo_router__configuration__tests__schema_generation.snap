@@ -113,9 +113,7 @@ expression: "&schema"
         "max_age": {
           "description": "The `Access-Control-Max-Age` header value in seconds",
           "default": null,
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0,
+          "type": "string",
           "nullable": true
         },
         "methods": {
