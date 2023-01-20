@@ -166,7 +166,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ## 📚 Documentation
 
-### Add documentation for `send_headers` and `send_variable_values` in `telemetry.apollo` ([Issue #2149](https://github.com/apollographql/router/issues/2149))
+### `send_headers` and `send_variable_values` in `telemetry.apollo` ([Issue #2149](https://github.com/apollographql/router/issues/2149))
 
 + `send_headers`
 
