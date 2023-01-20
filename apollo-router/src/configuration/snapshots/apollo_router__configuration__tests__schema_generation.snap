@@ -111,10 +111,9 @@ expression: "&schema"
           "nullable": true
         },
         "max_age": {
-          "description": "The `Access-Control-Max-Age` header value in seconds",
+          "description": "The `Access-Control-Max-Age` header value in time units",
           "default": null,
-          "type": "string",
-          "nullable": true
+          "type": "string"
         },
         "methods": {
           "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",

@@ -61,7 +61,7 @@ pub(crate) struct Cors {
     #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
 
-    /// The `Access-Control-Max-Age` header value in seconds
+    /// The `Access-Control-Max-Age` header value in time units
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     pub(crate) max_age: Option<Duration>,
