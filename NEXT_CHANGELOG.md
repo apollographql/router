@@ -127,9 +127,9 @@ There is a new metric called `apollo_router_processing_time` that measures the t
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
 
-### APQ support in subgraph requests ([PR #2284](https://github.com/apollographql/router/pull/2284))
+### Automated persisted query support for subgraph requests ([PR #2284](https://github.com/apollographql/router/pull/2284))
 
-Automatic persisted queries can now be used for subgraph requests. It is disabled by default, and can be configured for all subgraphs or per subgraph:
+Automatic persisted queries (APQ) (See useful context [in our Apollo Server docs](https://www.apollographql.com/docs/apollo-server/performance/apq/)) can now be used for subgraph requests. It is disabled by default, and can be configured for all subgraphs or per subgraph:
 
 ```yaml title="router.yaml"
 supergraph:
