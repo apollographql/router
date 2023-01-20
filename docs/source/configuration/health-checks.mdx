@@ -37,6 +37,19 @@ $ curl -v "http://127.0.0.1:8088/health"
 {"status":"UP"}
 ```
 
+## Logging
+
+If you start the router with trace logging enabled, you will see a log from the router for each health check:
+
+```sh
+--log apollo_router=trace
+
+2023-01-20T09:55:48.234946Z apollo-router/src/axum_factory/axum_http_server_factory.rs:100 TRACE apollo_router::axum_factory::axum_http_server_factory: health check health=Health { status: Up }
+
+```
+
+This may be helpful with confirming that health-checks are working correctly.
+
 ## Using in a containers environment
 
 The health check listens to 127.0.0.1 by default, which won't allow connections issued from a network.
