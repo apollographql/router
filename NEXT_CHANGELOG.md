@@ -82,7 +82,26 @@ The Router now emits a metric called `apollo_router_processing_time` which measu
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
 
-### Allow the disabling of automated persisted queries (APQ) ([PR #2386](https://github.com/apollographql/router/pull/2386))
+### Automated persisted queries support for subgraph requests ([PR #2284](https://github.com/apollographql/router/pull/2284))
+
+Automatic persisted queries (APQ) (See useful context [in our Apollo Server docs](https://www.apollographql.com/docs/apollo-server/performance/apq/)) can now be used for subgraph requests. It is disabled by default, and can be configured for all subgraphs or per subgraph:
+
+```yaml title="router.yaml"
+supergraph:
+  apq:
+    subgraph:
+      # override for all subgraphs
+      all:
+        enabled: false
+      # override per subgraph
+      subgraphs:
+        products:
+          enabled: true
+```
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2284 and https://github.com/apollographql/router/pull/2418
+
+### Allow the disabling of automated persisted queries ([PR #2386](https://github.com/apollographql/router/pull/2386))
 
 Automatic persisted queries (APQ) support is still enabled by default, but can now be disabled using configuration:
 
@@ -128,7 +147,6 @@ For example:
 Users can disable this mechanism by setting the environment variable `APOLLO_TELEMETRY_DISABLED=true` in their environment.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398, https://github.com/apollographql/router/pull/2413
-
 
 ## 🐛 Fixes
 

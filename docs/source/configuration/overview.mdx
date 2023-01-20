@@ -414,6 +414,21 @@ supergraph:
     enabled: false
 ```
 
+Subgraph requests from the Router can use APQ (disabled by default). Enabling APQ on a subgraph can be done either globally or on a per-subgraph request. The following example shows how to use a mixture of both global and per-subgraph configuration to accomplish enabling APQ on the `products` subgraph, while otherwise disabling it:
+
+```yaml title="router.yaml"
+supergraph:
+  apq:
+    subgraph:
+      # override for all subgraphs
+      all:
+        enabled: false
+      # override per subgraph
+      subgraphs:
+        products:
+          enabled: true
+```
+
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 
 ### TLS
