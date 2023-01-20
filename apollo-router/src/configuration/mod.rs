@@ -611,7 +611,7 @@ pub(crate) struct ApqSubgraphWrapper {
 }
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphApq {
     /// Enable
@@ -619,14 +619,8 @@ pub(crate) struct SubgraphApq {
     pub(crate) enabled: bool,
 }
 
-impl Default for SubgraphApq {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
 fn default_subgraph_apq() -> bool {
-    true
+    false
 }
 
 fn default_apq() -> bool {
