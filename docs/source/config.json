@@ -10,6 +10,7 @@
     "Federation version support": "/federation-version-support",
     "Configuration": {
       "Overview": "/configuration/overview",
+      "Development mode": "/configuration/development-mode",
       "JWT Authentication": "/configuration/authn-jwt",
       "Caching": "/configuration/caching",
       "CORS": "/configuration/cors",

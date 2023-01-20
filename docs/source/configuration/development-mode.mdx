@@ -1,0 +1,36 @@
+---
+title: Development mode
+description: Running the router in development mode
+---
+
+During development, it is useful to run the Apollo Router with increased logging and relaxed security constraints.
+
+Development mode modifies the default configuration of the router to:
+* Serve Apollo Sandbox Explorer rather than the Apollo Router page - Allows you to easily run queries against your development Router.
+* Enable supergraph introspection - Allows Apollo Sandbox Explorer to provide content completion and information about the supergraph schema.
+* Enable query plan introspection - Allows Apollo Sandbox Explorer to display on how your query was executed.
+* Propagate errors from subgraphs - Allows GraphQL errors from subgraphs to be propagated back to the client.   
+* Enable hot reloading of configuration - Equivalent to running the router with `--hot-reload`, changes in your router configuration are reflected without a restart.
+
+To run the Apollo Router in development mode:
+```bash
+router --dev
+```
+
+<blockquote>
+**⚠️ Do not use the `--dev` flag in production!**
+<br/>
+The features enabled in development mode may change over time. If you want to replicate any development mode functionality in production, modify your YAML configuration file instead.
+</blockquote>
+
+The equivalent yaml `router.yaml` file is:
+```yaml file="router.yaml"
+sandbox:
+  enabled: true
+supergraph:
+  introspection: true
+include_subgraph_errors:
+  all: true
+plugins:
+  experimental.expose_query_plan: true
+```

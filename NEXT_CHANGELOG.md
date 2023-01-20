@@ -189,6 +189,13 @@ This information is also available in [the Apollo Router documentation](https://
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
 
+
+### Added docs for development mode ([Issue #1988](https://github.com/apollographql/router/issues/#1988))
+
+Added a dedicated page for development mode documentation.
+
+By [@nbryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2443
+
 ## 🥼 Experimental
 
 ### JWT authentication ([Issue #912](https://github.com/apollographql/router/issues/912))
