@@ -14,6 +14,7 @@ use async_compression::tokio::write::ZlibEncoder;
 use futures::future::BoxFuture;
 use global::get_text_map_propagator;
 use http::header::ACCEPT;
+use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::{self};
@@ -58,6 +59,7 @@ const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
+const ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 
 enum APQError {
     PersistedQueryNotSupported,
@@ -267,6 +269,9 @@ async fn call_http(
     request.headers_mut().insert(CONTENT_TYPE, app_json.clone());
     request.headers_mut().insert(ACCEPT, app_json);
     request.headers_mut().append(ACCEPT, app_graphql_json);
+    request
+        .headers_mut()
+        .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS);
 
     let schema_uri = request.uri().clone();
     let host = schema_uri.host().map(String::from).unwrap_or_default();
