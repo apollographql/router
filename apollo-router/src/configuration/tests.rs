@@ -719,6 +719,16 @@ where
     pub(crate) subgraphs: HashMap<String, T>,
 }
 
+impl<T> Subgraph<T>
+where
+    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+{
+    #[allow(dead_code)]
+    fn get(&self, subgraph_name: &str) -> &T {
+        self.subgraphs.get(subgraph_name).unwrap_or(&self.all)
+    }
+}
+
 impl<'de, T> Deserialize<'de> for Subgraph<T>
 where
     T: DeserializeOwned,
