@@ -788,7 +788,8 @@ expression: "&schema"
           "experimental_cache": {
             "in_memory": {
               "limit": 512
-            }
+            },
+            "redis": null
           },
           "subgraph": {
             "all": {
@@ -801,7 +802,8 @@ expression: "&schema"
           "experimental_cache": {
             "in_memory": {
               "limit": 512
-            }
+            },
+            "redis": null
           },
           "warmed_up_queries": 0
         }
@@ -815,7 +817,8 @@ expression: "&schema"
             "experimental_cache": {
               "in_memory": {
                 "limit": 512
-              }
+              },
+              "redis": null
             },
             "subgraph": {
               "all": {
@@ -836,7 +839,8 @@ expression: "&schema"
               "default": {
                 "in_memory": {
                   "limit": 512
-                }
+                },
+                "redis": null
               },
               "type": "object",
               "required": [
@@ -858,6 +862,24 @@ expression: "&schema"
                     }
                   },
                   "additionalProperties": false
+                },
+                "redis": {
+                  "description": "Configures and activates the Redis cache",
+                  "type": "object",
+                  "required": [
+                    "urls"
+                  ],
+                  "properties": {
+                    "urls": {
+                      "description": "List of URLs to the Redis cluster",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
                 }
               },
               "additionalProperties": false
@@ -945,7 +967,8 @@ expression: "&schema"
             "experimental_cache": {
               "in_memory": {
                 "limit": 512
-              }
+              },
+              "redis": null
             },
             "warmed_up_queries": 0
           },
@@ -976,6 +999,24 @@ expression: "&schema"
                     }
                   },
                   "additionalProperties": false
+                },
+                "redis": {
+                  "description": "Configures and activates the Redis cache",
+                  "type": "object",
+                  "required": [
+                    "urls"
+                  ],
+                  "properties": {
+                    "urls": {
+                      "description": "List of URLs to the Redis cluster",
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
                 }
               },
               "additionalProperties": false
