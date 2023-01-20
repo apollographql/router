@@ -61,7 +61,7 @@ impl AxumHttpServerFactory {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[allow(dead_code)]
 enum HealthStatus {
@@ -69,7 +69,7 @@ enum HealthStatus {
     Down,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Health {
     status: HealthStatus,
 }
@@ -97,6 +97,7 @@ where
                     let health = Health {
                         status: HealthStatus::Up,
                     };
+                    tracing::trace!(?health, "health check");
                     async move {
                         Ok(router::Response {
                             response: http::Response::builder().body::<hyper::Body>(
