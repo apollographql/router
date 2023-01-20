@@ -2212,11 +2212,13 @@ expression: "&schema"
                   "properties": {
                     "ca": {
                       "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
                       "description": "The optional cert for tls config",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2228,6 +2230,7 @@ expression: "&schema"
                     },
                     "key": {
                       "description": "The optional private key file for TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2658,11 +2661,13 @@ expression: "&schema"
                   "properties": {
                     "ca": {
                       "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
                       "description": "The optional cert for tls config",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2674,6 +2679,7 @@ expression: "&schema"
                     },
                     "key": {
                       "description": "The optional private key file for TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -3184,6 +3190,7 @@ expression: "&schema"
         },
         "deduplicate_variables": {
           "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "default": null,
           "type": "boolean",
           "nullable": true
         },

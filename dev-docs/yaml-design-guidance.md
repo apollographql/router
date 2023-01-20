@@ -127,6 +127,38 @@ struct Export {
 ```
 Take a look at `env_defaults` in `expansion.rs` to see how env variables should be defaulted.
 
+### Use `#[serde(default)]` on struct instead of fields when possible
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl.
+
+#### GOOD
+```rust
+#[serde(deny_unknown_fields, default)]
+struct Export {
+    url: Url,
+    enabled: bool
+}
+
+impl Default for Export {
+  fn default() -> Self {
+    Self {
+      url: default_url_fn(),
+      enabled: false
+    }
+  }
+}
+```
+
+#### BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url,
+    #[serde(default)]
+    enabled: bool
+}
+```
+
 ### Avoid `Option<...>`
 Using option significantly complicates consuming code as it has to deal with the presence or otherwise, especially where you are transferring data to a non-buildstructor builder where `with_` methods are not present.
 
