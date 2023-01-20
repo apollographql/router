@@ -185,6 +185,18 @@ To publish a new metric, use tracing macros to generate an event that contains o
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
 
+### Added documentation for listening on IPv6 ([Issue #1835](https://github.com/apollographql/router/issues/1835))
+
+Added documentation for listening on IPv6
+```yaml
+supergraph:
+  # The socket address and port to listen on. 
+  # Note that this must be quoted to avoid interpretation as a yaml array.
+  listen: '[::1]:4000'
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
+
 ## 🥼 Experimental
 
 ### JWT authentication for the router ([Issue #912](https://github.com/apollographql/router/issues/912))
