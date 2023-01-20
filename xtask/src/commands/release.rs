@@ -177,7 +177,7 @@ impl Prepare {
             println!("Skipping requirement that GITHUB_TOKEN is set in the environment because this is a nightly release which doesn't yet need it.");
         } else {
             if std::env::var("GITHUB_TOKEN").is_err() {
-                return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."))
+                return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
             }
         }
         Ok(())
@@ -310,7 +310,10 @@ impl Prepare {
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
             "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
-            format!("https://github.com/apollographql/router/tree/v{}/helm/chart/router", version)
+            format!(
+                "https://github.com/apollographql/router/tree/v{}/helm/chart/router",
+                version
+            )
         );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
@@ -343,6 +346,13 @@ impl Prepare {
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm charts");
+
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "^version:.*?$",
+            format!("version: {}", version)
+        );
+
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
             "appVersion: \"v[^\"]+\"",
@@ -373,7 +383,10 @@ impl Prepare {
                 replace_in_file!(
                     entry.path(),
                     r#"^(?P<indentation>\s+)image:\s*ghcr.io/apollographql/router:v.*$"#,
-                    format!("${{indentation}}image: ghcr.io/apollographql/router:v{}", version)
+                    format!(
+                        "${{indentation}}image: ghcr.io/apollographql/router:v{}",
+                        version
+                    )
                 );
             }
         }
@@ -388,7 +401,7 @@ impl Prepare {
         println!("finalizing changelog");
         let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex = regex::Regex::new(r"(?ms)(^<!--.*?^(?:# .*)^-->\s+)(.*)?")?;
+        let changes_regex = regex::Regex::new(r"(?ms)(^<!-- <KEEP>.*?$^(?:.*)^<\/KEEP> -->\s+)(.*)?")?;
         let captures = changes_regex
             .captures(&next_changelog)
             .expect("changelog format was unexpected");

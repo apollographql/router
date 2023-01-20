@@ -42,7 +42,7 @@ impl QueryPlan {
         context: &'a Context,
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
-        schema: &'a Schema,
+        schema: &'a Arc<Schema>,
         sender: futures::channel::mpsc::Sender<Response>,
     ) -> Response {
         let root = Path::empty();
@@ -83,7 +83,7 @@ impl QueryPlan {
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
-    pub(crate) schema: &'a Schema,
+    pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,

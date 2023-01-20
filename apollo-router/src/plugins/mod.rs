@@ -20,6 +20,7 @@ macro_rules! schemar_fn {
     };
 }
 
+mod authentication;
 pub(crate) mod csrf;
 mod expose_query_plan;
 mod external;

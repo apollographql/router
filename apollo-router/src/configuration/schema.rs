@@ -4,7 +4,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
-use std::sync::Arc;
 
 use itertools::Itertools;
 use jsonschema::error::ValidationErrorKind;
@@ -15,7 +14,6 @@ use schemars::schema::RootSchema;
 use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
-use super::expansion::expand_env_variables;
 use super::expansion::Expansion;
 use super::experimental::log_used_experimental_conf;
 use super::plugins;
@@ -102,7 +100,7 @@ pub(crate) fn validate_yaml_configuration(
 
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true)?;
-        let expanded_yaml = expand_env_variables(&upgraded, &expansion)?;
+        let expanded_yaml = expansion.expand_env_variables(&upgraded)?;
         if schema.validate(&expanded_yaml).is_ok() {
             yaml = upgraded;
         } else {
@@ -110,7 +108,7 @@ pub(crate) fn validate_yaml_configuration(
         }
     }
     log_used_experimental_conf(&yaml);
-    let expanded_yaml = expand_env_variables(&yaml, &expansion)?;
+    let expanded_yaml = expansion.expand_env_variables(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
     if let Err(errors_it) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
@@ -263,7 +261,7 @@ pub(crate) fn validate_yaml_configuration(
             ),
         });
     }
-    config.validated_yaml = Arc::new(expanded_yaml);
+    config.validated_yaml = Some(expanded_yaml);
     Ok(config)
 }
 

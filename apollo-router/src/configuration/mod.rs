@@ -9,12 +9,12 @@ mod tests;
 mod upgrade;
 mod yaml;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
-use std::sync::Arc;
 
 use derivative::Derivative;
 use displaydoc::Display;
@@ -69,24 +69,27 @@ pub enum ConfigurationError {
 
     /// could not migrate configuration: {error}.
     MigrationFailure { error: String },
+
+    /// could not load certificate authorities: {error}
+    CertificateAuthorities { error: String },
 }
 
 /// The configuration for the router.
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-#[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
+#[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
 pub struct Configuration {
     /// The raw configuration string.
     #[serde(skip)]
-    pub(crate) validated_yaml: Arc<Value>,
+    pub(crate) validated_yaml: Option<Value>,
 
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
 
-    /// Healthcheck configuration
+    /// Health check configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
@@ -106,6 +109,9 @@ pub struct Configuration {
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
+
+    #[serde(default)]
+    pub(crate) tls: Tls,
 
     /// Plugin configuration
     #[serde(default)]
@@ -144,6 +150,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
+            #[serde(default)]
+            tls: Tls,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -156,6 +164,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
+            .tls(ad_hoc.tls)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -178,7 +187,6 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
-        validated_yaml: Option<Value>,
         server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
@@ -188,9 +196,10 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
-            validated_yaml: Arc::new(validated_yaml.unwrap_or_default()),
+            validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -203,6 +212,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -302,6 +312,13 @@ impl Configuration {
     }
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        // We want to trigger all defaulting logic so don't use the raw builder.
+        Configuration::from_str("").expect("default configuration must be valid")
+    }
+}
+
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
@@ -316,6 +333,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
             validated_yaml: Default::default(),
@@ -331,6 +349,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -565,11 +584,27 @@ impl Default for Supergraph {
 }
 
 /// Automatic Persisted Queries (APQ) configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
+    /// Activates Automatic Persisted Queries (enabled by default)
+    #[serde(default = "default_apq")]
+    pub(crate) enabled: bool,
     /// Cache configuration
     pub(crate) experimental_cache: Cache,
+}
+
+fn default_apq() -> bool {
+    true
+}
+
+impl Default for Apq {
+    fn default() -> Self {
+        Self {
+            enabled: default_apq(),
+            experimental_cache: Default::default(),
+        }
+    }
 }
 
 /// Query planning cache configuration
@@ -619,6 +654,65 @@ impl Default for InMemoryCache {
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
     pub(crate) urls: Vec<String>,
+}
+
+/// TLS related configuration options.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Tls {
+    #[serde(default)]
+    pub(crate) subgraph: TlsSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: TlsSubgraph,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraphWrapper {
+    #[builder]
+    pub(crate) fn new(all: TlsSubgraph, subgraphs: HashMap<String, TlsSubgraph>) -> Self {
+        Self { all, subgraphs }
+    }
+}
+
+impl Default for TlsSubgraphWrapper {
+    fn default() -> Self {
+        Self::builder().all(TlsSubgraph::default()).build()
+    }
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraph {
+    /// list of certificate authorities in PEM format
+    #[serde(default)]
+    pub(crate) certificate_authorities: Option<String>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraph {
+    #[builder]
+    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
+        Self {
+            certificate_authorities,
+        }
+    }
+}
+
+impl Default for TlsSubgraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
 }
 
 /// Configuration options pertaining to the sandbox page.
@@ -710,7 +804,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the healthcheck endpoint
+    /// Set to false to disable the health check endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }

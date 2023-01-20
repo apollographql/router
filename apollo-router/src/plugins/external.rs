@@ -35,7 +35,7 @@ use crate::services::external::PipelineStep;
 use crate::services::router;
 use crate::Context;
 
-pub(crate) const EXTERNAL_SPAN_NAME: &str = "external plugin";
+pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 #[derive(Debug)]
 struct ExternalPlugin {
@@ -148,8 +148,10 @@ impl Plugin for ExternalPlugin {
                             my_sdl,
                         )?;
 
+                        request.context.enter_active_request().await;
+
                         // Second, call our co-processor and get a reply.
-                        let co_processor_output = call_external(
+                        let res = call_external(
                             proto_url,
                             timeout,
                             PipelineStep::RouterRequest,
@@ -158,7 +160,11 @@ impl Plugin for ExternalPlugin {
                             context,
                             sdl,
                         )
-                        .await?;
+                        .await;
+
+                        request.context.leave_active_request().await;
+
+                        let co_processor_output = res?;
 
                         tracing::debug!(?co_processor_output, "co-processor returned");
 
@@ -318,7 +324,7 @@ impl Plugin for ExternalPlugin {
             .instrument(external_service_span())
             .option_layer(request_layer)
             .option_layer(response_layer)
-            .buffer(20_000)
+            .buffered()
             .service(service)
             .boxed()
     }
