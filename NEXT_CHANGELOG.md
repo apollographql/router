@@ -31,41 +31,6 @@ Two new functions, `base64::encode()` and `base64::decode()` may now be used to 
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2394
 
-### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397), [Issue #2412](https://github.com/apollographql/router/issues/2412))
-
-Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
-Note that strings are output as `<redacted>` so that we do not leak confidential or sensitive information.
-Boolean and numerics are output.
-
-For example:
-```json
-{
-   "session_id": "fbe09da3-ebdb-4863-8086-feb97464b8d7", // Randomly generated at Router startup.
-   "version": "1.4.0", // The version of the router
-   "os": "linux",
-   "ci": null, // If CI is detected then this will name the CI vendor
-   "usage": {
-     "configuration.headers.all.request.propagate.named.<redacted>": 3,
-     "configuration.headers.all.request.propagate.default.<redacted>": 1,
-     "configuration.headers.all.request.len": 3
-     "configuration.headers.subgraphs.<redacted>.request.propagate.named.<redacted>": 2,
-     "configuration.headers.subgraphs.<redacted>.request.len": 2,
-     "configuration.headers.subgraphs.len": 1,
-     "configuration.homepage.enabled.true": 1,
-     "args.config-path.redacted": 1,
-     "args.hot-reload.true": 1,
-     //Many more keys. This is dynamic and will change over time.
-     //More...
-     //More...
-     //More...
-   }
- }
-```
-
-Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398, https://github.com/apollographql/router/pull/2413
-
 ### Override the root certificate list for subgraph requests ([Issue #1503](https://github.com/apollographql/router/issues/1503))
 
 we might want to connect over TLS to a subgraph with a self signed certificate, or using a custom certificate authority.
@@ -109,6 +74,12 @@ openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2008
 
+### Measure the router's processing time ([Issue #1949](https://github.com/apollographql/router/issues/1949) [Issue #2057](https://github.com/apollographql/router/issues/2057))
+
+There is a new metric called `apollo_router_processing_time` that measures the time (in seconds) spent executing the request minus the time spent waiting for an external request (subgraph request or external plugin). This accounts both for the time spent actually executing on the request, and the time spent waiting for concurrent client requests to be executed.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
+
 ### Make APQ optional ([PR #2386](https://github.com/apollographql/router/pull/2386))
 
 Automatic persisted queries support is enabled by default, this adds an option to deactivate it:
@@ -121,11 +92,41 @@ supergraph:
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
 
-### Measure the router's processing time ([Issue #1949](https://github.com/apollographql/router/issues/1949) [Issue #2057](https://github.com/apollographql/router/issues/2057))
+### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397), [Issue #2412](https://github.com/apollographql/router/issues/2412))
 
-There is a new metric called `apollo_router_processing_time` that measures the time (in seconds) spent executing the request minus the time spent waiting for an external request (subgraph request or external plugin). This accounts both for the time spent actually executing on the request, and the time spent waiting for concurrent client requests to be executed.
+Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
+Note that strings are output as `<redacted>` so that we do not leak confidential or sensitive information.
+Boolean and numerics are output.
 
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
+For example:
+```json
+{
+   "session_id": "fbe09da3-ebdb-4863-8086-feb97464b8d7", // Randomly generated at Router startup.
+   "version": "1.4.0", // The version of the router
+   "os": "linux",
+   "ci": null, // If CI is detected then this will name the CI vendor
+   "usage": {
+     "configuration.headers.all.request.propagate.named.<redacted>": 3,
+     "configuration.headers.all.request.propagate.default.<redacted>": 1,
+     "configuration.headers.all.request.len": 3,
+     "configuration.headers.subgraphs.<redacted>.request.propagate.named.<redacted>": 2,
+     "configuration.headers.subgraphs.<redacted>.request.len": 2,
+     "configuration.headers.subgraphs.len": 1,
+     "configuration.homepage.enabled.true": 1,
+     "args.config-path.redacted": 1,
+     "args.hot-reload.true": 1,
+     //Many more keys. This is dynamic and will change over time.
+     //More...
+     //More...
+     //More...
+   }
+ }
+```
+
+Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398, https://github.com/apollographql/router/pull/2413
+
 
 ## 🐛 Fixes
 
