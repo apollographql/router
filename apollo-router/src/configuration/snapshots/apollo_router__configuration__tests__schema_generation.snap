@@ -3223,7 +3223,7 @@ expression: "&schema"
           "nullable": true
         },
         "deduplicate_variables": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
           "type": "boolean",
           "nullable": true
         },

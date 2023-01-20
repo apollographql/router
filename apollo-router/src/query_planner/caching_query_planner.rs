@@ -288,7 +288,6 @@ mod tests {
     use super::*;
     use crate::error::PlanErrors;
     use crate::query_planner::QueryPlan;
-    use crate::query_planner::QueryPlanOptions;
     use crate::spec::Query;
 
     mock! {
@@ -384,7 +383,6 @@ mod tests {
                 let query_plan: QueryPlan = QueryPlan {
                     formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    options: QueryPlanOptions::default(),
                     usage_reporting: UsageReporting {
                         stats_report_key: "this is a test report key".to_string(),
                         referenced_fields_by_type: Default::default(),

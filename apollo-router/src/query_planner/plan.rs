@@ -17,12 +17,6 @@ use crate::spec::query::SubSelection;
 use crate::spec::Query;
 use crate::spec::Schema;
 
-/// Query planning options.
-#[derive(Clone, Eq, Hash, PartialEq, Debug, Default, Serialize, Deserialize)]
-pub(crate) struct QueryPlanOptions {
-    /// Enable the variable deduplication optimization on the QueryPlan
-    pub(crate) enable_deduplicate_variables: bool,
-}
 /// A planner key.
 ///
 /// This type consists of a query string and an optional operation string
@@ -36,7 +30,6 @@ pub struct QueryPlan {
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<String>,
     pub(crate) query: Arc<Query>,
-    pub(crate) options: QueryPlanOptions,
 }
 
 /// This default impl is useful for test users
@@ -56,7 +49,6 @@ impl QueryPlan {
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::default()),
-            options: QueryPlanOptions::default(),
         }
     }
 }
