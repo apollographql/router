@@ -62,8 +62,9 @@ pub(crate) struct Cors {
     pub(crate) methods: Vec<String>,
 
     /// The `Access-Control-Max-Age` header value in seconds
-    #[serde(default)]
-    pub(crate) max_age: Option<u64>,
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    pub(crate) max_age: Option<Duration>,
 }
 
 impl Default for Cors {
@@ -102,7 +103,7 @@ impl Cors {
         origins: Option<Vec<String>>,
         match_origins: Option<Vec<String>>,
         methods: Option<Vec<String>>,
-        max_age: Option<u64>,
+        max_age: Option<Duration>,
     ) -> Self {
         Self {
             expose_headers,
@@ -157,7 +158,7 @@ impl Cors {
                 },
             )));
         let cors = if let Some(max_age) = self.max_age {
-            cors.max_age(Duration::from_secs(max_age))
+            cors.max_age(max_age)
         } else {
             cors
         };
