@@ -843,7 +843,7 @@ impl<'de> Visitor<'de> for FieldVisitor {
     }
 }
 
-const FIELDS: &'static [&'static str] = &["all", "subgraphs"];
+const FIELDS: &[&str] = &["all", "subgraphs"];
 
 #[test]
 fn test_subgraph_override() {
@@ -874,8 +874,8 @@ fn test_subgraph_override_json() {
     });
 
     let data: TestSubgraphOverride = serde_json::from_value(first).unwrap();
-    assert_eq!(data.subgraph.all.a, false);
-    assert_eq!(data.subgraph.subgraphs.get("products").unwrap().a, true);
+    assert!(!data.subgraph.all.a);
+    assert!(data.subgraph.subgraphs.get("products").unwrap().a);
 
     let second = json!({
         "subgraph": {
@@ -891,9 +891,9 @@ fn test_subgraph_override_json() {
     });
 
     let data: TestSubgraphOverride = serde_json::from_value(second).unwrap();
-    assert_eq!(data.subgraph.all.a, false);
+    assert!(!data.subgraph.all.a);
     // since products did not set the `a` field, it should take the override value from `all`
-    assert_eq!(data.subgraph.subgraphs.get("products").unwrap().a, false);
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
 
     // the default value from `all` should work even if it is parsed after
     let third = json!({
@@ -910,8 +910,8 @@ fn test_subgraph_override_json() {
     });
 
     let data: TestSubgraphOverride = serde_json::from_value(third).unwrap();
-    assert_eq!(data.subgraph.all.a, false);
+    assert!(!data.subgraph.all.a);
     // since products did not set the `a` field, it should take the override value from `all`
-    assert_eq!(data.subgraph.subgraphs.get("products").unwrap().a, false);
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
     panic!()
 }
