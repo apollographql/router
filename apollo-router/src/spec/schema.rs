@@ -332,6 +332,12 @@ impl Schema {
             }
 
             let document = tree.document();
+            let introspection_document = introspection_tree.document();
+            let definitions = || {
+                document
+                    .definitions()
+                    .chain(introspection_document.definitions())
+            };
             let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
             let mut subgraphs = HashMap::new();
             let mut root_operations = HashMap::new();
@@ -340,10 +346,7 @@ impl Schema {
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L294-L300
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L215-L263
-            for definition in document
-                .definitions()
-                .chain(introspection_tree.document().definitions())
-            {
+            for definition in definitions() {
                 macro_rules! implements_interfaces {
                     ($definition:expr) => {{
                         let name = $definition
@@ -511,8 +514,7 @@ impl Schema {
 
             macro_rules! implement_object_type_or_interface_map {
                 ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                    let mut map = document
-                        .definitions()
+                    let mut map = definitions()
                         .filter_map(|definition| {
                             if let $ast_ty(definition) = definition {
                                 match <$ty>::try_from(definition) {
@@ -525,8 +527,7 @@ impl Schema {
                         })
                         .collect::<Result<HashMap<String, $ty>, SchemaError>>()?;
 
-                    document
-                        .definitions()
+                    definitions()
                         .filter_map(|definition| {
                             if let $ast_extension_ty(extension) = definition {
                                 match <$ty>::try_from(extension) {
@@ -573,8 +574,7 @@ impl Schema {
 
             macro_rules! implement_input_object_type_or_interface_map {
                 ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                    let mut map = document
-                        .definitions()
+                    let mut map = definitions()
                         .filter_map(|definition| {
                             if let $ast_ty(definition) = definition {
                                 match <$ty>::try_from(definition) {
@@ -589,8 +589,7 @@ impl Schema {
                         .collect::<Result<HashMap<String, $ty>, _>>()
                         .map_err(|e| SchemaError::Api(e.to_string()))?;
 
-                    document
-                        .definitions()
+                    definitions()
                         .filter_map(|definition| {
                             if let $ast_extension_ty(extension) = definition {
                                 Some(<$ty>::try_from(extension))
@@ -627,8 +626,7 @@ impl Schema {
                 ast::Definition::InputObjectTypeExtension,
             );
 
-            let custom_scalars = document
-                .definitions()
+            let custom_scalars = definitions()
                 .filter_map(|definition| match definition {
                     // Spec: https://spec.graphql.org/draft/#sec-Scalars
                     // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
@@ -656,8 +654,7 @@ impl Schema {
                 })
                 .collect::<Result<_, _>>()?;
 
-            let enums: HashMap<String, HashSet<String>> = document
-                .definitions()
+            let enums: HashMap<String, HashSet<String>> = definitions()
                 .filter_map(|definition| match definition {
                     // Spec: https://spec.graphql.org/draft/#sec-Enums
                     ast::Definition::EnumTypeDefinition(definition) => {
