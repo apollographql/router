@@ -314,9 +314,8 @@ impl Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
-        Configuration::builder()
-            .build()
-            .expect("default configuration must be valid")
+        // We want to trigger all defaulting logic so don't use the raw builder.
+        Configuration::from_str("").expect("default configuration must be valid")
     }
 }
 
