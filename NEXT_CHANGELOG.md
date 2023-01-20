@@ -122,3 +122,16 @@ supergraph:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
 
+## 🛠 Maintenance
+
+### Parse schemas and queries with `apollo-compiler`
+
+The Router now uses the higher-level representation from `apollo-compiler`
+instead of using the AST from `apollo-parser` directly.
+This is a first step towards replacing a bunch of code that grew organically
+during the Router’s early days, with a general-purpose library with intentional design.
+Internal data structures are unchanged for now.
+Parsing behavior has been tested to be identical on a large corpus
+of production schemas and queries.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2466
