@@ -161,7 +161,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🛠 Maintenance
 
-### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
+### Remove unused factory traits ([PR #2372](https://github.com/apollographql/router/pull/2372))
 
 We removed a factory trait that was only used in a single implementation, which removes the overall requirement that execution and subgraph building take place via that factory trait.
 
