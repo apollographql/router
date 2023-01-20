@@ -178,11 +178,46 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🛠 Maintenance
 
-### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
+### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/issues/2180))
 
 We removed a factory trait that was only used in a single implementation, which removes the overall requirement that execution and subgraph building take place via that factory trait.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
+
+### Improve #[serde(default)] attribute on structs ([Issue #2424](https://github.com/apollographql/router/issues/2424))
+
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl.
+
++ GOOD
+```rust
+#[serde(deny_unknown_fields, default)]
+struct Export {
+    url: Url,
+    enabled: bool
+}
+
+impl Default for Export {
+  fn default() -> Self {
+    Self {
+      url: default_url_fn(),
+      enabled: false
+    }
+  }
+}
+```
+
++ BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url,
+    #[serde(default)]
+    enabled: bool
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2424
 
 ### Optimize header propagation plugin's regular expression matching ([PR #2392](https://github.com/apollographql/router/pull/2392))
 
