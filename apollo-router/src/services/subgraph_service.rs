@@ -307,18 +307,24 @@ async fn call_http(
         );
     });
     let cloned_service_name = service_name.clone();
+    let cloned_context = context.clone();
     let (parts, body) = async move {
-        let response = client
+        cloned_context.enter_active_request().await;
+        let response = match client
             .call(request)
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = format!("{err:?}").as_str());
+            .await {
+                Err(err) => {
+                    tracing::error!(fetch_error = format!("{err:?}").as_str());
+                    cloned_context.leave_active_request().await;
 
-                FetchError::SubrequestHttpError {
-                    service: service_name.clone(),
-                    reason: err.to_string(),
+                    return Err(FetchError::SubrequestHttpError {
+                        service: service_name.clone(),
+                        reason: err.to_string(),
+                    }.into());
                 }
-            })?;
+                Ok(response) => response,
+            };
+
         // Keep our parts, we'll need them later
         let (parts, body) = response.into_parts();
         if display_headers {
@@ -332,7 +338,10 @@ async fn call_http(
                 if !content_type_str.contains(APPLICATION_JSON.essence_str())
                     && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 {
+                    cloned_context.leave_active_request().await;
+
                     return if !parts.status.is_success() {
+
                         Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
                             reason: format!(
@@ -351,17 +360,23 @@ async fn call_http(
             }
         }
 
-        let body = hyper::body::to_bytes(body)
+        let body = match hyper::body::to_bytes(body)
             .instrument(tracing::debug_span!("aggregate_response_data"))
-            .await
-            .map_err(|err| {
-                tracing::error!(fetch_error = format!("{err:?}").as_str());
+            .await {
+                Err(err) => {
+                    cloned_context.leave_active_request().await;
 
-                FetchError::SubrequestHttpError {
+                    tracing::error!(fetch_error = format!("{err:?}").as_str());
+
+                return Err(FetchError::SubrequestHttpError {
                     service: service_name.clone(),
                     reason: err.to_string(),
-                }
-            })?;
+                }.into())
+
+                }, Ok(body) => body,
+            };
+
+            cloned_context.leave_active_request().await;
 
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;
@@ -451,7 +466,6 @@ pub(crate) async fn compress(body: String, headers: &HeaderMap) -> Result<Vec<u8
 #[derive(Clone)]
 pub(crate) struct SubgraphServiceFactory {
     pub(crate) services: Arc<HashMap<String, Arc<dyn MakeSubgraphService>>>,
-
     pub(crate) plugins: Arc<Plugins>,
 }
 

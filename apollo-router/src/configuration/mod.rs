@@ -89,7 +89,7 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) server: Server,
 
-    /// Healthcheck configuration
+    /// Health check configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
@@ -314,9 +314,8 @@ impl Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
-        Configuration::builder()
-            .build()
-            .expect("default configuration must be valid")
+        // We want to trigger all defaulting logic so don't use the raw builder.
+        Configuration::from_str("").expect("default configuration must be valid")
     }
 }
 
@@ -803,7 +802,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
-    /// Set to false to disable the healthcheck endpoint
+    /// Set to false to disable the health check endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }

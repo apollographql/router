@@ -549,7 +549,7 @@ expression: "&schema"
       "additionalProperties": false
     },
     "health-check": {
-      "description": "Healthcheck configuration",
+      "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
         "enabled": true
@@ -557,7 +557,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Set to false to disable the healthcheck endpoint",
+          "description": "Set to false to disable the health check endpoint",
           "default": true,
           "type": "boolean"
         },

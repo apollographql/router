@@ -25,33 +25,80 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
-### JWT authentication for the router ([Issue #912](https://github.com/apollographql/router/issues/912))
-
-JWT authentication is now configurable for the router.
-
-Here's a typical sample configuration fragment:
-
-```yaml
-authentication:
-  jwt:
-    jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-```
-
-Until the documentation is published to the website, you can read [it](https://github.com/apollographql/router/blob/53d7b710a6bdc0fbef4d7fd0d13f49002ee70e84/docs/source/configuration/authn-jwt.mdx) from the pull request.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2348
-
 ### Add support for `base64::encode()` / `base64::decode()` in Rhai ([Issue #2025](https://github.com/apollographql/router/issues/2025))
 
-Two new functions, `base64::encode()` and `base64::decode()` may now be used to Base64-encode or Base64-decode strings, respectively.
+Two new functions, `base64::encode()` and `base64::decode()`, have been added to the capabilities available within Rhai scripts to Base64-encode or Base64-decode strings, respectively.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2394
 
+### Override the root TLS certificate list for subgraph requests ([Issue #1503](https://github.com/apollographql/router/issues/1503))
+
+In some cases, users need to use self-signed certificates or use a custom certificate authority (CA) when communicating with subgraphs.
+
+It is now possible to consigure these certificate-related details using configuration for either specific subgraphs or all subgraphs, as follows:
+
+```yaml
+tls:
+  subgraph:
+    all:
+      certificate_authorities: "${file./path/to/ca.crt}"
+    # Use a separate certificate for the `products` subgraph.
+    subgraphs:
+      products:
+        certificate_authorities: "${file./path/to/product_ca.crt}"
+```
+
+The file referenced in the `certificate_authorities` value is expected to be the combination of several PEM certificates, concatenated together into a single file (as is commonplace with Apache TLS configuration).
+
+These certificates are only configurable via the Router's configuration since using `SSL_CERT_FILE` would also override certificates for sending telemetry and communicating with Apollo Uplink.
+
+While we do not currently support terminating TLS at the Router (from clients), the `tls` is located at the root of the configuration file to allow all TLS-related configuration to be semantically grouped together in the future.
+
+Note: If you are attempting to use a self-signed certificate, it must be generated with the proper file extension and with `basicConstraints` disabled.  For example, a `v3.ext` extension file:
+
+```
+subjectKeyIdentifier   = hash
+authorityKeyIdentifier = keyid:always,issuer:always
+# this has to be disabled
+# basicConstraints       = CA:TRUE
+keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
+subjectAltName         = DNS:local.apollo.dev
+issuerAltName          = issuer:copy
+```
+
+Using this `v3.ext` file, the certificate can be generated with the appropriate certificate signing request (CSR) - in this example, `server.csr` - using the following `openssl` command:
+
+```
+openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
+```
+
+This will produce the file as `server.crt` which can be passed as `certificate_authorities`.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2008
+
+### Measure the Router's processing time ([Issue #1949](https://github.com/apollographql/router/issues/1949) [Issue #2057](https://github.com/apollographql/router/issues/2057))
+
+The Router now emits a metric called `apollo_router_processing_time` which measures the time spent executing the request **minus** the time spent waiting for an external requests (e.g., subgraph request/response or external plugin request/response).  This measurement accounts both for the time spent actually executing the request sa well as the time spent waiting for concurrent client requests to be executed.  The unit of measurement for the metric is in seconds, though this is not meant to indicate in any way that the Router is going to add actual seconds of overhead.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
+
+### Allow the disabling of automated persisted queries (APQ) ([PR #2386](https://github.com/apollographql/router/pull/2386))
+
+Automatic persisted queries (APQ) support is still enabled by default, but can now be disabled using configuration:
+
+```yaml
+supergraph:
+  apq:
+    enabled: false
+```
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
+
 ### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397), [Issue #2412](https://github.com/apollographql/router/issues/2412))
 
-Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunity to reduce complexity and remain diligent about the surface area of the Router.  The privacy of your and your user's data is of critical importantance to the core Router team and we handle it in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
-Note that strings are output as `<redacted>` so that we do not leak confidential or sensitive information.
-Boolean and numerics are output.
+Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunities to reduce complexity and remain diligent about the surface area of the Router over time.  The privacy of your and your user's data is of critical importance to the core Router team and we handle it with great care in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
+
+Booleans and numeric values are included, however, any strings are represented as `<redacted>` to avoid leaking confidential or sensitive information.
 
 For example:
 ```json
@@ -63,7 +110,7 @@ For example:
    "usage": {
      "configuration.headers.all.request.propagate.named.<redacted>": 3,
      "configuration.headers.all.request.propagate.default.<redacted>": 1,
-     "configuration.headers.all.request.len": 3
+     "configuration.headers.all.request.len": 3,
      "configuration.headers.subgraphs.<redacted>.request.propagate.named.<redacted>": 2,
      "configuration.headers.subgraphs.<redacted>.request.len": 2,
      "configuration.headers.subgraphs.len": 1,
@@ -78,70 +125,16 @@ For example:
  }
 ```
 
-Users can disable the sending this data by using the command line flag `--anonymous-telemetry-disabled` or setting the environment variable `APOLLO_TELEMETRY_DISABLED=true`
+Users can disable this mechanism by setting the environment variable `APOLLO_TELEMETRY_DISABLED=true` in their environment.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2173, https://github.com/apollographql/router/issues/2398, https://github.com/apollographql/router/pull/2413
 
-### Override the root certificate list for subgraph requests ([Issue #1503](https://github.com/apollographql/router/issues/1503))
-
-we might want to connect over TLS to a subgraph with a self signed certificate, or using a custom certificate authority.
-This adds a configuration option to set the list of certificate authorities for all the subgraphs, as follows:
-
-```yaml
-tls:
-  subgraph:
-    all:
-      certificate_authorities: "${file./path/to/ca.crt}"
-    # override per subgraph
-    subgraphs:
-      products:
-        certificate_authorities: "${file./path/to/product_ca.crt}"
-```
-
-The file is expected to be a list of certificates in PEM format, concatenated (as in Apache configuration).
-
-This uses a configuration option because the SSL_CERT_FILE environment variable would override certificates for telemetry and Uplink as well.
-The configuration option takes root in a tls field to allow for future work around TLS termination in the router (if it does not happen, the option is fine as is, but if it does, we would like to have them in the same place). This is a global option for all subgraphs.
-
-If this is used with self signed certificates, those certificates have to be generated with the proper extensions:
-
-extensions file `v3.ext`:
-
-```
-subjectKeyIdentifier   = hash
-authorityKeyIdentifier = keyid:always,issuer:always
-# this has to be disabled
-# basicConstraints       = CA:TRUE
-keyUsage               = digitalSignature, nonRepudiation, keyEncipherment, dataEncipherment, keyAgreement, keyCertSign
-subjectAltName         = DNS:local.apollo.dev
-issuerAltName          = issuer:copy
-```
-
-And the certificate can be generated as follows from a certificate signing request:
-
-```
-openssl x509 -req -in server.csr -signkey server.key -out server.crt -extfile v3.ext
-```
-
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2008
-
-### Make APQ optional ([PR #2386](https://github.com/apollographql/router/pull/2386))
-
-Automatic persisted queries support is enabled by default, this adds an option to deactivate it:
-
-```yaml
-supergraph:
-  apq:
-    enabled: false
-```
-
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2386
 
 ## 🐛 Fixes
 
 ### Don't send header names to Studio if `send_headers` is `none` ([Issue #2403](https://github.com/apollographql/router/issues/2403))
 
-Before when `send_headers` was set to `none` (like in the following example of configuration) we sent header names with empty header values. Now we don't send anything to Studio.
+We no longer transmit header **names** to Apollo Studio when `send_headers` is set to `none` (the default).  Previously, when `send_headers` was set to `none` (like in the following example) the header names were still transmitted with _empty_ header values.   No actual values were ever being sent unless `send_headers` was sent to a more permissive option like `forward_headers_only` or `forward_headers_except`.
 
 ```yaml
 telemetry:
@@ -152,46 +145,68 @@ telemetry:
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2425
 
 
-### Specify content type to `application/json` on requests with content-type/accept header missmatch ([Issue #2334](https://github.com/apollographql/router/issues/2334))
+### Response with `Content-type: application/json` when encountering incompatible `Content-type` or `Accept` request headers ([Issue #2334](https://github.com/apollographql/router/issues/2334))
 
-When receiving requests with invalid content-type/accept header missmatch (e.g multipart requests) , it now specifies the right `content-type` header.
+When receiving requests with `content-type` and `accept` header mismatches (e.g., on multipart requests) the Router now utilizes a correct `content-type` header in its response.
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2370
 
+### Fix `APOLLO_USAGE_REPORTING_INGRESS_URL` behavior when Router was run without a configuration file
+
+The environment variable `APOLLO_USAGE_REPORTING_INGRESS_URL` (not usually necessary under typical operation) was **not** being applied correctly when the Router was run without a configuration file.
+In addition, defaulting of environment variables now directly injects the variable rather than injecting via expansion expression.  This means that the use of `APOLLO_ROUTER_CONFIG_ENV_PREFIX` (even less common) doesn't affect injected configuration defaults.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2432
 
 ## 🛠 Maintenance
 
 ### Remove unused factory traits ([Issue #2180](https://github.com/apollographql/router/pull/2372))
 
-Building the execution and subgraph services had to go through a factory trait before, which is not
-needed anymore since there is only one useful implementation.
+We removed a factory trait that was only used in a single implementation, which removes the overall requirement that execution and subgraph building take place via that factory trait.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2372
 
-### Optimize header propagation plugin's regex matching ([PR #2392](https://github.com/apollographql/router/pull/2392))
+### Optimize header propagation plugin's regular expression matching ([PR #2392](https://github.com/apollographql/router/pull/2392))
 
-We've changed the plugin to reduce the chances of generating memory allocations when applying regex-based header propagation rules.
+We've changed the header propagation plugins' behavior to reduce the chance of memory allocations occurring when applying regex-based header propagation rules.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2392
 
 ## 📚 Documentation
 
-### Add documentation to create custom metrics in plugins ([Issue #2294](https://github.com/apollographql/router/issues/2294))
+### Creating custom metrics in plugins ([Issue #2294](https://github.com/apollographql/router/issues/2294))
 
-To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [tracing macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event. If you observe a specific naming pattern for your event you'll be able to generate your own custom metrics directly in Prometheus.
+To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [`tracing` macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event. If you observe a specific naming pattern for your event, you'll be able to generate your own custom metrics directly in Prometheus.
 
 To publish a new metric, use tracing macros to generate an event that contains one of the following prefixes:
 
-`monotonic_counter.` (non-negative numbers): Used when the counter should only ever increase
-`counter.`: Used when the counter can go up or down
-`value.`: Used for discrete data points (i.e., summing them does not make semantic sense)
-`histogram.`: Used for histograms (takes f64)
+`monotonic_counter.` _(non-negative numbers)_: Used when the metric will only ever increase.
+`counter.`: For when the metric may increase or decrease over time.
+`value.`: For discrete data points (i.e., when taking the sum of values does not make semantic sense)
+`histogram.`: For building histograms (takes `f64`)
+
+This information is also available in [the Apollo Router documentation](https://www.apollographql.com/docs/router/customizations/native#add-custom-metrics).
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
 
 ## 🥼 Experimental
 
-### Experimental 🥼 Redis cache for APQ and query planning ([PR #2431](https://github.com/apollographql/router/pull/2431))
+### JWT authentication ([Issue #912](https://github.com/apollographql/router/issues/912))
+
+Experimental JWT authentication is now configurable.  Here's a typical sample configuration fragment:
+
+```yaml
+authentication:
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+```
+
+Until the documentation is published, you can [read more about configuring it](https://github.com/apollographql/router/blob/dev/docs/source/configuration/authn-jwt.mdx) in our GitHub repository source.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2348
+
+### Redis cache for APQ and query planning ([PR #2431](https://github.com/apollographql/router/pull/2431))
 
 Experimental caching was [already available for APQ and query planning](https://github.com/apollographql/router/blob/dev/CHANGELOG.md#experimental--apq-and-query-planner-redis-caching-fixes-pr-2176) but required a custom router build with the `experimental_cache` Cargo feature. That feature is now removed to make that cache easier to test.
 

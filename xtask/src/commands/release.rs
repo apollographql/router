@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Error, Result};
 use cargo_metadata::MetadataCommand;
+use chrono::prelude::Utc;
+use git2::Repository;
 use octorust::types::PullsCreateRequest;
 use octorust::Client;
 use std::str::FromStr;
@@ -28,6 +30,7 @@ enum Version {
     Minor,
     Patch,
     Current,
+    Nightly,
     Version(String),
 }
 
@@ -41,6 +44,7 @@ impl FromStr for Version {
             "minor" => Version::Minor,
             "patch" => Version::Patch,
             "current" => Version::Current,
+            "nightly" => Version::Nightly,
             version => Version::Version(version.to_string()),
         })
     }
@@ -102,19 +106,29 @@ impl Prepare {
                 std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN env variable must be set"),
             ),
         )?;
-        if !self.current_branch && !self.dry_run {
-            self.switch_to_release_branch(&version)?;
-        }
-        self.update_install_script(&version)?;
-        self.update_helm_charts(&version)?;
-        self.update_docs(&version)?;
-        self.docker_files(&version)?;
-        self.finalize_changelog(&version)?;
         self.update_lock()?;
         self.check_compliance()?;
-        if !self.dry_run {
-            self.create_release_pr(&github, &version).await?;
+
+        if let Version::Nightly = &self.version {
+            println!("Skipping various steps becasuse this is a nightly build.");
+        } else {
+            self.update_install_script(&version)?;
+            self.update_helm_charts(&version)?;
+            self.update_docs(&version)?;
+            self.docker_files(&version)?;
+            self.finalize_changelog(&version)?;
+
+            if !self.dry_run {
+                if !self.current_branch {
+                    self.switch_to_release_branch(&version)?;
+                }
+
+                // This also commits all changes to previously tracked files
+                // created by this script.
+                self.create_release_pr(&github, &version).await?;
+            }
         }
+
         Ok(())
     }
 
@@ -139,12 +153,16 @@ impl Prepare {
             ));
         }
 
-        if which::which("helm").is_err() {
-            return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
-        }
+        if let Version::Nightly = &self.version {
+            println!("Skipping requirement that helm and helm-docs is installed because we're building a nightly that doesn't require those tools.");
+        } else {
+            if which::which("helm").is_err() {
+                return Err(anyhow!("the 'helm' executable could not be found in your PATH.  Install it using the instructions at https://helm.sh/docs/intro/install/ and try again."));
+            }
 
-        if which::which("helm-docs").is_err() {
-            return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+            if which::which("helm-docs").is_err() {
+                return Err(anyhow!("the 'helm-docs' executable could not be found in your PATH.  Install it using the instructions at https://github.com/norwoodj/helm-docs#installation and try again."));
+            }
         }
 
         if which::which("cargo-about").is_err() {
@@ -155,8 +173,12 @@ impl Prepare {
             return Err(anyhow!("the 'cargo-deny' executable could not be found in your PATH.  Install it by running `cargo install --locked cargo-deny"));
         }
 
-        if std::env::var("GITHUB_TOKEN").is_err() {
-            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."))
+        if let Version::Nightly = &self.version {
+            println!("Skipping requirement that GITHUB_TOKEN is set in the environment because this is a nightly release which doesn't yet need it.");
+        } else {
+            if std::env::var("GITHUB_TOKEN").is_err() {
+                return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
+            }
         }
         Ok(())
     }
@@ -197,6 +219,31 @@ impl Prepare {
                 "--package",
                 "apollo-router"
             ]),
+            Version::Nightly => {
+                let head_commit: String = match Repository::open_from_env() {
+                    Ok(repo) => {
+                        let revspec = repo.revparse("HEAD")?;
+                        if revspec.mode().contains(git2::RevparseMode::SINGLE) {
+                            let mut full_hash = revspec.from().unwrap().id().to_string();
+                            full_hash.truncate(8);
+                            full_hash
+                        } else {
+                            panic!("unexpected rev-parse HEAD");
+                        }
+                    }
+                    Err(e) => panic!("failed to open: {}", e),
+                };
+
+                replace_in_file!(
+                    "./apollo-router/Cargo.toml",
+                    r#"^(?P<existingVersion>version\s*=\s*)"[^"]+""#,
+                    format!(
+                        "${{existingVersion}}\"0.0.0-nightly.{}+{}\"",
+                        Utc::now().format("%Y%m%d"),
+                        head_commit
+                    )
+                );
+            }
             Version::Version(version) => {
                 cargo!(["set-version", version, "--package", "apollo-router"])
             }
@@ -205,27 +252,35 @@ impl Prepare {
         let metadata = MetadataCommand::new()
             .manifest_path("./apollo-router/Cargo.toml")
             .exec()?;
-        let version = metadata
+        let resolved_version = metadata
             .root_package()
             .expect("root package missing")
             .version
             .to_string();
-        let packages = vec!["apollo-router-scaffold", "apollo-router-benchmarks"];
-        for package in packages {
-            cargo!(["set-version", &version, "--package", package])
-        }
-        replace_in_file!(
-            "./apollo-router-scaffold/templates/base/Cargo.toml",
-            "^apollo-router\\s*=\\s*\"[^\"]+\"",
-            format!("apollo-router = \"{}\"", version)
-        );
-        replace_in_file!(
-            "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
-            r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
-            format!(r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#, version)
-        );
 
-        Ok(version)
+        if let Version::Nightly = version {
+            println!("Not changing `apollo-router-scaffold` or `apollo-router-benchmarks` because of nightly build mode.");
+        } else {
+            let packages = vec!["apollo-router-scaffold", "apollo-router-benchmarks"];
+            for package in packages {
+                cargo!(["set-version", &resolved_version, "--package", package])
+            }
+            replace_in_file!(
+                "./apollo-router-scaffold/templates/base/Cargo.toml",
+                "^apollo-router\\s*=\\s*\"[^\"]+\"",
+                format!("apollo-router = \"{}\"", resolved_version)
+            );
+            replace_in_file!(
+                "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
+                r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
+                format!(
+                    r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#,
+                    resolved_version
+                )
+            );
+        }
+
+        Ok(resolved_version)
     }
 
     /// Update the `PACKAGE_VERSION` value in `scripts/install.sh` (it should be prefixed with `v`!)
@@ -255,7 +310,10 @@ impl Prepare {
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
             "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
-            format!("https://github.com/apollographql/router/tree/v{}/helm/chart/router", version)
+            format!(
+                "https://github.com/apollographql/router/tree/v{}/helm/chart/router",
+                version
+            )
         );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
@@ -288,6 +346,13 @@ impl Prepare {
     ///   (If not installed, you should [install `helm-docs`](https://github.com/norwoodj/helm-docs))
     fn update_helm_charts(&self, version: &str) -> Result<()> {
         println!("updating helm charts");
+
+        replace_in_file!(
+            "./helm/chart/router/Chart.yaml",
+            "^version:.*?$",
+            format!("version: {}", version)
+        );
+
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
             "appVersion: \"v[^\"]+\"",
@@ -318,7 +383,10 @@ impl Prepare {
                 replace_in_file!(
                     entry.path(),
                     r#"^(?P<indentation>\s+)image:\s*ghcr.io/apollographql/router:v.*$"#,
-                    format!("${{indentation}}image: ghcr.io/apollographql/router:v{}", version)
+                    format!(
+                        "${{indentation}}image: ghcr.io/apollographql/router:v{}",
+                        version
+                    )
                 );
             }
         }
