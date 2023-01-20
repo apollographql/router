@@ -309,16 +309,19 @@ impl Schema {
         return Ok(schema);
 
         fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
-            let schema_with_introspection = Schema::with_introspection(schema);
-            let parser = apollo_parser::Parser::new(&schema_with_introspection);
+            let parser = apollo_parser::Parser::new(include_str!("introspection_types.graphql"));
+            let introspection_tree = parser.parse();
+            let parser = apollo_parser::Parser::new(schema);
             let tree = parser.parse();
 
             // Trace log recursion limit data
             let recursion_limit = tree.recursion_limit();
             tracing::trace!(?recursion_limit, "recursion limit data");
 
+            let introspection_errors = introspection_tree.errors().cloned().collect::<Vec<_>>();
             let errors = tree.errors().cloned().collect::<Vec<_>>();
 
+            assert_eq!(introspection_errors, &[]);
             if !errors.is_empty() {
                 let errors = ParseErrors {
                     raw_schema: schema.to_string(),
@@ -337,7 +340,10 @@ impl Schema {
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L294-L300
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L215-L263
-            for definition in document.definitions() {
+            for definition in document
+                .definitions()
+                .chain(introspection_tree.document().definitions())
+            {
                 macro_rules! implements_interfaces {
                     ($definition:expr) => {{
                         let name = $definition
@@ -746,14 +752,6 @@ impl Schema {
             Some(schema) => schema,
             None => self,
         }
-    }
-
-    fn with_introspection(schema: &str) -> String {
-        format!(
-            "{}\n{}",
-            schema,
-            include_str!("introspection_types.graphql")
-        )
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
@@ -1235,5 +1233,13 @@ GraphQL request:42:1
             }
             other => panic!("unexpected schema result: {:?}", other),
         };
+    }
+
+    // https://github.com/apollographql/router/issues/2269
+    #[test]
+    fn unclosed_brace_error_does_not_panic() {
+        let schema = "schema {";
+        let result = Schema::parse(schema, &Default::default());
+        assert!(result.is_err());
     }
 }
