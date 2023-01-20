@@ -185,6 +185,8 @@ To publish a new metric, use tracing macros to generate an event that contains o
 `value.`: For discrete data points (i.e., when taking the sum of values does not make semantic sense)
 `histogram.`: For building histograms (takes `f64`)
 
+This information is also available in [the Apollo Router documentation](https://www.apollographql.com/docs/router/customizations/native#add-custom-metrics).
+
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
 
 ## 🥼 Experimental
