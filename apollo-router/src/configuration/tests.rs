@@ -683,3 +683,61 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
         _ => {}
     }
 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct TestSubgraphOverride {
+    value: Option<u8>,
+    subgraph: Subgraph<PluginConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+
+struct Subgraph<T>
+where
+    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+{
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: T,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, T>,
+}
+
+impl<'de, T> Deserialize<'de> for Subgraph<T>
+where
+    T: Deserialize<'de>,
+    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+{
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct PluginConfig {
+    #[serde(default = "set_true")]
+    a: bool,
+    #[serde(default)]
+    b: u8,
+}
+
+fn set_true() -> bool {
+    true
+}
+
+#[test]
+fn test_subgraph_override() {
+    let settings = SchemaSettings::draft2019_09().with(|s| {
+        s.option_nullable = true;
+        s.option_add_null_type = false;
+        s.inline_subschemas = true;
+    });
+    let gen = settings.into_generator();
+    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    println!("{}", serde_json::to_string_pretty(&schema).unwrap());
+    panic!()
+}
