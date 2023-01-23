@@ -287,19 +287,24 @@ This file enables you to customize the router's behavior in many ways:
 
 ### Listen address
 
-By default, the router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address like so:
+By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`, but you can specify a different address:
 
-```yaml title="router_unix.yaml"
-#
-# supergraph: Configuration of the Supergraph server
-#
+IPv4:
+```yaml title="router.yaml"
 supergraph:
   # The socket address and port to listen on
   listen: 127.0.0.1:4000
 ```
 
-The router can also listen on a Unix socket (not supported on Windows):
+IPv6:
+```yaml title="router.yaml"
+supergraph:
+  # The socket address and port to listen on. 
+  # Note that this must be quoted to avoid interpretation as an array in YAML.
+  listen: '[::1]:4000'
+```
 
+The Apollo Router can also listen on a Unix socket (not supported on Windows):
 ```yaml title="router_unix.yaml"
 supergraph:
   # Absolute path to a Unix socket
@@ -313,9 +318,6 @@ By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoin
 You can change this path by setting `server.path`:
 
 ```yaml title="router.yaml"
-#
-# supergraph: Configuration of the Supergraph server
-#
 supergraph:
   # The path for GraphQL execution
   # (Defaults to /)
@@ -336,9 +338,6 @@ Path parameters and wildcards are supported. For example:
 By default, the router does _not_ resolve introspection queries. You can enable introspection like so:
 
 ```yaml title="router.yaml"
-#
-# supergraph: Configuration of the Supergraph server
-#
 supergraph:
   introspection: true
 ```

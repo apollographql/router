@@ -129,7 +129,7 @@ struct Export {
 Take a look at `env_defaults` in `expansion.rs` to see how env variables should be defaulted.
 
 ### Use `#[serde(default)]` on struct instead of fields when possible
-If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl.
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl. By doing this we will have the same behavior if we're deserializing the struct and if we create it with the `Default` implementation, it uses the same mechanism not only a specific mechanism for `serde`.
 
 #### GOOD
 ```rust
