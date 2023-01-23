@@ -176,6 +176,21 @@ In addition, defaulting of environment variables now directly injects the variab
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2432
 
+### Fix panic in schema parse error reporting ([Issue #2269](https://github.com/apollographql/router/issues/2269))
+
+In order to support introspection, 
+some definitions like `type __Field { … }` are implicitly added to schemas.
+This addition was done by string concatenation at the source level.
+In some cases like unclosed braces, a parse error could be reported at a position
+beyond the size of the original source.
+This would cause a panic because only the unconcatenated string 
+is given the the error reporting library `miette`.
+
+Instead, the Router now parses introspection types separately
+and “concatenates” definitions at the AST level.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/issues/2448
+
 ### Always accept compressed subgraph responses  ([Issue #2415](https://github.com/apollographql/router/issues/2415))
 
 Subgraph response decompression was only supported when subgraph request compression was configured. This is now always active.

@@ -17,7 +17,7 @@ Note: The exact image version to use is your choice depending on which release y
 
 Our default Docker images include a basic configuration which can be seen [in our repository](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml).  Inside the container, this file is located at `/dist/config/router.yaml`.
 
-If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network inferface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
+If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network interface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
 
 You can provide your own configuration from the host environment to the Router by mounting your configuration to `/dist/config/router.yaml`, as follows:
 
