@@ -6,6 +6,7 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use crate::graphql;
+use crate::spec::Schema;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -23,6 +24,14 @@ pub struct Request {
 
     pub query_plan: Arc<QueryPlan>,
 
+    /// An apollo-compiler context that contains `self.query_plan.query`.
+    ///
+    /// It normally also contains type information from the schema,
+    /// but might not if this `Request` was created in tests
+    /// with `fake_builder()` without providing a `schema` parameter.
+    #[allow(unused)] // TODO: find some uses
+    pub(crate) compiler: apollo_compiler::Snapshot,
+
     pub context: Context,
 }
 
@@ -38,9 +47,27 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
+        let compiler = query_plan.query.uncached_compiler(None).snapshot();
         Self {
             supergraph_request,
             query_plan,
+            compiler,
+            context,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
+    async fn internal_new<'a>(
+        supergraph_request: http::Request<graphql::Request>,
+        query_plan: Arc<QueryPlan>,
+        schema: &'a Schema,
+        context: Context,
+    ) -> Request {
+        let compiler = query_plan.query.compiler(Some(&schema)).await.snapshot();
+        Self {
+            supergraph_request,
+            query_plan,
+            compiler,
             context,
         }
     }
