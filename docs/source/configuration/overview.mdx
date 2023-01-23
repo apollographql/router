@@ -212,6 +212,20 @@ Prints out a JSON schema of the router's configuration file, including [plugin c
 <tr>
 <td style="min-width: 150px;">
 
+##### `--anonymous-telemetry-disabled`
+
+`APOLLO_TELEMETRY_DISABLED`
+
+</td>
+<td>
+
+Disable sending anonymous usage information to Apollo.
+
+</td>
+</tr>
+<tr>
+<td>
+
 ##### `-V` / `--version`
 
 </td>
@@ -221,7 +235,6 @@ Prints out the Apollo Router's version.
 
 </td>
 </tr>
-
 </tbody>
 </table>
 
@@ -377,6 +390,10 @@ See [Sending HTTP headers to subgraphs](./header-propagation/).
 
 See [Configuring CORS in the Apollo Router](./cors).
 
+### Defer support
+
+See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
+
 ### External Extensibility
 
 See [External Extensibility in the Apollo Router](./external).
@@ -389,8 +406,45 @@ See [Tracing in the Apollo Router](./tracing/).
 
 Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
 The Apollo Router automatically supports APQ via its in-memory cache. See the [caching documentation](./caching) for related options.
+It is enabled by default, but can be disabled from the configuration:
+
+```yaml
+supergraph:
+  apq:
+    enabled: false
+```
+
+Subgraph requests from the Router can use APQ (disabled by default). Enabling APQ on a subgraph can be done either globally or on a per-subgraph request. The following example shows how to use a mixture of both global and per-subgraph configuration to accomplish enabling APQ on the `products` subgraph, while otherwise disabling it:
+
+```yaml title="router.yaml"
+supergraph:
+  apq:
+    subgraph:
+      # override for all subgraphs
+      all:
+        enabled: false
+      # override per subgraph
+      subgraphs:
+        products:
+          enabled: true
+```
 
 For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
+
+### TLS
+
+TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. It is possible to override the list, for all subgraphs or per subgraph:
+
+```yaml title="router.yaml"
+tls:
+  subgraph:
+    all:
+      certificate_authorities: "${file./path/to/ca.crt}"
+    # override per subgraph
+    subgraphs:
+      products:
+        certificate_authorities: "${file./path/to/product_ca.crt}"
+```
 
 ### Plugins
 

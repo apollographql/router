@@ -636,3 +636,50 @@ fn upgrade_old_configuration() {
         }
     }
 }
+
+#[test]
+fn all_properties_are_documented() {
+    let schema = serde_json::to_value(&generate_config_schema())
+        .expect("must be able to convert the schema to json");
+
+    let mut errors = Vec::new();
+    visit_schema("", &schema, &mut errors);
+    if !errors.is_empty() {
+        panic!(
+            "There were errors in the configuration schema: {}",
+            errors.join("\n")
+        )
+    }
+}
+
+#[test]
+fn default_config_has_defaults() {
+    insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
+fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
+    match schema {
+        Value::Array(arr) => {
+            for element in arr {
+                visit_schema(path, element, errors)
+            }
+        }
+        Value::Object(o) => {
+            for (k, v) in o {
+                if k.as_str() == "properties" {
+                    let properties = v.as_object().expect("properties must be an object");
+                    for (k, v) in properties {
+                        let path = format!("{}.{}", path, k);
+                        if v.as_object().and_then(|o| o.get("description")).is_none() {
+                            errors.push(format!("{} was missing a description", path));
+                        }
+                        visit_schema(&path, v, errors)
+                    }
+                } else {
+                    visit_schema(path, v, errors)
+                }
+            }
+        }
+        _ => {}
+    }
+}

@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.8.0](https://img.shields.io/badge/Version-1.8.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.8.0](https://img.shields.io/badge/AppVersion-v1.8.0-informational?style=flat-square)
+![Version: 1.9.0](https://img.shields.io/badge/Version-1.9.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.9.0](https://img.shields.io/badge/AppVersion-v1.9.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.8.0
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.9.0
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.8.0
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.8.0 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.9.0 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -41,7 +41,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | autoscaling.maxReplicas | int | `100` |  |
 | autoscaling.minReplicas | int | `1` |  |
 | autoscaling.targetCPUUtilizationPercentage | int | `80` |  |
-| containerPorts.health | int | `8088` | For exposing the healthcheck endpoint |
+| containerPorts.health | int | `8088` | For exposing the health check endpoint |
 | containerPorts.http | int | `80` | If you override the port in `router.configuration.server.listen` then make sure to match the listen port here |
 | containerPorts.metrics | int | `9090` | For exposing the metrics port when running a serviceMonitor for example |
 | extraEnvVars | list | `[]` |  |

@@ -9,6 +9,7 @@ mod tests;
 mod upgrade;
 mod yaml;
 
+use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -68,34 +69,49 @@ pub enum ConfigurationError {
 
     /// could not migrate configuration: {error}.
     MigrationFailure { error: String },
+
+    /// could not load certificate authorities: {error}
+    CertificateAuthorities { error: String },
 }
 
 /// The configuration for the router.
 ///
 /// Can be created through `serde::Deserialize` from various formats,
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
-#[derive(Clone, Derivative, Serialize, JsonSchema, Default)]
+#[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
 pub struct Configuration {
+    /// The raw configuration string.
+    #[serde(skip)]
+    pub(crate) validated_yaml: Option<Value>,
+
     /// Configuration options pertaining to the http server component.
     #[serde(default)]
     pub(crate) server: Server,
 
+    /// Health check configuration
     #[serde(default)]
     #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
 
+    /// Sandbox configuration
     #[serde(default)]
     pub(crate) sandbox: Sandbox,
 
+    /// Homepage configuration
     #[serde(default)]
     pub(crate) homepage: Homepage,
 
+    /// Configuration for the supergraph
     #[serde(default)]
     pub(crate) supergraph: Supergraph,
+
     /// Cross origin request headers.
     #[serde(default)]
     pub(crate) cors: Cors,
+
+    #[serde(default)]
+    pub(crate) tls: Tls,
 
     /// Plugin configuration
     #[serde(default)]
@@ -104,7 +120,7 @@ pub struct Configuration {
     /// Built-in plugin configuration. Built in plugins are pushed to the top level of config.
     #[serde(default)]
     #[serde(flatten)]
-    apollo_plugins: ApolloPlugins,
+    pub(crate) apollo_plugins: ApolloPlugins,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
@@ -134,6 +150,8 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
+            #[serde(default)]
+            tls: Tls,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -146,6 +164,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .cors(ad_hoc.cors)
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
+            .tls(ad_hoc.tls)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -177,8 +196,10 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut conf = Self {
+            validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
@@ -191,6 +212,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -290,6 +312,13 @@ impl Configuration {
     }
 }
 
+impl Default for Configuration {
+    fn default() -> Self {
+        // We want to trigger all defaulting logic so don't use the raw builder.
+        Configuration::from_str("").expect("default configuration must be valid")
+    }
+}
+
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl Configuration {
@@ -304,8 +333,10 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         dev: Option<bool>,
+        tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
         let mut configuration = Self {
+            validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
@@ -318,6 +349,7 @@ impl Configuration {
             apollo_plugins: ApolloPlugins {
                 plugins: apollo_plugins,
             },
+            tls: tls.unwrap_or_default(),
         };
         if dev.unwrap_or_default()
             || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
@@ -483,7 +515,7 @@ pub(crate) struct Supergraph {
     #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
-    /// Enable defer support
+    /// Set to false to disable defer support
     #[serde(default = "default_defer_support")]
     pub(crate) defer_support: bool,
 
@@ -551,15 +583,65 @@ impl Default for Supergraph {
     }
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+/// Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Apq {
+    /// Activates Automatic Persisted Queries (enabled by default)
+    #[serde(default = "default_apq")]
+    pub(crate) enabled: bool,
+    /// Cache configuration
+    #[serde(default)]
     pub(crate) experimental_cache: Cache,
+
+    #[serde(default)]
+    pub(crate) subgraph: ApqSubgraphWrapper,
 }
 
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ApqSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: SubgraphApq,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, SubgraphApq>,
+}
+
+/// Subgraph level Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SubgraphApq {
+    /// Enable
+    #[serde(default = "default_subgraph_apq")]
+    pub(crate) enabled: bool,
+}
+
+fn default_subgraph_apq() -> bool {
+    false
+}
+
+fn default_apq() -> bool {
+    true
+}
+
+impl Default for Apq {
+    fn default() -> Self {
+        Self {
+            enabled: default_apq(),
+            experimental_cache: Default::default(),
+            subgraph: Default::default(),
+        }
+    }
+}
+
+/// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
+    /// Cache configuration
     pub(crate) experimental_cache: Cache,
     /// Warm up the cache on reloads by running the query plan over
     /// a list of the most used queries
@@ -568,13 +650,12 @@ pub(crate) struct QueryPlanning {
     pub(crate) warmed_up_queries: usize,
 }
 
+/// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
-    #[cfg(feature = "experimental_cache")]
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<RedisCache>,
 }
@@ -595,7 +676,6 @@ impl Default for InMemoryCache {
     }
 }
 
-#[cfg(feature = "experimental_cache")]
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
@@ -604,10 +684,70 @@ pub(crate) struct RedisCache {
     pub(crate) urls: Vec<String>,
 }
 
+/// TLS related configuration options.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Tls {
+    #[serde(default)]
+    pub(crate) subgraph: TlsSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: TlsSubgraph,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraphWrapper {
+    #[builder]
+    pub(crate) fn new(all: TlsSubgraph, subgraphs: HashMap<String, TlsSubgraph>) -> Self {
+        Self { all, subgraphs }
+    }
+}
+
+impl Default for TlsSubgraphWrapper {
+    fn default() -> Self {
+        Self::builder().all(TlsSubgraph::default()).build()
+    }
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSubgraph {
+    /// list of certificate authorities in PEM format
+    #[serde(default)]
+    pub(crate) certificate_authorities: Option<String>,
+}
+
+#[buildstructor::buildstructor]
+impl TlsSubgraph {
+    #[builder]
+    pub(crate) fn new(certificate_authorities: Option<String>) -> Self {
+        Self {
+            certificate_authorities,
+        }
+    }
+}
+
+impl Default for TlsSubgraph {
+    fn default() -> Self {
+        Self::builder().build()
+    }
+}
+
 /// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Sandbox {
+    /// Set to true to enable sandbox
     #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
@@ -647,6 +787,7 @@ impl Default for Sandbox {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Homepage {
+    /// Set to false to disable the homepage
     #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
@@ -691,6 +832,7 @@ pub(crate) struct HealthCheck {
     #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
+    /// Set to false to disable the health check endpoint
     #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }

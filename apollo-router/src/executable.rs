@@ -2,7 +2,6 @@
 
 use std::env;
 use std::ffi::OsStr;
-use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -27,7 +26,6 @@ use url::Url;
 use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -205,6 +203,10 @@ pub(crate) struct Opt {
     /// The time between polls to Apollo uplink. Minimum 10s.
     #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_poll_interval: Duration,
+
+    /// Disable sending anonymous usage information to Apollo.
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED")]
+    anonymous_telemetry_disabled: bool,
 
     /// The timeout for an http call to Apollo uplink. Defaults to 30s.
     #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
@@ -429,17 +431,14 @@ impl Executable {
                 }
             }) {
                 Some(configuration) => configuration,
-                None => Configuration::builder()
-                    .build()
-                    .map(std::convert::Into::into)?,
+                None => Default::default(),
             },
         };
 
-        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
-        let apollo_telemetry_msg = if is_telemetry_disabled {
-            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {
+            "Anonymous usage data collection is disabled.".to_string()
         } else {
-            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for details.".to_string()
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
@@ -560,7 +559,7 @@ fn setup_panic_handler(dispatcher: Dispatch) {
             } else {
                 tracing::error!("{}", e)
             }
-            // Once we've panic'ed the behaviour of the router is non-deterministic
+            // Once we've panicked the behaviour of the router is non-deterministic
             // We've logged out the panic details. Terminate with an error code
             std::process::exit(1);
         });
@@ -575,14 +574,12 @@ fn copy_args_to_env() {
     let matches = Opt::command().get_matches();
     Opt::command().get_arguments().for_each(|a| {
         if let Some(env) = a.get_env() {
-            if let Ok(Some(value)) = matches.try_get_one::<PathBuf>(a.get_id().as_str()) {
-                env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id().as_str()) {
-                env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id().as_str()) {
-                env::set_var(env, value.to_string());
-            } else if let Ok(Some(value)) = matches.try_get_one::<OsString>(a.get_id().as_str()) {
-                env::set_var(env, value);
+            if let Some(raw) = matches
+                .get_raw(a.get_id().as_str())
+                .unwrap_or_default()
+                .next()
+            {
+                env::set_var(env, raw);
             }
         }
     });

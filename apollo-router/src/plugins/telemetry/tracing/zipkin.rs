@@ -19,10 +19,12 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The endpoint to send to
     #[schemars(with = "String", default = "default_agent_endpoint")]
     #[serde(deserialize_with = "deser_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
 
+    /// Batch processor configuration
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 }

@@ -80,6 +80,8 @@ trait OptionDance<T> {
 
 type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
+pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
+
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let mut guard = self.lock().expect("poisoned mutex");
@@ -117,6 +119,20 @@ mod execution {
 
 mod subgraph {
     pub(crate) use crate::services::subgraph::*;
+}
+
+#[export_module]
+mod router_base64_mod {
+    #[rhai_fn(pure, return_raw)]
+    pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
+        String::from_utf8(base64::decode(input.as_bytes()).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string().into())
+    }
+
+    #[rhai_fn(pure)]
+    pub(crate) fn encode(input: &mut ImmutableString) -> String {
+        base64::encode(input.as_bytes())
+    }
 }
 
 #[export_module]
@@ -382,8 +398,15 @@ impl EngineBlock {
         let engine = Arc::new(Rhai::new_rhai_engine(scripts));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
+        // Keep these two lower cases ones as mistakes until 2.0
+        // At 2.0 (or maybe before), replace with upper case
         scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
+
+        scope.push_constant(
+            "APOLLO_AUTHENTICATION_JWT_CLAIMS",
+            "apollo_authentication::JWT::claims".to_string(),
+        );
 
         // Run the AST with our scope to put any global variables
         // defined in scripts into scope.
@@ -412,7 +435,9 @@ struct Rhai {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Conf {
+    /// The directory where Rhai scripts can be found
     scripts: Option<PathBuf>,
+    /// The main entry point for Rhai script evaluation
     main: Option<String>,
 }
 
@@ -600,7 +625,7 @@ macro_rules! gen_map_request {
             fn rhai_service_span() -> impl Fn(&$base::Request) -> tracing::Span + Clone {
                 move |_request: &$base::Request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($base::Request),
                         "otel.kind" = "INTERNAL"
                     )
@@ -665,7 +690,7 @@ macro_rules! gen_map_deferred_request {
             fn rhai_service_span() -> impl Fn(&$request) -> tracing::Span + Clone {
                 move |_request: &$request| {
                     tracing::info_span!(
-                        "rhai plugin",
+                        RHAI_SPAN_NAME,
                         "rhai service" = stringify!($request),
                         "otel.kind" = "INTERNAL"
                     )
@@ -1235,6 +1260,8 @@ impl Rhai {
         // The macro call creates a Rhai module from the plugin module.
         let module = exported_module!(router_plugin_mod);
 
+        let base64_module = exported_module!(router_base64_mod);
+
         // Configure our engine for execution
         engine
             .set_max_expr_depths(0, 0)
@@ -1243,6 +1270,8 @@ impl Rhai {
             })
             // Register our plugin module
             .register_global_module(module.into())
+            // Register our base64 module (not global)
+            .register_static_module("base64", base64_module.into())
             // Register types accessible in plugin scripts
             .register_type::<Context>()
             .register_type::<HeaderMap>()
@@ -2092,6 +2121,24 @@ mod tests {
         let engine = Rhai::new_rhai_engine(None);
         let decoded: String = engine
             .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
+            .expect("can decode string");
+        assert_eq!(decoded, "This has an ümlaut in it.");
+    }
+
+    #[test]
+    fn it_can_base64encode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let encoded: String = engine
+            .eval(r#"base64::encode("This has an ümlaut in it.")"#)
+            .expect("can encode string");
+        assert_eq!(encoded, "VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=");
+    }
+
+    #[test]
+    fn it_can_base64decode_string() {
+        let engine = Rhai::new_rhai_engine(None);
+        let decoded: String = engine
+            .eval(r#"base64::decode("VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=")"#)
             .expect("can decode string");
         assert_eq!(decoded, "This has an ümlaut in it.");
     }
