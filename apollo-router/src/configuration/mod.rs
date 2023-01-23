@@ -80,7 +80,7 @@ pub enum ConfigurationError {
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 #[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
-// We can't put a global #[serde(default)] here because of the Default implementatin using `from_str` which use deserialize
+// We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
     /// The raw configuration string.
     #[serde(skip)]
