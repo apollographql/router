@@ -6,6 +6,7 @@ fn main() {
     // used by `benches/memory_use.rs`
     let queries_path = out_dir.join("queries.rs");
 
+    println!("cargo:rerun-if-changed=benches/fixtures/supergraph.graphql");
     let schema = include_str!("benches/fixtures/supergraph.graphql");
     let schema: apollo_smith::Document = apollo_parser::Parser::new(schema)
         .parse()
