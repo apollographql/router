@@ -652,6 +652,11 @@ fn all_properties_are_documented() {
     }
 }
 
+#[test]
+fn default_config_has_defaults() {
+    insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
     match schema {
         Value::Array(arr) => {
