@@ -82,7 +82,7 @@ supergraph:
           enabled: true
 ```
 
-By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2284 and https://github.com/apollographql/router/pull/2418
+By [@krishna15898](https://github.com/krishna15898) and [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2284 and https://github.com/apollographql/router/pull/2418
 
 ### Allow the disabling of automated persisted queries ([PR #2386](https://github.com/apollographql/router/pull/2386))
 
