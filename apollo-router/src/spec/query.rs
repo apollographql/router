@@ -1161,7 +1161,7 @@ impl Operation {
             .variables()
             .iter()
             .map(|variable| {
-                let name = ByteString::from(variable.name());
+                let name = variable.name().into();
                 let variable = Variable {
                     field_type: variable.ty().into(),
                     default_value: variable.default_value().and_then(parse_hir_value),
@@ -1239,7 +1239,7 @@ impl Operation {
                 })?)?;
 
                 Ok((
-                    ByteString::from(name),
+                    name.into(),
                     Variable {
                         field_type: ty,
                         default_value: parse_default_value(&definition),

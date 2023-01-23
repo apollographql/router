@@ -104,7 +104,7 @@ impl Selection {
                     }
                 };
 
-                let alias = field.alias().map(|x| ByteString::from(&*x.0));
+                let alias = field.alias().map(|x| x.0.as_str().into());
 
                 let selection_set = if field_type.is_builtin_scalar() {
                     None
