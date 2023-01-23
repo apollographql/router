@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::hir;
+use apollo_compiler::HirDatabase;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -89,6 +91,24 @@ impl Request {
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
         )
+    }
+
+    /// Returns the definition (from the schema) of the current operation
+    pub(crate) fn operation_definition(&self) -> Arc<hir::OperationDefinition> {
+        let operations = self.compiler.all_operations();
+
+        // If either branch would panic, query planning should have returned an error
+        // and an execution request should not be created at all.
+        if let Some(name) = &self.supergraph_request.body().operation_name {
+            operations
+                .iter()
+                .find(|op| op.name() == Some(name))
+                .expect("named operation not found")
+                .clone()
+        } else {
+            assert_eq!(operations.len(), 1, "ambiguous operation");
+            operations[0].clone()
+        }
     }
 }
 

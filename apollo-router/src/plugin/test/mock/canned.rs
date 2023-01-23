@@ -36,6 +36,20 @@ pub(crate) fn accounts_subgraph() -> MockSubgraph {
                         ]
                     }
                 }}
+        ),
+        (
+            json!({
+                "query": "{me{__typename id}}", 
+                "operationName": null, 
+                "variables": {}, 
+                "extensions": {}
+            }),
+            json!({
+                "data": {
+                    "__typename": "User",
+                    "id": "1"
+                }
+            })
         )
     ].into_iter().map(|(query, response)| (serde_json::from_value(query).unwrap(), serde_json::from_value(response).unwrap())).collect();
     MockSubgraph::new(account_mocks)

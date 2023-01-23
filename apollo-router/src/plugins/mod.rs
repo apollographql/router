@@ -27,6 +27,7 @@ mod external;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;
+mod limits;
 pub(crate) mod override_url;
 pub(crate) mod rhai;
 pub(crate) mod telemetry;

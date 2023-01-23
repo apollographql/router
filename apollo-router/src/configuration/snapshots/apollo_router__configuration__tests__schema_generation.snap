@@ -619,6 +619,20 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "limits": {
+      "description": "Requests that exceed a configured limit are rejected with a GraphQL error",
+      "type": "object",
+      "properties": {
+        "selection_set_depth": {
+          "description": "Limit query nesting level",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0.0,
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "override_subgraph_url": {
       "description": "Subgraph URL mappings",
       "anyOf": [
