@@ -59,6 +59,8 @@ const PERSISTED_QUERY_KEY: &str = "persistedQuery";
 const HASH_VERSION_KEY: &str = "version";
 const HASH_VERSION_VALUE: i32 = 1;
 const HASH_KEY: &str = "sha256Hash";
+// interior mutability is not a concern here, the value is never modified
+#[allow(clippy::declare_interior_mutable_const)]
 const ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
 
 enum APQError {

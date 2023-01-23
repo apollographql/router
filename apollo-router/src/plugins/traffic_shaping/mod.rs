@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -376,6 +375,7 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use http::header::ACCEPT_ENCODING;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
