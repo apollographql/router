@@ -49,7 +49,7 @@ Create your configuration struct like so:
 ```rust title="hello_world.rs"
 #[derive(Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    // Put your plugin confguration here. It's deserialzed from YAML automatically.
+    // Put your plugin configuration here. It's deserialized from YAML automatically.
 }
 ```
 
@@ -154,7 +154,7 @@ fn supergraph_service(
 The [tower-rs](https://github.com/tower-rs) library (which the Apollo Router is built on) comes with many "off-the-shelf" layers. In addition, Apollo provides layers that cover common functionality and integration with third-party products.
 
 Some notable layers are:
-* **buffered** - Make a service `Clone`. Typically requred for any `async` layers.
+* **buffered** - Make a service `Clone`. Typically required for any `async` layers.
 * **checkpoint** - Perform a sync call to decide if a request should proceed or not. Useful for validation.
 * **checkpoint_async** - Perform an async call to decide if the request should proceed or not. e.g. for Authentication. Requires `buffered`.
 * **instrument** - Add a tracing span around a service.
@@ -241,10 +241,10 @@ If you observe a specific naming pattern for your event you'll be able to genera
 
 To publish a new metric, use tracing macros to generate an event that contains one of the following prefixes:
 
-`monotonic_counter.` (non-negative numbers): Used when the counter should only ever increase
-`counter.`: Used when the counter can go up or down
-`value.`: Used for discrete data points (i.e., summing them does not make semantic sense)
-`histogram.`: Used for histograms (takes f64)
+`monotonic_counter.` _(non-negative numbers)_: Used when the metric will only ever increase.
+`counter.`: For when the metric may increase or decrease over time.
+`value.`: For discrete data points (i.e., when taking the sum of values does not make semantic sense)
+`histogram.`: For building histograms (takes `f64`)
 
 #### Examples:
 
