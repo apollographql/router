@@ -401,16 +401,26 @@ impl Prepare {
         println!("finalizing changelog");
         let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex = regex::Regex::new(r"(?ms)(^<!-- <KEEP>.*?$^(?:.*)^<\/KEEP> -->\s+)(.*)?")?;
+        let changes_regex = regex::Regex::new(
+            r"(?ms)(?P<example>^<!-- <KEEP>.*^</KEEP> -->\s*)(?P<newChangelog>.*)?",
+        )?;
         let captures = changes_regex
             .captures(&next_changelog)
-            .expect("changelog format was unexpected");
-        let changes = captures
-            .get(2)
-            .expect("changelog format was unexpected")
+            .expect("changelog format was unexpected1");
+
+        // There must be a block like this in the CHANGELOG.
+        //
+        // <!-- <KEEP>
+        //   Anything here.  Doesn't matter.
+        // </KEEP> -->
+        captures.name("example").expect("example block was not found in changelog; see xtask release command source code for expectation of example block");
+
+        let new_changelog_text = captures
+            .name("newChangelog")
+            .expect("newChangelog was not found, possibly because the format was unexpected")
             .as_str();
 
-        let new_next_changelog = changes_regex.replace(&next_changelog, "$1");
+        let new_next_changelog = changes_regex.replace(&next_changelog, "${example}");
 
         let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).";
 
@@ -423,7 +433,7 @@ impl Prepare {
                 semver_heading,
                 version,
                 chrono::Utc::now().date_naive(),
-                changes
+                new_changelog_text
             ),
         );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;
