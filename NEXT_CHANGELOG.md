@@ -38,7 +38,15 @@ is given the the error reporting library `miette`.
 Instead, the Router now parses introspection types separately
 and “concatenates” definitions at the AST level.
 
-By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/issues/2448
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2448
+
+### Fix handling of root query operation not named `Query`
+
+With such a schema, some parsing code in the Router would incorrectly
+return an error because it was assuming the default name.
+Similarly with a root mutation operation not named `Mutation`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2459
 
 
 ## 📚 Documentation
@@ -54,5 +62,3 @@ supergraph:
 ```
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
-
-
