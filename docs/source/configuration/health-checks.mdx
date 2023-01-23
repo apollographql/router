@@ -44,7 +44,7 @@ If you start the router with trace logging enabled, you will see a log from the 
 ```sh
 --log apollo_router=trace
 
-2023-01-20T09:55:48.234946Z apollo-router/src/axum_factory/axum_http_server_factory.rs:100 TRACE apollo_router::axum_factory::axum_http_server_factory: health check health=Health { status: Up }
+2023-01-23T17:42:04.640501Z apollo-router/src/axum_factory/axum_http_server_factory.rs:100 TRACE apollo_router::axum_factory::axum_http_server_factory: health check health=Health { status: Up } request=Request { method: GET, uri: /health, version: HTTP/1.1, headers: {"host": "127.0.0.1:8088", "user-agent": "curl/7.85.0", "accept": "*/*"}, body: Body(Empty) }
 
 ```
 
