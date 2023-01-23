@@ -1144,11 +1144,10 @@ impl Operation {
     fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();
-        let current_field_type = match kind {
-            OperationKind::Query => FieldType::Named("Query".to_string()),
-            OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
-            OperationKind::Subscription => return Err(SpecError::SubscriptionNotSupported),
-        };
+        if kind == OperationKind::Subscription {
+            return Err(SpecError::SubscriptionNotSupported);
+        }
+        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
         let selection_set = operation
             .selection_set()
             .selection()
