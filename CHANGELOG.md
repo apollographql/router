@@ -24,11 +24,11 @@ It is now possible to consigure these certificate-related details using configur
 tls:
   subgraph:
     all:
-      certificate_authorities: ""
+      certificate_authorities: "${file./path/to/ca.crt}"
     # Use a separate certificate for the `products` subgraph.
     subgraphs:
       products:
-        certificate_authorities: ""
+        certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
 
 The file referenced in the `certificate_authorities` value is expected to be the combination of several PEM certificates, concatenated together into a single file (as is commonplace with Apache TLS configuration).
@@ -61,7 +61,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ### Measure the Router's processing time ([Issue #1949](https://github.com/apollographql/router/issues/1949) [Issue #2057](https://github.com/apollographql/router/issues/2057))
 
-The Router now emits a metric called `apollo_router_processing_time` which measures the time spent executing the request **minus** the time spent waiting for an external requests (e.g., subgraph request/response or external plugin request/response).  This measurement accounts both for the time spent actually executing the request sa well as the time spent waiting for concurrent client requests to be executed.  The unit of measurement for the metric is in seconds, though this is not meant to indicate in any way that the Router is going to add actual seconds of overhead.
+The Router now emits a metric called `apollo_router_processing_time` which measures the time spent executing the request **minus** the time spent waiting for an external requests (e.g., subgraph request/response or external plugin request/response).  This measurement accounts both for the time spent actually executing the request as well as the time spent waiting for concurrent client requests to be executed.  The unit of measurement for the metric is in seconds, as with other time-related metrics the router produces, though this is not meant to indicate in any way that the Router is going to add actual seconds of overhead.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2371
 
@@ -86,7 +86,7 @@ By [@krishna15898](https://github.com/krishna15898) and [@Geal](https://github.c
 
 ### Allow the disabling of automated persisted queries ([PR #2386](https://github.com/apollographql/router/pull/2386))
 
-Automatic persisted queries (APQ) support is still enabled by default, but can now be disabled using configuration:
+Automatic persisted queries (APQ) support is still enabled by default on the client side, but can now be disabled in the configuration:
 
 ```yaml
 supergraph:
@@ -98,7 +98,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ### Anonymous product usage analytics ([Issue #2124](https://github.com/apollographql/router/issues/2124), [Issue #2397](https://github.com/apollographql/router/issues/2397), [Issue #2412](https://github.com/apollographql/router/issues/2412))
 
-Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development.  No information is transmitted in our usage collection that includes any request-specific information.  Knowing what features and configuration our users are depending on allows us to evaluate opportunities to reduce complexity and remain diligent about the surface area of the Router over time.  The privacy of your and your user's data is of critical importance to the core Router team and we handle it with great care in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
+Following up on https://github.com/apollographql/router/pull/1630, the Router transmits anonymous usage telemetry about configurable feature usage which helps guide Router product development. No information is transmitted in our usage collection that includes any request-specific information. Knowing what features and configuration our users are depending on allows us to evaluate opportunities to reduce complexity and remain diligent about the surface area of the Router over time. The privacy of your and your user's data is of critical importance to the core Router team and we handle it with great care in accordance with our [privacy policy](https://www.apollographql.com/docs/router/privacy/), which clearly states which data we collect and transmit and offers information on how to opt-out.
 
 Booleans and numeric values are included, however, any strings are represented as `<redacted>` to avoid leaking confidential or sensitive information.
 
