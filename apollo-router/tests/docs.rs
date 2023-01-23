@@ -1,9 +1,11 @@
-use inflector::Inflector;
-use serde_json::Value;
-use std::path::Path;
 #[test]
 #[cfg(target_family = "unix")]
 fn check_config_json() {
+    use std::path::Path;
+
+    use inflector::Inflector;
+    use serde_json::Value;
+
     // Sanity check consistency and that files exist
     let config = serde_json::from_str(include_str!("../../docs/source/config.json"))
         .expect("docs json must be valid");
