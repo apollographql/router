@@ -103,7 +103,7 @@ Following up on https://github.com/apollographql/router/pull/1630, the Router tr
 Booleans and numeric values are included, however, any strings are represented as `<redacted>` to avoid leaking confidential or sensitive information.
 
 For example:
-```json
+```json5
 {
    "session_id": "fbe09da3-ebdb-4863-8086-feb97464b8d7", // Randomly generated at Router startup.
    "version": "1.4.0", // The version of the router
