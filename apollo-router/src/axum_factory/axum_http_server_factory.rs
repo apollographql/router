@@ -97,7 +97,7 @@ where
                     let health = Health {
                         status: HealthStatus::Up,
                     };
-                    tracing::trace!(?health, "health check");
+                    tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
                             response: http::Response::builder().body::<hyper::Body>(
