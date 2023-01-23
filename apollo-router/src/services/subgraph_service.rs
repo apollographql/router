@@ -107,7 +107,7 @@ pub(crate) struct SubgraphService {
 impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
-        apq_enabled: Option<bool>,
+        apq_enabled: bool,
         tls_cert_store: Option<RootCertStore>,
     ) -> Self {
         let mut http_connector = HttpConnector::new();
@@ -136,7 +136,7 @@ impl SubgraphService {
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            apq: Arc::new(<AtomicBool>::new(apq_enabled.unwrap_or(true))),
+            apq: Arc::new(<AtomicBool>::new(apq_enabled)),
         }
     }
 }
