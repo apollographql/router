@@ -14,7 +14,7 @@ fn check_config_json() {
         if let Value::String(path) = value {
             if !path.starts_with("https://") {
                 assert!(
-                    path.replace("/", "").is_kebab_case(),
+                    path.replace('/', "").is_kebab_case(),
                     "{} in config.json was not kebab case",
                     path
                 );
