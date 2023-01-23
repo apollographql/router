@@ -1073,11 +1073,10 @@ impl Operation {
             })
             .unwrap_or(OperationKind::Query);
 
-        let current_field_type = match kind {
-            OperationKind::Query => FieldType::Named("Query".to_string()),
-            OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
-            OperationKind::Subscription => return Err(SpecError::SubscriptionNotSupported),
-        };
+        if kind == OperationKind::Subscription {
+            return Err(SpecError::SubscriptionNotSupported);
+        }
+        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
 
         let selection_set = operation
             .selection_set()
