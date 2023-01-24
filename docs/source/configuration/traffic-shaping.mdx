@@ -89,6 +89,8 @@ traffic_shaping:
     compression: br # Enable brotli compression for all subgraphs.
 ```
 
+Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
+
 ### Rate limiting
 
 Subgraph request rate limiting uses the same configuration as client rate limiting, and is calculated per subgraph, not per backend host.

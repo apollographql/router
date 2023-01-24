@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -349,7 +348,6 @@ impl TrafficShaping {
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
@@ -555,13 +553,6 @@ mod test {
                     .get(&CONTENT_ENCODING)
                     .unwrap(),
                 HeaderValue::from_static("gzip")
-            );
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&ACCEPT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req
