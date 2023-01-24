@@ -584,7 +584,36 @@ pub(crate) struct Apq {
     #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
     /// Cache configuration
+    #[serde(default)]
     pub(crate) experimental_cache: Cache,
+
+    #[serde(default)]
+    pub(crate) subgraph: ApqSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ApqSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: SubgraphApq,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, SubgraphApq>,
+}
+
+/// Subgraph level Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SubgraphApq {
+    /// Enable
+    #[serde(default = "default_subgraph_apq")]
+    pub(crate) enabled: bool,
+}
+
+fn default_subgraph_apq() -> bool {
+    false
 }
 
 fn default_apq() -> bool {
@@ -596,6 +625,7 @@ impl Default for Apq {
         Self {
             enabled: default_apq(),
             experimental_cache: Default::default(),
+            subgraph: Default::default(),
         }
     }
 }

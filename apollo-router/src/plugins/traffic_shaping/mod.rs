@@ -67,8 +67,6 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    /// Enable APQ for outgoing subgraph requests
-    apq: Option<bool>,
     /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
@@ -82,7 +80,6 @@ impl Merge for Shaping {
                 deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
-                apq: self.apq.or(fallback.apq),
                 global_rate_limit: self
                     .global_rate_limit
                     .as_ref()
@@ -360,10 +357,6 @@ impl TrafficShaping {
         } else {
             Either::B(service)
         }
-    }
-
-    pub(crate) fn get_apq(&self, name: &str) -> Option<bool> {
-        self.config.subgraphs.get(name)?.apq
     }
 }
 
