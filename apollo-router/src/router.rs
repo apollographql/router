@@ -662,9 +662,7 @@ fn generate_event_stream(
 mod tests {
     use std::env::temp_dir;
 
-    use serde_json::json;
     use serde_json::to_string_pretty;
-    use serde_json::Value;
     use test_log::test;
 
     use super::*;
@@ -751,39 +749,6 @@ mod tests {
         write_and_flush(&mut file, ":garbage").await;
         let event = stream.into_future().now_or_never();
         assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn config_dev_mode_without_file() {
-        let telemetry_configuration = serde_json::json!({
-            "telemetry": {}
-        });
-        let mut stream = ConfigurationSource::from(
-            Configuration::builder()
-                .apollo_plugin("telemetry", telemetry_configuration)
-                .dev(true)
-                .build()
-                .unwrap(),
-        )
-        .into_stream()
-        .boxed();
-
-        let cfg = match stream.next().await.unwrap() {
-            UpdateConfiguration(configuration) => configuration,
-            _ => panic!("the event from the stream must be UpdateConfiguration"),
-        };
-        assert!(cfg.supergraph.introspection);
-        assert!(cfg.sandbox.enabled);
-        assert!(!cfg.homepage.enabled);
-        assert!(cfg.plugins().iter().any(
-            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
-        ));
-        assert!(cfg
-            .plugins()
-            .iter()
-            .any(|(name, val)| name == "apollo.include_subgraph_errors"
-                && val == &json!({"all": true})));
-        cfg.validate().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]

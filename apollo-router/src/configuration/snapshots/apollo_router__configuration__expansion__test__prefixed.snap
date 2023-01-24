@@ -4,5 +4,6 @@ expression: value
 ---
 defaulted: defaulted
 expanded: expanded
-overridden: overridden
+no_env: defaulted
+overridden: defaulted
 

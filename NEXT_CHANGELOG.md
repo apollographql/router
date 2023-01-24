@@ -24,6 +24,15 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 </KEEP> -->
 
+## ❗ BREAKING ❗
+
+### Env variables should override router.yaml ([Issue #2404](https://github.com/apollographql/router/issues/#2404))
+
+As per https://clig.dev/#configuration, env variable will now take precedence over configuration files. This only affects `APOLLO_USAGE_REPORTING_INGRESS_URL` but will also apply to future env variables.
+This does not preclude use of env expansion, which should still be used for adding non-built-in env variable overrides. 
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2443
+
 ## 🚀 Features
 
 ### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
@@ -73,6 +82,12 @@ Subgraph errors can come with a `locations` field indicating which part of the q
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2442
 
+### Fix dev mode config merge ([Issue #2404](https://github.com/apollographql/router/issues/#2404))
+
+Enabling dev mode will now merge with existing configuration rather than replacing elements. This means that existing configuration that are not related to enabling of dev mode will not be discarded.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2443
+
 ## 📃 Configuration
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
@@ -114,3 +129,4 @@ supergraph:
 ```
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
+
