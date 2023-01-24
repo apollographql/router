@@ -2,6 +2,7 @@
 // This entire file is license key functionality
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use http::request::Parts;
 use http::HeaderValue;
@@ -59,6 +60,11 @@ pub(crate) struct Cors {
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
     #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
+
+    /// The `Access-Control-Max-Age` header value in time units
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    pub(crate) max_age: Option<Duration>,
 }
 
 impl Default for Cors {
@@ -71,6 +77,7 @@ impl Default for Cors {
             allow_headers: Default::default(),
             expose_headers: Default::default(),
             match_origins: Default::default(),
+            max_age: Default::default(),
         }
     }
 }
@@ -96,10 +103,12 @@ impl Cors {
         origins: Option<Vec<String>>,
         match_origins: Option<Vec<String>>,
         methods: Option<Vec<String>>,
+        max_age: Option<Duration>,
     ) -> Self {
         Self {
             expose_headers,
             match_origins,
+            max_age,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
             allow_any_origin: allow_any_origin.unwrap_or_default(),
@@ -148,6 +157,11 @@ impl Cors {
                         .ok()
                 },
             )));
+        let cors = if let Some(max_age) = self.max_age {
+            cors.max_age(max_age)
+        } else {
+            cors
+        };
 
         if self.allow_any_origin {
             Ok(cors.allow_origin(cors::Any))

@@ -69,7 +69,8 @@ expression: "&schema"
           "GET",
           "POST",
           "OPTIONS"
-        ]
+        ],
+        "max_age": null
       },
       "type": "object",
       "properties": {
@@ -108,6 +109,11 @@ expression: "&schema"
             "type": "string"
           },
           "nullable": true
+        },
+        "max_age": {
+          "description": "The `Access-Control-Max-Age` header value in time units",
+          "default": null,
+          "type": "string"
         },
         "methods": {
           "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
