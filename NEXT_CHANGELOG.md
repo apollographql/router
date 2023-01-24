@@ -40,6 +40,12 @@ and “concatenates” definitions at the AST level.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2448
 
+### Always accept compressed subgraph responses  ([Issue #2415](https://github.com/apollographql/router/issues/2415))
+
+Subgraph response decompression was only supported when subgraph request compression was configured. This is now always active.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2450
+
 ### Fix handling of root query operation not named `Query`
 
 With such a schema, some parsing code in the Router would incorrectly
