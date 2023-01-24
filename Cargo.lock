@@ -1333,9 +1333,9 @@ dependencies = [
 
 [[package]]
 name = "deno_core"
-version = "0.164.0"
+version = "0.167.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b7e27ca2ef58fdba235d90f8c98ab8bc498f956bb7297ce64b992d80d5bfa56c"
+checksum = "2d9c965d57f9f0e018f344c0aaabe10348d8a7d592d622156bf380528dcd57a4"
 dependencies = [
  "anyhow",
  "bytes",
@@ -1358,9 +1358,9 @@ dependencies = [
 
 [[package]]
 name = "deno_ops"
-version = "0.42.0"
+version = "0.45.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeeef7a7865ae587ad6b17b03e13a5b34b44299f51ad12b04316d647d5f5ceee"
+checksum = "998d3f2f229edbcd6823dc930b41fcd7be71f1b1c3f2510d0a413ff29fae64e8"
 dependencies = [
  "once_cell",
  "pmutil",
@@ -4333,9 +4333,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.13-beta+v2.3.0-beta.3"
+version = "0.1.13-beta.0+v2.3.0-beta.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2517d48d9eb5e7af57b8857de460b7587ddf101bbf13db48ccf3b0f0845ed79"
+checksum = "91a063729ebcec840d7f65ecf3a94d2c25f3d94d0d313079eb2ac20a8c05a422"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -4752,9 +4752,9 @@ dependencies = [
 
 [[package]]
 name = "serde_v8"
-version = "0.75.0"
+version = "0.78.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81957fca74f7a393a726341b70a797b28e2ef09890958c94d87c9cd7a8ffe4a7"
+checksum = "beb349bbca4a51daad1c26d987e530543e3dbbe21f4556bb7d200e86164b4b90"
 dependencies = [
  "bytes",
  "derive_more",
