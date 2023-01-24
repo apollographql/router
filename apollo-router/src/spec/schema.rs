@@ -42,29 +42,33 @@ pub(crate) struct Schema {
     root_operations: HashMap<OperationKind, String>,
 }
 
+pub(crate) fn sorted_map<K, V>(
+    f: &mut std::fmt::Formatter<'_>,
+    indent: &str,
+    name: &str,
+    map: &HashMap<K, V>,
+) -> std::fmt::Result
+where
+    K: std::fmt::Debug + Ord,
+    V: std::fmt::Debug,
+{
+    writeln!(f, "{indent}{name}:")?;
+    for (k, v) in map.iter().sorted_by_key(|&(k, _v)| k) {
+        writeln!(f, "{indent}  {k:?}: {v:#?}")?;
+    }
+    Ok(())
+}
+
 /// YAML-like representation with sorted hashmap/sets, more amenable to diffing
 impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn sorted_map<V: std::fmt::Debug>(
-            f: &mut std::fmt::Formatter<'_>,
-            indent: &str,
-            name: &str,
-            map: &HashMap<String, V>,
-        ) -> std::fmt::Result {
-            writeln!(f, "{indent}{name}:")?;
-            for (k, v) in map.iter().sorted_by_key(|&(k, _v)| k.clone()) {
-                writeln!(f, "{indent}  {k:?}: {v:?}")?;
-            }
-            Ok(())
-        }
-
         fn sorted_map_of_sets(
             f: &mut std::fmt::Formatter<'_>,
             name: &str,
             map: &HashMap<String, HashSet<String>>,
         ) -> std::fmt::Result {
             writeln!(f, "  {name}:")?;
-            for (k, set) in map.iter().sorted_by_key(|&(k, _set)| k.clone()) {
+            for (k, set) in map.iter().sorted_by_key(|&(k, _set)| k) {
                 writeln!(f, "    {k:?}:")?;
                 for v in set.iter().sorted() {
                     writeln!(f, "      {v:?}")?;
@@ -95,7 +99,7 @@ impl std::fmt::Debug for Schema {
             .collect();
         sorted_map(f, "  ", "root_operations", &root)?;
         writeln!(f, "  object_types:")?;
-        for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+        for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k) {
             let ObjectType {
                 name: _,
                 fields,
@@ -106,7 +110,7 @@ impl std::fmt::Debug for Schema {
             sorted_map(f, "      ", "fields", fields)?
         }
         writeln!(f, "  interfaces:")?;
-        for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+        for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k) {
             let Interface {
                 name: _,
                 fields,
@@ -117,7 +121,7 @@ impl std::fmt::Debug for Schema {
             sorted_map(f, "      ", "fields", fields)?
         }
         writeln!(f, "  input_types:")?;
-        for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+        for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k) {
             let InputObjectType { name: _, fields } = v;
             writeln!(f, "    {k:?}:")?;
             sorted_map(f, "      ", "fields", fields)?
