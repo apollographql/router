@@ -790,6 +790,12 @@ expression: "&schema"
               "limit": 512
             },
             "redis": null
+          },
+          "subgraph": {
+            "all": {
+              "enabled": false
+            },
+            "subgraphs": {}
           }
         },
         "query_planning": {
@@ -813,12 +819,15 @@ expression: "&schema"
                 "limit": 512
               },
               "redis": null
+            },
+            "subgraph": {
+              "all": {
+                "enabled": false
+              },
+              "subgraphs": {}
             }
           },
           "type": "object",
-          "required": [
-            "experimental_cache"
-          ],
           "properties": {
             "enabled": {
               "description": "Activates Automatic Persisted Queries (enabled by default)",
@@ -827,6 +836,12 @@ expression: "&schema"
             },
             "experimental_cache": {
               "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
               "type": "object",
               "required": [
                 "in_memory"
@@ -865,6 +880,51 @@ expression: "&schema"
                   },
                   "additionalProperties": false,
                   "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraph": {
+              "description": "Configuration options pertaining to the subgraph server component.",
+              "default": {
+                "all": {
+                  "enabled": false
+                },
+                "subgraphs": {}
+              },
+              "type": "object",
+              "properties": {
+                "all": {
+                  "description": "options applying to all subgraphs",
+                  "default": {
+                    "enabled": false
+                  },
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "description": "Enable",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "subgraphs": {
+                  "description": "per subgraph options",
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
+                    "type": "object",
+                    "properties": {
+                      "enabled": {
+                        "description": "Enable",
+                        "default": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
                 }
               },
               "additionalProperties": false
@@ -3123,11 +3183,6 @@ expression: "&schema"
           "description": "Applied on all subgraphs",
           "type": "object",
           "properties": {
-            "apq": {
-              "description": "Enable APQ for outgoing subgraph requests",
-              "type": "boolean",
-              "nullable": true
-            },
             "compression": {
               "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
               "oneOf": [
@@ -3269,11 +3324,6 @@ expression: "&schema"
             "description": "Traffic shaping options",
             "type": "object",
             "properties": {
-              "apq": {
-                "description": "Enable APQ for outgoing subgraph requests",
-                "type": "boolean",
-                "nullable": true
-              },
               "compression": {
                 "description": "Enable compression for subgraphs (available compressions are deflate, br, gzip)",
                 "oneOf": [
