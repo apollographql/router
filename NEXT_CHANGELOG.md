@@ -31,6 +31,11 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 Variable deduplication allows the router to reduce the number of entities that are requested from subgraphs if some of them are redundant, and as such reduce the size of subgraph responses. It has been available for a while but was not active by default. This is now always on.
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2445
+### Update to Federation v2.3.0 ([Issue #2465](https://github.com/apollographql/router/issues/2465))
+
+This brings in Federation v2.3.0-beta.3 for testing.  This will be updated to a final version before final release.
+
+By [@abernix](https://github.com/abernix) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2462
 
 ### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
 
