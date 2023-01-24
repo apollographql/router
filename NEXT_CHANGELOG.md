@@ -77,7 +77,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 
-### `health-check` renamed to `health_check`
+### `health-check` renamed to `health_check` ([Issue #2161](https://github.com/apollographql/router/issues/2161))
 
 The health_check key in router.yaml has been renamed to snake case for consistency. 
 
@@ -93,7 +93,7 @@ health_check:
   enabled: true
 ```
 
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2451
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2451 and https://github.com/apollographql/router/pull/2463
 
 
 ## 📚 Documentation
