@@ -132,9 +132,3 @@ supergraph:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
 
-## 🥼 Experimental
-
-### JWT authentication ([Issue #912](https://github.com/apollographql/router/issues/912))
-
-Experimental JWT authentication is now configurable.  Here's a typical sample configuration fragment:
-
