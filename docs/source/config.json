@@ -8,7 +8,7 @@
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation version support": "/federation-version-support",
-    "Configuration": {
+    "Configuring the Router": {
       "Overview": "/configuration/overview",
       "JWT Authentication": "/configuration/authn-jwt",
       "Caching": "/configuration/caching",
