@@ -14,13 +14,16 @@ use super::selection::select_object;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::graphql;
 use crate::graphql::Request;
+use crate::http_ext;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::services::subgraph_service::SubgraphServiceFactory;
-use crate::*;
+use crate::services::SubgraphRequest;
+use crate::spec::Schema;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -184,15 +187,12 @@ impl Variables {
 
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a, SF>(
+    pub(crate) async fn fetch_node<'a>(
         &'a self,
-        parameters: &'a ExecutionParameters<'a, SF>,
+        parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
-    ) -> Result<(Value, Vec<Error>), FetchError>
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> Result<(Value, Vec<Error>), FetchError> {
         let FetchNode {
             operation,
             operation_kind,
@@ -308,7 +308,11 @@ impl FetchNode {
             let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
 
             let mut errors: Vec<Error> = vec![];
-            for error in response.errors {
+            for mut error in response.errors {
+                // the locations correspond to the subgraph query and cannot be linked to locations
+                // in the client query, so we remove them
+                error.locations = Vec::new();
+
                 // errors with path should be updated to the path of the entity they target
                 if let Some(ref path) = error.path {
                     if path.starts_with(&entities_path) {

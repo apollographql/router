@@ -61,7 +61,7 @@ impl AxumHttpServerFactory {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[allow(dead_code)]
 enum HealthStatus {
@@ -69,7 +69,7 @@ enum HealthStatus {
     Down,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Health {
     status: HealthStatus,
 }
@@ -86,7 +86,7 @@ where
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "healthcheck endpoint exposed at {}/health",
+            "Health check endpoint exposed at {}/health",
             configuration.health_check.listen
         );
         endpoints.insert(
@@ -97,6 +97,7 @@ where
                     let health = Health {
                         status: HealthStatus::Up,
                     };
+                    tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
                         Ok(router::Response {
                             response: http::Response::builder().body::<hyper::Body>(
@@ -310,7 +311,7 @@ where
         graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
     }
 
-    Router::<hyper::Body>::new().route(
+    Router::new().route(
         &graphql_configuration.path,
         get({
             move |Extension(service): Extension<RF>, request: Request<Body>| {
@@ -329,7 +330,16 @@ async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
-    match service.oneshot(http_request.into()).await {
+    let request: router::Request = http_request.into();
+    let context = request.context.clone();
+
+    let res = service.oneshot(request).await;
+    let dur = context.busy_time().await;
+    let processing_seconds = dur.as_secs_f64();
+
+    tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
+
+    match res {
         Err(e) => {
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {

@@ -10,6 +10,7 @@
     "Federation version support": "/federation-version-support",
     "Configuration": {
       "Overview": "/configuration/overview",
+      "JWT Authentication": "/configuration/authn-jwt",
       "Caching": "/configuration/caching",
       "CORS": "/configuration/cors",
       "CSRF prevention": "/configuration/csrf",
@@ -32,7 +33,7 @@
     },
     "Executing Operations": {
       "Build and run queries": "/executing-operations/build-run-queries",
-      "@defer support (preview)": "/executing-operations/defer-support",
+      "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {

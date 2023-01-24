@@ -10,17 +10,21 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
-use crate::SubgraphResponse;
+use crate::services::SubgraphResponse;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
+/// Configuration for exposing errors that originate from subgraphs
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 struct Config {
+    /// Include errors from all subgraphs
     #[serde(default)]
     all: bool,
+
+    /// Include errors from specific subgraphs
     #[serde(default)]
     subgraphs: HashMap<String, bool>,
 }
@@ -90,10 +94,10 @@ mod test {
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
+    use crate::spec::Schema;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
-    use crate::SupergraphRequest;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
@@ -206,6 +210,7 @@ mod test {
             Arc::new(builder.build().await.expect("should build")),
             &Configuration::default(),
         )
+        .await
         .make()
         .boxed()
     }

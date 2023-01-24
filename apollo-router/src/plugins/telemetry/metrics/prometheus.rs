@@ -25,12 +25,16 @@ use crate::router_factory::Endpoint;
 use crate::services::router;
 use crate::ListenAddr;
 
+/// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Set to true to enable
     pub(crate) enabled: bool,
+    /// The listen address
     #[serde(default = "prometheus_default_listen_addr")]
     pub(crate) listen: ListenAddr,
+    /// The path where prometheus will be exposed
     #[serde(default = "prometheus_default_path")]
     pub(crate) path: String,
 }

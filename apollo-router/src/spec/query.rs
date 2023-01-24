@@ -6,10 +6,12 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::hir;
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::AstDatabase;
+use apollo_compiler::HirDatabase;
 use apollo_parser::ast;
-use apollo_parser::ast::AstNode;
 use derivative::Derivative;
-use graphql::Error;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
@@ -17,6 +19,7 @@ use serde_json_bytes::ByteString;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
+use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
@@ -24,12 +27,18 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
-use crate::*;
+use crate::spec::FieldType;
+use crate::spec::Fragments;
+use crate::spec::InvalidValue;
+use crate::spec::Schema;
+use crate::spec::Selection;
+use crate::spec::SpecError;
+use crate::Configuration;
 
 pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative, Default, Serialize, Deserialize)]
+#[derive(Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq)]
 pub(crate) struct Query {
     string: String,
@@ -39,6 +48,36 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
+}
+
+impl std::fmt::Debug for Query {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use super::schema::sorted_map;
+        let Query {
+            string,
+            fragments,
+            operations,
+            subselections,
+        } = self;
+        writeln!(f, "Query:")?;
+        writeln!(f, "  string: {string:?}")?;
+        sorted_map(f, "  ", "fragments", &fragments.map)?;
+        writeln!(f, "  operations:")?;
+        for operation in operations {
+            let Operation {
+                name,
+                kind,
+                selection_set,
+                variables,
+            } = operation;
+            writeln!(f, "    - name: {name:?}")?;
+            writeln!(f, "      kind: {kind:?}")?;
+            writeln!(f, "      selection_set: {selection_set:#?}")?;
+            sorted_map(f, "      ", "variables", variables)?;
+        }
+        writeln!(f, "  subselections: {subselections:#?}")?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -248,6 +287,58 @@ impl Query {
     }
 
     pub(crate) fn parse(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
+        Self::parse_with_ast(query, schema, configuration)
+    }
+
+    pub(crate) fn parse_with_hir(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
+        let query = query.into();
+        let mut compiler = ApolloCompiler::with_recursion_limit(
+            configuration.server.experimental_parser_recursion_limit,
+        );
+        let id = compiler.add_executable(&query, "query");
+        let ast = compiler.db.ast(id);
+
+        // Trace log recursion limit data
+        let recursion_limit = ast.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        let errors = ast
+            .errors()
+            .map(|err| format!("{:?}", err))
+            .collect::<Vec<_>>();
+
+        if !errors.is_empty() {
+            let errors = errors.join(", ");
+            failfast_debug!("parsing error(s): {}", errors);
+            return Err(SpecError::ParsingError(errors));
+        }
+
+        let fragments = Fragments::from_hir(&compiler, schema)?;
+
+        let operations = compiler
+            .db
+            .all_operations()
+            .iter()
+            .map(|operation| Operation::from_hir(operation, schema))
+            .collect::<Result<Vec<_>, SpecError>>()?;
+
+        Ok(Query {
+            string: query,
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+        })
+    }
+
+    pub(crate) fn parse_with_ast(
         query: impl Into<String>,
         schema: &Schema,
         configuration: &Configuration,
@@ -557,7 +648,7 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        if field_name.as_str() == TYPENAME {
+                        if name.as_str() == TYPENAME {
                             if input_value.is_string() {
                                 *output_value = input_value.clone();
                             }
@@ -765,7 +856,7 @@ impl Query {
                         );
                         path.pop();
                         res?
-                    } else if field_name_str == TYPENAME {
+                    } else if name.as_str() == TYPENAME {
                         if !output.contains_key(field_name_str) {
                             output.insert(
                                 field_name.clone(),
@@ -1050,6 +1141,41 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
+    fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
+        let name = operation.name().map(|s| s.to_owned());
+        let kind = operation.operation_ty().into();
+        if kind == OperationKind::Subscription {
+            return Err(SpecError::SubscriptionNotSupported);
+        }
+        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
+        let selection_set = operation
+            .selection_set()
+            .selection()
+            .iter()
+            .filter_map(|selection| {
+                Selection::from_hir(selection, &current_field_type, schema, 0).transpose()
+            })
+            .collect::<Result<_, _>>()?;
+        let variables = operation
+            .variables()
+            .iter()
+            .map(|variable| {
+                let name = variable.name().into();
+                let variable = Variable {
+                    field_type: variable.ty().into(),
+                    default_value: variable.default_value().and_then(parse_hir_value),
+                };
+                Ok((name, variable))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Operation {
+            selection_set,
+            name,
+            variables,
+            kind,
+        })
+    }
+
     // clippy false positive due to the bytes crate
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
@@ -1067,11 +1193,10 @@ impl Operation {
             })
             .unwrap_or(OperationKind::Query);
 
-        let current_field_type = match kind {
-            OperationKind::Query => FieldType::Named("Query".to_string()),
-            OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
-            OperationKind::Subscription => return Err(SpecError::SubscriptionNotSupported),
-        };
+        if kind == OperationKind::Subscription {
+            return Err(SpecError::SubscriptionNotSupported);
+        }
+        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
 
         let selection_set = operation
             .selection_set()
@@ -1112,7 +1237,7 @@ impl Operation {
                 })?)?;
 
                 Ok((
-                    ByteString::from(name),
+                    name.into(),
                     Variable {
                         field_type: ty,
                         default_value: parse_default_value(&definition),
@@ -1160,6 +1285,16 @@ impl Operation {
     }
 }
 
+impl From<hir::OperationType> for OperationKind {
+    fn from(operation_type: hir::OperationType) -> Self {
+        match operation_type {
+            hir::OperationType::Query => Self::Query,
+            hir::OperationType::Mutation => Self::Mutation,
+            hir::OperationType::Subscription => Self::Subscription,
+        }
+    }
+}
+
 impl From<ast::OperationType> for OperationKind {
     // Spec: https://spec.graphql.org/draft/#OperationType
     fn from(operation_type: ast::OperationType) -> Self {
@@ -1185,13 +1320,31 @@ fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
         .and_then(|value| parse_value(&value))
 }
 
+pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
+    match value {
+        hir::Value::Variable(_) => None,
+        hir::Value::Int(val) => Some((val.get() as i64).into()),
+        hir::Value::Float(val) => Some(val.get().into()),
+        hir::Value::Null => Some(Value::Null),
+        hir::Value::String(val) => Some(val.as_str().into()),
+        hir::Value::Boolean(val) => Some((*val).into()),
+        hir::Value::Enum(name) => Some(name.src().into()),
+        hir::Value::List(list) => list.iter().map(parse_hir_value).collect(),
+        hir::Value::Object(obj) => obj
+            .iter()
+            .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
+            .collect(),
+    }
+}
+
 pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
     match value {
         ast::Value::Variable(_) => None,
         ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
         ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
         ast::Value::IntValue(i) => {
-            let s = i.source_string();
+            let token = i.int_token()?;
+            let s = token.text();
             s.parse::<i64>()
                 .ok()
                 .map(Into::into)

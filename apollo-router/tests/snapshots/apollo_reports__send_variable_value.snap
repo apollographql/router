@@ -34,10 +34,7 @@ traces_per_query:
         client_version: ""
         http:
           method: 4
-          request_headers:
-            content-type:
-              value:
-                - ""
+          request_headers: {}
           response_headers:
             my_trace_id: "[my_trace_id]"
           status_code: 0

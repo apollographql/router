@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -44,8 +43,8 @@ use crate::register_plugin;
 use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
+use crate::services::SubgraphRequest;
 use crate::Configuration;
-use crate::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -54,6 +53,7 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
+/// Traffic shaping options
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Shaping {
@@ -67,6 +67,7 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
+    /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
 }
@@ -94,6 +95,7 @@ impl Merge for Shaping {
     }
 }
 
+/// Retry configuration
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RetryConfig {
@@ -142,9 +144,9 @@ struct RouterShaping {
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
-
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
+/// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
     #[serde(default)]
     /// Applied at the router level
@@ -346,7 +348,6 @@ impl TrafficShaping {
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
@@ -388,11 +389,11 @@ mod test {
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
+    use crate::spec::Schema;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
@@ -502,6 +503,7 @@ mod test {
             Arc::new(builder.build().await.expect("should build")),
             &Configuration::default(),
         )
+        .await
         .make()
         .boxed()
     }
@@ -551,13 +553,6 @@ mod test {
                     .get(&CONTENT_ENCODING)
                     .unwrap(),
                 HeaderValue::from_static("gzip")
-            );
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&ACCEPT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req
