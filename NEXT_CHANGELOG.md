@@ -98,22 +98,6 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 📚 Documentation
 
-
-### Creating custom metrics in plugins ([Issue #2294](https://github.com/apollographql/router/issues/2294))
-
-To create your custom metrics in [Prometheus](https://prometheus.io/) you can use the [`tracing` macros](https://docs.rs/tracing/latest/tracing/index.html#macros) to generate an event. If you observe a specific naming pattern for your event, you'll be able to generate your own custom metrics directly in Prometheus.
-
-To publish a new metric, use tracing macros to generate an event that contains one of the following prefixes:
-
-`monotonic_counter.` _(non-negative numbers)_: Used when the metric will only ever increase.
-`counter.`: For when the metric may increase or decrease over time.
-`value.`: For discrete data points (i.e., when taking the sum of values does not make semantic sense)
-`histogram.`: For building histograms (takes `f64`)
-
-This information is also available in [the Apollo Router documentation](https://www.apollographql.com/docs/router/customizations/native#add-custom-metrics).
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2417
-
 ### Documentation on how to propagate headers between subgraph services ([Issue #2128](https://github.com/apollographql/router/issues/2128))
 
 Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
