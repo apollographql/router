@@ -98,6 +98,12 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 📚 Documentation
 
+### Documentation on how to propagate headers between subgraph services ([Issue #2128](https://github.com/apollographql/router/issues/2128))
+
+Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2446
+
 ### Added documentation for listening on IPv6 ([Issue #1835](https://github.com/apollographql/router/issues/1835))
 
 Added documentation for listening on IPv6
@@ -109,3 +115,4 @@ supergraph:
 ```
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
+
