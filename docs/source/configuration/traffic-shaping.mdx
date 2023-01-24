@@ -28,7 +28,6 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
-      apq: false # Enable automatic persisted queries for http calls to 'products' subgraph. (true by default)
       experimental_retry:
         min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
         ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
@@ -62,17 +61,6 @@ traffic_shaping:
     timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
 ```
 
-### Automatic persisted queries (APQ)
-
-Subgraph requests support [automatic persisted queries](https://www.apollographql.com/docs/apollo-server/performance/apq/) by default. It can be deactivated with the `apq` option:
-
-```yaml title="router.yaml"
-traffic_shaping:
-  subgraphs:
-    products:
-      apq: false # Enable automatic persisted queries for http calls to 'products' subgraph. (true by default)
-```
-
 ### Compression
 
 Compression is automatically supported on the client side, depending on the `Accept-Encoding` header provided by the client.
@@ -100,6 +88,8 @@ traffic_shaping:
   all:
     compression: br # Enable brotli compression for all subgraphs.
 ```
+
+Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
 
 ### Rate limiting
 
@@ -160,6 +150,5 @@ Traffic shaping always executes these steps in the same order, to ensure a consi
 - request retry
 - timeout
 - query deduplication
-- APQ
 - compression
 - sending the request to the subgraph

@@ -5,7 +5,17 @@ description: Improve performance by delivering fields incrementally
 
 > 📣 **Defer support is generally available as of Apollo Router v1.8.0.** [Learn more about launch stages.](/resources/product-launch-stages)
 
-Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness:
+Queries sent to the Apollo Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
+
+The Apollo Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
+
+## What is `@defer`?
+
+The `@defer` directive enables a client query to specify sets of fields that it doesn't need to receive data for _immediately_. This is helpful whenever some fields in a query take much longer to resolve than others.
+
+Deferred fields are always contained within a GraphQL fragment, and the `@defer` directive is applied to that fragment (_not_ to the individual fields).
+
+Here's an example query that uses `@defer`:
 
 ```graphql
 query GetTopProducts {
@@ -33,7 +43,7 @@ The remainder of this article covers the Apollo Router's defer implementation in
 
 ## How does the Apollo Router defer fields?
 
-As discussed in [this article](/graphos/routing/defer/#which-fields-can-my-router-defer), the Apollo Router can defer the following fields in your schema: 
+As discussed in [this article](/graphos/routing/defer/#which-fields-can-my-router-defer), the Apollo Router can defer the following fields in your schema:
 
 - Root fields of the `Query` type (along with their subfields)
 - Fields of any entity type (along with their subfields)

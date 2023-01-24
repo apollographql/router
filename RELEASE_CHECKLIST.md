@@ -1,6 +1,42 @@
 Release Checklist
 =================
 
+Nightly Releases
+----------------
+
+As of the introduction of [PR #2409](https://github.com/apollographql/router/pull/2409), nightly releases are automatically built on a daily basis.  This is accomplished automatically through use of a parameterized invocation of the [`nightly` workflow](https://github.com/apollographql/router/blob/HEAD/.circleci/config.yml#L704-L711) using [CircleCI's Scheduled Pipelines](https://circleci.com/docs/scheduled-pipelines/) feature.
+
+### One-off builds
+
+In the way the schedule is defined, nightly builds are done from the `dev` branch.  However, the functionality that powers nightly builds can be used to also build from _any_ branch (including PRs) and produce a pre-release, "nightly style" build from any desired commit.
+
+This process can only be done by members of the Apollo Router `router` GitHub repository with contributor permissions on CircleCI.
+
+To invoke a one-off `nightly` build:
+
+1. Go to the CircleCI Pipelines view for this repository](https://app.circleci.com/pipelines/github/apollographql/router)
+2. Click on the **"All Branches"** drop-down menu and choose a branch you'd like to build from.
+3. Press the **"Trigger Pipeline"** button in the top-right of the navigation (to the left of the "Project Settings" button).
+4. Expand the "Add Parameters" section.
+5. Add one parameter using the following configuration:
+
+   **Parameter type:** `boolean`
+   **Name:** `nightly`
+   **Value:** `true`
+6. Press **"Trigger Pipeline"**
+7. Wait a couple seconds for the pipeline to begin and show in the list.
+
+To obtain the binary builds from the pipeline which was launched:
+
+> **Note**
+> Built nightlies are only available on the Artifacts for a job within 30 days after the CircleCI pipeline that created them is finished.  If you need them after this period, you will need to re-run the pipeline and wait for it to finish again.  You can do this by clicking the "Rerun from start" option on the pipeline.
+
+1. Click on the workflow name: **`nightly`** of the newly launched pipeline.  In the above steps, this is the pipeline that appeared after step 7.
+2. Click on the job representing the system architecture you'd like to obtain the build binary for.  For example, to get the macOS binary, click on `build_release-macos_build`.
+3. If the job hasn't already finished successfully, **wait for the job to finish successfully**.
+4. Click on the **Artifacts** tab.
+5. Click on the link to the `.tar.gz` file to download the tarball of the build distribution.  For example, you might click on a link called `artifacts/router-v0.0.0-nightly-20230119-abcd1234-x86_64-apple-darwin.tar.gz` for a macOS build done on the 19th of January 2023 from commit hash starting with `abcd1234`.
+
 This is a list of the things that need to happen during a release.
 
 Build a Release

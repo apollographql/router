@@ -114,4 +114,25 @@ pub mod _private {
             format!("{:?}", Schema::parse_with_hir(schema, &conf)),
         )
     }
+
+    /// Retuns the `Debug` fomatting of two `Result<Query, SpecError>`,
+    /// from `parse_with_ast` and `parse_with_hir` respectively.
+    ///
+    /// The two strings are expected to be equal.
+    pub fn compare_query_parsing(query: &str) -> (String, String) {
+        use once_cell::sync::OnceCell;
+
+        use crate::spec::Query;
+        use crate::spec::Schema;
+
+        static DUMMY_SCHEMA: OnceCell<Schema> = OnceCell::new();
+        let conf = Default::default();
+        let schema = DUMMY_SCHEMA.get_or_init(|| {
+            Schema::parse(include_str!("testdata/minimal_supergraph.graphql"), &conf).unwrap()
+        });
+        (
+            format!("{:?}", Query::parse_with_ast(query, schema, &conf)),
+            format!("{:?}", Query::parse_with_hir(query, schema, &conf)),
+        )
+    }
 }

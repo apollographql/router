@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -68,8 +67,6 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    /// Enable APQ for outgoing subgraph requests
-    apq: Option<bool>,
     /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
@@ -83,7 +80,6 @@ impl Merge for Shaping {
                 deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
-                apq: self.apq.or(fallback.apq),
                 global_rate_limit: self
                     .global_rate_limit
                     .as_ref()
@@ -352,7 +348,6 @@ impl TrafficShaping {
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
@@ -361,10 +356,6 @@ impl TrafficShaping {
         } else {
             Either::B(service)
         }
-    }
-
-    pub(crate) fn get_apq(&self, name: &str) -> Option<bool> {
-        self.config.subgraphs.get(name)?.apq
     }
 }
 
@@ -562,13 +553,6 @@ mod test {
                     .get(&CONTENT_ENCODING)
                     .unwrap(),
                 HeaderValue::from_static("gzip")
-            );
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&ACCEPT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req
