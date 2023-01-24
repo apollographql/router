@@ -35,6 +35,12 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ## 🚀 Features
 
+### Always deduplicate variables ([Issue #2387](https://github.com/apollographql/router/issues/2387))
+
+Variable deduplication allows the router to reduce the number of entities that are requested from subgraphs if some of them are redundant, and as such reduce the size of subgraph responses. It has been available for a while but was not active by default. This is now always on.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2445
+
 ### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
 
 Adds new option called `max_age` that is used like this:
@@ -111,6 +117,12 @@ health_check:
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2451 and https://github.com/apollographql/router/pull/2463
 
 ## 📚 Documentation
+
+### Documentation on how to propagate headers between subgraph services ([Issue #2128](https://github.com/apollographql/router/issues/2128))
+
+Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2446
 
 ### Added docs for development mode ([Issue #1988](https://github.com/apollographql/router/issues/#1988))
 

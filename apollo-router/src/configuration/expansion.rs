@@ -5,12 +5,12 @@ use std::env;
 use std::env::VarError;
 use std::fs;
 
-use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use proteus::Parser;
 use proteus::TransformBuilder;
 use serde_json::Value;
 
 use super::ConfigurationError;
+use crate::executable::APOLLO_ROUTER_DEV_ENV;
 
 #[derive(buildstructor::Builder)]
 pub(crate) struct Expansion {
@@ -222,7 +222,8 @@ mod test {
     use insta::assert_yaml_snapshot;
     use serde_json::json;
 
-    use crate::configuration::expansion::{dev_mode_defaults, ConfigDefault};
+    use crate::configuration::expansion::dev_mode_defaults;
+    use crate::configuration::expansion::ConfigDefault;
     use crate::configuration::Expansion;
 
     #[test]
