@@ -26,7 +26,7 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
-### Update to Federation v2.3.0 ([Issue #2212](https://github.com/apollographql/router/issues/))
+### Update to Federation v2.3.0 ([Issue #2465](https://github.com/apollographql/router/issues/2465))
 
 This brings in Federation v2.3.0-beta.3 for testing.  This will be updated to a final version before final release.
 
