@@ -26,6 +26,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
+### Update to Federation v2.3.0 ([Issue #2465](https://github.com/apollographql/router/issues/2465))
+
+This brings in Federation v2.3.0-beta.3 for testing.  This will be updated to a final version before final release.
+
+By [@abernix](https://github.com/abernix) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2462
+
 ### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
 
 Adds new option called `max_age` that is used like this:
