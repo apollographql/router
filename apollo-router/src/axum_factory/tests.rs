@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
@@ -28,6 +29,7 @@ use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN;
+use reqwest::header::ACCESS_CONTROL_MAX_AGE;
 use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
@@ -1308,6 +1310,26 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
 }
 
 #[tokio::test]
+async fn cors_max_age() -> Result<(), ApolloRouterError> {
+    let conf = Configuration::fake_builder()
+        .cors(Cors::builder().max_age(Duration::from_secs(100)).build())
+        .build()
+        .unwrap();
+    let (server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
+    assert_cors_max_age(response, "100");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn cors_allow_any_origin() -> Result<(), ApolloRouterError> {
     let conf = Configuration::fake_builder()
         .cors(Cors::builder().allow_any_origin(true).build())
@@ -1424,6 +1446,12 @@ fn assert_not_cors_origin(response: reqwest::Response, origin: &str) {
     assert!(response.status().is_success());
     let headers = response.headers();
     assert!(!origin_valid(headers, origin));
+}
+
+fn assert_cors_max_age(response: reqwest::Response, max_age: &str) {
+    assert!(response.status().is_success());
+    assert_headers_valid(&response);
+    assert_header_contains!(response, ACCESS_CONTROL_MAX_AGE, &[max_age]);
 }
 
 fn assert_headers_valid(response: &reqwest::Response) {

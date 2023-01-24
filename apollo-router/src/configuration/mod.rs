@@ -91,7 +91,6 @@ pub struct Configuration {
 
     /// Health check configuration
     #[serde(default)]
-    #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
 
     /// Sandbox configuration
@@ -135,7 +134,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             server: Server,
             #[serde(default)]
-            #[serde(rename = "health-check")]
             health_check: HealthCheck,
             #[serde(default)]
             sandbox: Sandbox,
