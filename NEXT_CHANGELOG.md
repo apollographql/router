@@ -23,6 +23,18 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 </KEEP> -->
 
+## 🚀 Features
+
+### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
+
+Adds new option called `max_age` that is used like this:
+```
+cors:
+  max_age: 86400secs
+```
+
+By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollographql/router/pull/2331
+
 ## 🐛 Fixes
 
 ### Fix panic in schema parse error reporting ([Issue #2269](https://github.com/apollographql/router/issues/2269))
