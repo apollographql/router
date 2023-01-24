@@ -375,7 +375,6 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
-    use http::header::ACCEPT_ENCODING;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
@@ -554,13 +553,6 @@ mod test {
                     .get(&CONTENT_ENCODING)
                     .unwrap(),
                 HeaderValue::from_static("gzip")
-            );
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&ACCEPT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req
