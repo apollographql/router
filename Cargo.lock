@@ -179,7 +179,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "Inflector",
  "access-json",
@@ -307,12 +307,16 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
+ "apollo-parser 0.4.1",
  "apollo-router",
+ "apollo-smith",
+ "arbitrary",
  "async-trait",
  "criterion",
  "futures",
+ "memory-stats",
  "once_cell",
  "serde_json",
  "serde_json_bytes",
@@ -323,7 +327,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -337,9 +341,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9c717390e188a27cbbe09c76042332bf6cc3bb6a83a73d71c0bceb6f2d73cb9"
+checksum = "7b4ab369b6c748e8e1ea87733a7f98d8e8671bf848cd8a8290308d5b0f90299b"
 dependencies = [
  "apollo-encoder 0.4.0",
  "apollo-parser 0.4.1",
@@ -2877,6 +2881,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "memory-stats"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34f79cf9964c5c9545493acda1263f1912f8d2c56c8a2ffee2606cb960acaacc"
+dependencies = [
+ "libc",
+ "winapi 0.3.9",
 ]
 
 [[package]]

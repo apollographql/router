@@ -42,29 +42,33 @@ pub(crate) struct Schema {
     root_operations: HashMap<OperationKind, String>,
 }
 
+pub(crate) fn sorted_map<K, V>(
+    f: &mut std::fmt::Formatter<'_>,
+    indent: &str,
+    name: &str,
+    map: &HashMap<K, V>,
+) -> std::fmt::Result
+where
+    K: std::fmt::Debug + Ord,
+    V: std::fmt::Debug,
+{
+    writeln!(f, "{indent}{name}:")?;
+    for (k, v) in map.iter().sorted_by_key(|&(k, _v)| k) {
+        writeln!(f, "{indent}  {k:?}: {v:#?}")?;
+    }
+    Ok(())
+}
+
 /// YAML-like representation with sorted hashmap/sets, more amenable to diffing
 impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn sorted_map<V: std::fmt::Debug>(
-            f: &mut std::fmt::Formatter<'_>,
-            indent: &str,
-            name: &str,
-            map: &HashMap<String, V>,
-        ) -> std::fmt::Result {
-            writeln!(f, "{indent}{name}:")?;
-            for (k, v) in map.iter().sorted_by_key(|&(k, _v)| k.clone()) {
-                writeln!(f, "{indent}  {k:?}: {v:?}")?;
-            }
-            Ok(())
-        }
-
         fn sorted_map_of_sets(
             f: &mut std::fmt::Formatter<'_>,
             name: &str,
             map: &HashMap<String, HashSet<String>>,
         ) -> std::fmt::Result {
             writeln!(f, "  {name}:")?;
-            for (k, set) in map.iter().sorted_by_key(|&(k, _set)| k.clone()) {
+            for (k, set) in map.iter().sorted_by_key(|&(k, _set)| k) {
                 writeln!(f, "    {k:?}:")?;
                 for v in set.iter().sorted() {
                     writeln!(f, "      {v:?}")?;
@@ -95,7 +99,7 @@ impl std::fmt::Debug for Schema {
             .collect();
         sorted_map(f, "  ", "root_operations", &root)?;
         writeln!(f, "  object_types:")?;
-        for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+        for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k) {
             let ObjectType {
                 name: _,
                 fields,
@@ -106,7 +110,7 @@ impl std::fmt::Debug for Schema {
             sorted_map(f, "      ", "fields", fields)?
         }
         writeln!(f, "  interfaces:")?;
-        for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+        for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k) {
             let Interface {
                 name: _,
                 fields,
@@ -117,7 +121,7 @@ impl std::fmt::Debug for Schema {
             sorted_map(f, "      ", "fields", fields)?
         }
         writeln!(f, "  input_types:")?;
-        for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k.clone()) {
+        for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k) {
             let InputObjectType { name: _, fields } = v;
             writeln!(f, "    {k:?}:")?;
             sorted_map(f, "      ", "fields", fields)?
@@ -309,16 +313,19 @@ impl Schema {
         return Ok(schema);
 
         fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
-            let schema_with_introspection = Schema::with_introspection(schema);
-            let parser = apollo_parser::Parser::new(&schema_with_introspection);
+            let parser = apollo_parser::Parser::new(include_str!("introspection_types.graphql"));
+            let introspection_tree = parser.parse();
+            let parser = apollo_parser::Parser::new(schema);
             let tree = parser.parse();
 
             // Trace log recursion limit data
             let recursion_limit = tree.recursion_limit();
             tracing::trace!(?recursion_limit, "recursion limit data");
 
+            let introspection_errors = introspection_tree.errors().cloned().collect::<Vec<_>>();
             let errors = tree.errors().cloned().collect::<Vec<_>>();
 
+            assert_eq!(introspection_errors, &[]);
             if !errors.is_empty() {
                 let errors = ParseErrors {
                     raw_schema: schema.to_string(),
@@ -329,6 +336,12 @@ impl Schema {
             }
 
             let document = tree.document();
+            let introspection_document = introspection_tree.document();
+            let definitions = || {
+                document
+                    .definitions()
+                    .chain(introspection_document.definitions())
+            };
             let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
             let mut subgraphs = HashMap::new();
             let mut root_operations = HashMap::new();
@@ -337,7 +350,7 @@ impl Schema {
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L294-L300
             // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L215-L263
-            for definition in document.definitions() {
+            for definition in definitions() {
                 macro_rules! implements_interfaces {
                     ($definition:expr) => {{
                         let name = $definition
@@ -505,8 +518,7 @@ impl Schema {
 
             macro_rules! implement_object_type_or_interface_map {
                 ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                    let mut map = document
-                        .definitions()
+                    let mut map = definitions()
                         .filter_map(|definition| {
                             if let $ast_ty(definition) = definition {
                                 match <$ty>::try_from(definition) {
@@ -519,8 +531,7 @@ impl Schema {
                         })
                         .collect::<Result<HashMap<String, $ty>, SchemaError>>()?;
 
-                    document
-                        .definitions()
+                    definitions()
                         .filter_map(|definition| {
                             if let $ast_extension_ty(extension) = definition {
                                 match <$ty>::try_from(extension) {
@@ -567,8 +578,7 @@ impl Schema {
 
             macro_rules! implement_input_object_type_or_interface_map {
                 ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                    let mut map = document
-                        .definitions()
+                    let mut map = definitions()
                         .filter_map(|definition| {
                             if let $ast_ty(definition) = definition {
                                 match <$ty>::try_from(definition) {
@@ -583,8 +593,7 @@ impl Schema {
                         .collect::<Result<HashMap<String, $ty>, _>>()
                         .map_err(|e| SchemaError::Api(e.to_string()))?;
 
-                    document
-                        .definitions()
+                    definitions()
                         .filter_map(|definition| {
                             if let $ast_extension_ty(extension) = definition {
                                 Some(<$ty>::try_from(extension))
@@ -621,8 +630,7 @@ impl Schema {
                 ast::Definition::InputObjectTypeExtension,
             );
 
-            let custom_scalars = document
-                .definitions()
+            let custom_scalars = definitions()
                 .filter_map(|definition| match definition {
                     // Spec: https://spec.graphql.org/draft/#sec-Scalars
                     // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
@@ -650,8 +658,7 @@ impl Schema {
                 })
                 .collect::<Result<_, _>>()?;
 
-            let enums: HashMap<String, HashSet<String>> = document
-                .definitions()
+            let enums: HashMap<String, HashSet<String>> = definitions()
                 .filter_map(|definition| match definition {
                     // Spec: https://spec.graphql.org/draft/#sec-Enums
                     ast::Definition::EnumTypeDefinition(definition) => {
@@ -746,14 +753,6 @@ impl Schema {
             Some(schema) => schema,
             None => self,
         }
-    }
-
-    fn with_introspection(schema: &str) -> String {
-        format!(
-            "{}\n{}",
-            schema,
-            include_str!("introspection_types.graphql")
-        )
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
@@ -1235,5 +1234,13 @@ GraphQL request:42:1
             }
             other => panic!("unexpected schema result: {:?}", other),
         };
+    }
+
+    // https://github.com/apollographql/router/issues/2269
+    #[test]
+    fn unclosed_brace_error_does_not_panic() {
+        let schema = "schema {";
+        let result = Schema::parse(schema, &Default::default());
+        assert!(result.is_err());
     }
 }
