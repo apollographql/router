@@ -554,7 +554,7 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "health-check": {
+    "health_check": {
       "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
