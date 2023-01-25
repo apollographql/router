@@ -19,6 +19,8 @@ use std::str::FromStr;
 use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -40,6 +42,11 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
+
+static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?P<first_path>.*/)(?P<sub_path>.+)\*$")
+        .expect("this regex to check the path is valid")
+});
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
@@ -378,7 +385,10 @@ impl Configuration {
             ),
         });
         }
-        if self.supergraph.path.ends_with('*') && !self.supergraph.path.ends_with("/*") {
+        if self.supergraph.path.ends_with('*')
+            && !self.supergraph.path.ends_with("/*")
+            && !SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.supergraph.path)
+        {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "invalid 'server.graphql_path' configuration",
                 error: format!(
@@ -571,6 +581,23 @@ impl Supergraph {
 impl Default for Supergraph {
     fn default() -> Self {
         Self::builder().build()
+    }
+}
+
+impl Supergraph {
+    /// To sanitize the path for axum router
+    pub(crate) fn sanitized_path(&self) -> String {
+        let mut path = self.path.clone();
+        if self.path.ends_with("/*") {
+            // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+            path = format!("{}router_extra_path", self.path);
+        } else if SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.path) {
+            let new_path = SUPERGRAPH_ENDPOINT_REGEX
+                .replace(&self.path, "${first_path}${sub_path}:supergraph_route");
+            path = new_path.to_string();
+        }
+
+        path
     }
 }
 
