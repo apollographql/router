@@ -554,7 +554,7 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "health-check": {
+    "health_check": {
       "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
@@ -3290,7 +3290,7 @@ expression: "&schema"
           "nullable": true
         },
         "deduplicate_variables": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
           "default": null,
           "type": "boolean",
           "nullable": true

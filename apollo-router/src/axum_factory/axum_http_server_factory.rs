@@ -305,14 +305,8 @@ pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: RouterFactory,
 {
-    let mut graphql_configuration = configuration.supergraph.clone();
-    if graphql_configuration.path.ends_with("/*") {
-        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
-    }
-
     Router::new().route(
-        &graphql_configuration.path,
+        &configuration.supergraph.sanitized_path(),
         get({
             move |Extension(service): Extension<RF>, request: Request<Body>| {
                 handle_graphql(service.create().boxed(), request)

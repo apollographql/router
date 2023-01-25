@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🚀 Features
 ## 🐛 Fixes
 ## 📃 Configuration
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 ## 🛠 Maintenance
 ## 📚 Documentation
 ## 🥼 Experimental
@@ -25,6 +26,12 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ## 🚀 Features
 
+### Always deduplicate variables ([Issue #2387](https://github.com/apollographql/router/issues/2387))
+
+Variable deduplication allows the router to reduce the number of entities that are requested from subgraphs if some of them are redundant, and as such reduce the size of subgraph responses. It has been available for a while but was not active by default. This is now always on.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2445
+
 ### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
 
 Adds new option called `max_age` that is used like this:
@@ -36,6 +43,20 @@ cors:
 By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollographql/router/pull/2331
 
 ## 🐛 Fixes
+
+### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
+
+You can now use wildcard in supergraph endpoint path like this:
+
+```yaml
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /g*
+```
+
+if you want the supergraph to answer on `/graphql` or `/gateway` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2410
 
 ### Fix panic in schema parse error reporting ([Issue #2269](https://github.com/apollographql/router/issues/2269))
 
@@ -110,7 +131,36 @@ struct Export {
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2424
 
+## 📃 Configuration
+
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
+
+### `health-check` renamed to `health_check` ([Issue #2161](https://github.com/apollographql/router/issues/2161))
+
+The health_check key in router.yaml has been renamed to snake case for consistency. 
+
+Before:
+```yaml
+health-check:
+  enabled: true
+```
+
+After:
+```yaml
+health_check:
+  enabled: true
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2451 and https://github.com/apollographql/router/pull/2463
+
+
 ## 📚 Documentation
+
+### Documentation on how to propagate headers between subgraph services ([Issue #2128](https://github.com/apollographql/router/issues/2128))
+
+Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2446
 
 ### Added documentation for listening on IPv6 ([Issue #1835](https://github.com/apollographql/router/issues/1835))
 
@@ -123,3 +173,4 @@ supergraph:
 ```
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
+
