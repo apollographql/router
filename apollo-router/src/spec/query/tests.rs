@@ -5236,3 +5236,41 @@ fn test_error_path_works_across_inline_fragments() {
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField")
     ));
 }
+
+#[test]
+fn test_query_not_named_query() {
+    let config = Default::default();
+    let schema = Schema::parse(
+        r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+            {
+            query: TheOneAndOnlyQuery
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type TheOneAndOnlyQuery { example: Boolean }
+        "#,
+        &config,
+    )
+    .unwrap();
+    let query = Query::parse("{ example }", &schema, &config).unwrap();
+    let selection = &query.operations[0].selection_set[0];
+    assert!(
+        matches!(
+            selection,
+            Selection::Field {
+                field_type: FieldType::Boolean,
+                ..
+            }
+        ),
+        "unexpected selection {selection:?}"
+    );
+}

@@ -99,7 +99,6 @@ impl Variables {
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
-        enable_deduplicate_variables: bool,
     ) -> Option<Variables> {
         let body = request.body();
         if !requires.is_empty() {
@@ -112,46 +111,30 @@ impl Variables {
             }));
 
             let mut paths: HashMap<Path, usize> = HashMap::new();
-            let (paths, representations) = if enable_deduplicate_variables {
-                let mut values: IndexSet<Value> = IndexSet::new();
-                data.select_values_and_paths(current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(value)) = select_object(content, requires, schema) {
-                            match values.get_index_of(&value) {
-                                Some(index) => {
-                                    paths.insert(path.clone(), index);
-                                }
-                                None => {
-                                    paths.insert(path.clone(), values.len());
-                                    values.insert(value);
-                                }
+            let mut values: IndexSet<Value> = IndexSet::new();
+
+            data.select_values_and_paths(current_dir, |path, value| {
+                if let Value::Object(content) = value {
+                    if let Ok(Some(value)) = select_object(content, requires, schema) {
+                        match values.get_index_of(&value) {
+                            Some(index) => {
+                                paths.insert(path.clone(), index);
+                            }
+                            None => {
+                                paths.insert(path.clone(), values.len());
+                                values.insert(value);
                             }
                         }
                     }
-                });
-
-                if values.is_empty() {
-                    return None;
                 }
+            });
 
-                (paths, Value::Array(Vec::from_iter(values)))
-            } else {
-                let mut values: Vec<Value> = Vec::new();
-                data.select_values_and_paths(current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(value)) = select_object(content, requires, schema) {
-                            paths.insert(path.clone(), values.len());
-                            values.push(value);
-                        }
-                    }
-                });
+            if values.is_empty() {
+                return None;
+            }
 
-                if values.is_empty() {
-                    return None;
-                }
+            let representations = Value::Array(Vec::from_iter(values));
 
-                (paths, Value::Array(Vec::from_iter(values)))
-            };
             variables.insert("representations", representations);
 
             Some(Variables { variables, paths })
@@ -209,7 +192,6 @@ impl FetchNode {
             // Needs the original request here
             parameters.supergraph_request,
             parameters.schema,
-            parameters.options.enable_deduplicate_variables,
         )
         .await
         {
@@ -308,7 +290,11 @@ impl FetchNode {
             let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
 
             let mut errors: Vec<Error> = vec![];
-            for error in response.errors {
+            for mut error in response.errors {
+                // the locations correspond to the subgraph query and cannot be linked to locations
+                // in the client query, so we remove them
+                error.locations = Vec::new();
+
                 // errors with path should be updated to the path of the entity they target
                 if let Some(ref path) = error.path {
                     if path.starts_with(&entities_path) {
