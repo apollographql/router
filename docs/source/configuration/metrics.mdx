@@ -66,6 +66,7 @@ The following metrics are available using Prometheus:
 - Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`), in seconds: `apollo_router_cache_hit_time`
 - Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`), in seconds: `apollo_router_cache_miss_time`
 - Time spent processing a request, outside of waiting for external or subgraph requests, in seconds (`apollo_router_processing_time`)
+- Number of triggered timeouts: `apollo_router_timeout`
 
 ## Using OpenTelemetry Collector
 

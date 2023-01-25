@@ -343,7 +343,13 @@ async fn handle_graphql(
                     return Elapsed::new().into_response();
                 }
             }
-            tracing::error!("router service call failed: {}", e);
+            if e.is::<RateLimited>() {
+                return RateLimited::new().into_response();
+            }
+            if e.is::<Elapsed>() {
+                return Elapsed::new().into_response();
+            }
+
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "router service call failed",
