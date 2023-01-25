@@ -44,6 +44,20 @@ By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollograp
 
 ## 🐛 Fixes
 
+### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
+
+You can now use wildcard in supergraph endpoint path like this:
+
+```yaml
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /g*
+```
+
+if you want the supergraph to answer on `/graphql` or `/gateway` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2410
+
 ### Fix panic in schema parse error reporting ([Issue #2269](https://github.com/apollographql/router/issues/2269))
 
 In order to support introspection,
