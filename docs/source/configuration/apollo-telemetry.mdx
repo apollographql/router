@@ -46,13 +46,13 @@ Note that `field_level_instrumentation_sampler` may not sample at a greater rate
 
 Provide this field to configure which request header names and values are included in trace data that's sent to Apollo Studio. Valid options are: `only` with an array, `except` with an array, `none`, `all`.
 
-The default value is `none``, which means no header names or values are sent to Studio. This is a security measure to prevent sensitive data from potentially reaching the Router.
+The default value is `none`, which means no header names or values are sent to Studio. This is a security measure to prevent sensitive data from leaving your infrastructure unless you specifically opt into it
 
 ### `send_variable_values`
 
 Provide this field to configure which variable values are included in trace data that's sent to Apollo Studio. Valid options are: `only` with an array, `except` with an array, `none`, `all`.
 
-The default value is `none`, which means no variable values are sent to Studio. This is a security measure to prevent sensitive data from potentially reaching the Router.
+The default value is `none`, which means no variable values are sent to Studio. This is a security measure to prevent sensitive data from leaving your infrastructure unless you specifically opt into it.
 
 ```yaml title="router.yaml"
 telemetry:
