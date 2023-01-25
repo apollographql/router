@@ -141,7 +141,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         #[serde(default)]
         struct AdHocConfiguration {
             server: Server,
-            #[serde(default, rename = "health-check")]
             health_check: HealthCheck,
             sandbox: Sandbox,
             homepage: Homepage,
