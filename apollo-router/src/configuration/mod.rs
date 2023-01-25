@@ -19,6 +19,8 @@ use std::str::FromStr;
 use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -40,6 +42,11 @@ use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
+
+static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?P<first_path>.*/)(?P<sub_path>.+)\*$")
+        .expect("this regex to check the path is valid")
+});
 
 /// Configuration error.
 #[derive(Debug, Error, Display)]
@@ -91,7 +98,6 @@ pub struct Configuration {
 
     /// Health check configuration
     #[serde(default)]
-    #[serde(rename = "health-check")]
     pub(crate) health_check: HealthCheck,
 
     /// Sandbox configuration
@@ -135,7 +141,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(default)]
             server: Server,
             #[serde(default)]
-            #[serde(rename = "health-check")]
             health_check: HealthCheck,
             #[serde(default)]
             sandbox: Sandbox,
@@ -293,13 +298,6 @@ impl Configuration {
         plugins
     }
 
-    pub(crate) fn plugin_configuration(&self, plugin_name: &str) -> Option<Value> {
-        self.plugins()
-            .iter()
-            .find(|(name, _)| name == plugin_name)
-            .map(|(_, value)| value.clone())
-    }
-
     // checks that we can reload configuration from the current one to the new one
     pub(crate) fn is_compatible(&self, new: &Configuration) -> Result<(), &'static str> {
         if self.apollo_plugins.plugins.get(TELEMETRY_KEY)
@@ -314,9 +312,8 @@ impl Configuration {
 
 impl Default for Configuration {
     fn default() -> Self {
-        Configuration::builder()
-            .build()
-            .expect("default configuration must be valid")
+        // We want to trigger all defaulting logic so don't use the raw builder.
+        Configuration::from_str("").expect("default configuration must be valid")
     }
 }
 
@@ -388,7 +385,10 @@ impl Configuration {
             ),
         });
         }
-        if self.supergraph.path.ends_with('*') && !self.supergraph.path.ends_with("/*") {
+        if self.supergraph.path.ends_with('*')
+            && !self.supergraph.path.ends_with("/*")
+            && !SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.supergraph.path)
+        {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "invalid 'server.graphql_path' configuration",
                 error: format!(
@@ -584,6 +584,23 @@ impl Default for Supergraph {
     }
 }
 
+impl Supergraph {
+    /// To sanitize the path for axum router
+    pub(crate) fn sanitized_path(&self) -> String {
+        let mut path = self.path.clone();
+        if self.path.ends_with("/*") {
+            // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
+            path = format!("{}router_extra_path", self.path);
+        } else if SUPERGRAPH_ENDPOINT_REGEX.is_match(&self.path) {
+            let new_path = SUPERGRAPH_ENDPOINT_REGEX
+                .replace(&self.path, "${first_path}${sub_path}:supergraph_route");
+            path = new_path.to_string();
+        }
+
+        path
+    }
+}
+
 /// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -592,7 +609,36 @@ pub(crate) struct Apq {
     #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
     /// Cache configuration
+    #[serde(default)]
     pub(crate) experimental_cache: Cache,
+
+    #[serde(default)]
+    pub(crate) subgraph: ApqSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the subgraph server component.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ApqSubgraphWrapper {
+    /// options applying to all subgraphs
+    #[serde(default)]
+    pub(crate) all: SubgraphApq,
+    /// per subgraph options
+    #[serde(default)]
+    pub(crate) subgraphs: HashMap<String, SubgraphApq>,
+}
+
+/// Subgraph level Automatic Persisted Queries (APQ) configuration
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct SubgraphApq {
+    /// Enable
+    #[serde(default = "default_subgraph_apq")]
+    pub(crate) enabled: bool,
+}
+
+fn default_subgraph_apq() -> bool {
+    false
 }
 
 fn default_apq() -> bool {
@@ -604,6 +650,7 @@ impl Default for Apq {
         Self {
             enabled: default_apq(),
             experimental_cache: Default::default(),
+            subgraph: Default::default(),
         }
     }
 }
@@ -627,7 +674,6 @@ pub(crate) struct QueryPlanning {
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
-    #[cfg(feature = "experimental_cache")]
     /// Configures and activates the Redis cache
     pub(crate) redis: Option<RedisCache>,
 }
@@ -648,7 +694,6 @@ impl Default for InMemoryCache {
     }
 }
 
-#[cfg(feature = "experimental_cache")]
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
