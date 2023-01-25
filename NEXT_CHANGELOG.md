@@ -44,6 +44,19 @@ By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollograp
 
 ## 🐛 Fixes
 
+### Listen on root URL when `/*` is set in `supergraph.path` configuration ([Issue #2471](https://github.com/apollographql/router/issues/2471))
+
+If you provided this configuration:
+
+```yaml
+supergraph:
+  path: /*
+```
+
+Since release `1.8` and due to [Axum upgrade](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0) it wasn't listening on `localhost` without a path. It now has a special case for `/*` to also listen to the URL without a path so you're able to call on `http://localhost` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2472
+
 ### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
 
 You can now use wildcard in supergraph endpoint path like this:
