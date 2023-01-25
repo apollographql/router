@@ -210,7 +210,7 @@ headers:
 
 It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
 
-This approach relies the fact that all requests have context that can be used to store data for the duration of the request:
+This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
 
 1. For each subgraph response, copy header values into context.
 2. For each the supergraph response, copy header values from the context onto the response.
@@ -260,7 +260,7 @@ If you would like to see a YAML based solution then [please leave us a comment o
 
 It is not currently possible to propagate headers between subgraphs using yaml config alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
 
-This approach relies the fact that all requests have context that can be used to store data for the duration of the request:
+This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
 
 1. For each subgraph response, copy header values into context.
 2. For each subgraph request, copy header values from context into the subgraph request.
