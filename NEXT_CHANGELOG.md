@@ -158,3 +158,8 @@ supergraph:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
 
+### Documentation on how to propagate headers to clients
+
+Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/2474
