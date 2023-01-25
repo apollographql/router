@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -62,6 +63,8 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
+use crate::plugin::test::MockSubgraph;
+use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::static_page::home_page_content;
@@ -69,11 +72,14 @@ use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service;
+use crate::services::router_service::RouterCreator;
 use crate::services::supergraph;
+use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::ApolloRouterError;
@@ -2166,4 +2172,60 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
         error.to_string()
     );
+}
+
+#[tokio::test]
+async fn test_supergraph_timeout() {
+    let config = serde_json::json!({
+        "supergraph": {
+            "defer_support": false,
+        },
+        "traffic_shaping": {
+            "router": {
+                "timeout": "1ns"
+            }
+        },
+    });
+
+    let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
+
+    let schema = Schema::parse(
+        include_str!("..//testdata/minimal_supergraph.graphql"),
+        &conf,
+    )
+    .unwrap();
+
+    // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
+    // because we need the plugins to apply on the supergraph
+    let plugins = create_plugins(&conf, &schema, None).await.unwrap();
+
+    let mut builder = PluggableSupergraphServiceBuilder::new(Arc::new(schema))
+        .with_configuration(conf.clone())
+        .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
+
+    for (name, plugin) in plugins.into_iter() {
+        builder = builder.with_dyn_plugin(name, plugin);
+    }
+    let supergraph_creator = builder.build().await.unwrap();
+
+    let service = RouterCreator::new(Arc::new(supergraph_creator), &conf)
+        .await
+        .make();
+
+    // keep the server handle around otherwise it will immediately shutdown
+    let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
+        .await
+        .unwrap();
+    let url = "http://localhost:4000/";
+
+    let response = client
+        .post(url)
+        .body(r#"{ "query": "{ me }" }"#)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = response.bytes().await.unwrap();
+    assert_eq!(std::str::from_utf8(&body).unwrap(), "request timed out");
 }
