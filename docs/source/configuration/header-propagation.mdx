@@ -205,3 +205,51 @@ headers:
             name: "router-subgraph-name"
             value: "accounts"
 ```
+
+
+## Propagation between subgraphs
+
+It is not currently possible to propagate headers between subgraphs using yaml config alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
+
+The approach relied on the feature that all requests have context that can be used to store data for the duration of the request: 
+1. On supbgraph response, copy header values into context.
+2. On supbgraph request, copy header values from context into the subgraph request.
+
+
+Example router.yaml that will use the Rhai script:
+```rhai title="router.yaml"
+rhai:
+  main: "main.rhai"
+```
+
+Example Rhai script that copies `request-id` and `user` headers:
+```rhai title="./rhai/main.rhai"
+fn subgraph_service(service, subgraph) {
+    // The list of headers that you which to propagate.
+    let headers = ["request-id", "user"];
+
+    // Callback for subgraph requests. Inserts headers from context into the subgraph request.
+    let request_callback = |request| {
+        for key in headers {
+            if request.context[key] != () {
+                request.subgraph.headers[key] = request.context[key];
+            }
+        }
+    };
+  
+    // Callback for subgraph responses. Pulls header values out of the response and inserts them into context.
+    let response_callback = |response| {
+        for key in headers {
+            if key in response.headers {
+                response.context[key] = response.headers[key];
+            }
+        }
+    };
+  
+    // Register the callbacks.
+    service.map_request(request_callback);
+    service.map_response(response_callback);
+}
+```
+
+If you would like to see a YAML based solution then [please leave us a comment on our issue tracker](https://github.com/apollographql/router/issues/2444).
