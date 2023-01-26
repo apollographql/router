@@ -146,7 +146,7 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
 
 impl Schema {
     pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        Self::parse_with_ast(s, configuration)
+        Self::parse_with_hir(s, configuration)
     }
 
     pub(crate) fn parse_with_hir(

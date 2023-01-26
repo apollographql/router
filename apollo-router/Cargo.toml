@@ -58,7 +58,7 @@ backtrace = "0.3.67"
 base64 = "0.20.0"
 buildstructor = "0.5.1"
 bytes = "1.3.0"
-clap = { version = "4.1.3", default-features = false, features = [
+clap = { version = "4.1.4", default-features = false, features = [
     "env",
     "derive",
     "std",

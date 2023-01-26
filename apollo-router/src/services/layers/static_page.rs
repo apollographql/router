@@ -108,9 +108,8 @@ fn prefers_html(headers: &HeaderMap) -> bool {
 
 /// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Sandbox {
-    #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
 

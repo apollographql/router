@@ -305,14 +305,8 @@ pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: RouterFactory,
 {
-    let mut graphql_configuration = configuration.supergraph.clone();
-    if graphql_configuration.path.ends_with("/*") {
-        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
-    }
-
-    Router::new().route(
-        &graphql_configuration.path,
+    let mut router = Router::new().route(
+        &configuration.supergraph.sanitized_path(),
         get({
             move |Extension(service): Extension<RF>, request: Request<Body>| {
                 handle_graphql(service.create().boxed(), request)
@@ -323,7 +317,25 @@ where
                 handle_graphql(service.create().boxed(), request)
             }
         }),
-    )
+    );
+
+    if configuration.supergraph.path == "/*" {
+        router = router.route(
+            "/",
+            get({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            })
+            .post({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            }),
+        );
+    }
+
+    router
 }
 
 async fn handle_graphql(
@@ -349,7 +361,13 @@ async fn handle_graphql(
                     return Elapsed::new().into_response();
                 }
             }
-            tracing::error!("router service call failed: {}", e);
+            if e.is::<RateLimited>() {
+                return RateLimited::new().into_response();
+            }
+            if e.is::<Elapsed>() {
+                return Elapsed::new().into_response();
+            }
+
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "router service call failed",
