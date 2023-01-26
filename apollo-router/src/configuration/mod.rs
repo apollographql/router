@@ -263,11 +263,6 @@ impl Configuration {
         self.homepage.enabled = false;
     }
 
-    #[cfg(test)]
-    pub(crate) fn boxed(self) -> Box<Self> {
-        Box::new(self)
-    }
-
     pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
         let mut plugins = vec![];
 
