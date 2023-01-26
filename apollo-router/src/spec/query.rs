@@ -16,6 +16,9 @@ use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
+use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
@@ -42,6 +45,9 @@ pub(crate) const TYPENAME: &str = "__typename";
 #[derivative(PartialEq, Hash, Eq)]
 pub(crate) struct Query {
     string: String,
+    #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
+    #[serde(skip)]
+    compiler: OnceCell<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -55,6 +61,7 @@ impl std::fmt::Debug for Query {
         use super::schema::sorted_map;
         let Query {
             string,
+            compiler: _,
             fragments,
             operations,
             subselections,
@@ -332,6 +339,7 @@ impl Query {
 
         Ok(Query {
             string: query,
+            compiler: OnceCell::from(Mutex::new(compiler)),
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -379,11 +387,33 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
+            compiler: OnceCell::new(),
             string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
         })
+    }
+
+    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
+        self.compiler
+            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
+            .await
+            .lock()
+            .await
+    }
+
+    /// Create a new compiler for this query, without caching it
+    pub(crate) fn uncached_compiler(&self, schema: Option<&Schema>) -> ApolloCompiler {
+        let mut compiler = ApolloCompiler::new();
+        if let Some(schema) = schema {
+            compiler.set_type_system_hir(schema.type_system.clone());
+        }
+        // As long as this is the only executable document in this compiler
+        // we can use compiler’s `all_operations` and `all_fragments`.
+        // If that changes, we’ll need to carry around this ID somehow.
+        let _id = compiler.add_executable(&self.string, "query");
+        compiler
     }
 
     #[allow(clippy::too_many_arguments)]
