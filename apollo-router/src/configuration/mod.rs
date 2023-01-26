@@ -87,6 +87,7 @@ pub enum ConfigurationError {
 /// or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.
 #[derive(Clone, Derivative, Serialize, JsonSchema)]
 #[derivative(Debug)]
+// We can't put a global #[serde(default)] here because of the Default implementation using `from_str` which use deserialize
 pub struct Configuration {
     /// The raw configuration string.
     #[serde(skip)]
@@ -137,25 +138,17 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         // This intermediate structure will allow us to deserialize a Configuration
         // yet still exercise the Configuration validation function
         #[derive(Deserialize, Default)]
+        #[serde(default)]
         struct AdHocConfiguration {
-            #[serde(default)]
             server: Server,
-            #[serde(default)]
             health_check: HealthCheck,
-            #[serde(default)]
             sandbox: Sandbox,
-            #[serde(default)]
             homepage: Homepage,
-            #[serde(default)]
             supergraph: Supergraph,
-            #[serde(default)]
             cors: Cors,
-            #[serde(default)]
             plugins: UserPlugins,
-            #[serde(default)]
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
-            #[serde(default)]
             tls: Tls,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -500,32 +493,27 @@ impl JsonSchema for UserPlugins {
 /// Configuration options pertaining to the supergraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Supergraph {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:4000
-    #[serde(default = "default_graphql_listen")]
     pub(crate) listen: ListenAddr,
 
     /// The HTTP path on which GraphQL requests will be served.
     /// default: "/"
-    #[serde(default = "default_graphql_path")]
     pub(crate) path: String,
 
     /// Enable introspection
     /// Default: false
-    #[serde(default = "default_graphql_introspection")]
     pub(crate) introspection: bool,
 
     /// Set to false to disable defer support
-    #[serde(default = "default_defer_support")]
     pub(crate) defer_support: bool,
 
     /// Configures automatic persisted queries
-    #[serde(default)]
     pub(crate) apq: Apq,
 
     /// Query planning options
-    #[serde(default)]
     pub(crate) query_planning: QueryPlanning,
 }
 
@@ -705,20 +693,19 @@ pub(crate) struct RedisCache {
 /// TLS related configuration options.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Tls {
-    #[serde(default)]
     pub(crate) subgraph: TlsSubgraphWrapper,
 }
 
 /// Configuration options pertaining to the subgraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct TlsSubgraphWrapper {
     /// options applying to all subgraphs
-    #[serde(default)]
     pub(crate) all: TlsSubgraph,
     /// per subgraph options
-    #[serde(default)]
     pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
 }
 
@@ -739,9 +726,9 @@ impl Default for TlsSubgraphWrapper {
 /// Configuration options pertaining to the subgraph server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct TlsSubgraph {
     /// list of certificate authorities in PEM format
-    #[serde(default)]
     pub(crate) certificate_authorities: Option<String>,
 }
 
@@ -764,9 +751,9 @@ impl Default for TlsSubgraph {
 /// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Sandbox {
     /// Set to true to enable sandbox
-    #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
 
@@ -804,9 +791,9 @@ impl Default for Sandbox {
 /// Configuration options pertaining to the home page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Homepage {
     /// Set to false to disable the homepage
-    #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
 }
 
@@ -844,14 +831,13 @@ impl Default for Homepage {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct HealthCheck {
     /// The socket address and port to listen on
     /// Defaults to 127.0.0.1:8088
-    #[serde(default = "default_health_check_listen")]
     pub(crate) listen: ListenAddr,
 
     /// Set to false to disable the health check endpoint
-    #[serde(default = "default_health_check")]
     pub(crate) enabled: bool,
 }
 
@@ -895,10 +881,10 @@ impl Default for HealthCheck {
 /// Configuration options pertaining to the http server component.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Server {
     /// Experimental limitation of query depth
     /// default: 4096
-    #[serde(default = "default_parser_recursion_limit")]
     pub(crate) experimental_parser_recursion_limit: usize,
 }
 
@@ -911,6 +897,12 @@ impl Server {
             experimental_parser_recursion_limit: parser_recursion_limit
                 .unwrap_or_else(default_parser_recursion_limit),
         }
+    }
+}
+
+impl Default for Server {
+    fn default() -> Self {
+        Self::builder().build()
     }
 }
 
@@ -983,10 +975,4 @@ fn default_parser_recursion_limit() -> usize {
     // but is still very high for "reasonable" queries.
     // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
     4096
-}
-
-impl Default for Server {
-    fn default() -> Self {
-        Server::builder().build()
-    }
 }
