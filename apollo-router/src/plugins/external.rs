@@ -45,36 +45,32 @@ struct ExternalPlugin {
 
 /// What information is passed to a request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default)]
 struct BaseConf {
     /// Send the headers
-    #[serde(default)]
     headers: bool,
     /// Send the context
-    #[serde(default)]
     context: bool,
     /// Send the body
-    #[serde(default)]
     body: bool,
     /// Send the SDL
-    #[serde(default)]
     sdl: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default)]
 struct RouterStage {
     /// The request configuration
-    #[serde(default)]
     request: Option<BaseConf>,
     /// The response configuration
-    #[serde(default)]
     response: Option<BaseConf>,
 }
 
 /// The stages request/response configuration
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default)]
 struct Stages {
     /// The router stage
-    #[serde(default)]
     router: Option<RouterStage>,
 }
 

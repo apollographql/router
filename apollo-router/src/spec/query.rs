@@ -291,7 +291,7 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        Self::parse_with_ast(query, schema, configuration)
+        Self::parse_with_hir(query, schema, configuration)
     }
 
     pub(crate) fn parse_with_hir(

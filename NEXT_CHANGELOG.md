@@ -44,6 +44,19 @@ By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollograp
 
 ## 🐛 Fixes
 
+### Listen on root URL when `/*` is set in `supergraph.path` configuration ([Issue #2471](https://github.com/apollographql/router/issues/2471))
+
+If you provided this configuration:
+
+```yaml
+supergraph:
+  path: /*
+```
+
+Since release `1.8` and due to [Axum upgrade](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0) it wasn't listening on `localhost` without a path. It now has a special case for `/*` to also listen to the URL without a path so you're able to call on `http://localhost` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2472
+
 ### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
 
 You can now use wildcard in supergraph endpoint path like this:
@@ -103,6 +116,43 @@ This also fixes the behaviour when we reach the maximum number of file descripto
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
 
+## 🛠 Maintenance
+
+### Improve #[serde(default)] attribute on structs ([Issue #2424](https://github.com/apollographql/router/issues/2424))
+
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl.
+
++ GOOD
+```rust
+#[serde(deny_unknown_fields, default)]
+struct Export {
+    url: Url,
+    enabled: bool
+}
+
+impl Default for Export {
+  fn default() -> Self {
+    Self {
+      url: default_url_fn(),
+      enabled: false
+    }
+  }
+}
+```
+
++ BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url,
+    #[serde(default)]
+    enabled: bool
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2424
+
 ## 📃 Configuration
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
@@ -133,6 +183,23 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 📚 Documentation
 
+### `send_headers` and `send_variable_values` in `telemetry.apollo` ([Issue #2149](https://github.com/apollographql/router/issues/2149))
+
++ `send_headers`
+
+  Provide this field to configure which request header names and values are included in trace data that's sent to Apollo Studio. Valid options are: `only` with an array, `except` with an array, `none`, `all`.
+
+  The default value is `none``, which means no header names or values are sent to Studio. This is a security measure to prevent sensitive data from potentially reaching the Router.
+
++ `send_variable_values`
+
+  Provide this field to configure which variable values are included in trace data that's sent to Apollo Studio. Valid options are: `only` with an array, `except` with an array, `none`, `all`.
+
+  The default value is `none`, which means no variable values are sent to Studio. This is a security measure to prevent sensitive data from potentially reaching the Router.
+
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2435
+
 ### Documentation on how to propagate headers between subgraph services ([Issue #2128](https://github.com/apollographql/router/issues/2128))
 
 Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
@@ -151,3 +218,16 @@ supergraph:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
 
+## 🛠 Maintenance
+
+### Parse schemas and queries with `apollo-compiler`
+
+The Router now uses the higher-level representation from `apollo-compiler`
+instead of using the AST from `apollo-parser` directly.
+This is a first step towards replacing a bunch of code that grew organically
+during the Router’s early days, with a general-purpose library with intentional design.
+Internal data structures are unchanged for now.
+Parsing behavior has been tested to be identical on a large corpus
+of production schemas and queries.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2466

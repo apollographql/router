@@ -308,7 +308,7 @@ pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: RouterFactory,
 {
-    Router::new().route(
+    let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
             move |Extension(service): Extension<RF>, request: Request<Body>| {
@@ -320,7 +320,25 @@ where
                 handle_graphql(service.create().boxed(), request)
             }
         }),
-    )
+    );
+
+    if configuration.supergraph.path == "/*" {
+        router = router.route(
+            "/",
+            get({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            })
+            .post({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            }),
+        );
+    }
+
+    router
 }
 
 async fn handle_graphql(
