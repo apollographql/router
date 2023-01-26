@@ -106,6 +106,15 @@ Subgraph errors can come with a `locations` field indicating which part of the q
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2442
 
+### Emit metrics showing number of client connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
+
+New metrics are available to track the client connections:
+- `apollo_router_session_count_total` indicates the number of currently connected clients
+- `apollo_router_session_count_active` indicates the number of in flight GraphQL requests from connected clients.
+
+This also fixes the behaviour when we reach the maximum number of file descriptors: instead of going into a busy loop, the router will wait a bit before accepting a new connection.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
 
 ## 🛠 Maintenance
 
