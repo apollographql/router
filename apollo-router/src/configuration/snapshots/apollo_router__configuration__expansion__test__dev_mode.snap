@@ -2,19 +2,19 @@
 source: apollo-router/src/configuration/expansion.rs
 expression: value
 ---
-experimental:
-  expose_query_plan: "true"
 homepage:
-  enabled: "true"
+  enabled: false
   some_other_config: should remain
 include_subgraph_errors:
-  all: "true"
+  all: true
+plugins:
+  experimental.expose_query_plan: true
 sandbox:
-  enabled: "true"
+  enabled: true
 supergraph:
-  introspection: "true"
+  introspection: true
 telemetry:
   tracing:
     experimental_response_trace_id:
-      enabled: "true"
+      enabled: true
 

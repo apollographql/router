@@ -24,6 +24,7 @@ pub(crate) struct ConfigDefault {
     config_path: String,
     env_name: Option<String>,
     default: String,
+    quote: bool,
 }
 
 impl Expansion {
@@ -62,6 +63,7 @@ impl Expansion {
                     .config_path("telemetry.apollo.endpoint")
                     .env_name("APOLLO_USAGE_REPORTING_INGRESS_URL")
                     .default("https://usage-reporting.api.apollographql.com/api/ingress/traces")
+                    .quote(true)
                     .build(),
             )
             .defaults(dev_mode_defaults)
@@ -72,28 +74,34 @@ impl Expansion {
 fn dev_mode_defaults() -> Vec<ConfigDefault> {
     vec![
         ConfigDefault::builder()
-            .config_path("experimental.expose_query_plan")
+            .config_path("plugins.[\"experimental.expose_query_plan\"]")
             .default("true")
+            .quote(false)
             .build(),
         ConfigDefault::builder()
             .config_path("include_subgraph_errors.all")
             .default("true")
+            .quote(false)
             .build(),
         ConfigDefault::builder()
             .config_path("telemetry.tracing.experimental_response_trace_id.enabled")
             .default("true")
+            .quote(false)
             .build(),
         ConfigDefault::builder()
             .config_path("supergraph.introspection")
             .default("true")
+            .quote(false)
             .build(),
         ConfigDefault::builder()
             .config_path("sandbox.enabled")
             .default("true")
+            .quote(false)
             .build(),
         ConfigDefault::builder()
             .config_path("homepage.enabled")
-            .default("true")
+            .default("false")
+            .quote(false)
             .build(),
     ]
 }
@@ -139,17 +147,17 @@ impl Expansion {
         }
     }
 
-    pub(crate) fn expand_env_variables(
+    pub(crate) fn expand(
         &self,
         configuration: &serde_json::Value,
     ) -> Result<serde_json::Value, ConfigurationError> {
         let mut configuration = configuration.clone();
-        self.env_defaults(&mut configuration)?;
+        self.defaults(&mut configuration)?;
         self.visit(&mut configuration)?;
         Ok(configuration)
     }
 
-    fn env_defaults(&self, config: &mut Value) -> Result<(), ConfigurationError> {
+    fn defaults(&self, config: &mut Value) -> Result<(), ConfigurationError> {
         // Anything that needs expanding via env variable should be placed here. Don't pollute the codebase with calls to std::env.
         // For testing we have the one fixed expansion. We don't actually want to expand env variables during tests
         let mut transformer_builder = TransformBuilder::default();
@@ -162,10 +170,17 @@ impl Expansion {
                 default.default.clone()
             };
 
-            transformer_builder = transformer_builder.add_action(
-                Parser::parse(&format!("const(\"{}\")", value), &default.config_path)
-                    .expect("migration must be valid"),
-            );
+            if default.quote {
+                transformer_builder = transformer_builder.add_action(
+                    Parser::parse(&format!("const(\"{}\")", value), &default.config_path)
+                        .expect("migration must be valid"),
+                );
+            } else {
+                transformer_builder = transformer_builder.add_action(
+                    Parser::parse(&format!("const({})", value), &default.config_path)
+                        .expect("migration must be valid"),
+                );
+            }
         }
         *config = transformer_builder
             .build()
@@ -238,6 +253,7 @@ mod test {
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
+                    .quote(true)
                     .build(),
             )
             .default(
@@ -245,6 +261,7 @@ mod test {
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
                     .default("defaulted")
+                    .quote(true)
                     .build(),
             )
             .default(
@@ -252,14 +269,13 @@ mod test {
                     .config_path("overridden")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
+                    .quote(true)
                     .build(),
             )
             .build();
 
         let mut value = json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "fail"});
-        value = expansion
-            .expand_env_variables(&value)
-            .expect("expansion must succeed");
+        value = expansion.expand(&value).expect("expansion must succeed");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
         })
@@ -278,6 +294,7 @@ mod test {
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
+                    .quote(true)
                     .build(),
             )
             .default(
@@ -285,6 +302,7 @@ mod test {
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
                     .default("defaulted")
+                    .quote(true)
                     .build(),
             )
             .default(
@@ -292,13 +310,12 @@ mod test {
                     .config_path("overridden")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
+                    .quote(true)
                     .build(),
             )
             .build();
         let mut value = json!({"expanded": "${env.TEST_EXPANSION_VAR}", "overridden": "fail"});
-        value = expansion
-            .expand_env_variables(&value)
-            .expect("expansion must succeed");
+        value = expansion.expand(&value).expect("expansion must succeed");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
         })
@@ -309,9 +326,7 @@ mod test {
         let expansion = Expansion::builder().defaults(dev_mode_defaults()).build();
         let mut value =
             json!({"homepage": {"enabled": false, "some_other_config": "should remain"}});
-        value = expansion
-            .expand_env_variables(&value)
-            .expect("expansion must succeed");
+        value = expansion.expand(&value).expect("expansion must succeed");
         insta::with_settings!({sort_maps => true}, {
             assert_yaml_snapshot!(value);
         })
