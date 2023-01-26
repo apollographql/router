@@ -183,6 +183,12 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ## 📚 Documentation
 
+### Fix the documentation to disable the Apollo telemetry ([Issue #2478](https://github.com/apollographql/router/issues/2478))
+
+To disable the Apollo telemetry you have to use `APOLLO_TELEMETRY_DISABLED=true`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2479
+
 ### `send_headers` and `send_variable_values` in `telemetry.apollo` ([Issue #2149](https://github.com/apollographql/router/issues/2149))
 
 + `send_headers`
