@@ -144,7 +144,20 @@ impl Service<ExecutionRequest> for ExecutionService {
                         // under an array would generate one response par array element
                         (Some(response_path), Some(response_data)) => {
                             let mut sub_responses = Vec::new();
-                            response_data.select_values_and_paths(response_path, |path, value| {
+                            // TODO: this selection at `response_path` below is applied on the response data _after_
+                            // is has been post-processed with the user query (in the "format_response" span above).
+                            // It is not quite right however, because `response_path` (sent by the query planner) 
+                            // may contain `PathElement::Fragment`, whose goal is to filter out only those entities that
+                            // match the fragment type. However, because the data is been filtered, `response_data` will
+                            // not contain the `__typename` value for entities (even though those are in the unfiltered
+                            // data), at least unless the user query selects them manually. The result being that those
+                            // `PathElement::Fragment` in the path will be essentially ignored (we'll match any object
+                            // for which we don't have a `__typename` as we would otherwise miss the data that we need
+                            // to return). I believe this might make it possible to return some data that should not have
+                            // been returned (at least not in that particular response). And while this is probably only
+                            // true in fairly contrived examples, this is not working as intended by the query planner,
+                            // so it is dodgy and could create bigger problems in the future.
+                            response_data.select_values_and_paths(&schema, response_path, |path, value| {
                                 // if the deferred path points to an array, split it into multiple subresponses
                                 // because the root must be an object
                                 if let Value::Array(array) = value {
