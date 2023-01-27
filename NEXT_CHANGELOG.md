@@ -116,6 +116,30 @@ This also fixes the behaviour when we reach the maximum number of file descripto
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
 
+### `--dev` will no longer modify configuration that it does not directly touch ([Issue #2404](https://github.com/apollographql/router/issues/2404), [Issue #2481](https://github.com/apollographql/router/issues/2481))
+
+Previously `dev` mode was operating against the configuration object model. This meant that it would sometimes replace pieces of configuration where really it should just have modified it.
+Now dev mode will override the following in the yaml config, but it will leave any adjacent configuration as it was:
+
+```yaml
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true
+plugins:
+  experimental.expose_query_plan: true
+sandbox:
+  enabled: true
+supergraph:
+  introspection: true
+telemetry:
+  tracing:
+    experimental_response_trace_id:
+      enabled: true
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2489
+
 ## 🛠 Maintenance
 
 ### Improve #[serde(default)] attribute on structs ([Issue #2424](https://github.com/apollographql/router/issues/2424))
