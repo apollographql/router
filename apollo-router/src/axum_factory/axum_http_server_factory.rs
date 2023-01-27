@@ -198,8 +198,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
-            let (main_server, main_shutdown_sender) =
-                serve_router_on_listen_addr(main_listener, all_routers.main.1);
+            let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                main_listener,
+                actual_main_listen_address.clone(),
+                all_routers.main.1,
+            );
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
@@ -233,7 +236,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) =
-                            serve_router_on_listen_addr(listener, router);
+                            serve_router_on_listen_addr(listener, listen_addr.clone(), router);
                         (
                             server.map(|listener| (listen_addr, listener)),
                             shutdown_sender,
@@ -305,7 +308,7 @@ pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
 where
     RF: RouterFactory,
 {
-    Router::new().route(
+    let mut router = Router::new().route(
         &configuration.supergraph.sanitized_path(),
         get({
             move |Extension(service): Extension<RF>, request: Request<Body>| {
@@ -317,13 +320,33 @@ where
                 handle_graphql(service.create().boxed(), request)
             }
         }),
-    )
+    );
+
+    if configuration.supergraph.path == "/*" {
+        router = router.route(
+            "/",
+            get({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            })
+            .post({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            }),
+        );
+    }
+
+    router
 }
 
 async fn handle_graphql(
     service: router::BoxService,
     http_request: Request<Body>,
 ) -> impl IntoResponse {
+    tracing::info!(counter.apollo_router_session_count_active = 1,);
+
     let request: router::Request = http_request.into();
     let context = request.context.clone();
 
@@ -335,6 +358,7 @@ async fn handle_graphql(
 
     match res {
         Err(e) => {
+            tracing::info!(counter.apollo_router_session_count_active = -1,);
             if let Some(source_err) = e.source() {
                 if source_err.is::<RateLimited>() {
                     return RateLimited::new().into_response();
@@ -356,6 +380,9 @@ async fn handle_graphql(
             )
                 .into_response()
         }
-        Ok(response) => response.response.into_response(),
+        Ok(response) => {
+            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            response.response.into_response()
+        }
     }
 }

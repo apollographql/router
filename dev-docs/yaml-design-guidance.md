@@ -37,13 +37,14 @@ The most important goal is usability, so do break the rules if it makes sense, b
 
 1. [Avoid empty config](#avoid-empty-config).
 2. [Use `#[serde(default)]`](#use-serdedefault).
-3. [Avoid `Option<...>`](#avoid-option)
-4. [Do use `#[serde(deny_unknown_fields)]`](#use-serdedenyunknownfields).
-5. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
-6. [Use consistent terminology](#use-consistent-terminology).
-7. [Don't use negative options](#dont-use-negative-options).
-8. [Document your configuration options](#document-your-configuration-options).
-9. [Plan for the future](#plan-for-the-future).
+3. [Use `#[serde(default)]` on struct instead of fields when possible](#use-serdedefault-on-struct-instead-of-fields-when-possible).
+4. [Avoid `Option<...>`](#avoid-option)
+5. [Do use `#[serde(deny_unknown_fields)]`](#use-serdedenyunknownfields).
+6. [Don't use `#[serde(flatten)]`](#dont-use-serdeflatten).
+7. [Use consistent terminology](#use-consistent-terminology).
+8. [Don't use negative options](#dont-use-negative-options).
+9. [Document your configuration options](#document-your-configuration-options).
+10. [Plan for the future](#plan-for-the-future).
 
 ### Avoid empty config
 
@@ -126,6 +127,38 @@ struct Export {
 }
 ```
 Take a look at `env_defaults` in `expansion.rs` to see how env variables should be defaulted.
+
+### Use `#[serde(default)]` on struct instead of fields when possible
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl. By doing this we will have the same behavior if we're deserializing the struct and if we create it with the `Default` implementation, it uses the same mechanism not only a specific mechanism for `serde`.
+
+#### GOOD
+```rust
+#[serde(deny_unknown_fields, default)]
+struct Export {
+    url: Url,
+    enabled: bool
+}
+
+impl Default for Export {
+  fn default() -> Self {
+    Self {
+      url: default_url_fn(),
+      enabled: false
+    }
+  }
+}
+```
+
+#### BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url,
+    #[serde(default)]
+    enabled: bool
+}
+```
 
 ### Avoid `Option<...>`
 Using option significantly complicates consuming code as it has to deal with the presence or otherwise, especially where you are transferring data to a non-buildstructor builder where `with_` methods are not present.

@@ -66,7 +66,7 @@ struct AuthenticationPlugin {
     jwks_url: Url,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
 struct JWTConf {
     /// Retrieve our JWK Set from here
     jwks_url: String,
@@ -80,6 +80,17 @@ struct JWTConf {
     #[serde(deserialize_with = "humantime_serde::deserialize", default)]
     #[schemars(with = "String", default)]
     cooldown: Option<Duration>,
+}
+
+impl Default for JWTConf {
+    fn default() -> Self {
+        Self {
+            jwks_url: Default::default(),
+            header_name: default_header_name(),
+            header_value_prefix: default_header_value_prefix(),
+            cooldown: Default::default(),
+        }
+    }
 }
 
 // This is temporary. It will be removed when the plugin is promoted

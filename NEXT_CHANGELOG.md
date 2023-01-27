@@ -44,6 +44,19 @@ By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollograp
 
 ## 🐛 Fixes
 
+### Listen on root URL when `/*` is set in `supergraph.path` configuration ([Issue #2471](https://github.com/apollographql/router/issues/2471))
+
+If you provided this configuration:
+
+```yaml
+supergraph:
+  path: /*
+```
+
+Since release `1.8` and due to [Axum upgrade](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0) it wasn't listening on `localhost` without a path. It now has a special case for `/*` to also listen to the URL without a path so you're able to call on `http://localhost` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2472
+
 ### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
 
 You can now use wildcard in supergraph endpoint path like this:
@@ -93,6 +106,53 @@ Subgraph errors can come with a `locations` field indicating which part of the q
 
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2442
 
+### Emit metrics showing number of client connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
+
+New metrics are available to track the client connections:
+- `apollo_router_session_count_total` indicates the number of currently connected clients
+- `apollo_router_session_count_active` indicates the number of in flight GraphQL requests from connected clients.
+
+This also fixes the behaviour when we reach the maximum number of file descriptors: instead of going into a busy loop, the router will wait a bit before accepting a new connection.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
+
+## 🛠 Maintenance
+
+### Improve #[serde(default)] attribute on structs ([Issue #2424](https://github.com/apollographql/router/issues/2424))
+
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl.
+
++ GOOD
+```rust
+#[serde(deny_unknown_fields, default)]
+struct Export {
+    url: Url,
+    enabled: bool
+}
+
+impl Default for Export {
+  fn default() -> Self {
+    Self {
+      url: default_url_fn(),
+      enabled: false
+    }
+  }
+}
+```
+
++ BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url,
+    #[serde(default)]
+    enabled: bool
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2424
+
 ## 📃 Configuration
 
 Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
@@ -122,6 +182,12 @@ There was a regression where timeouts generated a HTTP response with status `500
 By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2419
 
 ## 📚 Documentation
+
+### Fix the documentation to disable the Apollo telemetry ([Issue #2478](https://github.com/apollographql/router/issues/2478))
+
+To disable the Apollo telemetry you have to use `APOLLO_TELEMETRY_DISABLED=true`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2479
 
 ### `send_headers` and `send_variable_values` in `telemetry.apollo` ([Issue #2149](https://github.com/apollographql/router/issues/2149))
 
@@ -158,3 +224,23 @@ supergraph:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
 
+## 🛠 Maintenance
+
+### Parse schemas and queries with `apollo-compiler`
+
+The Router now uses the higher-level representation from `apollo-compiler`
+instead of using the AST from `apollo-parser` directly.
+This is a first step towards replacing a bunch of code that grew organically
+during the Router’s early days, with a general-purpose library with intentional design.
+Internal data structures are unchanged for now.
+Parsing behavior has been tested to be identical on a large corpus
+of production schemas and queries.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2466
+
+
+### Disregard APOLLO_TELEMETRY_DISABLED in orbiter unit test ([Issue #2487](https://github.com/apollographql/router/issues/2487))
+
+`orbiter::test::test_visit_args` failed if APOLLO_TELEMETRY_DISABLED was set.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2488

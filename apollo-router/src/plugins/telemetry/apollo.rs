@@ -34,54 +34,43 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 #[derive(Derivative)]
 #[derivative(Debug)]
 #[derive(Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
     #[schemars(with = "String", default = "endpoint_default")]
-    #[serde(default = "endpoint_default")]
     pub(crate) endpoint: Url,
 
     /// The Apollo Studio API key.
     #[schemars(skip)]
-    #[serde(skip, default = "apollo_key")]
+    #[serde(skip)]
     pub(crate) apollo_key: Option<String>,
 
     /// The Apollo Studio graph reference.
     #[schemars(skip)]
-    #[serde(skip, default = "apollo_graph_reference")]
+    #[serde(skip)]
     pub(crate) apollo_graph_ref: Option<String>,
 
     /// The name of the header to extract from requests when populating 'client nane' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_name_header_default_str")]
-    #[serde(
-        deserialize_with = "deserialize_header_name",
-        default = "client_name_header_default"
-    )]
+    #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_name_header: HeaderName,
 
     /// The name of the header to extract from requests when populating 'client version' for traces and metrics in Apollo Studio.
     #[schemars(with = "Option<String>", default = "client_version_header_default_str")]
-    #[serde(
-        deserialize_with = "deserialize_header_name",
-        default = "client_version_header_default"
-    )]
+    #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_version_header: HeaderName,
 
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
-    #[serde(default = "default_buffer_size")]
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
     /// Value MUST be less than global sampling rate
-    #[serde(default = "default_field_level_instrumentation_sampler")]
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
-    #[serde(default)]
     pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
-    #[serde(default)]
     pub(crate) send_variable_values: ForwardValues,
 
     // This'll get overridden if a user tries to set it.
@@ -90,7 +79,6 @@ pub(crate) struct Config {
     pub(crate) schema_id: String,
 
     /// Configuration for batch processing.
-    #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 }
 
@@ -125,9 +113,9 @@ pub(crate) const fn default_buffer_size() -> NonZeroUsize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            endpoint: Url::parse(ENDPOINT_DEFAULT).expect("default endpoint URL must be parseable"),
-            apollo_key: None,
-            apollo_graph_ref: None,
+            endpoint: endpoint_default(),
+            apollo_key: apollo_key(),
+            apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
