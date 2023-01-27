@@ -1,5 +1,6 @@
-use crate::common::IntegrationTest;
 use tower::BoxError;
+
+use crate::common::IntegrationTest;
 
 mod common;
 

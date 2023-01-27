@@ -1,12 +1,11 @@
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fs;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Duration;
-
-use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 
 use http::header::ACCEPT;
@@ -24,12 +23,17 @@ use nix::unistd::Pid;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::trace::{Span, Tracer, TracerProvider};
+use opentelemetry::trace::Span;
+use opentelemetry::trace::Tracer;
+use opentelemetry::trace::TracerProvider;
 use serde_json::json;
 use serde_json::Value;
 use test_binary::build_test_binary;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::io::AsyncBufReadExt;
+use tokio::io::AsyncWriteExt;
+use tokio::io::BufReader;
+use tokio::process::Child;
+use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::task;
 use tokio::task::JoinHandle;

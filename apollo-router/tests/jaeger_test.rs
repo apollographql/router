@@ -2,11 +2,12 @@ extern crate core;
 
 mod common;
 
+use std::collections::HashSet;
+use std::time::Duration;
+
 use anyhow::anyhow;
 use serde_json::json;
 use serde_json::Value;
-use std::collections::HashSet;
-use std::time::Duration;
 use tower::BoxError;
 
 use crate::common::IntegrationTest;
