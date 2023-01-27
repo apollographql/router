@@ -113,7 +113,7 @@ impl Variables {
             let mut paths: HashMap<Path, usize> = HashMap::new();
             let mut values: IndexSet<Value> = IndexSet::new();
 
-            data.select_values_and_paths(current_dir, |path, value| {
+            data.select_values_and_paths(schema, current_dir, |path, value| {
                 if let Value::Object(content) = value {
                     if let Ok(Some(value)) = select_object(content, requires, schema) {
                         match values.get_index_of(&value) {
@@ -146,7 +146,7 @@ impl Variables {
             // should not perform the next fetch
             if !current_dir.is_empty()
                 && data
-                    .get_path(current_dir)
+                    .get_path(schema, current_dir)
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
