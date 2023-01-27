@@ -237,3 +237,10 @@ Parsing behavior has been tested to be identical on a large corpus
 of production schemas and queries.
 
 By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2466
+
+
+### Disregard APOLLO_TELEMETRY_DISABLED in orbiter unit test ([Issue #2487](https://github.com/apollographql/router/issues/2487))
+
+`orbiter::test::test_visit_args` failed if APOLLO_TELEMETRY_DISABLED was set.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2488
