@@ -213,7 +213,7 @@ It is not currently possible to propagate response headers from subgraphs to cli
 This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
 
 1. For each subgraph response, copy header values into context.
-2. For each the supergraph response, copy header values from the context onto the response.
+2. For the supergraph response, copy header values from the context onto the response.
 
 Example router.yaml that will use the Rhai script:
 
