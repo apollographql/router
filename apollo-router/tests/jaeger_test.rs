@@ -25,7 +25,8 @@ async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
     )
     .await;
 
-    router.start();
+    router.start().await;
+    router.assert_started().await;
 
     for _ in 0..10 {
         let (id, result) = router.run_query().await;

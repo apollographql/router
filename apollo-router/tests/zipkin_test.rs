@@ -11,12 +11,15 @@ async fn test_tracing() -> Result<(), BoxError> {
         .with_service_name("my_app")
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let router = IntegrationTest::new(
+    let mut router = IntegrationTest::new(
         tracer,
         opentelemetry_zipkin::Propagator::new(),
         include_str!("fixtures/zipkin.router.yaml"),
     )
     .await;
+    router.start().await;
+    router.assert_started().await;
+
     let (_, response) = router.run_query().await;
     assert!(response.headers().get("apollo-trace-id").is_none());
 

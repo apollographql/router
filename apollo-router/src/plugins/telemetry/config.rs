@@ -115,7 +115,7 @@ pub(crate) struct Tracing {
     pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Log format
@@ -128,18 +128,6 @@ pub(crate) struct Logging {
     pub(crate) display_line_number: bool,
     /// Log configuration to log request and response for subgraphs and supergraph
     pub(crate) when_header: Vec<HeaderLoggingCondition>,
-}
-
-impl Default for Logging {
-    fn default() -> Self {
-        Self {
-            format: Default::default(),
-            display_target: false,
-            display_filename: false,
-            display_line_number: false,
-            when_header: Default::default(),
-        }
-    }
 }
 
 impl Logging {

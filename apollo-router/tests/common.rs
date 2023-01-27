@@ -32,7 +32,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::task;
-use tokio::task::{spawn_blocking, JoinHandle};
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tower::BoxError;
 use tracing::info_span;
@@ -192,10 +192,12 @@ impl IntegrationTest {
             );
         });
         request.headers_mut().remove(ACCEPT);
-        if let Ok(result) = client.execute(request).await {
-            return (id, result);
-        }
-        panic!("unable to send successful request to router")
+        return match client.execute(request).await {
+            Ok(response) => (id, response),
+            Err(err) => {
+                panic!("unable to send successful request to router, {}", err)
+            }
+        };
     }
 
     #[allow(dead_code)]
@@ -310,12 +312,8 @@ impl IntegrationTest {
 
 impl Drop for IntegrationTest {
     fn drop(&mut self) {
-        if let Some(mut router) = self.router.take() {
-            if let Ok(None) = router.try_wait() {
-                spawn_blocking(move || async move {
-                    router.kill().await.expect("router could not be halted")
-                });
-            }
+        if let Some(child) = &mut self.router {
+            let _ = child.start_kill();
         }
         global::shutdown_tracer_provider();
     }

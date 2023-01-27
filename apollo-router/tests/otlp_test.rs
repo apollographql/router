@@ -15,12 +15,14 @@ async fn test_otlp_tracing() -> Result<(), BoxError> {
         .with_exporter(opentelemetry_otlp::new_exporter().http())
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let router = IntegrationTest::new(
+    let mut router = IntegrationTest::new(
         tracer,
         TraceContextPropagator::new(),
         include_str!("fixtures/otlp.router.yaml"),
     )
     .await;
+    router.start().await;
+    router.assert_started().await;
     router.run_query().await;
     Ok(())
 }
