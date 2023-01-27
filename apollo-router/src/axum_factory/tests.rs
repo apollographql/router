@@ -671,6 +671,92 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
 }
 
 #[tokio::test]
+async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
+    let expected_response = graphql::Response::builder()
+        .data(json!({"response": "yay"}))
+        .build();
+    let example_response = expected_response.clone();
+
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
+        let example_response = example_response.clone();
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
+    })
+    .await;
+
+    let conf = Configuration::fake_builder()
+        .supergraph(
+            crate::configuration::Supergraph::fake_builder()
+                .path(String::from("/*"))
+                .build(),
+        )
+        .build()
+        .unwrap();
+    let (server, client) =
+        init_with_config(router_service, Arc::new(conf), MultiMap::new()).await?;
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
+
+    // Post query
+    let response = client
+        .post(url.as_str())
+        .body(json!({ "query": "query" }).to_string())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response,
+    );
+
+    // Post query without path
+    let response = client
+        .post(
+            &server
+                .graphql_listen_address()
+                .as_ref()
+                .unwrap()
+                .to_string(),
+        )
+        .body(json!({ "query": "query" }).to_string())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response,
+    );
+
+    // Get query
+    let response = client
+        .get(url.as_str())
+        .query(&json!({ "query": "query" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response,
+    );
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     let expected_response = graphql::Response::builder()
         .data(json!({"response": "yay"}))

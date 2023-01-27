@@ -162,11 +162,9 @@ where
 
 /// Batch processor configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(default)]
 pub(crate) struct BatchProcessorConfig {
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "scheduled_delay_default"
-    )]
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     /// The delay interval in milliseconds between two consecutive processing
     /// of batches. The default value is 5 seconds.
@@ -174,20 +172,15 @@ pub(crate) struct BatchProcessorConfig {
 
     /// The maximum queue size to buffer spans for delayed processing. If the
     /// queue gets full it drops the spans. The default value of is 2048.
-    #[serde(default = "max_queue_size_default")]
     pub(crate) max_queue_size: usize,
 
     /// The maximum number of spans to process in a single batch. If there are
     /// more than one batch worth of spans then it processes multiple batches
     /// of spans one batch after the other without any delay. The default value
     /// is 512.
-    #[serde(default = "max_export_batch_size_default")]
     pub(crate) max_export_batch_size: usize,
 
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "max_export_timeout_default"
-    )]
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
@@ -199,7 +192,6 @@ pub(crate) struct BatchProcessorConfig {
     /// by an exporter. A value of 1 will cause exports to be performed
     /// synchronously on the BatchSpanProcessor task.
     /// The default is 1.
-    #[serde(default = "max_concurrent_exports_default")]
     pub(crate) max_concurrent_exports: usize,
 }
 

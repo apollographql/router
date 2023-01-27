@@ -59,6 +59,8 @@ async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
     assert!(metrics.contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 1"#));
     assert!(metrics.contains("apollo_router_cache_hit_time"));
     assert!(metrics.contains("apollo_router_cache_miss_time"));
+    assert!(metrics.contains("apollo_router_session_count_total"));
+    assert!(metrics.contains("apollo_router_session_count_active"));
 
     Ok(())
 }
