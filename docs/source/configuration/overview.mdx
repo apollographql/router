@@ -519,7 +519,8 @@ The router uses Unix-style expansion. Here are some examples:
 
 Variable expansions are valid only for YAML _values_, not keys:
 
-```yaml title="router.yaml"
+<!-- TODO: Add back doc config validation when https://github.com/apollographql/router/issues/1374 is fixed -->
+```yaml
 supergraph:
   listen: "${env.MY_LISTEN_ADDRESS}" #highlight-line
 example:
