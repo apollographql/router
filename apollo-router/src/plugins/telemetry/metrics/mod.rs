@@ -102,10 +102,9 @@ pub(crate) struct Forward {
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorsForward {
     /// Will include the error message in a "message" attribute
-    #[serde(default)]
     pub(crate) include_messages: bool,
     /// Forward extensions values as custom attributes/labels in metrics
     pub(crate) extensions: Option<Vec<BodyForward>>,

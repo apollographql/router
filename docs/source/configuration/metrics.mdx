@@ -58,13 +58,17 @@ apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 
 The following metrics are available using Prometheus:
 
-- HTTP router request duration (`apollo_router_http_request_duration_seconds_bucket`)
-- HTTP request duration by subgraph (`apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`)
-- Total number of HTTP requests by HTTP Status (`apollo_router_http_requests_total`)
+- HTTP router request duration: `apollo_router_http_request_duration_seconds_bucket`
+- HTTP request duration by subgraph: `apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`
+- Total number of HTTP requests by HTTP Status: `apollo_router_http_requests_total`
+- Number of currently connected clients: `apollo_router_session_count_total`
+- Number of in flight GraphQL requests: `apollo_router_session_count_active`
 - Number of cache hits for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_count`
 - Number of cache misses for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_count`
-- Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_hit_time`
-- Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`): `apollo_router_cache_miss_time`
+- Time to hit the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`), in seconds: `apollo_router_cache_hit_time`
+- Time to miss the cache for different `kind` of cache (`apq`, `query planner`, `introspection`) and for different `storage` (`memory`, `redis`), in seconds: `apollo_router_cache_miss_time`
+- Time spent processing a request, outside of waiting for external or subgraph requests, in seconds (`apollo_router_processing_time`)
+- Number of triggered timeouts: `apollo_router_timeout`
 
 ## Using OpenTelemetry Collector
 
@@ -203,3 +207,7 @@ telemetry:
 > [See OpenTelemetry conventions for resources.](https://github.com/open-telemetry/opentelemetry-specification/blob/main/specification/resource/semantic_conventions/README.md)
 >
 > For example, if you want to use a Datadog agent and specify a service name, you should set the `service.name` resource as shown above and described in the conventions document.
+
+## Adding custom metrics
+
+You can add your own custom metrics by creating a Rust plugin and following [these instructions](../customizations/native/#add-custom-metrics).

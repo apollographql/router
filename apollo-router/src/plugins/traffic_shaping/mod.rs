@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -45,7 +44,6 @@ use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
 use crate::services::SubgraphRequest;
-use crate::Configuration;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -68,8 +66,6 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
-    /// Enable APQ for outgoing subgraph requests
-    apq: Option<bool>,
     /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
@@ -83,7 +79,6 @@ impl Merge for Shaping {
                 deduplicate_query: self.deduplicate_query.or(fallback.deduplicate_query),
                 compression: self.compression.or(fallback.compression),
                 timeout: self.timeout.or(fallback.timeout),
-                apq: self.apq.or(fallback.apq),
                 global_rate_limit: self
                     .global_rate_limit
                     .as_ref()
@@ -146,22 +141,19 @@ struct RouterShaping {
     timeout: Option<Duration>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
 /// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
-    #[serde(default)]
     /// Applied at the router level
     router: Option<RouterShaping>,
-    #[serde(default)]
     /// Applied on all subgraphs
     all: Option<Shaping>,
-    #[serde(default)]
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, Shaping>,
-    /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
+    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
 
@@ -352,7 +344,6 @@ impl TrafficShaping {
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
@@ -361,19 +352,6 @@ impl TrafficShaping {
         } else {
             Either::B(service)
         }
-    }
-
-    pub(crate) fn get_apq(&self, name: &str) -> Option<bool> {
-        self.config.subgraphs.get(name)?.apq
-    }
-}
-
-impl TrafficShaping {
-    pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
-        configuration
-            .plugin_configuration(APOLLO_TRAFFIC_SHAPING)
-            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
-            .unwrap_or_default()
     }
 }
 
@@ -562,13 +540,6 @@ mod test {
                     .get(&CONTENT_ENCODING)
                     .unwrap(),
                 HeaderValue::from_static("gzip")
-            );
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&ACCEPT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req

@@ -7,12 +7,18 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::hir;
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::AstDatabase;
+use apollo_compiler::HirDatabase;
 use apollo_parser::ast;
 use derivative::Derivative;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
+use tokio::sync::Mutex;
+use tokio::sync::MutexGuard;
+use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
@@ -35,16 +41,50 @@ use crate::Configuration;
 pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
-#[derive(Debug, Derivative, Default, Serialize, Deserialize)]
+#[derive(Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq)]
 pub(crate) struct Query {
     string: String,
+    #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
+    #[serde(skip)]
+    compiler: OnceCell<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
+}
+
+impl std::fmt::Debug for Query {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        use super::schema::sorted_map;
+        let Query {
+            string,
+            compiler: _,
+            fragments,
+            operations,
+            subselections,
+        } = self;
+        writeln!(f, "Query:")?;
+        writeln!(f, "  string: {string:?}")?;
+        sorted_map(f, "  ", "fragments", &fragments.map)?;
+        writeln!(f, "  operations:")?;
+        for operation in operations {
+            let Operation {
+                name,
+                kind,
+                selection_set,
+                variables,
+            } = operation;
+            writeln!(f, "    - name: {name:?}")?;
+            writeln!(f, "      kind: {kind:?}")?;
+            writeln!(f, "      selection_set: {selection_set:#?}")?;
+            sorted_map(f, "      ", "variables", variables)?;
+        }
+        writeln!(f, "  subselections: {subselections:#?}")?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -258,6 +298,59 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
+        Self::parse_with_hir(query, schema, configuration)
+    }
+
+    pub(crate) fn parse_with_hir(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
+        let query = query.into();
+        let mut compiler = ApolloCompiler::with_recursion_limit(
+            configuration.server.experimental_parser_recursion_limit,
+        );
+        let id = compiler.add_executable(&query, "query");
+        let ast = compiler.db.ast(id);
+
+        // Trace log recursion limit data
+        let recursion_limit = ast.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        let errors = ast
+            .errors()
+            .map(|err| format!("{:?}", err))
+            .collect::<Vec<_>>();
+
+        if !errors.is_empty() {
+            let errors = errors.join(", ");
+            failfast_debug!("parsing error(s): {}", errors);
+            return Err(SpecError::ParsingError(errors));
+        }
+
+        let fragments = Fragments::from_hir(&compiler, schema)?;
+
+        let operations = compiler
+            .db
+            .all_operations()
+            .iter()
+            .map(|operation| Operation::from_hir(operation, schema))
+            .collect::<Result<Vec<_>, SpecError>>()?;
+
+        Ok(Query {
+            string: query,
+            compiler: OnceCell::from(Mutex::new(compiler)),
+            fragments,
+            operations,
+            subselections: HashMap::new(),
+        })
+    }
+
+    pub(crate) fn parse_with_ast(
+        query: impl Into<String>,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Self, SpecError> {
         let query = query.into();
         let parser = apollo_parser::Parser::new(query.as_str())
             .recursion_limit(configuration.server.experimental_parser_recursion_limit);
@@ -294,11 +387,33 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         Ok(Query {
+            compiler: OnceCell::new(),
             string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
         })
+    }
+
+    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
+        self.compiler
+            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
+            .await
+            .lock()
+            .await
+    }
+
+    /// Create a new compiler for this query, without caching it
+    pub(crate) fn uncached_compiler(&self, schema: Option<&Schema>) -> ApolloCompiler {
+        let mut compiler = ApolloCompiler::new();
+        if let Some(schema) = schema {
+            compiler.set_type_system_hir(schema.type_system.clone());
+        }
+        // As long as this is the only executable document in this compiler
+        // we can use compiler’s `all_operations` and `all_fragments`.
+        // If that changes, we’ll need to carry around this ID somehow.
+        let _id = compiler.add_executable(&self.string, "query");
+        compiler
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1056,6 +1171,41 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
+    fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
+        let name = operation.name().map(|s| s.to_owned());
+        let kind = operation.operation_ty().into();
+        if kind == OperationKind::Subscription {
+            return Err(SpecError::SubscriptionNotSupported);
+        }
+        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
+        let selection_set = operation
+            .selection_set()
+            .selection()
+            .iter()
+            .filter_map(|selection| {
+                Selection::from_hir(selection, &current_field_type, schema, 0).transpose()
+            })
+            .collect::<Result<_, _>>()?;
+        let variables = operation
+            .variables()
+            .iter()
+            .map(|variable| {
+                let name = variable.name().into();
+                let variable = Variable {
+                    field_type: variable.ty().into(),
+                    default_value: variable.default_value().and_then(parse_hir_value),
+                };
+                Ok((name, variable))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(Operation {
+            selection_set,
+            name,
+            variables,
+            kind,
+        })
+    }
+
     // clippy false positive due to the bytes crate
     // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
     #[allow(clippy::mutable_key_type)]
@@ -1073,11 +1223,10 @@ impl Operation {
             })
             .unwrap_or(OperationKind::Query);
 
-        let current_field_type = match kind {
-            OperationKind::Query => FieldType::Named("Query".to_string()),
-            OperationKind::Mutation => FieldType::Named("Mutation".to_string()),
-            OperationKind::Subscription => return Err(SpecError::SubscriptionNotSupported),
-        };
+        if kind == OperationKind::Subscription {
+            return Err(SpecError::SubscriptionNotSupported);
+        }
+        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
 
         let selection_set = operation
             .selection_set()
@@ -1118,7 +1267,7 @@ impl Operation {
                 })?)?;
 
                 Ok((
-                    ByteString::from(name),
+                    name.into(),
                     Variable {
                         field_type: ty,
                         default_value: parse_default_value(&definition),

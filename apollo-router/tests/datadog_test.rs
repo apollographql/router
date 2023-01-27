@@ -16,7 +16,8 @@ async fn test_datadog_tracing() -> Result<(), BoxError> {
         tracer,
         opentelemetry_datadog::DatadogPropagator::new(),
         include_str!("fixtures/datadog.router.yaml"),
-    );
+    )
+    .await;
     router.run_query().await;
     Ok(())
 }

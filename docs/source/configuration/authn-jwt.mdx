@@ -1,0 +1,141 @@
+---
+title: JWT Authentication in the Apollo Router
+sidebar_title: JWT Authentication
+description: Configure JWT authentication for the router
+---
+
+> This is part of an experimental feature, it means any time until it's stabilized (without the prefix `experimental_`) we might change the configuration shape,  add or remove features.
+> If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/2391).
+
+Authentication is an important step in controlling access to a router.
+
+JSON Web Tokens [JWT](https://www.rfc-editor.org/rfc/rfc7519) are a very popular authentication technique and are now supported by the router.
+
+JSON Web Keys [JWK](https://www.rfc-editor.org/rfc/rfc7517)s provide the cryptographic mechanism for JWT validation. The router implements this via a JWK Set (JWKS), which is a JSON data structure used to represent a set of JWKs.
+
+The cryptographic implementation is provided via the popular library [jsonwebtoken](https://crates.io/crates/jsonwebtoken) which supports a wide-range of different algorithms (see link for details).
+
+When JWT support is configured within the router, requests will be processed for the presence of a JWT via a header. This JWT will be validated using keys from a configured JWKS and claims will be extracted and stored with the request context so they are available for further processing.
+
+## Configuration
+
+The plugin is configured like other plugins. The typical configuration would look something like this. This is configuring the router so that:
+ - JWKS are retrieved from the specified URL
+ - The header containing the JWT is default: Authorization
+ - The header value prefix is default: Bearer
+ - The key retrieval cooldown duration is default: 15 seconds
+
+```yaml title="typical.yaml"
+authentication:
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+```
+
+Note: the jwks_url could be a `file://` url.
+
+A more completely specified configuration may look like this. This is configurating the router so that:
+
+ - JWKS are retrieved from the specified URL
+ - The header containing the JWT is customized: Different
+ - The header value prefix is customized: Prefix
+ - The key retrieval cooldown duration is customized: 30 seconds
+
+```yaml title="complete.yaml"
+authentication:
+  experimental:
+    jwt:
+      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+      header_name: Different
+      header_value_prefix: Prefix
+      cooldown: 30s
+```
+
+There are some considerations for each of these parameters.
+
+### jwks_url
+
+If you are using a symmetric algorithm (e.g.: HS256) **DO NOT** place your JWKS on the network. They should only be loaded from disk.
+
+### header_name and header_value_prefix
+
+Your chosen header must be a valid HTTP header name and your prefix should not contain any white space.
+
+### cooldown
+
+The default value for this parameter, 15s, should be suitable for almost all use cases. However, it is provided so that advanced users can configure this if required.
+
+## Observability
+
+### Tracing
+
+There is a tracing span for the authentication plugin. The span name is "authentication plugin".
+
+### Metrics
+
+Three metrics are provided and exported via prometheus. They look like this:
+
+```
+# HELP apollo_authentication_failure_count apollo_authentication_failure_count
+# TYPE apollo_authentication_failure_count counter
+apollo_authentication_failure_count{kind="JWT",service_name="apollo-router"} 1
+# HELP apollo_authentication_success_count apollo_authentication_success_count
+# TYPE apollo_authentication_success_count counter
+apollo_authentication_success_count{kind="JWT",service_name="apollo-router"} 11
+# HELP apollo_authentication_cooldown_count apollo_authentication_cooldown_count
+# TYPE apollo_authentication_cooldown_count counter
+apollo_authentication_cooldown_count{kind="JWT",service_name="apollo-router"} 3
+```
+
+## Validation
+
+The router will validate that a token is correctly signed and will extract all claims from the token into the request context. The token will not be validated if the token has expired. 
+
+Note: synchronising times across the internet can be problematic, so the JWT validation allows 60s leeway for token expiry.
+
+## Context
+
+The claims are stored within request context at this key: `"apollo_authentication::JWT::claims"`.
+
+Further processing of these claims can be performed in the router either as a rust or a rhai plugin. Here's an example of a rhai plugin:
+
+```rhai title="jwt_claims.rhai"
+fn process_request(request) {
+    try {
+        let claims = request.context[APOLLO_AUTHENTICATION_JWT_CLAIMS];
+        if claims == () {
+            throw #{
+                status: 401,
+                message: "No claims presented in this request"
+            };
+        }
+        if !claims.contains("iss") {
+            throw #{
+                status: 401,
+                message: "No issuer presented in this request"
+            };
+        }
+        if claims["iss"] != "https://idp.local" {
+            throw #{
+                status: 401,
+                message: `Issuer ${claims.iss} is not accepted here`
+            };
+        }
+        // We are happy we have claims from the correct idp, do something
+        // with them. In this case, we'll just print them out.
+        print(`claims: ${claims}`);
+    }
+    catch(err)
+    {
+        // log any errors
+        log_error(`Error during claims processing: ${err}`);
+        throw err;
+    }
+}
+```
+
+Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a rhai scope constant with a value of `"apollo_authentication::JWT::claims"`.
+
+## Header Propagation
+
+The router already provides a mechanism for propagating headers to subgraphs which may be used in conjunction with authentication to allow for JWT verification in the router prior to JWT propagation to all or specific subgraphs.

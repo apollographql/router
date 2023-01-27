@@ -58,10 +58,6 @@ pub fn setup() -> TestHarness<'static> {
                 {
                     "__typename": "User",
                     "id": "2"
-                },
-                {
-                    "__typename": "User",
-                    "id": "1"
                 }
             ]
         }
@@ -74,9 +70,6 @@ pub fn setup() -> TestHarness<'static> {
                 },
                 {
                     "name": "Alan Turing"
-                },
-                {
-                    "name": "Ada Lovelace"
                 }
             ]
         }
@@ -179,10 +172,6 @@ pub fn setup() -> TestHarness<'static> {
                 },
                 {
                     "__typename": "Product",
-                    "upc": "1"
-                },
-                {
-                    "__typename": "Product",
                     "upc": "2"
                 }
             ]
@@ -191,9 +180,6 @@ pub fn setup() -> TestHarness<'static> {
     json!{{
         "data": {
             "_entities": [
-                {
-                    "name": "Table"
-                },
                 {
                     "name": "Table"
                 },

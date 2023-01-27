@@ -22,7 +22,8 @@ async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
         tracer,
         opentelemetry_jaeger::Propagator::new(),
         include_str!("fixtures/jaeger.router.yaml"),
-    );
+    )
+    .await;
 
     router.start();
 
@@ -34,7 +35,7 @@ async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
             .unwrap()
             .is_empty());
         query_jaeger_for_trace(id).await?;
-        router.touch_config()?;
+        router.touch_config().await;
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
@@ -43,6 +44,8 @@ async fn test_jaeger_tracing_and_metrics() -> Result<(), BoxError> {
     assert!(metrics.contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 1"#));
     assert!(metrics.contains("apollo_router_cache_hit_time"));
     assert!(metrics.contains("apollo_router_cache_miss_time"));
+    assert!(metrics.contains("apollo_router_session_count_total"));
+    assert!(metrics.contains("apollo_router_session_count_active"));
 
     Ok(())
 }

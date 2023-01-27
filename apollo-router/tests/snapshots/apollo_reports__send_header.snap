@@ -33,12 +33,6 @@ traces_per_query:
         http:
           method: 4
           request_headers:
-            content-type:
-              value:
-                - ""
-            dont-send-header:
-              value:
-                - ""
             send-header:
               value:
                 - Header value
@@ -515,46 +509,6 @@ traces_per_query:
                                               ResponseName: name
                                         id:
                                           Index: 1
-                                      - original_field_name: ""
-                                        type: ""
-                                        parent_type: ""
-                                        cache_policy: ~
-                                        start_time: "[start_time]"
-                                        end_time: "[end_time]"
-                                        error: []
-                                        child:
-                                          - original_field_name: ""
-                                            type: String
-                                            parent_type: User
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                        id:
-                                          Index: 2
-                                      - original_field_name: ""
-                                        type: ""
-                                        parent_type: ""
-                                        cache_policy: ~
-                                        start_time: "[start_time]"
-                                        end_time: "[end_time]"
-                                        error: []
-                                        child:
-                                          - original_field_name: ""
-                                            type: String
-                                            parent_type: User
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                        id:
-                                          Index: 3
                                     id:
                                       ResponseName: _entities
                                 id: ~

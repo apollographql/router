@@ -227,16 +227,6 @@ fn empty_config() {
 }
 
 #[test]
-fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
-    let error = Configuration::fake_builder()
-        .supergraph(Supergraph::fake_builder().path("/test*").build())
-        .build()
-        .unwrap_err();
-
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
-}
-
-#[test]
 fn line_precise_config_errors() {
     let error = validate_yaml_configuration(
         r#"
@@ -652,6 +642,11 @@ fn all_properties_are_documented() {
     }
 }
 
+#[test]
+fn default_config_has_defaults() {
+    insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
 fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
     match schema {
         Value::Array(arr) => {
@@ -677,4 +672,47 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
         }
         _ => {}
     }
+}
+
+#[test]
+fn test_configuration_validate_and_sanitize() {
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/graphql/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(
+        &conf.supergraph.sanitized_path(),
+        "/graphql/g:supergraph_route"
+    );
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/test").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/test");
+
+    assert!(Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*/whatever").build())
+        .build()
+        .is_err());
 }

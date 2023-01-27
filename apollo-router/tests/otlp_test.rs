@@ -19,7 +19,8 @@ async fn test_otlp_tracing() -> Result<(), BoxError> {
         tracer,
         TraceContextPropagator::new(),
         include_str!("fixtures/otlp.router.yaml"),
-    );
+    )
+    .await;
     router.run_query().await;
     Ok(())
 }
