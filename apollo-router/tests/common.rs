@@ -169,7 +169,7 @@ impl IntegrationTest {
     pub async fn run_query(&self) -> (String, reqwest::Response) {
         assert!(
             self.router.is_some(),
-            "router was not started, call start() on the integration test"
+            "router was not started, call `router.start().await; router.assert_started().await`"
         );
         let client = reqwest::Client::new();
         let id = Uuid::new_v4().to_string();
