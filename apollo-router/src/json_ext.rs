@@ -87,11 +87,20 @@ pub(crate) trait ValueExt {
     where
         F: FnMut(&Path, &'a Value);
 
+    /// Select all values matching a `Path`, and allows to mutate those values.
+    ///
+    /// The behavior of the method is otherwise the same as it's non-mutable counterpart
+    #[track_caller]
+    fn select_values_and_paths_mut<'a, F>(&'a mut self, schema: &Schema, path: &'a Path, f: F)
+    where
+        F: FnMut(&Path, &'a mut Value);
+
     #[track_caller]
     fn is_valid_float_input(&self) -> bool;
 
     #[track_caller]
     fn is_valid_int_input(&self) -> bool;
+
 
     /// Returns whether this value is an object that matches the provided type.
     ///
@@ -377,6 +386,14 @@ impl ValueExt for Value {
     }
 
     #[track_caller]
+    fn select_values_and_paths_mut<'a, F>(&'a mut self, schema: &Schema, path: &'a Path, mut f: F)
+    where
+        F: FnMut(&Path, &'a mut Value),
+    {
+        iterate_path_mut(schema, &mut Path::default(), &path.0, self, &mut f)
+    }
+
+    #[track_caller]
     fn is_valid_float_input(&self) -> bool {
         // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
         match self {
@@ -468,6 +485,64 @@ fn iterate_path<'a, F>(
                 for (i, value) in array.iter().enumerate() {
                     parent.push(PathElement::Index(i));
                     iterate_path(schema, parent, path, value, f);
+                    parent.pop();
+                }
+            }
+        }
+    }
+}
+
+fn iterate_path_mut<'a, F>(
+    schema: &Schema,
+    parent: &mut Path,
+    path: &'a [PathElement],
+    data: &'a mut Value,
+    f: &mut F,
+) where
+    F: FnMut(&Path, &'a mut Value),
+{
+    match path.get(0) {
+        None => f(parent, data),
+        Some(PathElement::Flatten) => {
+            if let Some(array) = data.as_array_mut() {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Index(i)) => {
+            if let Value::Array(a) = data {
+                if let Some(value) = a.get_mut(*i) {
+                    parent.push(PathElement::Index(*i));
+                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Key(k)) => {
+            if let Value::Object(o) = data {
+                if let Some(value) = o.get_mut(k.as_str()) {
+                    parent.push(PathElement::Key(k.to_string()));
+                    iterate_path_mut(schema, parent, &path[1..], value, f);
+                    parent.pop();
+                }
+            } else if let Value::Array(array) = data {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path_mut(schema, parent, path, value, f);
+                    parent.pop();
+                }
+            }
+        }
+        Some(PathElement::Fragment(name)) => {
+            if data.is_object_of_type(schema, name) {
+                iterate_path_mut(schema, parent, &path[1..], data, f);
+            } else if let Value::Array(array) = data {
+                for (i, value) in array.iter_mut().enumerate() {
+                    parent.push(PathElement::Index(i));
+                    iterate_path_mut(schema, parent, path, value, f);
                     parent.pop();
                 }
             }
