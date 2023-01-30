@@ -24,7 +24,8 @@ pub(crate) struct Expansion {
 pub(crate) struct ConfigDefault {
     config_path: String,
     env_name: Option<String>,
-    /// Note that the default type is important. If you set it as bool or numeric then the env variable will
+    /// Note that the default type is important. If you set it as bool or numeric then the env variable will be coerced into that type.
+    /// If it can't be coerced then it'll fall back to string.
     default: Value,
 }
 
