@@ -261,5 +261,5 @@ authentication:
         - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
 ```
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/XXXX
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2500
 
