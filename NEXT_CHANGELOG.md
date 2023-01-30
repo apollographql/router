@@ -44,6 +44,10 @@ By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollograp
 
 ## 🐛 Fixes
 
+### APQ: Add cache-control header on PERSISTED_QUERY_NOT_FOUND ([Issue #2502](https://github.com/apollographql/router/issues/2502))
+
+The router now sends `cache-control: private, no-cache, must-revalidate` when a persisted query hash was not found.
+
 ### Listen on root URL when `/*` is set in `supergraph.path` configuration ([Issue #2471](https://github.com/apollographql/router/issues/2471))
 
 If you provided this configuration:

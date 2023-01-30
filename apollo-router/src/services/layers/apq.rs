@@ -52,6 +52,9 @@ impl APQLayer {
     }
 }
 
+/// Persisted query errors (especially "not found") need to be uncached, because
+/// hopefully we're about to fill in the APQ cache and the same request will
+/// succeed next time.
 fn set_cache_control_headers(mut response: RouterResponse) -> RouterResponse {
     if let Ok(Some(true)) = &response.context.get::<_, bool>("persisted_query_miss") {
         response.response.headers_mut().insert(
