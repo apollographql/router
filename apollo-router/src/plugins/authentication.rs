@@ -389,7 +389,7 @@ impl Plugin for AuthenticationPlugin {
                                 Err(e) => {
                                     return failure_message(
                                         request.context,
-                                        format!("Could not create decoding key: {}", e),
+                                        format!("Could not create decoding key: {e}"),
                                         StatusCode::INTERNAL_SERVER_ERROR,
                                     );
                                 }
@@ -417,7 +417,7 @@ impl Plugin for AuthenticationPlugin {
                                 Err(e) => {
                                     return failure_message(
                                         request.context,
-                                        format!("Could not create decode JWT: {}", e),
+                                        format!("Could not create decode JWT: {e}"),
                                         StatusCode::UNAUTHORIZED,
                                     );
                                 }
@@ -429,7 +429,7 @@ impl Plugin for AuthenticationPlugin {
                             {
                                 return failure_message(
                                     request.context,
-                                    format!("Could not insert claims into context: {}", e),
+                                    format!("Could not insert claims into context: {e}"),
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }

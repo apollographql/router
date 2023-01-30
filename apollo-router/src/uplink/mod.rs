@@ -105,7 +105,7 @@ pub(crate) fn stream_supergraph(
                             }
 
                             if sender
-                            .send(Err(format!("error downloading the schema from Uplink: {}", message)))
+                            .send(Err(format!("error downloading the schema from Uplink: {message}")))
                             .await
                             .is_err()
                         {
@@ -113,7 +113,7 @@ pub(crate) fn stream_supergraph(
                         }
                         } else {
                             if sender
-                            .send(Err(format!("{:?} error downloading the schema from Uplink, the router will not try again: {}", code, message)))
+                            .send(Err(format!("{code:?} error downloading the schema from Uplink, the router will not try again: {message}")))
                             .await
                             .is_err()
                         {

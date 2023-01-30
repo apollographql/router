@@ -46,7 +46,7 @@ where
     // support the case of 'collector:4317' where url parses 'collector'
     // as the scheme instead of the host
     if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-        s = format!("http://{}/api/v2/spans", s);
+        s = format!("http://{s}/api/v2/spans");
 
         url = Url::parse(&s).map_err(serde::de::Error::custom)?;
     }
@@ -65,7 +65,7 @@ impl TracingConfigurator for Config {
             .with_trace_config(trace_config.into())
             .with_service_name(trace_config.service_name.clone())
             .with(&collector_endpoint, |b, endpoint| {
-                b.with_collector_endpoint(&endpoint.to_string())
+                b.with_collector_endpoint(endpoint.to_string())
             })
             .init_exporter()?;
 

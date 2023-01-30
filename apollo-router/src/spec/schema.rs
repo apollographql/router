@@ -143,7 +143,7 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
     let s = api_schema::api_schema(schema)
         .map_err(|e| SchemaError::Api(e.to_string()))?
         .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
-    Ok(format!("{}\n", s))
+    Ok(format!("{s}\n"))
 }
 
 impl Schema {
@@ -215,8 +215,7 @@ impl Schema {
                         .map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
                     if subgraphs.insert(name.clone(), url).is_some() {
                         return Err(SchemaError::Api(format!(
-                            "must not have several subgraphs with same name '{}'",
-                            name
+                            "must not have several subgraphs with same name '{name}'"
                         )));
                     }
                 }
@@ -486,7 +485,7 @@ impl Schema {
                                                         )
                                                         .is_some()
                                                     {
-                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{}'", name)));
+                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{name}'")));
                                                     }
                                                 }
                                             }
@@ -1058,7 +1057,7 @@ mod tests {
             union UnionType2 = Foo | Bar
             "#,
             );
-            let schema = format!("{}\n{}", base_schema, schema);
+            let schema = format!("{base_schema}\n{schema}");
             Schema::parse(&schema, &Default::default()).unwrap()
         }
 
@@ -1082,7 +1081,7 @@ mod tests {
             interface InterfaceType2 implements Foo & Bar { me: String }
             "#,
             );
-            let schema = format!("{}\n{}", base_schema, schema);
+            let schema = format!("{base_schema}\n{schema}");
             Schema::parse(&schema, &Default::default()).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
@@ -1240,7 +1239,7 @@ GraphQL request:42:1
 43 |   someField: String"#
                 );
             }
-            other => panic!("unexpected schema result: {:?}", other),
+            other => panic!("unexpected schema result: {other:?}"),
         };
     }
 
