@@ -63,7 +63,7 @@ pub(crate) fn parse_url_for_endpoint(mut s: String) -> Result<Url, ParseError> {
             // support the case of 'collector:4317' where url parses 'collector'
             // as the scheme instead of the host
             if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-                s = format!("http://{}", s);
+                s = format!("http://{s}");
                 Url::parse(&s)
             } else {
                 Ok(url)
@@ -74,7 +74,7 @@ pub(crate) fn parse_url_for_endpoint(mut s: String) -> Result<Url, ParseError> {
                 // support the case of '127.0.0.1:4317' where url is interpreted
                 // as a relative url without a base
                 ParseError::RelativeUrlWithoutBase => {
-                    s = format!("http://{}", s);
+                    s = format!("http://{s}");
                     Url::parse(&s)
                 }
                 _ => Err(err),
