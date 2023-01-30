@@ -38,7 +38,7 @@ pub(crate) struct ListenAddresses {
 
 /// This state maintains private information that is not exposed to the user via state listener.
 #[allow(clippy::large_enum_variant)]
-enum State {
+enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
         schema: Option<Arc<String>>,
@@ -50,12 +50,13 @@ enum State {
         schema: Arc<String>,
         entitlement: Arc<Entitlement>,
         server_handle: Option<HttpServerHandle>,
+        router_service_factory: FA::RouterFactory,
     },
     Stopped,
     Errored(ApolloRouterError),
 }
 
-impl State {
+impl<FA: RouterSuperServiceFactory> State<FA> {
     async fn no_more_configuration(self) -> Self {
         match self {
             Startup {
@@ -82,7 +83,7 @@ impl State {
         }
     }
 
-    async fn update_inputs<S, FA>(
+    async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
         new_schema: Option<Arc<String>>,
@@ -91,7 +92,6 @@ impl State {
     ) -> Self
     where
         S: HttpServerFactory,
-        FA: RouterSuperServiceFactory,
     {
         let mut new_state = None;
         match &mut self {
@@ -112,6 +112,7 @@ impl State {
                         Self::try_start(
                             state_machine,
                             &mut None,
+                            None,
                             configuration.clone(),
                             schema.clone(),
                             entitlement.clone(),
@@ -127,6 +128,7 @@ impl State {
                 configuration,
                 entitlement,
                 server_handle,
+                router_service_factory,
                 ..
             } => {
                 if let Some(new_configuration) = &new_configuration {
@@ -141,6 +143,7 @@ impl State {
                 new_state = match Self::try_start(
                     state_machine,
                     server_handle,
+                    Some(router_service_factory),
                     new_configuration.unwrap_or_else(|| configuration.clone()),
                     new_schema.unwrap_or_else(|| schema.clone()),
                     new_entitlement.unwrap_or_else(|| entitlement.clone()),
@@ -189,14 +192,15 @@ impl State {
         }
     }
 
-    async fn try_start<S, FA>(
+    async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
+        previous_router_service_factory: Option<&FA::RouterFactory>,
         configuration: Arc<Configuration>,
         schema: Arc<String>,
         entitlement: Arc<Entitlement>,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
-    ) -> Result<State, ApolloRouterError>
+    ) -> Result<State<FA>, ApolloRouterError>
     where
         S: HttpServerFactory,
         FA: RouterSuperServiceFactory,
@@ -208,7 +212,12 @@ impl State {
 
         let router_service_factory = state_machine
             .router_configurator
-            .create(configuration.clone(), parsed_schema, None, None)
+            .create(
+                configuration.clone(),
+                parsed_schema,
+                previous_router_service_factory,
+                None,
+            )
             .await
             .map_err(ServiceCreationError)?;
 
@@ -249,6 +258,7 @@ impl State {
             schema,
             entitlement,
             server_handle: Some(server_handle),
+            router_service_factory,
         })
     }
 }
@@ -299,7 +309,7 @@ where
     ) -> Result<(), ApolloRouterError> {
         tracing::debug!("starting");
         // The listen address guard is transferred to the startup state. It will get consumed when moving to running.
-        let mut state = Startup {
+        let mut state: State<FA> = Startup {
             configuration: None,
             schema: None,
             entitlement: None,
@@ -630,7 +640,7 @@ mod tests {
                 &'a mut self,
                 configuration: Arc<Configuration>,
                 schema: Arc<Schema>,
-                previous_router: Option<&'a MockMyRouterFactory>,
+                previous_router_service_factory: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
@@ -768,13 +778,39 @@ mod tests {
 
         router_factory
             .expect_create()
-            .times(expect_times_called)
+            .times(if expect_times_called > 1 {
+                1
+            } else {
+                expect_times_called
+            })
             .returning(move |_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
+
+        // verify reloads have the last previous_router_service_factory parameter
+        if expect_times_called > 0 {
+            router_factory
+                .expect_create()
+                .times(expect_times_called - 1)
+                .withf(
+                    move |_configuration: &Arc<Configuration>,
+                          _schema: &Arc<Schema>,
+                          previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
+                        previous_router_service_factory.is_some()
+                    },
+                )
+                .returning(move |_, _, _, _| {
+                    let mut router = MockMyRouterFactory::new();
+                    router.expect_clone().return_once(MockMyRouterFactory::new);
+                    router.expect_web_endpoints().returning(MultiMap::new);
+                    Ok(router)
+                });
+        }
+
         router_factory
     }
 }
