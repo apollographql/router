@@ -98,7 +98,7 @@ async fn apq_request(
             if let Ok(cached_query) = cache.get(&redis_key(&apq_hash)).await.get().await {
                 let _ = request.context.insert("persisted_query_hit", true);
                 tracing::trace!("apq: cache hit");
-                request.supergraph_request.body_mut().query = Some(cached_query.to_string());
+                request.supergraph_request.body_mut().query = Some(cached_query);
                 Ok(request)
             } else {
                 let _ = request.context.insert("persisted_query_miss", true);
