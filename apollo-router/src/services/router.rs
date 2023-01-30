@@ -79,7 +79,7 @@ impl TryFrom<supergraph::Request> for Request {
 
         let router_request = if parts.method == Method::GET {
             // get request
-            let get_path = serde_urlencoded::to_string(&[
+            let get_path = serde_urlencoded::to_string([
                 ("query", request.query),
                 ("operationName", request.operation_name),
                 (

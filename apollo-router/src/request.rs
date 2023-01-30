@@ -200,9 +200,9 @@ mod tests {
           "extensions": {"extension": 1}
         })
         .to_string();
-        println!("data: {}", data);
+        println!("data: {data}");
         let result = serde_json::from_str::<Request>(data.as_str());
-        println!("result: {:?}", result);
+        println!("result: {result:?}");
         assert_eq!(
             result.unwrap(),
             Request::builder()

@@ -228,7 +228,7 @@ pub(crate) fn validate_yaml_configuration(
         if !errors.is_empty() {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "configuration had errors",
-                error: format!("\n{}", errors),
+                error: format!("\n{errors}"),
             });
         }
     }

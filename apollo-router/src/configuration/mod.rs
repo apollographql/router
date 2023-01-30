@@ -223,7 +223,7 @@ impl Configuration {
 
         // Add all the apollo plugins
         for (plugin, config) in &self.apollo_plugins.plugins {
-            let plugin_full_name = format!("{}{}", APOLLO_PLUGIN_PREFIX, plugin);
+            let plugin_full_name = format!("{APOLLO_PLUGIN_PREFIX}{plugin}");
             tracing::debug!(
                 "adding plugin {} with user provided configuration",
                 plugin_full_name.as_str()
@@ -899,7 +899,7 @@ impl From<tokio_util::either::Either<std::net::SocketAddr, tokio::net::unix::Soc
 impl fmt::Display for ListenAddr {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Self::SocketAddr(addr) => write!(f, "http://{}", addr),
+            Self::SocketAddr(addr) => write!(f, "http://{addr}"),
             #[cfg(unix)]
             Self::UnixSocket(path) => write!(f, "{}", path.display()),
         }

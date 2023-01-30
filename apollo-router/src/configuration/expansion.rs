@@ -123,12 +123,12 @@ impl Expansion {
             if let Some(key) = key.strip_prefix("env.") {
                 return match self.prefix.as_ref() {
                     None => env::var(key),
-                    Some(prefix) => env::var(format!("{}_{}", prefix, key)),
+                    Some(prefix) => env::var(format!("{prefix}_{key}")),
                 }
                 .map(Some)
                 .map_err(|cause| ConfigurationError::CannotExpandVariable {
                     key: key.to_string(),
-                    cause: format!("{}", cause),
+                    cause: format!("{cause}"),
                 });
             }
             if let Some(key) = key.strip_prefix("file.") {
@@ -139,7 +139,7 @@ impl Expansion {
                 return fs::read_to_string(key).map(Some).map_err(|cause| {
                     ConfigurationError::CannotExpandVariable {
                         key: key.to_string(),
-                        cause: format!("{}", cause),
+                        cause: format!("{cause}"),
                     }
                 });
             }

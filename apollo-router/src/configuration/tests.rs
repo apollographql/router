@@ -111,10 +111,7 @@ fn missing_subgraph_url() {
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
         assert_eq!(subgraph, "reviews");
     } else {
-        panic!(
-            "expected missing subgraph URL for 'reviews', got: {:?}",
-            schema_error
-        );
+        panic!("expected missing subgraph URL for 'reviews', got: {schema_error:?}");
     }
 }
 
@@ -620,7 +617,7 @@ fn upgrade_old_configuration() {
                     });
                 }
                 Err(e) => {
-                    panic!("migrated configuration had validation errors:\n{}\n\noriginal configuration:\n{}\n\nmigrated configuration:\n{}", e, input, new_config)
+                    panic!("migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}")
                 }
             }
         }
@@ -659,9 +656,9 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
                     for (k, v) in properties {
-                        let path = format!("{}.{}", path, k);
+                        let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
-                            errors.push(format!("{} was missing a description", path));
+                            errors.push(format!("{path} was missing a description"));
                         }
                         visit_schema(&path, v, errors)
                     }

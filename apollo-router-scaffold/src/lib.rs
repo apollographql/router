@@ -126,7 +126,7 @@ mod test {
             .build();
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([
             (
-                format!("type_{}", plugin_type),
+                format!("type_{plugin_type}"),
                 toml::Value::String(plugin_type.to_string()),
             ),
             (

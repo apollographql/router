@@ -356,7 +356,7 @@ mod tests {
                 });
             }
             e => {
-                panic!("empty plan should have returned an EmptyPlanError: {:?}", e);
+                panic!("empty plan should have returned an EmptyPlanError: {e:?}");
             }
         }
     }
