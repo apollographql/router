@@ -196,12 +196,12 @@ impl IntegrationTest {
             );
         });
         request.headers_mut().remove(ACCEPT);
-        return match client.execute(request).await {
+        match client.execute(request).await {
             Ok(response) => (id, response),
             Err(err) => {
                 panic!("unable to send successful request to router, {}", err)
             }
-        };
+        }
     }
 
     #[allow(dead_code)]
@@ -301,10 +301,7 @@ impl IntegrationTest {
                 for frame in thread.frames() {
                     println!(
                         "  {}",
-                        frame
-                            .symbol()
-                            .map(|s| format!("{}", s.name()))
-                            .unwrap_or("<unknown>".to_string())
+                        frame.symbol().map(|s| s.name()).unwrap_or("<unknown>")
                     );
                 }
             }

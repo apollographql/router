@@ -1,5 +1,4 @@
 mod common;
-use std::path::Path;
 use std::result::Result;
 
 use opentelemetry::sdk::propagation::TraceContextPropagator;

@@ -1,6 +1,4 @@
 mod common;
-use std::path::Path;
-
 use tower::BoxError;
 
 use crate::common::IntegrationTest;
@@ -12,12 +10,15 @@ async fn test_datadog_tracing() -> Result<(), BoxError> {
         .with_service_name("my_app")
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let router = IntegrationTest::new(
+    let mut router = IntegrationTest::new(
         tracer,
         opentelemetry_datadog::DatadogPropagator::new(),
         include_str!("fixtures/datadog.router.yaml"),
     )
     .await;
+
+    router.start().await;
+    router.assert_started().await;
     router.run_query().await;
     Ok(())
 }
