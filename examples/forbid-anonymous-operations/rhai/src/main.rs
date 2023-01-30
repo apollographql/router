@@ -50,7 +50,7 @@ mod tests {
             .unwrap();
 
         let _response = service_response.next_response().await.unwrap();
-        println!("RESPONSE: {:?}", _response);
+        println!("RESPONSE: {_response:?}");
         // Rhai should return a 500
         assert_eq!(
             StatusCode::INTERNAL_SERVER_ERROR,

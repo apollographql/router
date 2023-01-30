@@ -124,19 +124,17 @@ pub(crate) enum EndpointDefault {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpExporter {
     /// Headers to send on report requests
-    #[serde(default)]
     pub(crate) headers: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
     /// Note that domain name is will be defaulted to match the endpoint is not explicitly set.
-    #[serde(default)]
     pub(crate) domain_name: Option<String>,
     /// The optional certificate authority (CA) certificate to be used in TLS configuration.
     pub(crate) ca: Option<String>,
@@ -148,8 +146,7 @@ pub(crate) struct GrpcExporter {
     /// gRPC metadata
     #[serde(
         deserialize_with = "metadata_map_serde::deserialize",
-        serialize_with = "metadata_map_serde::serialize",
-        default
+        serialize_with = "metadata_map_serde::serialize"
     )]
     #[schemars(schema_with = "header_map", default)]
     pub(crate) metadata: MetadataMap,

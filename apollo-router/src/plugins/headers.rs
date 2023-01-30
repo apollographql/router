@@ -177,14 +177,12 @@ enum Propagate {
 }
 
 /// Configuration for header propagation
-#[derive(Clone, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, JsonSchema, Default, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
     /// Rules to apply to all subgraphs
-    #[serde(default)]
     all: Option<HeadersLocation>,
     /// Rules to specific subgraphs
-    #[serde(default)]
     subgraphs: HashMap<String, HeadersLocation>,
 }
 

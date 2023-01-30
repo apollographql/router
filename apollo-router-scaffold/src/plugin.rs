@@ -68,7 +68,7 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
         )
         .target_dir(".")
         .project_name(name)
-        .parameter(format!("name={}", name))
+        .parameter(format!("name={name}"))
         .append(true)
         .build();
     let desc = ScaffoldDescription::new(opts)?;
@@ -108,9 +108,9 @@ fn create_plugin(name: &str, template_path: &Option<PathBuf>) -> Result<()> {
     };
 
     let snake_name = name.to_snake_case();
-    let re = Regex::new(&format!(r"(?m)^mod {};$", snake_name)).unwrap();
+    let re = Regex::new(&format!(r"(?m)^mod {snake_name};$")).unwrap();
     if re.find(&mod_rs).is_none() {
-        mod_rs = format!("mod {};\n{}", snake_name, mod_rs);
+        mod_rs = format!("mod {snake_name};\n{mod_rs}");
     }
 
     std::fs::write(mod_path, mod_rs)?;
@@ -155,7 +155,7 @@ fn remove_plugin(name: &str) -> Result<()> {
     let mod_path = mod_path();
     if Path::new(&mod_path).exists() {
         let mut mod_rs = std::fs::read_to_string(&mod_path)?;
-        let re = Regex::new(&format!(r"(?m)^mod {};$", snake_name)).unwrap();
+        let re = Regex::new(&format!(r"(?m)^mod {snake_name};$")).unwrap();
         mod_rs = re.replace(&mod_rs, "").to_string();
 
         std::fs::write(mod_path, mod_rs)?;
