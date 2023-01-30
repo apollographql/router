@@ -5,6 +5,8 @@
 
 // This entire file is license key functionality
 
+use http::header::CACHE_CONTROL;
+use http::HeaderValue;
 use serde::Deserialize;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
@@ -12,8 +14,11 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
+use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+
+const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
@@ -35,12 +40,26 @@ impl APQLayer {
         Self { cache }
     }
 
-    pub(crate) async fn request(
+    pub(crate) async fn supergraph_request(
         &self,
         request: SupergraphRequest,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         apq_request(&self.cache, request).await
     }
+
+    pub(crate) fn router_response(&self, response: RouterResponse) -> RouterResponse {
+        set_cache_control_headers(response)
+    }
+}
+
+fn set_cache_control_headers(mut response: RouterResponse) -> RouterResponse {
+    if let Ok(Some(false)) = response.context.get::<_, bool>("persisted_query_hit") {
+        response.response.headers_mut().insert(
+            CACHE_CONTROL,
+            HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE),
+        );
+    }
+    response
 }
 
 async fn apq_request(
@@ -79,6 +98,7 @@ async fn apq_request(
                 request.supergraph_request.body_mut().query = Some(cached_query);
                 Ok(request)
             } else {
+                let _ = request.context.insert("persisted_query_hit", false);
                 tracing::trace!("apq: cache miss");
                 let errors = vec![crate::error::Error {
                     message: "PersistedQueryNotFound".to_string(),

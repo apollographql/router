@@ -212,7 +212,7 @@ where
                     })
             };
 
-            match graphql_request {
+            let router_response = match graphql_request {
                 Ok(graphql_request) => {
                     let request = SupergraphRequest {
                         supergraph_request: http::Request::from_parts(parts, graphql_request),
@@ -221,7 +221,7 @@ where
 
                     let request_res = match apq {
                         None => Ok(request),
-                        Some(apq) => apq.request(request).await,
+                        Some(apq) => apq.supergraph_request(request).await,
                     };
 
                     let SupergraphResponse { response, context } =
@@ -414,7 +414,8 @@ where
                         context,
                     })
                 }
-            }
+            };
+            router_response.map(|r| apq.router_response(r))
         };
         Box::pin(fut)
     }
