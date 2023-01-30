@@ -174,6 +174,7 @@ where
 
         let supergraph_creator = self.supergraph_creator.clone();
         let apq = self.apq_layer.clone();
+        let apq2 = apq.clone();
 
         let fut = async move {
             let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
@@ -415,7 +416,11 @@ where
                     })
                 }
             };
-            router_response.map(|r| apq.router_response(r))
+            if let Some(apq) = apq2 {
+                router_response.map(|r| apq.router_response(r))
+            } else {
+                router_response
+            }
         };
         Box::pin(fut)
     }
