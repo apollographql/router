@@ -4,6 +4,7 @@
 use std::env;
 use std::env::VarError;
 use std::fs;
+use std::str::FromStr;
 
 use proteus::Parser;
 use proteus::TransformBuilder;
@@ -23,8 +24,8 @@ pub(crate) struct Expansion {
 pub(crate) struct ConfigDefault {
     config_path: String,
     env_name: Option<String>,
-    default: String,
-    quote: bool,
+    /// Note that the default type is important. If you set it as bool or numeric then the env variable will
+    default: Value,
 }
 
 impl Expansion {
@@ -63,7 +64,6 @@ impl Expansion {
                     .config_path("telemetry.apollo.endpoint")
                     .env_name("APOLLO_USAGE_REPORTING_INGRESS_URL")
                     .default("https://usage-reporting.api.apollographql.com/api/ingress/traces")
-                    .quote(true)
                     .build(),
             )
             .defaults(dev_mode_defaults)
@@ -75,33 +75,27 @@ fn dev_mode_defaults() -> Vec<ConfigDefault> {
     vec![
         ConfigDefault::builder()
             .config_path("plugins.[\"experimental.expose_query_plan\"]")
-            .default("true")
-            .quote(false)
+            .default(true)
             .build(),
         ConfigDefault::builder()
             .config_path("include_subgraph_errors.all")
-            .default("true")
-            .quote(false)
+            .default(true)
             .build(),
         ConfigDefault::builder()
             .config_path("telemetry.tracing.experimental_response_trace_id.enabled")
-            .default("true")
-            .quote(false)
+            .default(true)
             .build(),
         ConfigDefault::builder()
             .config_path("supergraph.introspection")
-            .default("true")
-            .quote(false)
+            .default(true)
             .build(),
         ConfigDefault::builder()
             .config_path("sandbox.enabled")
-            .default("true")
-            .quote(false)
+            .default(true)
             .build(),
         ConfigDefault::builder()
             .config_path("homepage.enabled")
-            .default("false")
-            .quote(false)
+            .default(false)
             .build(),
     ]
 }
@@ -165,7 +159,18 @@ impl Expansion {
             transformer_builder.add_action(Parser::parse("", "").expect("migration must be valid"));
         for default in &self.defaults {
             let value = if let Some(env_name) = &default.env_name {
-                std::env::var(env_name).unwrap_or_else(|_| default.default.clone())
+                if let Ok(var) = std::env::var(env_name) {
+                    // Coerce the env variable into the same format as the default, otherwise let it through as a string
+                    let parsed = Value::from_str(&var);
+                    let string_var = Value::String(var);
+                    match (&default.default, parsed) {
+                        (Value::Bool(_), Ok(Value::Bool(bool))) => Value::Bool(bool),
+                        (Value::Number(_), Ok(Value::Number(number))) => Value::Number(number),
+                        _ => string_var,
+                    }
+                } else {
+                    default.default.clone()
+                }
             } else {
                 default.default.clone()
             };
@@ -179,17 +184,13 @@ impl Expansion {
                 continue;
             }
 
-            if default.quote {
-                transformer_builder = transformer_builder.add_action(
-                    Parser::parse(&format!("const(\"{}\")", value), &default.config_path)
-                        .expect("migration must be valid"),
-                );
-            } else {
-                transformer_builder = transformer_builder.add_action(
-                    Parser::parse(&format!("const({})", value), &default.config_path)
-                        .expect("migration must be valid"),
-                );
-            }
+            transformer_builder = transformer_builder.add_action(
+                Parser::parse(
+                    &format!("const({})", value.to_string()),
+                    &default.config_path,
+                )
+                .expect("migration must be valid"),
+            );
         }
         *config = transformer_builder
             .build()
@@ -251,6 +252,73 @@ mod test {
     use crate::configuration::Expansion;
 
     #[test]
+    fn test_type_coercion() {
+        std::env::set_var("TEST_DEFAULTED_STRING_VAR", "overridden_string");
+        std::env::set_var("TEST_DEFAULTED_NUMERIC_VAR", "1");
+        std::env::set_var("TEST_DEFAULTED_BOOL_VAR", "true");
+        std::env::set_var("TEST_DEFAULTED_INCORRECT_TYPE", "true");
+
+        let expansion = Expansion::builder()
+            .supported_mode("env")
+            .default(
+                ConfigDefault::builder()
+                    .config_path("no_env_string")
+                    .env_name("NON_EXISTENT_STRING")
+                    .default("defaulted_string")
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("no_env_numeric")
+                    .env_name("NON_EXISTENT_NUMERIC")
+                    .default(2)
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("no_env_bool")
+                    .env_name("NON_EXISTENT_BOOL")
+                    .default(true)
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("overridden_string")
+                    .env_name("TEST_DEFAULTED_STRING_VAR")
+                    .default("defaulted_string")
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("overridden_numeric")
+                    .env_name("TEST_DEFAULTED_NUMERIC_VAR")
+                    .default(2)
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("overridden_bool")
+                    .env_name("TEST_DEFAULTED_BOOL_VAR")
+                    .default(false)
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("overridden_incorrect_type")
+                    .env_name("TEST_DEFAULTED_INCORRECT_TYPE")
+                    .default(23)
+                    .build(),
+            )
+            .build();
+
+        let mut value = json!({});
+        value = expansion.expand(&value).expect("expansion must succeed");
+        insta::with_settings!({sort_maps => true}, {
+            assert_yaml_snapshot!(value);
+        })
+    }
+
+    #[test]
     fn test_unprefixed() {
         std::env::set_var("TEST_EXPANSION_VAR", "expanded");
         std::env::set_var("TEST_DEFAULTED_VAR", "defaulted");
@@ -262,7 +330,6 @@ mod test {
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
-                    .quote(true)
                     .build(),
             )
             .default(
@@ -270,7 +337,6 @@ mod test {
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
                     .default("defaulted")
-                    .quote(true)
                     .build(),
             )
             .default(
@@ -278,7 +344,6 @@ mod test {
                     .config_path("overridden")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
-                    .quote(true)
                     .build(),
             )
             .build();
@@ -304,7 +369,6 @@ mod test {
                     .config_path("defaulted")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
-                    .quote(true)
                     .build(),
             )
             .default(
@@ -312,7 +376,6 @@ mod test {
                     .config_path("no_env")
                     .env_name("NON_EXISTENT")
                     .default("defaulted")
-                    .quote(true)
                     .build(),
             )
             .default(
@@ -320,7 +383,6 @@ mod test {
                     .config_path("overridden")
                     .env_name("TEST_DEFAULTED_VAR")
                     .default("defaulted")
-                    .quote(true)
                     .build(),
             )
             .build();
