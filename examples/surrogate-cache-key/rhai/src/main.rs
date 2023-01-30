@@ -58,7 +58,7 @@ mod tests {
         assert_eq!(StatusCode::OK, service_response.response.status());
         // Rhai should return a 200...
         let _response = service_response.next_response().await.unwrap();
-        println!("RESPONSE: {:?}", _response);
+        println!("RESPONSE: {_response:?}");
 
         /* TBD: Figure out how to run this as a test
         // with the expected message

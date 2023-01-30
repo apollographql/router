@@ -630,8 +630,8 @@ impl fmt::Display for Path {
         for element in self.iter() {
             write!(f, "/")?;
             match element {
-                PathElement::Index(index) => write!(f, "{}", index)?,
-                PathElement::Key(key) => write!(f, "{}", key)?,
+                PathElement::Index(index) => write!(f, "{index}")?,
+                PathElement::Key(key) => write!(f, "{key}")?,
                 PathElement::Flatten => write!(f, "@")?,
                 PathElement::Fragment(fragment) => write!(f, "{fragment}")?,
             }

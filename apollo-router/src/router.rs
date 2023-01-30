@@ -865,7 +865,7 @@ mod tests {
         request: &graphql::Request,
     ) -> Result<graphql::Response, crate::error::FetchError> {
         Ok(reqwest::Client::new()
-            .post(format!("{}/", listen_addr))
+            .post(format!("{listen_addr}/"))
             .json(request)
             .send()
             .await

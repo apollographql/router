@@ -319,7 +319,7 @@ impl Query {
 
         let errors = ast
             .errors()
-            .map(|err| format!("{:?}", err))
+            .map(|err| format!("{err:?}"))
             .collect::<Vec<_>>();
 
         if !errors.is_empty() {
@@ -362,7 +362,7 @@ impl Query {
 
         let errors = tree
             .errors()
-            .map(|err| format!("{:?}", err))
+            .map(|err| format!("{err:?}"))
             .collect::<Vec<_>>();
 
         if !errors.is_empty() {
@@ -448,12 +448,10 @@ impl Query {
                         if output.is_null() {
                             let message = match path.last() {
                                 Some(PathElement::Key(k)) => format!(
-                                    "Cannot return null for non-nullable field {parent_type}.{}",
-                                   k
+                                    "Cannot return null for non-nullable field {parent_type}.{k}"
                                 ),
                                 Some(PathElement::Index(i)) => format!(
-                                    "Cannot return null for non-nullable array element of type {inner_type} at index {}",
-                                   i
+                                    "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
                                 ),
                                 _ => todo!(),
                             };

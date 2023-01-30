@@ -66,7 +66,7 @@ pub(super) async fn decompress_request_body(
                 "deflate" => decode_body!(ZlibDecoder, "cannot decompress (deflate) request body"),
                 "identity" => Ok(next.run(Request::from_parts(parts, body)).await),
                 unknown => {
-                    let message = format!("unknown content-encoding header value {:?}", unknown);
+                    let message = format!("unknown content-encoding header value {unknown:?}");
                     tracing::error!(message);
                     ::tracing::error!(
                        monotonic_counter.apollo_router_http_requests_total = 1u64,

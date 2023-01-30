@@ -115,7 +115,7 @@ impl PluginFactory {
         let plugin_factory_name = if group.is_empty() {
             name.to_string()
         } else {
-            format!("{}.{}", group, name)
+            format!("{group}.{name}")
         };
         tracing::debug!(%plugin_factory_name, "creating plugin factory");
         PluginFactory {

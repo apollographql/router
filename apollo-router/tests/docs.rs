@@ -16,16 +16,14 @@ fn check_config_json() {
             if !path.starts_with("https://") {
                 assert!(
                     re.is_match(path),
-                    "{} in config.json was not kebab case",
-                    path
+                    "{path} in config.json was not kebab case"
                 );
                 if path != "/" {
-                    let path_in_docs = format!("../docs/source{}.mdx", path);
+                    let path_in_docs = format!("../docs/source{path}.mdx");
                     let path_in_docs = Path::new(&path_in_docs);
                     assert!(
                         path_in_docs.exists(),
-                        "{} in docs/source/config.json did not exist",
-                        path
+                        "{path} in docs/source/config.json did not exist"
                     );
                 }
             }

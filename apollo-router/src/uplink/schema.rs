@@ -59,7 +59,7 @@ pub(crate) fn stream_supergraph(
     timeout: Duration,
 ) -> impl Stream<Item = Result<Schema, String>> {
     let (sender, receiver) = channel(2);
-    let _ = tokio::task::spawn(async move {
+    let task = async move {
         let mut composition_id = None;
         let mut current_url_idx = 0;
 
@@ -71,9 +71,9 @@ pub(crate) fn stream_supergraph(
                 graph_ref.to_string(),
                 composition_id.clone(),
                 urls.as_ref().map(|u| &u[current_url_idx]),
-                timeout
+                timeout,
             )
-                .await
+            .await
             {
                 Ok(value) => match value.router_config {
                     supergraph_sdl::SupergraphSdlRouterConfig::RouterConfigResult(
@@ -91,7 +91,8 @@ pub(crate) fn stream_supergraph(
                         }
                         // this will truncate the number of seconds to under u64::MAX, which should be
                         // a large enough delay anyway
-                        interval = Duration::from_secs(schema_config.min_delay_seconds.round() as u64);
+                        interval =
+                            Duration::from_secs(schema_config.min_delay_seconds.round() as u64);
                     }
                     supergraph_sdl::SupergraphSdlRouterConfig::Unchanged => {
                         tracing::trace!("schema did not change");
@@ -105,7 +106,9 @@ pub(crate) fn stream_supergraph(
                             }
 
                             if sender
-                                .send(Err(format!("error downloading the schema from Uplink: {}", message)))
+                                .send(Err(format!(
+                                    "error downloading the schema from Uplink: {message}"
+                                )))
                                 .await
                                 .is_err()
                             {
@@ -113,7 +116,7 @@ pub(crate) fn stream_supergraph(
                             }
                         } else {
                             if sender
-                                .send(Err(format!("{:?} error downloading the schema from Uplink, the router will not try again: {}", code, message)))
+                                .send(Err(format!("{code:?} error downloading the schema from Uplink, the router will not try again: {message}")))
                                 .await
                                 .is_err()
                             {
@@ -133,8 +136,8 @@ pub(crate) fn stream_supergraph(
 
             tokio::time::sleep(interval).await;
         }
-    })
-        .with_current_subscriber();
+    };
+    let _ = tokio::task::spawn(task.with_current_subscriber());
 
     ReceiverStream::new(receiver)
 }

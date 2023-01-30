@@ -457,7 +457,7 @@ impl Plugin for Rhai {
             None => "main.rhai".to_string(),
         };
 
-        let main = scripts_path.join(&main_file);
+        let main = scripts_path.join(main_file);
 
         let watched_path = scripts_path.clone();
         let watched_main = main.clone();
@@ -526,10 +526,10 @@ impl Plugin for Rhai {
                 },
                 config,
             )
-            .unwrap_or_else(|_| panic!("could not create watch on: {:?}", watched_path));
+            .unwrap_or_else(|_| panic!("could not create watch on: {watched_path:?}"));
             watcher
                 .watch(&watched_path, RecursiveMode::Recursive)
-                .unwrap_or_else(|_| panic!("could not watch: {:?}", watched_path));
+                .unwrap_or_else(|_| panic!("could not watch: {watched_path:?}"));
             // Park the thread until this Rhai instance is dropped (see Drop impl)
             // We may actually unpark() before this code executes or exit from park() spuriously.
             // Use the watching_flag to control a loop which waits from the flag to be updated
@@ -1125,7 +1125,7 @@ impl fmt::Display for ErrorDetails {
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: format!("rhai execution error: '{}'", error),
+        message: format!("rhai execution error: '{error}'"),
         position: None,
     };
 
@@ -1465,7 +1465,7 @@ impl Rhai {
                     .query()
                 {
                     Some(query) => Some(
-                        PathAndQuery::from_maybe_shared(format!("{}?{}", value, query))
+                        PathAndQuery::from_maybe_shared(format!("{value}?{query}"))
                             .map_err(|e| e.to_string())?,
                     ),
                     None => Some(PathAndQuery::from_str(value).map_err(|e| e.to_string())?),
@@ -1484,7 +1484,7 @@ impl Rhai {
                 let new_authority = match parts.authority {
                     Some(old_authority) => {
                         if let Some(port) = old_authority.port() {
-                            Authority::from_maybe_shared(format!("{}:{}", value, port))
+                            Authority::from_maybe_shared(format!("{value}:{port}"))
                                 .map_err(|e| e.to_string())?
                         } else {
                             Authority::from_str(value).map_err(|e| e.to_string())?
@@ -1547,13 +1547,13 @@ impl Rhai {
             })
             // Register a function for printing to stderr
             .register_fn("eprint", |x: &str| {
-                eprintln!("{}", x);
+                eprintln!("{x}");
             })
             // Default representation in rhai is the "type", so
             // we need to register a to_string function for all our registered
             // types so we can interact meaningfully with them.
             .register_fn("to_string", |x: &mut Context| -> String {
-                format!("{:?}", x)
+                format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Option<HeaderName>| -> String {
                 match x {
@@ -1594,21 +1594,21 @@ impl Rhai {
                 },
             )
             .register_fn("to_string", |x: &mut Request| -> String {
-                format!("{:?}", x)
+                format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Response| -> String {
-                format!("{:?}", x)
+                format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Error| -> String {
-                format!("{:?}", x)
+                format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Object| -> String {
-                format!("{:?}", x)
+                format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Value| -> String {
-                format!("{:?}", x)
+                format!("{x:?}")
             })
-            .register_fn("to_string", |x: &mut Uri| -> String { format!("{:?}", x) })
+            .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
             // Add query plan getter to execution request
             .register_get(
                 "query_plan",
