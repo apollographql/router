@@ -359,6 +359,9 @@ impl Plugin for AuthenticationPlugin {
                     };
 
                     // Search our set of JWKS to find the kid and process it
+                    // Note: This will search through JWKS in the order in which they are defined
+                    // in configuration. If the same "kid" is present in multiple JWKS, the router
+                    // will just use the first "kid" encountered.
                     for jwks_url in my_jwks_urls {
                         request.context.enter_active_request().await;
                         // Get the JWKS here
@@ -528,12 +531,13 @@ mod tests {
     use crate::services::supergraph;
 
     async fn build_a_default_test_harness() -> router::BoxCloneService {
-        build_a_test_harness(None, None).await
+        build_a_test_harness(None, None, false).await
     }
 
     async fn build_a_test_harness(
         header_name: Option<String>,
         header_value_prefix: Option<String>,
+        multiple_jwks: bool,
     ) -> router::BoxCloneService {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
@@ -582,15 +586,27 @@ mod tests {
         }
 
         let jwks_url = format!("file://{}", jwks_file.display());
-        let mut config = serde_json::json!({
-            "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks_urls": [&jwks_url]
+        let mut config = if multiple_jwks {
+            serde_json::json!({
+                "authentication": {
+                    "experimental" : {
+                        "jwt" : {
+                            "jwks_urls": [&jwks_url, &jwks_url]
+                        }
                     }
                 }
-            }
-        });
+            })
+        } else {
+            serde_json::json!({
+                "authentication": {
+                    "experimental" : {
+                        "jwt" : {
+                            "jwks_urls": [&jwks_url]
+                        }
+                    }
+                }
+            })
+        };
 
         if let Some(hn) = header_name {
             config["authentication"]["experimental"]["jwt"]["header_name"] =
@@ -885,8 +901,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
+        let test_harness = build_a_test_harness(None, None, true).await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(response.errors, vec![]);
+
+        assert_eq!(StatusCode::OK, service_response.response.status());
+
+        let expected_mock_response_data = "response created within the mock";
+        // with the expected message
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-        let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None).await;
+        let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None, false).await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -925,7 +980,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-        let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string())).await;
+        let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string()), false).await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -965,12 +1020,12 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-        let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string())).await;
+        let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
     }
 
     #[tokio::test]
     #[should_panic]
     async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-        let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string())).await;
+        let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
     }
 }
