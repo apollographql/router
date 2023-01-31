@@ -149,7 +149,7 @@ mod test {
             .configuration_json(config)
             .unwrap()
             .schema(include_str!("fixtures/supergraph.graphql"))
-            .build()
+            .build_supergraph()
             .await
             .unwrap()
     }
