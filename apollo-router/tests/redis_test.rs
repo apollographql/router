@@ -4,15 +4,17 @@ mod test {
     use apollo_router::services::supergraph;
     use http::Method;
     use redis::AsyncCommands;
-    use redis_cluster_async::Client;
+    use redis::Client;
     use serde_json::json;
     use tower::ServiceExt;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() {
-        let client =
-            Client::open(vec!["redis://:router@127.0.0.1:6379"]).expect("opening ClusterClient");
-        let mut connection = client.get_connection().await.expect("got redis connection");
+        let client = Client::open("redis://:router@127.0.0.1:6379").expect("opening ClusterClient");
+        let mut connection = client
+            .get_async_connection()
+            .await
+            .expect("got redis connection");
 
         connection
         .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
@@ -55,8 +57,11 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() {
-        let client = Client::open(vec!["redis://127.0.0.1:6379"]).expect("opening ClusterClient");
-        let mut connection = client.get_connection().await.expect("got redis connection");
+        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
+        let mut connection = client
+            .get_async_connection()
+            .await
+            .expect("got redis connection");
 
         let config = json!({
             "supergraph": {
