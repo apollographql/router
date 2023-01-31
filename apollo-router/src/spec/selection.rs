@@ -523,7 +523,7 @@ impl Selection {
                     ..
                 },
             ) => {
-                if fragment.as_str().strip_prefix("... on ") == Some(type_condition.as_str()) {
+                if fragment.as_str() == type_condition.as_str() {
                     selection_set
                         .iter()
                         .any(|selection| selection.contains_error_path(&path[1..], fragments))
@@ -533,8 +533,7 @@ impl Selection {
             }
             (Some(PathElement::Fragment(fragment)), Self::FragmentSpread { name, .. }) => {
                 if let Some(f) = fragments.get(name) {
-                    if fragment.as_str().strip_prefix("... on ") == Some(f.type_condition.as_str())
-                    {
+                    if fragment.as_str() == f.type_condition.as_str() {
                         f.selection_set
                             .iter()
                             .any(|selection| selection.contains_error_path(&path[1..], fragments))
