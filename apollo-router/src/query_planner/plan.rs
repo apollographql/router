@@ -339,8 +339,8 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
-            json_ext::PathElement::Fragment(fragment) => {
-                write!(&mut query, "{{ {fragment}")
+            json_ext::PathElement::Fragment(name) => {
+                write!(&mut query, "{{ ... on {name}")
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
