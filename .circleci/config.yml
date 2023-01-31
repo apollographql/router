@@ -13,6 +13,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
+      - image: cimg/redis:6.2.6
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
@@ -312,8 +313,6 @@ commands:
       cache_key:
         type: string
         default: ""
-    docker:
-      - image: cimg/redis:6.2.6
     steps:
       - run:
           name: Start jaeger
