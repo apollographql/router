@@ -108,10 +108,10 @@ impl TextFormatter {
         if writer.has_ansi_escapes() {
             let style = Style::new().dimmed();
             write!(writer, "{}", style.prefix())?;
-            write!(writer, "{}:", target)?;
+            write!(writer, "{target}:")?;
             write!(writer, "{}", style.suffix())?;
         } else {
-            write!(writer, "{}:", target)?;
+            write!(writer, "{target}:")?;
         }
         writer.write_char(' ')
     }

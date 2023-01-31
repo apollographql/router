@@ -207,11 +207,13 @@ where
             } else {
                 let execution_response = execution
                     .oneshot(
-                        ExecutionRequest::builder()
+                        ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
+                            .schema(&schema)
                             .context(context)
-                            .build(),
+                            .build()
+                            .await,
                     )
                     .await?;
 

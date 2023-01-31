@@ -30,6 +30,7 @@ use crate::Configuration;
 /// A GraphQL schema.
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
+    pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
     subtype_map: Arc<HashMap<String, HashSet<String>>>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
@@ -79,6 +80,7 @@ impl std::fmt::Debug for Schema {
 
         // Make sure we consider all fields
         let Schema {
+            type_system: _,
             raw_sdl,
             subtype_map,
             subgraphs,
@@ -141,12 +143,12 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
     let s = api_schema::api_schema(schema)
         .map_err(|e| SchemaError::Api(e.to_string()))?
         .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
-    Ok(format!("{}\n", s))
+    Ok(format!("{s}\n"))
 }
 
 impl Schema {
     pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        Self::parse_with_ast(s, configuration)
+        Self::parse_with_hir(s, configuration)
     }
 
     pub(crate) fn parse_with_hir(
@@ -213,8 +215,7 @@ impl Schema {
                         .map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
                     if subgraphs.insert(name.clone(), url).is_some() {
                         return Err(SchemaError::Api(format!(
-                            "must not have several subgraphs with same name '{}'",
-                            name
+                            "must not have several subgraphs with same name '{name}'"
                         )));
                     }
                 }
@@ -290,6 +291,7 @@ impl Schema {
 
             Ok(Schema {
                 raw_sdl: Arc::new(schema.into()),
+                type_system: compiler.db.type_system(),
                 subtype_map: compiler.db.subtype_map(),
                 subgraphs,
                 object_types,
@@ -313,10 +315,14 @@ impl Schema {
         return Ok(schema);
 
         fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
-            let parser = apollo_parser::Parser::new(include_str!("introspection_types.graphql"));
-            let introspection_tree = parser.parse();
-            let parser = apollo_parser::Parser::new(schema);
-            let tree = parser.parse();
+            let mut compiler = ApolloCompiler::new();
+            let id = compiler.add_type_system(
+                include_str!("introspection_types.graphql"),
+                "introspection_types.graphql",
+            );
+            let introspection_tree = compiler.db.ast(id);
+            let id = compiler.add_type_system(schema, "schema.graphql");
+            let tree = compiler.db.ast(id);
 
             // Trace log recursion limit data
             let recursion_limit = tree.recursion_limit();
@@ -479,7 +485,7 @@ impl Schema {
                                                         )
                                                         .is_some()
                                                     {
-                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{}'", name)));
+                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{name}'")));
                                                     }
                                                 }
                                             }
@@ -714,8 +720,9 @@ impl Schema {
             let schema_id = Some(format!("{:x}", hasher.finalize()));
 
             Ok(Schema {
-                subtype_map: Arc::new(subtype_map),
                 raw_sdl: Arc::new(schema.to_owned()),
+                type_system: compiler.db.type_system(),
+                subtype_map: Arc::new(subtype_map),
                 subgraphs,
                 object_types,
                 input_types,
@@ -1050,7 +1057,7 @@ mod tests {
             union UnionType2 = Foo | Bar
             "#,
             );
-            let schema = format!("{}\n{}", base_schema, schema);
+            let schema = format!("{base_schema}\n{schema}");
             Schema::parse(&schema, &Default::default()).unwrap()
         }
 
@@ -1074,7 +1081,7 @@ mod tests {
             interface InterfaceType2 implements Foo & Bar { me: String }
             "#,
             );
-            let schema = format!("{}\n{}", base_schema, schema);
+            let schema = format!("{base_schema}\n{schema}");
             Schema::parse(&schema, &Default::default()).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
@@ -1232,7 +1239,7 @@ GraphQL request:42:1
 43 |   someField: String"#
                 );
             }
-            other => panic!("unexpected schema result: {:?}", other),
+            other => panic!("unexpected schema result: {other:?}"),
         };
     }
 

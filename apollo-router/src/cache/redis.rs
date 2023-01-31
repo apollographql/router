@@ -105,7 +105,7 @@ where
             res => Err(redis::RedisError::from((
                 redis::ErrorKind::TypeError,
                 "the data is the wrong type",
-                format!("{:?}", res),
+                format!("{res:?}"),
             ))),
         }
     }

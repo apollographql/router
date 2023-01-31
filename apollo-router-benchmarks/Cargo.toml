@@ -24,7 +24,7 @@ tower = "0.4"
 [build-dependencies]
 apollo-smith = { version = "0.3.2", features = ["parser-impl"] }
 apollo-parser = "0.4.1"
-arbitrary = "1.2.2"
+arbitrary = "1.2.3"
 
 [[bench]]
 name = "basic_composition"

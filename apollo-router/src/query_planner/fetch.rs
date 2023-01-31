@@ -107,7 +107,6 @@ impl Variables {
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
-        enable_deduplicate_variables: bool,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
         let body = request.body();
@@ -121,48 +120,32 @@ impl Variables {
             }));
 
             let mut paths: HashMap<Path, usize> = HashMap::new();
-            let (paths, representations) = if enable_deduplicate_variables {
-                let mut values: IndexSet<Value> = IndexSet::new();
-                data.select_values_and_paths(schema, current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(mut value)) = select_object(content, requires, schema) {
-                            rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                            match values.get_index_of(&value) {
-                                Some(index) => {
-                                    paths.insert(path.clone(), index);
-                                }
-                                None => {
-                                    paths.insert(path.clone(), values.len());
-                                    values.insert(value);
-                                }
+            let mut values: IndexSet<Value> = IndexSet::new();
+
+            data.select_values_and_paths(schema, current_dir, |path, value| {
+                if let Value::Object(content) = value {
+                    if let Ok(Some(value)) = select_object(content, requires, schema) {
+                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
+                        match values.get_index_of(&value) {
+                            Some(index) => {
+                                paths.insert(path.clone(), index);
+                            }
+                            None => {
+                                paths.insert(path.clone(), values.len());
+                                values.insert(value);
+
                             }
                         }
                     }
-                });
-
-                if values.is_empty() {
-                    return None;
                 }
+            });
 
-                (paths, Value::Array(Vec::from_iter(values)))
-            } else {
-                let mut values: Vec<Value> = Vec::new();
-                data.select_values_and_paths(schema, current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(mut value)) = select_object(content, requires, schema) {
-                            rewrites::apply_rewrites(schema, &mut value, input_rewrites);
-                            paths.insert(path.clone(), values.len());
-                            values.push(value);
-                        }
-                    }
-                });
+            if values.is_empty() {
+                return None;
+            }
 
-                if values.is_empty() {
-                    return None;
-                }
+            let representations = Value::Array(Vec::from_iter(values));
 
-                (paths, Value::Array(Vec::from_iter(values)))
-            };
             variables.insert("representations", representations);
 
             Some(Variables { variables, paths })
@@ -220,7 +203,6 @@ impl FetchNode {
             // Needs the original request here
             parameters.supergraph_request,
             parameters.schema,
-            parameters.options.enable_deduplicate_variables,
             &self.input_rewrites,
         )
         .await
@@ -243,8 +225,7 @@ impl FetchNode {
                             .find_map(|(name, url)| (name == service_name).then_some(url))
                             .unwrap_or_else(|| {
                                 panic!(
-                                    "schema uri for subgraph '{}' should already have been checked",
-                                    service_name
+                                    "schema uri for subgraph '{service_name}' should already have been checked"
                                 )
                             })
                             .clone(),

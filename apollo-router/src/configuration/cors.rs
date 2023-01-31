@@ -16,16 +16,15 @@ use tower_http::cors::CorsLayer;
 /// Cross origin request configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Cors {
     /// Set to true to allow any origin.
     ///
     /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
-    #[serde(default)]
     pub(crate) allow_any_origin: bool,
 
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
-    #[serde(default)]
     pub(crate) allow_credentials: bool,
 
     /// The headers to allow.
@@ -38,27 +37,22 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    #[serde(default)]
     pub(crate) allow_headers: Vec<String>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
-    #[serde(default)]
     pub(crate) expose_headers: Option<Vec<String>>,
 
     /// The origin(s) to allow requests from.
     /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
-    #[serde(default = "default_origins")]
     pub(crate) origins: Vec<String>,
 
     /// `Regex`es you want to match the origins against to determine if they're allowed.
     /// Defaults to an empty list.
     /// Note that `origins` will be evaluated before `match_origins`
-    #[serde(default)]
     pub(crate) match_origins: Option<Vec<String>>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
-    #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
 
     /// The `Access-Control-Max-Age` header value in time units
@@ -69,16 +63,7 @@ pub(crate) struct Cors {
 
 impl Default for Cors {
     fn default() -> Self {
-        Self {
-            origins: default_origins(),
-            methods: default_cors_methods(),
-            allow_any_origin: Default::default(),
-            allow_credentials: Default::default(),
-            allow_headers: Default::default(),
-            expose_headers: Default::default(),
-            match_origins: Default::default(),
-            max_age: Default::default(),
-        }
+        Self::builder().build()
     }
 }
 
@@ -90,7 +75,6 @@ fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
 
-#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
