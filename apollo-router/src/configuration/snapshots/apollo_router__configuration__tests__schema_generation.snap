@@ -45,7 +45,7 @@ expression: "&schema"
                   "type": "string"
                 },
                 "jwks_urls": {
-                  "description": "Retrieve our JWK Set from here",
+                  "description": "Retrieve our JWK Sets from these locations",
                   "type": "array",
                   "items": {
                     "type": "string"

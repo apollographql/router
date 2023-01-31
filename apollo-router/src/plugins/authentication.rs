@@ -68,7 +68,7 @@ struct AuthenticationPlugin {
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 struct JWTConf {
-    /// Retrieve our JWK Set from here
+    /// Retrieve our JWK Sets from these locations
     jwks_urls: Vec<String>,
     /// HTTP header expected to contain JWT
     #[serde(default = "default_header_name")]
