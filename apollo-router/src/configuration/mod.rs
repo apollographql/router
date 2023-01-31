@@ -28,7 +28,6 @@ use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
-use serde_json::json;
 use serde_json::Map;
 use serde_json::Value;
 use thiserror::Error;
@@ -40,7 +39,6 @@ pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
-use crate::executable::APOLLO_ROUTER_DEV_ENV;
 use crate::plugin::plugins;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
@@ -193,10 +191,9 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
-        dev: Option<bool>,
         tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
-        let mut conf = Self {
+        let conf = Self {
             validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
@@ -212,60 +209,8 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
         };
-        if dev.unwrap_or_default()
-            || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
-        {
-            conf.enable_dev_mode();
-        }
 
         conf.validate()
-    }
-
-    /// This should be executed after normal configuration processing
-    pub(crate) fn enable_dev_mode(&mut self) {
-        tracing::info!("Running with *development* mode settings which facilitate development experience (e.g., introspection enabled)");
-
-        if self.plugins.plugins.is_none() {
-            self.plugins.plugins = Some(Map::new());
-        }
-        self.plugins.plugins.as_mut().unwrap().insert(
-            "experimental.expose_query_plan".to_string(),
-            Value::Bool(true),
-        );
-        self.apollo_plugins
-            .plugins
-            .insert("include_subgraph_errors".to_string(), json!({"all": true}));
-        // Enable experimental_response_trace_id
-        self.apollo_plugins
-            .plugins
-            .entry("telemetry")
-            .or_insert_with(|| json!({}))
-            .as_object_mut()
-            .expect("configuration for telemetry must be an object")
-            .entry("tracing")
-            .and_modify(|e| {
-                e.as_object_mut()
-                    .expect("configuration for telemetry.tracing must be an object")
-                    .entry("experimental_response_trace_id")
-                    .and_modify(|e| *e = json!({"enabled": true, "header_name": null}))
-                    .or_insert_with(|| json!({"enabled": true, "header_name": null}));
-            })
-            .or_insert_with(|| {
-                json!({
-                    "experimental_response_trace_id": {
-                        "enabled": true,
-                        "header_name": null
-                    }
-                })
-            });
-        self.supergraph.introspection = true;
-        self.sandbox.enabled = true;
-        self.homepage.enabled = false;
-    }
-
-    #[cfg(test)]
-    pub(crate) fn boxed(self) -> Box<Self> {
-        Box::new(self)
     }
 
     pub(crate) fn plugins(&self) -> Vec<(String, Value)> {
@@ -323,10 +268,9 @@ impl Configuration {
         cors: Option<Cors>,
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
-        dev: Option<bool>,
         tls: Option<Tls>,
     ) -> Result<Self, ConfigurationError> {
-        let mut configuration = Self {
+        let configuration = Self {
             validated_yaml: Default::default(),
             server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
@@ -342,11 +286,6 @@ impl Configuration {
             },
             tls: tls.unwrap_or_default(),
         };
-        if dev.unwrap_or_default()
-            || std::env::var(APOLLO_ROUTER_DEV_ENV).ok().as_deref() == Some("true")
-        {
-            configuration.enable_dev_mode();
-        }
 
         configuration.validate()
     }

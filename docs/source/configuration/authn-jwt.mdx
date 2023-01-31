@@ -17,7 +17,7 @@ These are the high-level steps of JWT-based authentication with the Apollo Route
 2. In all followup requests to your supergraph, the authenticated client provides its JWT in a designated HTTP header.
 3. Whenever your router receives a client request, it extracts the JWT from the designated header (if it's present).
 4. Your router validates the extracted JWT using a corresponding [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (JWK).
-    - Your router obtains all of its known JWKs from a URL that you specify in its configuration file. This URL must provide all keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a JWKS).
+    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL must provide keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a JWKS).
     - JWT validation fails if the token is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
 
 5. The router extracts all **claims** from the validated JWT and includes them in the request's context, which makes them available to [router customizations](../customizations/overview/). This enables customizations to handle the request differently depending on the details of those claims ([see below](#accessing-jwt-claims-from-the-context)).
@@ -30,7 +30,8 @@ You enable JWT authentication in your router's [YAML config file](./overview/#ya
 authentication:
   experimental:
     jwt:
-      jwks_url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+      jwks_urls:
+        - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
       # These are the DEFAULT values for the following keys:
       header_name: Authorization
       header_value_prefix: Bearer
@@ -51,12 +52,12 @@ The following configuration options are supported:
 <tr class="required">
 <td style="min-width: 150px;">
 
-##### `jwks_url`
+##### `jwks_urls`
 
 </td>
 <td>
 
-**Required.** The URL of the JWK Set (JWKS) that the router should use. Can be an `https://` or a `file://` URL.
+**Required.** The list of URLs of the JWK Sets (JWKS) that the router should use. Each list entry Can be an `https://` or a `file://` URL.
 
 **If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should never be accessible over the network.
 
@@ -103,7 +104,7 @@ The default value is `Bearer`.
 </td>
 <td>
 
-Whenever the router receives a JWT with a key ID (`kid`) that it doesn't recognize, it fetches an up-to-date JWK Set from its [`jwks_url`](#jwks_url), _as long as_ it's been _at least_ the amount of time specified by `cooldown`.
+Whenever the router receives a JWT with a key ID (`kid`) that it doesn't recognize, it fetches up-to-date JWK Sets from its [`jwks_urls`](#jwks_urls), _as long as_ it's been _at least_ the amount of time specified by `cooldown`.
 
 The default value is `15s`. In almost all cases, you don't need to override this value.
 
@@ -164,7 +165,7 @@ Because clients provide their JWT via an HTTP header, you can propagate JWTs to 
 
 ## Providing keys to the router
 
-The Apollo Router obtains each JSON Web Key (JWK) that it uses from a URL that you specify via the [`jwks_url`](#jwks_url) configuration option. This URL must provide the full list of valid JWKs in a single JSON object called a **JWK Set** (or JWKS).
+The Apollo Router obtains each JSON Web Key (JWK) that it uses from URLs that you specify via the [`jwks_urls`](#jwks_urls) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a **JWK Set** (or JWKS).
 
 Many popular identity provider services (such as [Okta](https://developer.okta.com/docs/guides/validate-access-tokens/-/main/#retrieve-the-json-web-keys) and [Auth0](https://auth0.com/docs/secure/tokens/json-web-tokens/json-web-key-sets)) create a JWKS and its URL for you, and you can provide this URL directly to your router. If your identity provider _doesn't_ do this, you need to create and maintain your own JWKS at an `https://` or `file://` URL that your router can access.
 
