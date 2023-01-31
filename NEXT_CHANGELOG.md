@@ -261,3 +261,22 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 The `orbiter::test::test_visit_args` tests were failing in the event that `APOLLO_TELEMETRY_DISABLED` was set, however this is now corrected.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2488
+
+## 🥼 Experimental
+
+### JWT authentication ([Issue #912](https://github.com/apollographql/router/issues/912))
+
+As a result of UX feedback, we are modifying the experimental JWT configuration. The `jwks_url` parameter is renamed to `jwks_urls` and now expects to receive an array of URLs, rather than a single URL.
+
+Here's a typical sample configuration fragment:
+
+```yaml
+authentication:
+  experimental:
+    jwt:
+      jwks_urls:
+        - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+```
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2500
+
