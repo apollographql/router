@@ -28,11 +28,9 @@ By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/
 
 ### Update to Federation v2.3.0 ([Issue #2465](https://github.com/apollographql/router/issues/2465), [Issue #2485](https://github.com/apollographql/router/pull/2485) and [Issue #2489](https://github.com/apollographql/router/pull/2489))
 
-This brings in Federation v2.3.0-beta.3 for testing and execution support for:
+This brings in Federation v2.3.0 execution support for:
 - `@interfaceObject` (added to federation in [federation#2277](https://github.com/apollographql/federation/issues/2277)).
 - the bug fix from [federation#2294](https://github.com/apollographql/federation/pull/2294).
-
-This will be updated to a final version before final release.
 
 By [@abernix](https://github.com/abernix) and [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2462
 By [@pcmanus](https://github.com/pcmanus) in https://github.com/apollographql/router/pull/2485 and https://github.com/apollographql/router/pull/2489
