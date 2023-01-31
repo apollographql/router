@@ -19,6 +19,9 @@ use crate::spec::TYPENAME;
 /// A JSON object.
 pub(crate) type Object = Map<ByteString, Value>;
 
+
+const FRAGMENT_PREFIX: &str = "... on ";
+
 macro_rules! extract_key_value_from_object {
     ($object:expr, $key:literal, $pattern:pat => $var:ident) => {{
         match $object.remove($key) {
@@ -634,7 +637,7 @@ impl<'de> serde::de::Visitor<'de> for FragmentVisitor {
     where
         E: serde::de::Error,
     {
-        s.strip_prefix("... on ")
+        s.strip_prefix(FRAGMENT_PREFIX)
             .map(|v| v.to_string())
             .ok_or_else(|| serde::de::Error::invalid_value(serde::de::Unexpected::Str(s), &self))
     }
@@ -644,7 +647,7 @@ fn serialize_fragment<S>(name: &String, serializer: S) -> Result<S::Ok, S::Error
 where
     S: serde::Serializer,
 {
-    serializer.serialize_str(format!("... on {name}").as_str())
+    serializer.serialize_str(format!("{FRAGMENT_PREFIX}{name}").as_str())
 }
 
 /// A path into the result document.
@@ -665,7 +668,7 @@ impl Path {
                     } else if s == "@" {
                         PathElement::Flatten
                     } else {
-                        s.strip_prefix("... on ").map_or_else(
+                        s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
                             || PathElement::Key(s.to_string()),
                             |name| PathElement::Fragment(name.to_string()),
                         )
@@ -757,7 +760,7 @@ where
                     } else if s == "@" {
                         PathElement::Flatten
                     } else {
-                        s.strip_prefix("... on ").map_or_else(
+                        s.strip_prefix(FRAGMENT_PREFIX).map_or_else(
                             || PathElement::Key(s.to_string()),
                             |name| PathElement::Fragment(name.to_string()),
                         )
@@ -776,7 +779,7 @@ impl fmt::Display for Path {
                 PathElement::Index(index) => write!(f, "{index}")?,
                 PathElement::Key(key) => write!(f, "{key}")?,
                 PathElement::Flatten => write!(f, "@")?,
-                PathElement::Fragment(name) => write!(f, "... on {name}")?,
+                PathElement::Fragment(name) => write!(f, "{FRAGMENT_PREFIX}{name}")?,
             }
         }
         Ok(())
