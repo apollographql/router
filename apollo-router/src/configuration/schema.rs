@@ -100,7 +100,7 @@ pub(crate) fn validate_yaml_configuration(
 
     if migration == Mode::Upgrade {
         let upgraded = upgrade_configuration(&yaml, true)?;
-        let expanded_yaml = expansion.expand_env_variables(&upgraded)?;
+        let expanded_yaml = expansion.expand(&upgraded)?;
         if schema.validate(&expanded_yaml).is_ok() {
             yaml = upgraded;
         } else {
@@ -108,7 +108,7 @@ pub(crate) fn validate_yaml_configuration(
         }
     }
     log_used_experimental_conf(&yaml);
-    let expanded_yaml = expansion.expand_env_variables(&yaml)?;
+    let expanded_yaml = expansion.expand(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
     if let Err(errors_it) = schema.validate(&expanded_yaml) {
         // Validation failed, translate the errors into something nice for the user
