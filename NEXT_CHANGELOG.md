@@ -40,7 +40,7 @@ It can be enabled using our standard time notation, as follows:
 
 ```
 cors:
-  max_age: 1 day
+  max_age: 1day
 ```
 
 By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollographql/router/pull/2331
