@@ -14,7 +14,6 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
-use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 
@@ -46,23 +45,6 @@ impl APQLayer {
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         apq_request(&self.cache, request).await
     }
-
-    pub(crate) fn router_response(&self, response: RouterResponse) -> RouterResponse {
-        set_cache_control_headers(response)
-    }
-}
-
-/// Persisted query errors (especially "not found") need to be uncached, because
-/// hopefully we're about to fill in the APQ cache and the same request will
-/// succeed next time.
-fn set_cache_control_headers(mut response: RouterResponse) -> RouterResponse {
-    if let Ok(Some(true)) = &response.context.get::<_, bool>("persisted_query_miss") {
-        response.response.headers_mut().insert(
-            CACHE_CONTROL,
-            HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE),
-        );
-    }
-    response
 }
 
 async fn apq_request(
@@ -120,6 +102,13 @@ async fn apq_request(
                 let res = SupergraphResponse::builder()
                     .data(Value::default())
                     .errors(errors)
+                    // Persisted query errors (especially "not found") need to be uncached, because
+                    // hopefully we're about to fill in the APQ cache and the same request will
+                    // succeed next time.
+                    .header(
+                        CACHE_CONTROL,
+                        HeaderValue::from_static(DONT_CACHE_RESPONSE_VALUE),
+                    )
                     .context(request.context)
                     .build()
                     .expect("response is valid");
@@ -162,7 +151,7 @@ mod apq_tests {
     use crate::services::router_service::from_supergraph_mock_callback;
     use crate::Context;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_works() {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38");
         let hash2 = hash.clone();
@@ -219,7 +208,6 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
-
         let apq_response = router_service.call(hash_only).await.unwrap();
 
         // make sure clients won't cache apq missed response
@@ -246,6 +234,7 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
+
         let full_response = router_service.call(with_query).await.unwrap();
 
         // the cache control header shouldn't have been tampered with
@@ -262,6 +251,7 @@ mod apq_tests {
             .expect("expecting valid request")
             .try_into()
             .unwrap();
+
         let apq_response = router_service.call(second_hash_only).await.unwrap();
 
         // the cache control header shouldn't have been tampered with

@@ -174,7 +174,6 @@ where
 
         let supergraph_creator = self.supergraph_creator.clone();
         let apq = self.apq_layer.clone();
-        let apq2 = apq.clone();
 
         let fut = async move {
             let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
@@ -213,14 +212,14 @@ where
                     })
             };
 
-            let router_response = match graphql_request {
+            match graphql_request {
                 Ok(graphql_request) => {
                     let request = SupergraphRequest {
                         supergraph_request: http::Request::from_parts(parts, graphql_request),
                         context,
                     };
 
-                    let request_res = match apq {
+                    let request_res = match &apq {
                         None => Ok(request),
                         Some(apq) => apq.supergraph_request(request).await,
                     };
@@ -252,10 +251,7 @@ where
                             }
                         }) {
                             Err(response) => response,
-                            Ok(request) => {
-                                let supergraph_service = supergraph_creator.create();
-                                supergraph_service.oneshot(request).await?
-                            }
+                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
                         };
 
                     let accepts_wildcard: bool = context
@@ -415,11 +411,6 @@ where
                         context,
                     })
                 }
-            };
-            if let Some(apq) = apq2 {
-                router_response.map(|r| apq.router_response(r))
-            } else {
-                router_response
             }
         };
         Box::pin(fut)

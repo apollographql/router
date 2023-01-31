@@ -114,9 +114,9 @@ where
 
     pub(crate) async fn insert(&self, key: K, value: V) {
         // Let's see if we can help waiters make progress.
-        if let Some(sender) = self.wait_map.lock().await.remove(&key) {
-            let _ = sender.send(value.clone());
-        }
+        // if let Some(sender) = self.wait_map.lock().await.remove(&key) {
+        //     let _ = sender.send(value.clone());
+        // }
         self.storage.insert(key, value).await;
     }
 
