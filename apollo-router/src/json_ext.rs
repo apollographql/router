@@ -19,7 +19,6 @@ use crate::spec::TYPENAME;
 /// A JSON object.
 pub(crate) type Object = Map<ByteString, Value>;
 
-
 const FRAGMENT_PREFIX: &str = "... on ";
 
 macro_rules! extract_key_value_from_object {
@@ -103,7 +102,6 @@ pub(crate) trait ValueExt {
 
     #[track_caller]
     fn is_valid_int_input(&self) -> bool;
-
 
     /// Returns whether this value is an object that matches the provided type.
     ///

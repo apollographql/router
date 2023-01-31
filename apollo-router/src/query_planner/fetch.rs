@@ -133,7 +133,6 @@ impl Variables {
                             None => {
                                 paths.insert(path.clone(), values.len());
                                 values.insert(value);
-
                             }
                         }
                     }
