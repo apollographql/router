@@ -258,6 +258,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_json_bytes",
+ "serde_millis",
  "serde_urlencoded",
  "serde_yaml",
  "sha2",
@@ -4656,6 +4657,15 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "serde_millis"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e6e2dc780ca5ee2c369d1d01d100270203c4ff923d2a4264812d723766434d00"
+dependencies = [
+ "serde",
 ]
 
 [[package]]
