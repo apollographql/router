@@ -69,7 +69,7 @@ async fn apq_request(
         (Some((query_hash, query_hash_bytes)), Some(query)) => {
             if query_matches_hash(query.as_str(), query_hash_bytes.as_slice()) {
                 tracing::trace!("apq: cache insert");
-                let _ = request.context.insert("persisted_query_hit", false);
+                let _ = request.context.insert("persisted_query_register", true);
                 cache.insert(redis_key(&query_hash), query).await;
             } else {
                 tracing::warn!("apq: graphql request doesn't match provided sha256Hash");
@@ -83,7 +83,7 @@ async fn apq_request(
                 request.supergraph_request.body_mut().query = Some(cached_query);
                 Ok(request)
             } else {
-                let _ = request.context.insert("persisted_query_miss", true);
+                let _ = request.context.insert("persisted_query_hit", false);
                 tracing::trace!("apq: cache miss");
                 let errors = vec![crate::error::Error {
                     message: "PersistedQueryNotFound".to_string(),
