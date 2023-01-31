@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: primary
+---
+{
+  "data": {
+    "currentUser": {
+      "name": "Ada"
+    }
+  },
+  "hasNext": true
+}

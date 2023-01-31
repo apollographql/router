@@ -83,9 +83,6 @@ expression: query_plan
             }
           ],
           "subselections": {}
-        },
-        "options": {
-          "enable_deduplicate_variables": false
         }
       }
     }

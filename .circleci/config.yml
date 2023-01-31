@@ -3,7 +3,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.1.1
+  gh: circleci/github-cli@2.2.0
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -51,11 +51,17 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
     default: "1.33.0"
+  protoc_version:
+    type: string
+    default: "21.8"
+  nightly:
+    type: boolean
+    default: false
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -85,6 +91,12 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   linux_arm_install_baseline:
     steps:
       - linux_install_baseline
@@ -94,6 +106,12 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   macos_install_baseline:
     steps:
       - run:
@@ -103,6 +121,12 @@ commands:
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
       - install_minimal_rust
+      - run:
+          name: Install protoc
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   windows_install_baseline:
     steps:
       - run:
@@ -112,6 +136,19 @@ commands:
             curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
             tar -xf jaeger.tar.gz
             mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
+      - run:
+          name: Install protoc
+          shell: bash.exe
+          command: |
+            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
+            unzip protoc.zip -d $HOME/.local
+            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
+      - run:
+          name: Add protoc to env
+          command: |
+            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
+            $newpath = "$oldpath;$HOME/.local/bin"
+            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
   # This job makes sure everything is ready to run integration tests
   macos_prepare_env:
@@ -165,21 +202,48 @@ commands:
       - restore_cache:
           keys:
             - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-      - run:
-          name: Install cargo deny if not present
-          command: |
-            set -e -o pipefail
-            cargo deny --version || cargo install cargo-deny
-      - run:
-          name: Install cargo about if not present
-          command: |
-            set -e -o pipefail
-            cargo about --version || cargo install cargo-about
-      - save_cache:
-          key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-          paths:
-            - ~/.cargo/bin/cargo-deny
-            - ~/.cargo/bin/cargo-about
+
+      - when:
+          condition:
+            equal: [windows, << parameters.os >>]
+          steps:
+            - run:
+                name: Install cargo deny, about, edit
+                command: |
+                  cargo install --locked cargo-deny cargo-about cargo-edit
+            - save_cache:
+                name: Save .cargo
+                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                paths:
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-about.exe
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-deny.exe
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-edit.exe
+      - when:
+          condition:
+            and:
+              - not:
+                  equal: [windows, << parameters.os >>]
+          steps:
+            - run:
+                name: Install cargo deny if not present
+                command: |
+                  set -e -o pipefail
+                  cargo deny --version || cargo install cargo-deny
+            - run:
+                name: Install cargo about if not present
+                command: |
+                  set -e -o pipefail
+                  cargo about --version || cargo install cargo-about
+            - run:
+                name: Install cargo edit if not present
+                command: |
+                  set -e -o pipefail
+                  cargo edit --version || cargo install cargo-edit
+            - save_cache:
+                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                paths:
+                  - ~/.cargo/bin/cargo-deny
+                  - ~/.cargo/bin/cargo-about
 
   xtask_lint:
     parameters:
@@ -189,9 +253,19 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - run: cargo xtask lint
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+      - run:
+          name: Install xtask
+          command: |
+              set -e -o pipefail
+              xtask help || { cd xtask && cargo install --path . && cd ..; }
+      - run: xtask lint
+      - save_cache:
+          name: Save .cargo
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+          paths:
+            - ~/.cargo
 
   xtask_check_compliance:
     parameters:
@@ -201,8 +275,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
@@ -234,6 +308,10 @@ commands:
       cargo_test_args:
         type: string
         default: "--"
+      # additional cache key to have a cache for test_updated
+      cache_key:
+        type: string
+        default: ""
     steps:
       - run:
           name: Start jaeger
@@ -242,8 +320,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
@@ -351,10 +429,8 @@ jobs:
       - checkout
       - linux_amd_install_baseline
       - run:
-          name: Use latest Rust Nightly and update all Rust dependencies
+          name: Update all Rust dependencies
           command: |
-            sed -i '/channel/d' rust-toolchain.toml
-            echo 'channel = "nightly"' >> rust-toolchain.toml
             rm Cargo.lock
             cargo fetch
       - test_workspace:
@@ -362,11 +438,15 @@ jobs:
           # schema_generation test skipped because schemars changed its representation of enums:
           # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
           cargo_test_args: --no-fail-fast -- --skip schema_generation
+          cache_key: .test_updated
 
   build_release:
     parameters:
       platform:
         type: executor
+      nightly:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     environment:
       <<: *common_job_environment
@@ -376,14 +456,19 @@ jobs:
       MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
-      - run:
-          name: Initialize submodules
-          command: git submodule update --recursive --init
       - when:
           condition:
             equal: [*macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
+            - macos_install_baseline
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: macos
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -405,13 +490,49 @@ jobs:
           condition:
             or:
               - equal: [*amd_linux_build_executor, << parameters.platform >>]
-              - equal: [*arm_linux_build_executor, << parameters.platform >>]
           steps:
             - run:
                 name: Update and install dependencies
                 command: |
                   sudo apt-get update
             - install_minimal_rust
+            - linux_amd_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: linux_amd
+                  - run: cargo xtask release prepare nightly
+            - run:
+                command: >
+                  cargo xtask dist
+            - run:
+                command: >
+                  mkdir -p artifacts
+            - run:
+                command: >
+                  cargo xtask package --output artifacts/
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  sudo apt-get update
+            - install_minimal_rust
+            - linux_arm_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: linux_arm
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -445,6 +566,15 @@ jobs:
                   [net]
                   git-fetch-with-cli = true
                   "@
+            - windows_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: windows
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -458,6 +588,8 @@ jobs:
           root: artifacts
           paths:
             - "*"
+      - store_artifacts:
+          path: artifacts/
 
   publish_github_release:
     docker:
@@ -515,8 +647,27 @@ jobs:
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
+  prepare_release:
+    parameters:
+      release_type:
+        type: string
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
+    steps:
+      - checkout
+      - gh/setup
+      - linux_install_baseline
+      - install_extra_tools:
+          os: linux_amd
+      - run:
+          command: >
+            cargo xtask release prepare << parameters.release_type >>
+
 workflows:
   ci_checks:
+    when:
+      not: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
@@ -543,7 +694,59 @@ workflows:
             parameters:
               platform:
                 [macos_test, windows_test, amd_linux_test, arm_linux_test]
+      - prepare_major_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_minor_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_patch_release_approval:
+          type: approval
+          requires:
+            - test
+          filters:
+            branches:
+              only:
+                - dev
+      - prepare_release:
+          name: "Prepare major release"
+          release_type: "major"
+          requires:
+            - prepare_major_release_approval
+      - prepare_release:
+          name: "Prepare minor release"
+          release_type: "minor"
+          requires:
+            - prepare_minor_release_approval
+      - prepare_release:
+          name: "Prepare patch release"
+          release_type: "patch"
+          requires:
+            - prepare_patch_release_approval
+
+  nightly:
+    when: << pipeline.parameters.nightly >>
+    jobs:
+      - build_release:
+          nightly: true
+          matrix:
+            parameters:
+              platform:
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+
   release:
+    when:
+      not: << pipeline.parameters.nightly >>
     jobs:
       - build_release:
           matrix:

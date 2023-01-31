@@ -10,6 +10,7 @@ use std::time::Duration;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use jsonpath_lib::Selector;
+use mime::APPLICATION_JSON;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
 use opentelemetry::sdk::trace::Tracer;
@@ -48,7 +49,7 @@ impl TracingTest {
         let config_location =
             PathBuf::from_iter(["..", "apollo-router", "src", "testdata"]).join(config_location);
         let test_config_location = PathBuf::from_iter(["..", "target", "test_config.yaml"]);
-        fs::copy(&config_location, &test_config_location).expect("could not copy config");
+        fs::copy(config_location, &test_config_location).expect("could not copy config");
 
         tracing::subscriber::set_global_default(subscriber).unwrap();
         global::set_text_map_propagator(propagator);
@@ -95,7 +96,7 @@ impl TracingTest {
         for _i in 0..100 {
             let mut request = client
                 .post("http://localhost:4000")
-                .header(CONTENT_TYPE, "application/json")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                 .header("apollographql-client-name", "custom_name")
                 .header("apollographql-client-version", "1.0")
                 .json(&json!({"query":"{topProducts{name}}","variables":{}}))
@@ -115,12 +116,28 @@ impl TracingTest {
                     return (id, result);
                 }
                 Err(e) => {
-                    eprintln!("query failed: {}", e);
+                    eprintln!("query failed: {e}");
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         panic!("unable to send successful request to router")
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_metrics(&self) -> reqwest::Result<String> {
+        let client = reqwest::Client::new();
+
+        let request = client
+            .get("http://localhost:4000/metrics")
+            .header("apollographql-client-name", "custom_name")
+            .header("apollographql-client-version", "1.0")
+            .build()
+            .unwrap();
+
+        let res = client.execute(request).await?;
+
+        res.text().await
     }
 }
 

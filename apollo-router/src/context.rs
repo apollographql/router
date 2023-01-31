@@ -4,11 +4,14 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
+use futures::lock::Mutex;
+use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -24,16 +27,22 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// for usability but could lead to surprises when updates are highly contested.
 ///
 /// Within the router, contention is likely to be highest within plugins which
-/// provide [`crate::SubgraphRequest`] or [`crate::SubgraphResponse`] processing. At such times,
+/// provide [`crate::services::SubgraphRequest`] or
+/// [`crate::services::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
     /// Creation time
+    #[serde(skip)]
+    #[serde(default = "Instant::now")]
     pub(crate) created_at: Instant,
+
+    #[serde(skip)]
+    busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
 impl Context {
@@ -42,6 +51,7 @@ impl Context {
         Context {
             entries: Default::default(),
             created_at: Instant::now(),
+            busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }
     }
 }
@@ -159,11 +169,81 @@ impl Context {
     pub fn iter_mut(&self) -> impl Iterator<Item = RefMutMulti<'_, String, Value>> + '_ {
         self.entries.iter_mut()
     }
+
+    /// Notify the busy timer that we're waiting on a network request
+    pub(crate) async fn enter_active_request(&self) {
+        self.busy_timer.lock().await.increment_active_requests()
+    }
+
+    /// Notify the busy timer that we stopped waiting on a network request
+    pub(crate) async fn leave_active_request(&self) {
+        self.busy_timer.lock().await.decrement_active_requests()
+    }
+
+    /// How much time was spent working on the request
+    pub(crate) async fn busy_time(&self) -> Duration {
+        self.busy_timer.lock().await.current()
+    }
 }
 
 impl Default for Context {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Measures the total overhead of the router
+///
+/// This works by measuring the time spent executing when there is no active subgraph request.
+/// This is still not a perfect solution, there are cases where preprocessing a subgraph request
+/// happens while another one is running and still shifts the end of the span, but for now this
+/// should serve as a reasonable solution without complex post processing of spans
+pub(crate) struct BusyTimer {
+    active_requests: u32,
+    busy_ns: Duration,
+    start: Option<Instant>,
+}
+
+impl BusyTimer {
+    pub(crate) fn new() -> Self {
+        BusyTimer::default()
+    }
+
+    pub(crate) fn increment_active_requests(&mut self) {
+        if self.active_requests == 0 {
+            if let Some(start) = self.start.take() {
+                self.busy_ns += start.elapsed();
+            }
+            self.start = None;
+        }
+
+        self.active_requests += 1;
+    }
+
+    pub(crate) fn decrement_active_requests(&mut self) {
+        self.active_requests -= 1;
+
+        if self.active_requests == 0 {
+            self.start = Some(Instant::now());
+        }
+    }
+
+    pub(crate) fn current(&mut self) -> Duration {
+        if let Some(start) = self.start {
+            self.busy_ns + start.elapsed()
+        } else {
+            self.busy_ns
+        }
+    }
+}
+
+impl Default for BusyTimer {
+    fn default() -> Self {
+        Self {
+            active_requests: 0,
+            busy_ns: Duration::new(0, 0),
+            start: Some(Instant::now()),
+        }
     }
 }
 

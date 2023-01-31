@@ -11,7 +11,7 @@ use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
-use crate::router_factory::SupergraphServiceFactory;
+use crate::router_factory::RouterFactory;
 
 /// Factory for creating the http server component.
 ///
@@ -29,7 +29,7 @@ pub(crate) trait HttpServerFactory {
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
     ) -> Self::Future
     where
-        RF: SupergraphServiceFactory;
+        RF: RouterFactory;
 }
 
 type MainAndExtraListeners = (Listener, Vec<(ListenAddr, Listener)>);
@@ -99,7 +99,7 @@ impl HttpServerHandle {
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
-        RF: SupergraphServiceFactory,
+        RF: RouterFactory,
     {
         // we tell the currently running server to stop
         if let Err(_err) = self.shutdown_sender.send(()) {

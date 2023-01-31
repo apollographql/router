@@ -2,7 +2,6 @@
 
 use std::env;
 use std::ffi::OsStr;
-use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -10,7 +9,6 @@ use std::time::Duration;
 use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
-use clap::AppSettings;
 use clap::ArgAction;
 use clap::Args;
 use clap::CommandFactory;
@@ -25,9 +23,9 @@ use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
 
+use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
-use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -53,7 +51,6 @@ pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
 // main completes, so don't use tracing, use println!() and eprintln!()..
 #[cfg(feature = "dhat-heap")]
-#[crate::_private::ctor::ctor]
 fn create_heap_profiler() {
     unsafe {
         match DHAT_HEAP_PROFILER.set(dhat::Profiler::new_heap()) {
@@ -77,7 +74,6 @@ extern "C" fn drop_heap_profiler() {
 }
 
 #[cfg(feature = "dhat-ad-hoc")]
-#[crate::_private::ctor::ctor]
 fn create_ad_hoc_profiler() {
     unsafe {
         match DHAT_AD_HOC_PROFILER.set(dhat::Profiler::new_ad_hoc()) {
@@ -122,22 +118,21 @@ enum ConfigSubcommand {
     /// Print upgraded configuration.
     Upgrade {
         /// The location of the config to upgrade.
-        #[clap(parse(from_os_str), env = "APOLLO_ROUTER_CONFIG_PATH")]
+        #[clap(value_parser, env = "APOLLO_ROUTER_CONFIG_PATH")]
         config_path: PathBuf,
 
         /// Print a diff.
-        #[clap(parse(from_flag), long)]
+        #[clap(action = ArgAction::SetTrue, long)]
         diff: bool,
     },
+    /// List all the available experimental configurations with related GitHub discussion
+    Experimental,
 }
 
 /// Options for the router
 #[derive(Parser, Debug)]
-#[clap(
-    name = "router",
-    about = "Apollo federation router",
-    global_setting(AppSettings::NoAutoVersion)
-)]
+#[clap(name = "router", about = "Apollo federation router")]
+#[command(disable_version_flag(true))]
 pub(crate) struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
@@ -161,7 +156,7 @@ pub(crate) struct Opt {
     #[clap(
         short,
         long = "config",
-        parse(from_os_str),
+        value_parser,
         env = "APOLLO_ROUTER_CONFIG_PATH"
     )]
     config_path: Option<PathBuf>,
@@ -179,7 +174,7 @@ pub(crate) struct Opt {
     #[clap(
         short,
         long = "supergraph",
-        parse(from_os_str),
+        value_parser,
         env = "APOLLO_ROUTER_SUPERGRAPH_PATH"
     )]
     supergraph_path: Option<PathBuf>,
@@ -201,16 +196,24 @@ pub(crate) struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
-    #[clap(long, env, multiple_occurrences(true))]
+    #[clap(long, env, action = ArgAction::Append)]
     // Should be a Vec<Url> when https://github.com/clap-rs/clap/discussions/3796 is solved
     apollo_uplink_endpoints: Option<String>,
 
     /// The time between polls to Apollo uplink. Minimum 10s.
-    #[clap(long, default_value = "10s", parse(try_from_str = humantime::parse_duration), env)]
+    #[clap(long, default_value = "10s", value_parser = humantime::parse_duration, env)]
     apollo_uplink_poll_interval: Duration,
 
+    /// Disable sending anonymous usage information to Apollo.
+    #[clap(long, env = "APOLLO_TELEMETRY_DISABLED")]
+    anonymous_telemetry_disabled: bool,
+
+    /// The timeout for an http call to Apollo uplink. Defaults to 30s.
+    #[clap(long, default_value = "30s", value_parser = humantime::parse_duration, env)]
+    apollo_uplink_timeout: Duration,
+
     /// Display version and exit.
-    #[clap(parse(from_flag), long, short = 'V')]
+    #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
 }
 
@@ -258,6 +261,12 @@ impl fmt::Display for ProjectDir {
 ///
 /// Refer to the examples if you would like to see how to run your own router with plugins.
 pub fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    create_heap_profiler();
+
+    #[cfg(feature = "dhat-ad-hoc")]
+    create_ad_hoc_profiler();
+
     let mut builder = tokio::runtime::Builder::new_multi_thread();
     builder.enable_all();
     if let Some(nb) = std::env::var("APOLLO_ROUTER_NUM_CORES")
@@ -370,7 +379,13 @@ impl Executable {
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
-                println!("{}", output);
+                println!("{output}");
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Experimental,
+            })) => {
+                configuration::print_all_experimental_conf();
                 Ok(())
             }
             None => {
@@ -416,17 +431,14 @@ impl Executable {
                 }
             }) {
                 Some(configuration) => configuration,
-                None => Configuration::builder()
-                    .build()
-                    .map(std::convert::Into::into)?,
+                None => Default::default(),
             },
         };
 
-        let is_telemetry_disabled = std::env::var("APOLLO_TELEMETRY_DISABLED").ok().is_some();
-        let apollo_telemetry_msg = if is_telemetry_disabled {
-            "Anonymous usage data was disabled via APOLLO_TELEMETRY_DISABLED=1.".to_string()
+        let apollo_telemetry_msg = if opt.anonymous_telemetry_disabled {
+            "Anonymous usage data collection is disabled.".to_string()
         } else {
-            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for more info.".to_string()
+            "Anonymous usage data is gathered to inform Apollo product development.  See https://go.apollo.dev/o/privacy for details.".to_string()
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
@@ -480,6 +492,7 @@ impl Executable {
                     apollo_graph_ref,
                     urls: uplink_endpoints,
                     poll_interval: opt.apollo_uplink_poll_interval,
+                    timeout: opt.apollo_uplink_timeout
                 }
             }
             _ => {
@@ -546,7 +559,7 @@ fn setup_panic_handler(dispatcher: Dispatch) {
             } else {
                 tracing::error!("{}", e)
             }
-            // Once we've panic'ed the behaviour of the router is non-deterministic
+            // Once we've panicked the behaviour of the router is non-deterministic
             // We've logged out the panic details. Terminate with an error code
             std::process::exit(1);
         });
@@ -561,16 +574,12 @@ fn copy_args_to_env() {
     let matches = Opt::command().get_matches();
     Opt::command().get_arguments().for_each(|a| {
         if let Some(env) = a.get_env() {
-            if a.is_allow_invalid_utf8_set() {
-                if let Some(value) = matches.get_one::<OsString>(a.get_id()) {
-                    env::set_var(env, value);
-                }
-            } else if let Ok(Some(value)) = matches.try_get_one::<PathBuf>(a.get_id()) {
-                env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<String>(a.get_id()) {
-                env::set_var(env, value);
-            } else if let Ok(Some(value)) = matches.try_get_one::<bool>(a.get_id()) {
-                env::set_var(env, value.to_string());
+            if let Some(raw) = matches
+                .get_raw(a.get_id().as_str())
+                .unwrap_or_default()
+                .next()
+            {
+                env::set_var(env, raw);
             }
         }
     });

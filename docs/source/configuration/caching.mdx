@@ -21,7 +21,9 @@ Introspection responses are cached too, but that cache is not configurable for n
 
 ## Experimental Redis cache
 
-The Apollo Router has an experimental external storage cache, using Redis Cluster. It can work as a second level cache after the in memory cache.
+The Apollo Router has an experimental external storage cache, using Redis Cluster or a single Redis instance (if you provide only one url).
+It can be tested by building a custom Router binary, with the Cargo feature `experimental_cache`.
+
 
 This will activate a configuration option to connect to a Redis Cluster:
 

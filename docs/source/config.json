@@ -8,14 +8,23 @@
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation version support": "/federation-version-support",
-    "Configuration": {
+    "Configuring the Router": {
       "Overview": "/configuration/overview",
-      "CORS": "/configuration/cors",
-      "CSRF prevention": "/configuration/csrf",
-      "Logging": "/configuration/logging",
-      "Header propagation": "/configuration/header-propagation",
-      "Traffic shaping": "/configuration/traffic-shaping",
-      "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
+      "Caching": "/configuration/caching",
+      "External extensibility": "/configuration/external",
+      "Debugging": {
+        "Logging": "/configuration/logging",
+        "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
+      },
+      "Networking": {
+        "Header propagation": "/configuration/header-propagation",
+        "Traffic shaping": "/configuration/traffic-shaping"
+      },
+      "Security": {
+        "CORS": "/configuration/cors",
+        "CSRF prevention": "/configuration/csrf",
+        "JWT Authentication (experimental)": "/configuration/authn-jwt"
+      }
     },
     "Monitoring & Metrics": {
       "Health check": "/configuration/health-checks",
@@ -30,7 +39,7 @@
     },
     "Executing Operations": {
       "Build and run queries": "/executing-operations/build-run-queries",
-      "@defer support (preview)": "/executing-operations/defer-support",
+      "@defer support": "/executing-operations/defer-support",
       "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {

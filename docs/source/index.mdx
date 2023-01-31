@@ -1,29 +1,28 @@
 ---
 title: The Apollo Router
-description: High-performance graph routing for supergraphs
+description: High-performance routing for self-hosted supergraphs
 ---
 
 import { Link } from 'gatsby';
 
-**The Apollo Router** is a configurable, high-performance **graph router** for a federated supergraph. You can use it with any [Apollo Federation](/federation/) architecture (v1 or v2):
+**The Apollo Router** is a configurable, high-performance **graph router** for a [self-hosted supergraph](/graphos/graphs/overview/#self-hosted-supergraphs):
 
 ```mermaid
-flowchart BT;
+flowchart LR;
   clients(Clients);
-  subgraph " ";
+  subgraph "Your infrastructure";
   gateway(["Apollo Router"]);
-  serviceA[Users<br/>subgraph];
   serviceB[Products<br/>subgraph];
   serviceC[Reviews<br/>subgraph];
-  gateway --- serviceA & serviceB & serviceC;
+  gateway --- serviceB & serviceC;
   end;
   clients -.- gateway;
   class clients secondary;
 ```
-
- The Apollo Router is [implemented in Rust](https://github.com/apollographql/router), which provides [performance benefits](https://www.apollographql.com/blog/announcement/backend/apollo-router-our-graphql-federation-runtime-in-rust/) over the Node.js `@apollo/gateway` library.
  
-If you have an existing supergraph that currently uses `@apollo/gateway`, you can move to the Apollo Router without changing any other part of your supergraph.
+If you have an existing self-hosted supergraph that currently uses `@apollo/gateway`, you can move to the Apollo Router without changing any other part of your supergraph.
+
+> **Self-hosted supergraphs are part of the Apollo Enterprise plan.** For other organizations, you should instead [create a cloud supergraph](/graphos/quickstart/cloud/), which provisions and hosts your router for you.
 
 <p>
   <Button
@@ -34,7 +33,7 @@ If you have an existing supergraph that currently uses `@apollo/gateway`, you ca
       marginRight: '10px'
     }}
   >
-    Try it out!
+    Try out the Apollo Router!
   </Button>
   <Button
     colorScheme="gray"

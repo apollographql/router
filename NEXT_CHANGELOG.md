@@ -4,15 +4,16 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-<!-- <THIS IS AN EXAMPLE, DO NOT REMOVE>
+<!-- <KEEP> THIS IS AN SET OF TEMPLATES TO USE WHEN ADDING TO THE CHANGELOG.
 
-# [x.x.x] (unreleased) - 2022-mm-dd
-> Important: X breaking changes below, indicated by **❗ BREAKING ❗**
 ## ❗ BREAKING ❗
 ## 🚀 Features
 ## 🐛 Fixes
+## 📃 Configuration
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 ## 🛠 Maintenance
 ## 📚 Documentation
+## 🥼 Experimental
 
 ## Example section entry format
 
@@ -21,222 +22,25 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 Description! And a link to a [reference](http://url)
 
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
--->
-
-# [x.x.x] (unreleased) - 2022-mm-dd
-## ❗ BREAKING ❗
-
-### Router debug Docker images now run under the control of heaptrack ([Issue #2135](https://github.com/apollographql/router/pull/2142))
-
-From the next release, our debug Docker image will invoke the router under the control of heaptrack. We are making this change to make it simple for users to investigate potential memory issues with the router.
-
-Do not run debug images in performance sensitive contexts. The tracking of memory allocations will significantly impact performance. In general, the debug image should only be used in consultation with Apollo engineering and support.
-
-Look at our documentation for examples of how to use the image in either Docker or Kubernetes.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2142
-
-### Fix naming inconsistency of telemetry.metrics.common.attributes.router ([Issue #2076](https://github.com/apollographql/router/issues/2076))
-
-Mirroring the rest of the config `router` should be `supergraph`
-
-```yaml
-telemetry:
-  metrics:
-    common:
-      attributes:
-        router: # old
-```
-becomes
-```yaml
-telemetry:
-  metrics:
-    common:
-      attributes:
-        supergraph: # new
-```
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116
-
-### CLI structure changes ([Issue #2123](https://github.com/apollographql/router/issues/2123))
-
-As the Router gains functionality the limitations of the current CLI structure are becoming apparent.
-
-There is now a separate subcommand for config related operations:
-* `config`
-  * `schema` - Output the configuration schema
-  * `upgrade` - Upgrade the configuration with optional diff support.
-
-`router --schema` has been deprecated and users should move to `router config schema`.
+</KEEP> -->
 
 ## 🚀 Features
 
-### Add configuration for trace ID ([Issue #2080](https://github.com/apollographql/router/issues/2080))
+### Always deduplicate variables ([Issue #2387](https://github.com/apollographql/router/issues/2387))
 
-If you want to expose in response headers the generated trace ID or the one you provided using propagation headers you can use this configuration:
+Variable deduplication allows the router to reduce the number of entities that are requested from subgraphs if some of them are redundant, and as such reduce the size of subgraph responses. It has been available for a while but was not active by default. This is now always on.
 
-```yaml title="router.yaml"
-telemetry:
-  tracing:
-    experimental_response_trace_id:
-      enabled: true # default: false
-      header_name: "my-trace-id" # default: "apollo-trace-id"
-    propagation:
-      # If you have your own way to generate a trace id and you want to pass it via a custom request header
-      request:
-        header_name: my-trace-id
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2445
+
+### Add optional `Access-Control-Max-Age` header to CORS plugin ([Issue #2212](https://github.com/apollographql/router/issues/2212))
+
+Adds new option called `max_age` that is used like this:
+```
+cors:
+  max_age: 86400secs
 ```
 
-Using this configuration you will have a response header called `my-trace-id` containing the trace ID. It could help you to debug a specific query if you want to grep your log with this trace id to have more context.
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2131
-
-### Add configuration for logging and add more logs 
-
-By default some logs containing sensible data (like request body, response body, headers) are not displayed even if we set the right log level.
-For example if you need to display raw responses from one of your subgraph it won't be displayed by default. To enable them you have to configure it thanks to the `when_header` setting in the new section `experimental_logging`. It let's you set different headers to enable more logs (request/response headers/body for supergraph and subgraphs) when the request contains these headers with corresponding values/regex.
-Here is an example how you can configure it:
-
-```yaml title="router.yaml"
-telemetry:
-  experimental_logging:
-    format: json # By default it's "pretty" if you are in an interactive shell session
-    display_filename: true # Display filename where the log is coming from. Default: true
-    display_line_number: false # Display line number in the file where the log is coming from. Default: true
-    # If one of these headers matches we will log supergraph and subgraphs requests/responses
-    when_header:
-      - name: apollo-router-log-request
-        value: my_client
-        headers: true # default: false
-        body: true # default: false
-      # log request for all requests/responses headers coming from Iphones
-      - name: user-agent
-        match: ^Mozilla/5.0 (iPhone*
-        headers: true
-```
-
-### Provide multi-arch (amd64/arm64) Docker images for the Router ([Issue #1932](https://github.com/apollographql/router/pull/2138))
-
-From the next release, our Docker images will be multi-arch.
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2138
-
-### Add a supergraph configmap option to the helm chart ([PR #2119](https://github.com/apollographql/router/pull/2119))
-
-Adds the capability to create a configmap containing your supergraph schema. Here's an example of how you could make use of this from your values.yaml and with the `helm` install command.
-
-```yaml
-extraEnvVars:
-  - name: APOLLO_ROUTER_SUPERGRAPH_PATH
-    value: /data/supergraph-schema.graphql
-
-extraVolumeMounts:
-  - name: supergraph-schema
-    mountPath: /data
-    readOnly: true
-
-extraVolumes:
-  - name: supergraph-schema
-    configMap:
-      name: "{{ .Release.Name }}-supergraph"
-      items:
-        - key: supergraph-schema.graphql
-          path: supergraph-schema.graphql
-```
-
-With that values.yaml content, and with your supergraph schema in a file name supergraph-schema.graphql, you can execute:
-
-```
-helm upgrade --install --create-namespace --namespace router-test --set-file supergraphFile=supergraph-schema.graphql router-test oci://ghcr.io/apollographql/helm-charts/router --version 1.0.0-rc.9 --values values.yaml
-```
-
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2119
-
-### Configuration upgrades ([Issue #2123](https://github.com/apollographql/router/issues/2123))
-
-Occasionally we will make changes to the Router yaml configuration format.
-When starting the Router if the configuration can be upgraded it will do so automatically and display a warning:
-
-```
-2022-11-22T14:01:46.884897Z  WARN router configuration contains deprecated options: 
-
-  1. telemetry.tracing.trace_config.attributes.router has been renamed to 'supergraph' for consistency
-
-These will become errors in the future. Run `router config upgrade <path_to_router.yaml>` to see a suggested upgraded configuration.
-```
-
-Note: If a configuration has errors after upgrading then the configuration will not be upgraded automatically.
-
-From the CLI users can run:
-* `router config upgrade <path_to_router.yaml>` to output configuration that has been upgraded to match the latest config format.
-* `router config upgrade --diff <path_to_router.yaml>` to output a diff e.g.
-```
- telemetry:
-   apollo:
-     client_name_header: apollographql-client-name
-   metrics:
-     common:
-       attributes:
--        router:
-+        supergraph:
-           request:
-             header:
-             - named: "1" # foo
-```
-
-There are situations where comments and whitespace are not preserved. This may be improved in future.
-
-By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2116, https://github.com/apollographql/router/pull/2162
-
-### *Experimental* 🥼 subgraph request retry ([Issue #338](https://github.com/apollographql/router/issues/338), [Issue #1956](https://github.com/apollographql/router/issues/1956))
-
-Implements subgraph request retries, using Finagle's retry buckets algorithm:
-- it defines a minimal number of retries per second (`min_per_sec`, default is 10 retries per second), to
-bootstrap the system or for low traffic deployments
-- for each successful request, we add a "token" to the bucket, those tokens expire after `ttl` (default: 10 seconds)
-- the number of available additional retries is a part of the number of tokens, defined by `retry_percent` (default is 0.2)
-
-Request retries are disabled by default on mutations.
-
-This is activated in the `traffic_shaping` plugin, either globally or per subgraph:
-
-```yaml
-traffic_shaping:
-  all:
-    experimental_retry:
-      min_per_sec: 10
-      ttl: 10s
-      retry_percent: 0.2
-      retry_mutations: false
-  subgraphs:
-    accounts:
-      experimental_retry:
-        min_per_sec: 20
-```
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2006 and https://github.com/apollographql/router/pull/2160
-
-### *Experimental* 🥼 Caching configuration ([Issue #2075](https://github.com/apollographql/router/issues/2075))
-
-Split Redis cache configuration for APQ and query planning:
-
-```yaml
-supergraph:
-  apq:
-    experimental_cache:
-      in_memory:
-        limit: 512
-      redis:
-        urls: ["redis://..."]
-  query_planning:
-    experimental_cache:
-      in_memory:
-        limit: 512
-      redis:
-        urls: ["redis://..."]
-```
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2155
+By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollographql/router/pull/2331
 
 ### *Experimental* 🥼 Remove the `experimental_cache` Cargo feature ([PR #2176](https://github.com/apollographql/router/issues/2176))
 
@@ -246,51 +50,232 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### fix build_docker_image.sh script when using default repo ([PR #2163](https://github.com/apollographql/router/pull/2163))
+### Forbid caching `PERSISTED_QUERY_NOT_FOUND` responses ([Issue #2502](https://github.com/apollographql/router/issues/2502))
 
-Adding the `-r` flag recently broke the existing functionality to build from the default repo using `-b`. This fixes that.
+The router now sends a `cache-control: private, no-cache, must-revalidate` response header to clients, in addition to the existing `PERSISTED_QUERY_NOT_FOUND` error code on the response which was being sent previously.  This expanded behaviour occurs when when a persisted query hash could not be found and is important since such responses should **not** be cached by intermediary proxies/CDNs since the client will need to be able to send the full query directly to the Router on a subsequent request.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2163
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2503
+### Listen on root URL when `/*` is set in `supergraph.path` configuration ([Issue #2471](https://github.com/apollographql/router/issues/2471))
 
-### Improve errors when subgraph returns non-GraphQL response with a non-2xx status code ([Issue #2117](https://github.com/apollographql/router/issues/2117))
+If you provided this configuration:
 
-The error response will now contain the status code and status name. Example: `HTTP fetch failed from 'my-service': 401 Unauthorized`
+```yaml
+supergraph:
+  path: /*
+```
 
-By [@col](https://github.com/col) in https://github.com/apollographql/router/pull/2118
+Since release `1.8` and due to [Axum upgrade](https://github.com/tokio-rs/axum/releases/tag/axum-v0.6.0) it wasn't listening on `localhost` without a path. It now has a special case for `/*` to also listen to the URL without a path so you're able to call on `http://localhost` for example.
 
-### handle mutations containing @defer ([Issue #2099](https://github.com/apollographql/router/issues/2099))
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2472
 
-The Router generates partial query shapes corresponding to the primary and deferred responses,
-to validate the data sent back to the client. Those query shapes were invalid for mutations.
+### Better support for wildcard in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2102
+You can now use wildcard in supergraph endpoint path like this:
+
+```yaml
+supergraph:
+  listen: 0.0.0.0:4000
+  path: /g*
+```
+
+if you want the supergraph to answer on `/graphql` or `/gateway` for example.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2410
+
+### Fix panic in schema parse error reporting ([Issue #2269](https://github.com/apollographql/router/issues/2269))
+
+In order to support introspection,
+some definitions like `type __Field { … }` are implicitly added to schemas.
+This addition was done by string concatenation at the source level.
+In some cases like unclosed braces, a parse error could be reported at a position
+beyond the size of the original source.
+This would cause a panic because only the unconcatenated string
+is given the the error reporting library `miette`.
+
+Instead, the Router now parses introspection types separately
+and “concatenates” definitions at the AST level.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2448
+
+### Always accept compressed subgraph responses  ([Issue #2415](https://github.com/apollographql/router/issues/2415))
+
+Subgraph response decompression was only supported when subgraph request compression was configured. This is now always active.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2450
+
+### Fix handling of root query operation not named `Query`
+
+With such a schema, some parsing code in the Router would incorrectly
+return an error because it was assuming the default name.
+Similarly with a root mutation operation not named `Mutation`.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2459
+
+### Remove the `locations` field from subgraph errors ([Issue #2297](https://github.com/apollographql/router/issues/2297))
+
+Subgraph errors can come with a `locations` field indicating which part of the query was causing issues, but it refers to the subgraph query generated by the query planner, and we have no way of translating it to locations in the client query, so this field is removed for now.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2442
+
+### Emit metrics showing number of client connections ([issue #2384](https://github.com/apollographql/router/issues/2384))
+
+New metrics are available to track the client connections:
+- `apollo_router_session_count_total` indicates the number of currently connected clients
+- `apollo_router_session_count_active` indicates the number of in flight GraphQL requests from connected clients.
+
+This also fixes the behaviour when we reach the maximum number of file descriptors: instead of going into a busy loop, the router will wait a bit before accepting a new connection.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2395
+
+### `--dev` will no longer modify configuration that it does not directly touch ([Issue #2404](https://github.com/apollographql/router/issues/2404), [Issue #2481](https://github.com/apollographql/router/issues/2481))
+
+Previously `dev` mode was operating against the configuration object model. This meant that it would sometimes replace pieces of configuration where really it should just have modified it.
+Now dev mode will override the following in the yaml config, but it will leave any adjacent configuration as it was:
+
+```yaml
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true
+plugins:
+  experimental.expose_query_plan: true
+sandbox:
+  enabled: true
+supergraph:
+  introspection: true
+telemetry:
+  tracing:
+    experimental_response_trace_id:
+      enabled: true
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2489
 
 ## 🛠 Maintenance
 
-### Refactor APQ ([PR #2129](https://github.com/apollographql/router/pull/2129))
+### Improve #[serde(default)] attribute on structs ([Issue #2424](https://github.com/apollographql/router/issues/2424))
 
-Remove duplicated code.
+If all the fields of your struct have their default value then use the `#[serde(default)]` on the struct instead of all fields. If you have specific default values for field, you have to create your own `Default` impl.
 
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2129
++ GOOD
+```rust
+#[serde(deny_unknown_fields, default)]
+struct Export {
+    url: Url,
+    enabled: bool
+}
 
-### Update apollo-rs ([PR #2177](https://github.com/apollographql/router/pull/2177))
+impl Default for Export {
+  fn default() -> Self {
+    Self {
+      url: default_url_fn(),
+      enabled: false
+    }
+  }
+}
+```
 
-Updates to new apollo-rs APIs, and fixes some potential panics on unexpected user input.
++ BAD
+```rust
+#[serde(deny_unknown_fields)]
+struct Export {
+    #[serde(default="default_url_fn")
+    url: Url,
+    #[serde(default)]
+    enabled: bool
+}
+```
 
-By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/2177
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2424
+
+## 📃 Configuration
+
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
+
+### `health-check` renamed to `health_check` ([Issue #2161](https://github.com/apollographql/router/issues/2161))
+
+The health_check key in router.yaml has been renamed to snake case for consistency. 
+
+Before:
+```yaml
+health-check:
+  enabled: true
+```
+
+After:
+```yaml
+health_check:
+  enabled: true
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2451 and https://github.com/apollographql/router/pull/2463
+
+### Return a proper timeout response ([Issue #2360](https://github.com/apollographql/router/issues/2360) [Issue #2400](https://github.com/apollographql/router/issues/240))
+
+There was a regression where timeouts generated a HTTP response with status `500 Internal Server Error`. This is now fixed with a test to guarantee it, the status code is now `504 Gateway Timeout` (Instead of previously `408 Request Timeout` which blamed the client). There is also a new metric `apollo_router_timeout` to track when timeouts are triggered.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2419
 
 ## 📚 Documentation
 
-### Docs: Update cors match regex example ([Issue #2151](https://github.com/apollographql/router/issues/2151))
+### Fix the documentation to disable the Apollo telemetry ([Issue #2478](https://github.com/apollographql/router/issues/2478))
 
-The docs CORS regex example now displays a working and safe way to allow `HTTPS` subdomains of `api.example.com`.
+To disable the Apollo telemetry you have to use `APOLLO_TELEMETRY_DISABLED=true`.
 
-By [@col](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2152
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2479
+
+### `send_headers` and `send_variable_values` in `telemetry.apollo` ([Issue #2149](https://github.com/apollographql/router/issues/2149))
+
++ `send_headers`
+
+  Provide this field to configure which request header names and values are included in trace data that's sent to Apollo Studio. Valid options are: `only` with an array, `except` with an array, `none`, `all`.
+
+  The default value is `none``, which means no header names or values are sent to Studio. This is a security measure to prevent sensitive data from potentially reaching the Router.
+
++ `send_variable_values`
+
+  Provide this field to configure which variable values are included in trace data that's sent to Apollo Studio. Valid options are: `only` with an array, `except` with an array, `none`, `all`.
+
+  The default value is `none`, which means no variable values are sent to Studio. This is a security measure to prevent sensitive data from potentially reaching the Router.
 
 
-### update documentation to reflect new examples structure ([Issue #2095](https://github.com/apollographql/router/issues/2095))
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2435
 
-We recently updated the examples directory structure. This fixes the documentation links to the examples. It also makes clear that rhai subgraph fields are read-only, since they are shared resources.
+### Documentation on how to propagate headers between subgraph services ([Issue #2128](https://github.com/apollographql/router/issues/2128))
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2133
+Migrating headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
 
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2446
+
+### Added documentation for listening on IPv6 ([Issue #1835](https://github.com/apollographql/router/issues/1835))
+
+Added documentation for listening on IPv6
+```yaml
+supergraph:
+  # The socket address and port to listen on. 
+  # Note that this must be quoted to avoid interpretation as a yaml array.
+  listen: '[::1]:4000'
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2440
+
+## 🛠 Maintenance
+
+### Parse schemas and queries with `apollo-compiler`
+
+The Router now uses the higher-level representation from `apollo-compiler`
+instead of using the AST from `apollo-parser` directly.
+This is a first step towards replacing a bunch of code that grew organically
+during the Router’s early days, with a general-purpose library with intentional design.
+Internal data structures are unchanged for now.
+Parsing behavior has been tested to be identical on a large corpus
+of production schemas and queries.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2466
+
+
+### Disregard APOLLO_TELEMETRY_DISABLED in orbiter unit test ([Issue #2487](https://github.com/apollographql/router/issues/2487))
+
+`orbiter::test::test_visit_args` failed if APOLLO_TELEMETRY_DISABLED was set.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2488

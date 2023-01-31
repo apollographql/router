@@ -1,6 +1,9 @@
 use std::ops::ControlFlow;
 
 use http::StatusCode;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -11,21 +14,29 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::execution;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 
 #[derive(Debug, Clone)]
 struct ForbidMutations {
     forbid: bool,
 }
 
+/// Forbid mutations configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ForbidMutationsConfig(
+    /// Enabled
+    bool,
+);
+
 #[async_trait::async_trait]
 impl Plugin for ForbidMutations {
-    type Config = bool;
+    type Config = ForbidMutationsConfig;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         Ok(ForbidMutations {
-            forbid: init.config,
+            forbid: init.config.0,
         })
     }
 
@@ -34,12 +45,10 @@ impl Plugin for ForbidMutations {
             ServiceBuilder::new()
                 .checkpoint(|req: ExecutionRequest| {
                     if req.query_plan.contains_mutations() {
-                        let error = Error {
-                            message: "Mutations are forbidden".to_string(),
-                            locations: Default::default(),
-                            path: Default::default(),
-                            extensions: Default::default(),
-                        };
+                        let error = Error::builder()
+                            .message("Mutations are forbidden".to_string())
+                            .extension_code("MUTATION_FORBIDDEN")
+                            .build();
                         let res = ExecutionResponse::builder()
                             .error(error)
                             .status_code(StatusCode::BAD_REQUEST)
@@ -84,10 +93,13 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
-            .await
-            .expect("couldnt' create forbid mutations plugin")
-            .execution_service(mock_service.boxed());
+        let service_stack = ForbidMutations::new(PluginInit::new(
+            ForbidMutationsConfig(true),
+            Default::default(),
+        ))
+        .await
+        .expect("couldn't create forbid_mutations plugin")
+        .execution_service(mock_service.boxed());
 
         let request = create_request(Method::GET, OperationKind::Query);
 
@@ -102,18 +114,19 @@ mod forbid_http_get_mutations_tests {
 
     #[tokio::test]
     async fn it_doesnt_let_mutations_pass_through() {
-        let expected_error = Error {
-            message: "Mutations are forbidden".to_string(),
-            locations: Default::default(),
-            path: Default::default(),
-            extensions: Default::default(),
-        };
+        let expected_error = Error::builder()
+            .message("Mutations are forbidden".to_string())
+            .extension_code("MUTATION_FORBIDDEN")
+            .build();
         let expected_status = StatusCode::BAD_REQUEST;
 
-        let service_stack = ForbidMutations::new(PluginInit::new(true, Default::default()))
-            .await
-            .expect("couldnt' create forbid mutations plugin")
-            .execution_service(MockExecutionService::new().boxed());
+        let service_stack = ForbidMutations::new(PluginInit::new(
+            ForbidMutationsConfig(true),
+            Default::default(),
+        ))
+        .await
+        .expect("couldn't create forbid_mutations plugin")
+        .execution_service(MockExecutionService::new().boxed());
         let request = create_request(Method::GET, OperationKind::Mutation);
 
         let mut actual_error = service_stack.oneshot(request).await.unwrap();
@@ -131,10 +144,13 @@ mod forbid_http_get_mutations_tests {
             .times(1)
             .returning(move |_| Ok(ExecutionResponse::fake_builder().build().unwrap()));
 
-        let service_stack = ForbidMutations::new(PluginInit::new(false, Default::default()))
-            .await
-            .expect("couldnt' create forbid mutations plugin")
-            .execution_service(mock_service.boxed());
+        let service_stack = ForbidMutations::new(PluginInit::new(
+            ForbidMutationsConfig(false),
+            Default::default(),
+        ))
+        .await
+        .expect("couldn't create forbid_mutations plugin")
+        .execution_service(mock_service.boxed());
 
         let request = create_request(Method::GET, OperationKind::Mutation);
 
@@ -151,7 +167,7 @@ mod forbid_http_get_mutations_tests {
         assert_eq!(&response.errors[0], expected_error);
     }
 
-    fn create_request(method: Method, operation_kind: OperationKind) -> crate::ExecutionRequest {
+    fn create_request(method: Method, operation_kind: OperationKind) -> ExecutionRequest {
         let root: PlanNode = if operation_kind == OperationKind::Mutation {
             serde_json::from_value(json!({
                 "kind": "Sequence",

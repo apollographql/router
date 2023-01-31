@@ -7,19 +7,24 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use apollo_router::Context;
 use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
+use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
+use http::Uri;
 use insta::internals::Content;
 use insta::internals::Redaction;
 use maplit::hashmap;
+use mime::APPLICATION_JSON;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
@@ -165,12 +170,19 @@ async fn basic_mutation() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn queries_should_work_over_get() {
-    let request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
+    // get request
+    let get_request = supergraph::Request::builder()
+        .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
+        .variable("topProductsFirst", 2_usize)
+        .variable("reviewsForAuthorAuthorId", 1_usize)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::GET)
+        .context(Context::new())
         .build()
-        .expect("expecting valid request");
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     let expected_service_hits = hashmap! {
         "products".to_string()=>2,
@@ -178,8 +190,13 @@ async fn queries_should_work_over_get() {
         "accounts".to_string()=>1,
     };
 
-    let (actual, registry) = query_rust(request).await;
-
+    let (actual, registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            query_with_router(router, get_request).await,
+            counting_registry,
+        )
+    };
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
 }
@@ -190,20 +207,32 @@ async fn simple_queries_should_not_work() {
     Please either specify a 'content-type' header \
     (with a mime-type that is not one of application/x-www-form-urlencoded, multipart/form-data, text/plain) \
     or provide one of the following headers: x-apollo-operation-name, apollo-require-preflight";
-    let expected_error = graphql::Error::builder().message(message).build();
+    let expected_error = graphql::Error::builder()
+        .message(message)
+        .extension_code("CSRF_ERROR")
+        .build();
 
-    let mut request = supergraph::Request::fake_builder()
-        .query(r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#)
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
+    let mut get_request: router::Request = supergraph::Request::builder()
+        .query("{ topProducts { upc name reviews {id product { name } author { id name } } } }")
+        .variable("topProductsFirst", 2_usize)
+        .variable("reviewsForAuthorAuthorId", 1_usize)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::GET)
+        .context(Context::new())
         .build()
-        .expect("expecting valid request");
-    request
-        .supergraph_request
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    get_request
+        .router_request
         .headers_mut()
         .remove("content-type");
 
-    let (actual, registry) = query_rust(request).await;
+    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
+
+    let actual = query_with_router(router, get_request).await;
 
     assert_eq!(
         1,
@@ -221,7 +250,7 @@ async fn queries_should_work_with_compression() {
         .variable("topProductsFirst", 2_i32)
         .variable("reviewsForAuthorAuthorId", 1_i32)
         .method(Method::POST)
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
         .header("accept-encoding", "gzip")
         .build()
         .expect("expecting valid request");
@@ -268,6 +297,7 @@ async fn service_errors_should_be_propagated() {
     let expected_error = apollo_router::graphql::Error::builder()
         .message(message)
         .extensions(extensions_map)
+        .extension_code("VALIDATION_ERROR")
         .build();
 
     let request = supergraph::Request::fake_builder()
@@ -286,31 +316,44 @@ async fn service_errors_should_be_propagated() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn mutation_should_not_work_over_get() {
-    let request = supergraph::Request::fake_builder()
+    // get request
+    let get_request: router::Request = supergraph::Request::builder()
         .query(
             r#"mutation {
-                createProduct(upc:"8", name:"Bob") {
-                  upc
-                  name
-                  reviews {
-                    body
-                  }
-                }
-                createReview(upc: "8", id:"100", body: "Bif"){
-                  id
-                  body
-                }
-              }"#,
+            createProduct(upc:"8", name:"Bob") {
+              upc
+              name
+              reviews {
+                body
+              }
+            }
+            createReview(upc: "8", id:"100", body: "Bif"){
+              id
+              body
+            }
+          }"#,
         )
-        .variable("topProductsFirst", 2_i32)
-        .variable("reviewsForAuthorAuthorId", 1_i32)
+        .variable("topProductsFirst", 2_usize)
+        .variable("reviewsForAuthorAuthorId", 1_usize)
+        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+        .uri(Uri::from_static("/"))
+        .method(Method::GET)
+        .context(Context::new())
         .build()
-        .expect("expecting valid request");
+        .unwrap()
+        .try_into()
+        .unwrap();
 
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let (actual, registry) = query_rust(request).await;
+    let (actual, registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            query_with_router(router, get_request).await,
+            counting_registry,
+        )
+    };
 
     assert_eq!(1, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -357,13 +400,13 @@ async fn automated_persisted_queries() {
 
     let expected_apq_miss_error = apollo_router::graphql::Error::builder()
         .message("PersistedQueryNotFound")
-        .extension("code", "PERSISTED_QUERY_NOT_FOUND")
         .extension(
             "exception",
             json!({
                 "stacktrace": ["PersistedQueryNotFoundError: PersistedQueryNotFound"]
             }),
         )
+        .extension_code("PERSISTED_QUERY_NOT_FOUND")
         .build();
 
     let persisted = json!({
@@ -381,7 +424,7 @@ async fn automated_persisted_queries() {
     // No services should be queried
     let expected_service_hits = hashmap! {};
 
-    let actual = query_with_router(router.clone(), apq_only_request).await;
+    let actual = query_with_router(router.clone(), apq_only_request.try_into().unwrap()).await;
 
     assert_eq!(expected_apq_miss_error, actual.errors[0]);
     assert_eq!(1, actual.errors.len());
@@ -400,7 +443,8 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>1,
     };
 
-    let actual = query_with_router(router.clone(), apq_request_with_query).await;
+    let actual =
+        query_with_router(router.clone(), apq_request_with_query.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -416,7 +460,7 @@ async fn automated_persisted_queries() {
         "accounts".to_string()=>2,
     };
 
-    let actual = query_with_router(router, apq_only_request).await;
+    let actual = query_with_router(router, apq_only_request.try_into().unwrap()).await;
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
@@ -473,16 +517,26 @@ async fn missing_variables() {
 
     assert_eq!(StatusCode::BAD_REQUEST, http_response.response.status());
 
-    let mut response = http_response.next_response().await.unwrap();
+    let mut response = serde_json::from_slice::<graphql::Response>(
+        http_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
     let mut expected = vec![
         graphql::Error::builder()
             .message("invalid type for variable: 'missingVariable'")
-            .extension("type", "ValidationInvalidTypeVariable")
+            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "missingVariable")
             .build(),
         graphql::Error::builder()
             .message("invalid type for variable: 'yetAnotherMissingVariable'")
-            .extension("type", "ValidationInvalidTypeVariable")
+            .extension_code("VALIDATION_INVALID_TYPE_VARIABLE")
             .extension("name", "yetAnotherMissingVariable")
             .build(),
     ];
@@ -540,16 +594,27 @@ async fn normal_query_with_defer_accept_header() {
         .header(ACCEPT, "multipart/mixed; deferSpec=20220824")
         .build()
         .expect("expecting valid request");
-    let (actual, _registry) = query_rust_with_config(request, serde_json::json!({})).await;
-
-    assert!(actual.errors.is_empty());
+    let (mut response, _registry) = {
+        let (router, counting_registry) = setup_router_and_registry(serde_json::json!({})).await;
+        (
+            router
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap()
+                .into_graphql_response_stream()
+                .await,
+            counting_registry,
+        )
+    };
+    insta::assert_json_snapshot!(response.next().await.unwrap().unwrap());
+    assert!(response.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn defer_path_with_disabled_config() {
     let config = serde_json::json!({
         "supergraph": {
-            "preview_defer_support": false,
+            "defer_support": false,
         },
         "plugins": {
             "apollo.include_subgraph_errors": {
@@ -574,10 +639,15 @@ async fn defer_path_with_disabled_config() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let only = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(only);
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -606,13 +676,16 @@ async fn defer_path() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
-
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -646,17 +719,16 @@ async fn defer_path_in_array() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
-    assert_eq!(first.has_next, Some(true));
-
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
-    assert_eq!(second.has_next, Some(false));
-
-    assert_eq!(stream.next_response().await, None);
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -684,16 +756,15 @@ async fn defer_query_without_accept() {
                 }
             }"#,
         )
-        .header(ACCEPT, "application/json")
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
         .build()
         .expect("expecting valid request");
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
-
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
+    let mut stream = router.oneshot(request.try_into().unwrap()).await.unwrap();
+    let first = stream.next_response().await.unwrap().unwrap();
+    insta::assert_snapshot!(std::str::from_utf8(first.to_vec().as_slice()).unwrap());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -721,13 +792,16 @@ async fn defer_empty_primary_response() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
-
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -755,13 +829,16 @@ async fn defer_default_variable() {
 
     let (router, _) = setup_router_and_registry(config.clone()).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
-
-    let second = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(second);
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -772,13 +849,15 @@ async fn defer_default_variable() {
 
     let (router, _) = setup_router_and_registry(config).await;
 
-    let mut stream = router.oneshot(request).await.unwrap();
+    let mut stream = router
+        .oneshot(request.try_into().unwrap())
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await;
 
-    let first = stream.next_response().await.unwrap();
-    insta::assert_json_snapshot!(first);
-
-    let second = stream.next_response().await;
-    assert!(second.is_none());
+    insta::assert_json_snapshot!(stream.next().await.unwrap().unwrap());
+    assert!(stream.next().await.is_none());
 }
 
 async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, String> {
@@ -795,7 +874,7 @@ async fn query_node(request: &supergraph::Request) -> Result<graphql::Response, 
 
 async fn http_query_rust(
     request: supergraph::Request,
-) -> (supergraph::Response, CountingServiceRegistry) {
+) -> (router::Response, CountingServiceRegistry) {
     http_query_rust_with_config(request, serde_json::json!({})).await
 }
 
@@ -808,10 +887,10 @@ async fn query_rust(
 async fn http_query_rust_with_config(
     request: supergraph::Request,
     config: serde_json::Value,
-) -> (supergraph::Response, CountingServiceRegistry) {
+) -> (router::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
     (
-        http_query_with_router(router, request).await,
+        http_query_with_router(router, request.try_into().unwrap()).await,
         counting_registry,
     )
 }
@@ -821,12 +900,15 @@ async fn query_rust_with_config(
     config: serde_json::Value,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
     let (router, counting_registry) = setup_router_and_registry(config).await;
-    (query_with_router(router, request).await, counting_registry)
+    (
+        query_with_router(router, request.try_into().unwrap()).await,
+        counting_registry,
+    )
 }
 
 async fn setup_router_and_registry(
     config: serde_json::Value,
-) -> (supergraph::BoxCloneService, CountingServiceRegistry) {
+) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
     let telemetry = TelemetryPlugin::new_with_subscriber(
         serde_json::json!({
@@ -846,29 +928,35 @@ async fn setup_router_and_registry(
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
         .extra_plugin(telemetry)
-        .build()
+        .build_router()
         .await
         .unwrap();
     (router, counting_registry)
 }
 
 async fn query_with_router(
-    router: supergraph::BoxCloneService,
-    request: supergraph::Request,
+    router: router::BoxCloneService,
+    request: router::Request,
 ) -> graphql::Response {
-    router
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap()
+    serde_json::from_slice(
+        router
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap()
 }
 
 async fn http_query_with_router(
-    router: supergraph::BoxCloneService,
-    request: supergraph::Request,
-) -> supergraph::Response {
+    router: router::BoxCloneService,
+    request: router::Request,
+) -> router::Response {
     router.oneshot(request).await.unwrap()
 }
 
@@ -975,22 +1063,41 @@ impl ValueExt for Value {
 fn redact_dynamic() -> Redaction {
     insta::dynamic_redaction(|value, _path| {
         if let Some(value_slice) = value.as_slice() {
-            if value_slice.get(0).and_then(|v| v.as_str()) == Some("request.id") {
+            if value_slice
+                .get(0)
+                .and_then(|v| {
+                    v.as_str().map(|s| {
+                        [
+                            "request.id",
+                            "response_headers",
+                            "trace_id",
+                            "histogram.apollo_router_cache_miss_time",
+                            "histogram.apollo_router_cache_hit_time",
+                        ]
+                        .contains(&s)
+                    })
+                })
+                .unwrap_or_default()
+            {
                 return Content::Seq(vec![
                     value_slice.get(0).unwrap().clone(),
                     Content::String("[REDACTED]".to_string()),
                 ]);
             }
-            if value_slice.get(0).and_then(|v| v.as_str())
-                == Some("apollo_private.sent_time_offset")
+            if value_slice
+                .get(0)
+                .and_then(|v| {
+                    v.as_str().map(|s| {
+                        [
+                            "apollo_private.sent_time_offset",
+                            "apollo_private.duration_ns",
+                        ]
+                        .contains(&s)
+                    })
+                })
+                .unwrap_or_default()
             {
                 return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
-            }
-            if value_slice.get(0).and_then(|v| v.as_str()) == Some("response_headers") {
-                return Content::Seq(vec![
-                    value_slice.get(0).unwrap().clone(),
-                    Content::String("[REDACTED]".to_string()),
-                ]);
             }
         }
         value

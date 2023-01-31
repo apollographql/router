@@ -2,6 +2,7 @@
 // This entire file is license key functionality
 
 use std::str::FromStr;
+use std::time::Duration;
 
 use http::request::Parts;
 use http::HeaderValue;
@@ -15,16 +16,15 @@ use tower_http::cors::CorsLayer;
 /// Cross origin request configuration.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct Cors {
     /// Set to true to allow any origin.
     ///
     /// Defaults to false
     /// Having this set to true is the only way to allow Origin: null.
-    #[serde(default)]
     pub(crate) allow_any_origin: bool,
 
     /// Set to true to add the `Access-Control-Allow-Credentials` header.
-    #[serde(default)]
     pub(crate) allow_credentials: bool,
 
     /// The headers to allow.
@@ -37,41 +37,33 @@ pub(crate) struct Cors {
     /// - accept `x-apollo-operation-name` AND / OR `apollo-require-preflight`
     /// - defined `csrf` required headers in your yml configuration, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    #[serde(default)]
     pub(crate) allow_headers: Vec<String>,
 
     /// Which response headers should be made available to scripts running in the browser,
     /// in response to a cross-origin request.
-    #[serde(default)]
     pub(crate) expose_headers: Option<Vec<String>>,
 
     /// The origin(s) to allow requests from.
     /// Defaults to `https://studio.apollographql.com/` for Apollo Studio.
-    #[serde(default = "default_origins")]
     pub(crate) origins: Vec<String>,
 
     /// `Regex`es you want to match the origins against to determine if they're allowed.
     /// Defaults to an empty list.
     /// Note that `origins` will be evaluated before `match_origins`
-    #[serde(default)]
     pub(crate) match_origins: Option<Vec<String>>,
 
     /// Allowed request methods. Defaults to GET, POST, OPTIONS.
-    #[serde(default = "default_cors_methods")]
     pub(crate) methods: Vec<String>,
+
+    /// The `Access-Control-Max-Age` header value in time units
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    pub(crate) max_age: Option<Duration>,
 }
 
 impl Default for Cors {
     fn default() -> Self {
-        Self {
-            origins: default_origins(),
-            methods: default_cors_methods(),
-            allow_any_origin: Default::default(),
-            allow_credentials: Default::default(),
-            allow_headers: Default::default(),
-            expose_headers: Default::default(),
-            match_origins: Default::default(),
-        }
+        Self::builder().build()
     }
 }
 
@@ -83,7 +75,6 @@ fn default_cors_methods() -> Vec<String> {
     vec!["GET".into(), "POST".into(), "OPTIONS".into()]
 }
 
-#[cfg(test)]
 #[buildstructor::buildstructor]
 impl Cors {
     #[builder]
@@ -96,10 +87,12 @@ impl Cors {
         origins: Option<Vec<String>>,
         match_origins: Option<Vec<String>>,
         methods: Option<Vec<String>>,
+        max_age: Option<Duration>,
     ) -> Self {
         Self {
             expose_headers,
             match_origins,
+            max_age,
             origins: origins.unwrap_or_else(default_origins),
             methods: methods.unwrap_or_else(default_cors_methods),
             allow_any_origin: allow_any_origin.unwrap_or_default(),
@@ -148,6 +141,11 @@ impl Cors {
                         .ok()
                 },
             )));
+        let cors = if let Some(max_age) = self.max_age {
+            cors.max_age(max_age)
+        } else {
+            cors
+        };
 
         if self.allow_any_origin {
             Ok(cors.allow_origin(cors::Any))

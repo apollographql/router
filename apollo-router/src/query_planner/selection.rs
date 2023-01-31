@@ -6,7 +6,7 @@ use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::*;
+use crate::spec::Schema;
 
 /// A selection that is part of a fetch.
 /// Selections are used to propagate data to subgraph fetches.
@@ -153,7 +153,7 @@ mod tests {
             .data
             .as_ref()
             .unwrap()
-            .select_values_and_paths(path, |_path, value| {
+            .select_values_and_paths(schema, path, |_path, value| {
                 values.push(value);
             });
 

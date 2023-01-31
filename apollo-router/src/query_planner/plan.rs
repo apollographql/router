@@ -9,18 +9,14 @@ use serde::Serialize;
 pub(crate) use self::fetch::OperationKind;
 use super::fetch;
 use crate::error::QueryPlannerError;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::query::SubSelection;
-use crate::*;
+use crate::spec::Query;
+use crate::spec::Schema;
 
-/// Query planning options.
-#[derive(Clone, Eq, Hash, PartialEq, Debug, Default, Serialize, Deserialize)]
-pub(crate) struct QueryPlanOptions {
-    /// Enable the variable deduplication optimization on the QueryPlan
-    pub(crate) enable_deduplicate_variables: bool,
-}
 /// A planner key.
 ///
 /// This type consists of a query string and an optional operation string
@@ -34,7 +30,6 @@ pub struct QueryPlan {
     /// String representation of the query plan (not a json representation)
     pub(crate) formatted_query_plan: Option<String>,
     pub(crate) query: Arc<Query>,
-    pub(crate) options: QueryPlanOptions,
 }
 
 /// This default impl is useful for test users
@@ -54,7 +49,6 @@ impl QueryPlan {
             root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::default()),
-            options: QueryPlanOptions::default(),
         }
     }
 }
@@ -132,17 +126,6 @@ impl PlanNode {
         }
     }
 
-    pub(crate) fn contains_condition_or_defer(&self) -> bool {
-        match self {
-            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_condition_or_defer()),
-            Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_condition_or_defer()),
-            Self::Flatten(node) => node.node.contains_condition_or_defer(),
-            Self::Fetch(..) => false,
-            Self::Defer { .. } => true,
-            Self::Condition { .. } => true,
-        }
-    }
-
     pub(crate) fn is_deferred(
         &self,
         operation: Option<&str>,
@@ -194,6 +177,7 @@ impl PlanNode {
         // re-create full query with the right path
         // parse the subselection
         let mut subselections = HashMap::new();
+
         let operation_kind = if self.contains_mutations() {
             OperationKind::Mutation
         } else {
@@ -233,11 +217,12 @@ impl PlanNode {
                     .collect_subselections(schema, initial_path, kind, subselections)
             }
             Self::Defer { primary, deferred } => {
-                let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
+                let primary_path = initial_path.join(primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, kind, primary_subselection);
+
                     // ----------------------- Parse ---------------------------------
-                    let sub_selection = Query::parse(&query, schema, &Default::default())?;
+                    let sub_selection = Query::parse(query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
 
                     subselections.insert(
@@ -251,14 +236,15 @@ impl PlanNode {
 
                 deferred.iter().try_fold(subselections, |subs, current| {
                     if let Some(subselection) = &current.subselection {
-                        let query = reconstruct_full_query(&current.path, kind, subselection);
+                        let query = reconstruct_full_query(&current.query_path, kind, subselection);
+
                         // ----------------------- Parse ---------------------------------
-                        let sub_selection = Query::parse(&query, schema, &Default::default())?;
+                        let sub_selection = Query::parse(query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
                             SubSelection {
-                                path: current.path.clone(),
+                                path: current.query_path.clone(),
                                 subselection: subselection.clone(),
                             },
                             sub_selection,
@@ -267,7 +253,7 @@ impl PlanNode {
                     if let Some(current_node) = &current.node {
                         current_node.collect_subselections(
                             schema,
-                            &initial_path.join(&current.path),
+                            &initial_path.join(&current.query_path),
                             kind,
                             subs,
                         )?;
@@ -353,6 +339,11 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
+            json_ext::PathElement::Fragment(name) => {
+                write!(&mut query, "{{ ... on {name}")
+                    .expect("writing to a String should not fail because it can reallocate");
+                len += 1;
+            }
         }
     }
 
@@ -403,7 +394,7 @@ pub(crate) struct DeferredNode {
     /// The optional defer label.
     pub(crate) label: Option<String>,
     /// Path to the @defer this correspond to. `subselection` start at that `path`.
-    pub(crate) path: Path,
+    pub(crate) query_path: Path,
     /// The part of the original query that "selects" the data to send
     /// in that deferred response (once the plan in `node` completes).
     /// Will be set _unless_ `node` is a `DeferNode` itself.

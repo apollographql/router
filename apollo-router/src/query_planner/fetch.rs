@@ -14,13 +14,16 @@ use super::selection::select_object;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::graphql;
 use crate::graphql::Request;
+use crate::http_ext;
+use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::services::subgraph_service::SubgraphServiceFactory;
-use crate::*;
+use crate::services::SubgraphRequest;
+use crate::spec::Schema;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -96,7 +99,6 @@ impl Variables {
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
-        enable_deduplicate_variables: bool,
     ) -> Option<Variables> {
         let body = request.body();
         if !requires.is_empty() {
@@ -109,46 +111,30 @@ impl Variables {
             }));
 
             let mut paths: HashMap<Path, usize> = HashMap::new();
-            let (paths, representations) = if enable_deduplicate_variables {
-                let mut values: IndexSet<Value> = IndexSet::new();
-                data.select_values_and_paths(current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(value)) = select_object(content, requires, schema) {
-                            match values.get_index_of(&value) {
-                                Some(index) => {
-                                    paths.insert(path.clone(), index);
-                                }
-                                None => {
-                                    paths.insert(path.clone(), values.len());
-                                    values.insert(value);
-                                }
+            let mut values: IndexSet<Value> = IndexSet::new();
+
+            data.select_values_and_paths(schema, current_dir, |path, value| {
+                if let Value::Object(content) = value {
+                    if let Ok(Some(value)) = select_object(content, requires, schema) {
+                        match values.get_index_of(&value) {
+                            Some(index) => {
+                                paths.insert(path.clone(), index);
+                            }
+                            None => {
+                                paths.insert(path.clone(), values.len());
+                                values.insert(value);
                             }
                         }
                     }
-                });
-
-                if values.is_empty() {
-                    return None;
                 }
+            });
 
-                (paths, Value::Array(Vec::from_iter(values)))
-            } else {
-                let mut values: Vec<Value> = Vec::new();
-                data.select_values_and_paths(current_dir, |path, value| {
-                    if let Value::Object(content) = value {
-                        if let Ok(Some(value)) = select_object(content, requires, schema) {
-                            paths.insert(path.clone(), values.len());
-                            values.push(value);
-                        }
-                    }
-                });
+            if values.is_empty() {
+                return None;
+            }
 
-                if values.is_empty() {
-                    return None;
-                }
+            let representations = Value::Array(Vec::from_iter(values));
 
-                (paths, Value::Array(Vec::from_iter(values)))
-            };
             variables.insert("representations", representations);
 
             Some(Variables { variables, paths })
@@ -160,7 +146,7 @@ impl Variables {
             // should not perform the next fetch
             if !current_dir.is_empty()
                 && data
-                    .get_path(current_dir)
+                    .get_path(schema, current_dir)
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
@@ -184,15 +170,12 @@ impl Variables {
 
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a, SF>(
+    pub(crate) async fn fetch_node<'a>(
         &'a self,
-        parameters: &'a ExecutionParameters<'a, SF>,
+        parameters: &'a ExecutionParameters<'a>,
         data: &'a Value,
         current_dir: &'a Path,
-    ) -> Result<(Value, Vec<Error>), FetchError>
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> Result<(Value, Vec<Error>), FetchError> {
         let FetchNode {
             operation,
             operation_kind,
@@ -209,7 +192,6 @@ impl FetchNode {
             // Needs the original request here
             parameters.supergraph_request,
             parameters.schema,
-            parameters.options.enable_deduplicate_variables,
         )
         .await
         {
@@ -228,11 +210,10 @@ impl FetchNode {
                         parameters
                             .schema
                             .subgraphs()
-                            .find_map(|(name, url)| (name == service_name).then(|| url))
+                            .find_map(|(name, url)| (name == service_name).then_some(url))
                             .unwrap_or_else(|| {
                                 panic!(
-                                    "schema uri for subgraph '{}' should already have been checked",
-                                    service_name
+                                    "schema uri for subgraph '{service_name}' should already have been checked"
                                 )
                             })
                             .clone(),
@@ -253,7 +234,7 @@ impl FetchNode {
 
         let service = parameters
             .service_factory
-            .new_service(service_name)
+            .create(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
         // TODO not sure if we need a RouterReponse here as we don't do anything with it
@@ -308,7 +289,11 @@ impl FetchNode {
             let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
 
             let mut errors: Vec<Error> = vec![];
-            for error in response.errors {
+            for mut error in response.errors {
+                // the locations correspond to the subgraph query and cannot be linked to locations
+                // in the client query, so we remove them
+                error.locations = Vec::new();
+
                 // errors with path should be updated to the path of the entity they target
                 if let Some(ref path) = error.path {
                     if path.starts_with(&entities_path) {
@@ -367,6 +352,7 @@ impl FetchNode {
                         "Subgraph response from '{}' was missing key `_entities`",
                         self.service_name
                     ))
+                    .extension_code("PARSE_ERROR")
                     .build(),
             );
 

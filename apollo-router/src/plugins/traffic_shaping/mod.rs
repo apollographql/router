@@ -18,7 +18,6 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use http::header::ACCEPT_ENCODING;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use schemars::JsonSchema;
@@ -44,8 +43,7 @@ use crate::register_plugin;
 use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
-use crate::Configuration;
-use crate::SubgraphRequest;
+use crate::services::SubgraphRequest;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -54,6 +52,7 @@ trait Merge {
     fn merge(&self, fallback: Option<&Self>) -> Self;
 }
 
+/// Traffic shaping options
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Shaping {
@@ -67,6 +66,7 @@ struct Shaping {
     #[schemars(with = "String", default)]
     /// Enable timeout for incoming requests
     timeout: Option<Duration>,
+    /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
 }
@@ -94,6 +94,7 @@ impl Merge for Shaping {
     }
 }
 
+/// Retry configuration
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RetryConfig {
@@ -140,22 +141,19 @@ struct RouterShaping {
     timeout: Option<Duration>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
+/// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
-    #[serde(default)]
     /// Applied at the router level
     router: Option<RouterShaping>,
-    #[serde(default)]
     /// Applied on all subgraphs
     all: Option<Shaping>,
-    #[serde(default)]
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, Shaping>,
-    /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
+    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
 
@@ -346,7 +344,6 @@ impl TrafficShaping {
                 .map_request(move |mut req: SubgraphRequest| {
                     if let Some(compression) = config.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
-                        req.subgraph_request.headers_mut().insert(ACCEPT_ENCODING, HeaderValue::from_static("gzip, br, deflate"));
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
 
@@ -358,56 +355,51 @@ impl TrafficShaping {
     }
 }
 
-impl TrafficShaping {
-    pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
-        configuration
-            .plugin_configuration(APOLLO_TRAFFIC_SHAPING)
-            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
-            .unwrap_or_default()
-    }
-}
-
 register_plugin!("apollo", "traffic_shaping", TrafficShaping);
 
 #[cfg(test)]
 mod test {
     use std::sync::Arc;
 
+    use bytes::Bytes;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
-    use tower::util::BoxCloneService;
     use tower::Service;
 
     use super::*;
-    use crate::graphql::Response;
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::router_factory::create_plugins;
+    use crate::services::router;
+    use crate::services::router_service::RouterCreator;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
+    use crate::spec::Schema;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
 
-    static EXPECTED_RESPONSE: Lazy<Response> = Lazy::new(|| {
-        serde_json::from_str(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#).unwrap()
+    static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
+        Bytes::from_static(r#"{"data":{"topProducts":[{"upc":"1","name":"Table","reviews":[{"id":"1","product":{"name":"Table"},"author":{"id":"1","name":"Ada Lovelace"}},{"id":"4","product":{"name":"Table"},"author":{"id":"2","name":"Alan Turing"}}]},{"upc":"2","name":"Couch","reviews":[{"id":"2","product":{"name":"Couch"},"author":{"id":"1","name":"Ada Lovelace"}}]}]}}"#.as_bytes())
     });
 
     static VALID_QUERY: &str = r#"query TopProducts($first: Int) { topProducts(first: $first) { upc name reviews { id product { name } author { id name } } } }"#;
 
     async fn execute_router_test(
         query: &str,
-        body: &Response,
-        mut router_service: BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError>,
+        body: &Bytes,
+        mut router_service: router::BoxService,
     ) {
         let request = SupergraphRequest::fake_builder()
             .query(query.to_string())
             .variable("first", 2usize)
             .build()
-            .expect("expecting valid request");
+            .expect("expecting valid request")
+            .try_into()
+            .unwrap();
 
         let response = router_service
             .ready()
@@ -418,13 +410,15 @@ mod test {
             .unwrap()
             .next_response()
             .await
+            .unwrap()
             .unwrap();
-        assert_eq!(response, *body);
+
+        assert_eq!(response, body);
     }
 
     async fn build_mock_router_with_variable_dedup_optimization(
         plugin: Box<dyn DynPlugin>,
-    ) -> BoxCloneService<SupergraphRequest, SupergraphResponse, BoxError> {
+    ) -> router::BoxService {
         let mut extensions = Object::new();
         extensions.insert("test", Value::String(ByteString::from("value")));
 
@@ -470,22 +464,41 @@ mod test {
         )
         .unwrap();
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone())
-            .with_configuration(Arc::new(config));
+        let config = Arc::new(config);
+
+        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone())
+            .with_configuration(config.clone());
+
+        for (name, plugin) in create_plugins(
+            &config,
+            &schema,
+            Some(vec![(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)]),
+        )
+        .await
+        .expect("create plugins should work")
+        .into_iter()
+        {
+            builder = builder.with_dyn_plugin(name, plugin);
+        }
 
         let builder = builder
-            .with_dyn_plugin(APOLLO_TRAFFIC_SHAPING.to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
-        builder.build().await.expect("should build").test_service()
+        RouterCreator::new(
+            Arc::new(builder.build().await.expect("should build")),
+            &Configuration::default(),
+        )
+        .await
+        .make()
+        .boxed()
     }
 
     async fn get_traffic_shaping_plugin(config: &serde_json::Value) -> Box<dyn DynPlugin> {
         // Build a traffic shaping plugin
         crate::plugin::plugins()
-            .get(APOLLO_TRAFFIC_SHAPING)
+            .find(|factory| factory.name == APOLLO_TRAFFIC_SHAPING)
             .expect("Plugin not found")
             .create_instance_without_schema(config)
             .await
@@ -503,7 +516,7 @@ mod test {
         // Build a traffic shaping plugin
         let plugin = get_traffic_shaping_plugin(&config).await;
         let router = build_mock_router_with_variable_dedup_optimization(plugin).await;
-        execute_router_test(VALID_QUERY, &*EXPECTED_RESPONSE, router).await;
+        execute_router_test(VALID_QUERY, &EXPECTED_RESPONSE, router).await;
     }
 
     #[tokio::test]
@@ -527,13 +540,6 @@ mod test {
                     .get(&CONTENT_ENCODING)
                     .unwrap(),
                 HeaderValue::from_static("gzip")
-            );
-            assert_eq!(
-                req.subgraph_request
-                    .headers()
-                    .get(&ACCEPT_ENCODING)
-                    .unwrap(),
-                HeaderValue::from_static("gzip, br, deflate")
             );
 
             req
@@ -579,7 +585,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_subgraph_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
@@ -587,7 +593,7 @@ mod test {
             test:
                 global_rate_limit:
                     capacity: 1
-                    interval: 300ms
+                    interval: 100ms
                 timeout: 500ms
         "#,
         )
@@ -636,7 +642,7 @@ mod test {
             .unwrap();
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn it_rate_limit_router_requests() {
         let config = serde_yaml::from_str::<serde_json::Value>(
             r#"
