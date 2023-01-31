@@ -124,7 +124,7 @@ impl Variables {
 
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 if let Value::Object(content) = value {
-                    if let Ok(Some(value)) = select_object(content, requires, schema) {
+                    if let Ok(Some(mut value)) = select_object(content, requires, schema) {
                         rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                         match values.get_index_of(&value) {
                             Some(index) => {
