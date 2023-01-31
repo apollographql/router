@@ -10,12 +10,8 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() {
-        let client = Client::open(vec![
-            "redis://:router@127.0.0.1:6379",
-            "redis://:router@127.0.0.1:6380",
-            "redis://:router@127.0.0.1:6381",
-        ])
-        .expect("opening ClusterClient");
+        let client =
+            Client::open(vec!["redis://:router@127.0.0.1:6379"]).expect("opening ClusterClient");
         let mut connection = client.get_connection().await.expect("got redis connection");
 
         connection
@@ -31,12 +27,13 @@ mod test {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://:router@127.0.0.1:6379", "redis://:router@127.0.0.1:6380", "redis://:router@127.0.0.1:6381"]
+                            "urls": ["redis://127.0.0.1:6379"]
                         }
                     }
                 }
             }
-        })).await;
+        }))
+        .await;
 
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name name2:name } }"#)
@@ -58,12 +55,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() {
-        let client = Client::open(vec![
-            "redis://:router@127.0.0.1:6379",
-            "redis://:router@127.0.0.1:6380",
-            "redis://:router@127.0.0.1:6381",
-        ])
-        .expect("opening ClusterClient");
+        let client = Client::open(vec!["redis://127.0.0.1:6379"]).expect("opening ClusterClient");
         let mut connection = client.get_connection().await.expect("got redis connection");
 
         let config = json!({
@@ -74,7 +66,7 @@ mod test {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://:router@127.0.0.1:6379", "redis://:router@127.0.0.1:6380", "redis://:router@127.0.0.1:6381"]
+                            "urls": ["redis://127.0.0.1:6379"]
                         }
                     }
                 }

@@ -312,6 +312,8 @@ commands:
       cache_key:
         type: string
         default: ""
+    docker:
+      - image: cimg/redis:6.2.6
     steps:
       - run:
           name: Start jaeger
@@ -328,10 +330,6 @@ commands:
           condition:
             equal: [linux_amd, << parameters.os >>]
           steps:
-            - setup_remote_docker
-            - run:
-                name: Start Redis cluster
-                command: docker-compose -f dockerfiles/docker-compose-redis.yml up -d
             - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=6
       - when:
           condition:
@@ -615,9 +613,6 @@ jobs:
       - run:
           command: >
             gh release create $VERSION --notes-file NEXT_CHANGELOG.md --title $VERSION artifacts/*
-      - setup_remote_docker:
-          version: 20.10.11
-          docker_layer_caching: true
       - run:
           name: Docker build
           command: |
