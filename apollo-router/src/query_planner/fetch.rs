@@ -10,6 +10,7 @@ use tracing::instrument;
 use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
+use super::rewrites;
 use super::selection::select_object;
 use super::selection::Selection;
 use crate::error::Error;
@@ -83,6 +84,12 @@ pub(crate) struct FetchNode {
 
     /// Optional id used by Deferred nodes
     pub(crate) id: Option<String>,
+
+    // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
+    pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
+
+    // Optionally describes a number of "rewrites" to apply to the data that received from a fetch (and before it is applied to the current in-memory results).
+    pub(crate) output_rewrites: Option<Vec<rewrites::DataRewrite>>,
 }
 
 struct Variables {
@@ -92,6 +99,7 @@ struct Variables {
 
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
+    #[allow(clippy::too_many_arguments)]
     async fn new(
         requires: &[Selection],
         variable_usages: &[String],
@@ -99,6 +107,7 @@ impl Variables {
         current_dir: &Path,
         request: &Arc<http::Request<Request>>,
         schema: &Schema,
+        input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
         let body = request.body();
         if !requires.is_empty() {
@@ -113,9 +122,10 @@ impl Variables {
             let mut paths: HashMap<Path, usize> = HashMap::new();
             let mut values: IndexSet<Value> = IndexSet::new();
 
-            data.select_values_and_paths(current_dir, |path, value| {
+            data.select_values_and_paths(schema, current_dir, |path, value| {
                 if let Value::Object(content) = value {
-                    if let Ok(Some(value)) = select_object(content, requires, schema) {
+                    if let Ok(Some(mut value)) = select_object(content, requires, schema) {
+                        rewrites::apply_rewrites(schema, &mut value, input_rewrites);
                         match values.get_index_of(&value) {
                             Some(index) => {
                                 paths.insert(path.clone(), index);
@@ -146,7 +156,7 @@ impl Variables {
             // should not perform the next fetch
             if !current_dir.is_empty()
                 && data
-                    .get_path(current_dir)
+                    .get_path(schema, current_dir)
                     .map(|value| value.is_null())
                     .unwrap_or(true)
             {
@@ -192,6 +202,7 @@ impl FetchNode {
             // Needs the original request here
             parameters.supergraph_request,
             parameters.schema,
+            &self.input_rewrites,
         )
         .await
         {
@@ -261,7 +272,8 @@ impl FetchNode {
             });
         }
 
-        let (value, errors) = self.response_at_path(current_dir, paths, response);
+        let (value, errors) =
+            self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
@@ -275,6 +287,7 @@ impl FetchNode {
     #[instrument(skip_all, level = "debug", name = "response_insert")]
     fn response_at_path<'a>(
         &'a self,
+        schema: &Schema,
         current_dir: &'a Path,
         paths: HashMap<Path, usize>,
         response: graphql::Response,
@@ -337,7 +350,9 @@ impl FetchNode {
 
                         for (path, entity_idx) in paths {
                             if let Some(entity) = array.get(entity_idx) {
-                                let _ = value.insert(&path, entity.clone());
+                                let mut data = entity.clone();
+                                rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
+                                let _ = value.insert(&path, data);
                             }
                         }
                         return (value, errors);
@@ -380,10 +395,9 @@ impl FetchNode {
                     }
                 })
                 .collect();
-            (
-                Value::from_path(current_dir, response.data.unwrap_or_default()),
-                errors,
-            )
+            let mut data = response.data.unwrap_or_default();
+            rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
+            (Value::from_path(current_dir, data), errors)
         }
     }
 
