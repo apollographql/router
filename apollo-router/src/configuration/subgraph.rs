@@ -12,63 +12,67 @@ use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 
-/// Wrapper structure for subgraph configuration override
-///
-/// In various parts of the configuration, we need to provide a global configuration for subgraphs,
-/// with a per subgraph override. This cannot be handled easily with `Default` implementations,
-/// because to work in an intuitive way, overriding configuration should work per field, not on the
-/// entire structure.
-///
-/// As an example, let's say we have this subgraph plugin configuration:
-///
-/// ```rust
-/// #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-/// struct PluginConfig {
-///     #[serde(default = "set_true")]
-///     a: bool,
-///     #[serde(default)]
-///     b: u8,
-/// }
-/// ```
-///
-/// If we have this configuration, we expect that all subgraph would have `a = false`, except for the
-/// "products" subgraph. All subgraphs would have `b = 0`, the default.
-/// ```yaml
-/// subgraph:
-///   all:
-///     a: false
-///   subgraphs:
-///     products:
-///       a: true
-/// ```
-///
-/// But now, if we get this configuration:
-///
-/// ```yaml
-/// subgraph:
-///   all:
-///     a: false
-///   subgraphs:
-///     products:
-///       b: 1
-/// ```
-///
-/// We would expect that:
-/// - for all subgraphs, `a = false`
-/// - for all subgraphs, `b = 0`
-/// - for the "products" subgraph, `b = 1`
-///
-/// Unfortunately, if we used `Default` implementation, we would end up with `a = true` for the
-/// "products" subgraph.
-///
-/// Another way to handle it is to use `Option` for every field, then handle override when requesting them,
-/// but this ends up with a configuration schema that does not contain the default values.
-///
-/// This `SubgraphConfiguration` type handles overrides through a custom deserializer that works in three steps:
-/// - deserialize `all` and `subgraphs` fields to `serde_yaml::Mapping`
-/// - for each specific subgraph configuration, start from the `all` configuration (or default implementation),
-/// and replace the overriden fields
-/// - deserialize to the plugin configuration
+// In various parts of the configuration, we need to provide a global configuration for subgraphs,
+// with a per subgraph override. This cannot be handled easily with `Default` implementations,
+// because to work in an intuitive way, overriding configuration should work per field, not on the
+// entire structure.
+//
+// As an example, let's say we have this subgraph plugin configuration:
+//
+// ```rust
+// use serde::Deserialize;
+// use serde::Serialize;
+// use schemars::JsonSchema;
+//
+// #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+// struct PluginConfig {
+//     #[serde(default = "set_true")]
+//     a: bool,
+//     #[serde(default)]
+//     b: u8,
+// }
+// ```
+//
+// If we have this configuration, we expect that all subgraph would have `a = false`, except for the
+// "products" subgraph. All subgraphs would have `b = 0`, the default.
+// ```yaml
+// subgraph:
+//   all:
+//     a: false
+//   subgraphs:
+//     products:
+//       a: true
+// ```
+//
+// But now, if we get this configuration:
+//
+// ```yaml
+// subgraph:
+//   all:
+//     a: false
+//   subgraphs:
+//     products:
+//       b: 1
+// ```
+//
+// We would expect that:
+// - for all subgraphs, `a = false`
+// - for all subgraphs, `b = 0`
+// - for the "products" subgraph, `b = 1`
+//
+// Unfortunately, if we used `Default` implementation, we would end up with `a = true` for the
+// "products" subgraph.
+//
+// Another way to handle it is to use `Option` for every field, then handle override when requesting them,
+// but this ends up with a configuration schema that does not contain the default values.
+//
+// This `SubgraphConfiguration` type handles overrides through a custom deserializer that works in three steps:
+// - deserialize `all` and `subgraphs` fields to `serde_yaml::Mapping`
+// - for each specific subgraph configuration, start from the `all` configuration (or default implementation),
+// and replace the overriden fields
+// - deserialize to the plugin configuration
+
+/// Configuration options pertaining to the subgraph server component.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub(crate) struct SubgraphConfiguration<T>
 where
@@ -89,6 +93,27 @@ where
     #[allow(dead_code)]
     fn get(&self, subgraph_name: &str) -> &T {
         self.subgraphs.get(subgraph_name).unwrap_or(&self.all)
+    }
+}
+
+impl<T> Default for SubgraphConfiguration<T>
+where
+    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+{
+    fn default() -> Self {
+        Self {
+            all: T::default(),
+            subgraphs: HashMap::default(),
+        }
+    }
+}
+
+impl<T> PartialEq for SubgraphConfiguration<T>
+where
+    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema + PartialEq,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.all == other.all && self.subgraphs == other.subgraphs
     }
 }
 

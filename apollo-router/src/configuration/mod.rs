@@ -10,7 +10,6 @@ mod tests;
 mod upgrade;
 mod yaml;
 
-use std::collections::HashMap;
 use std::fmt;
 use std::net::IpAddr;
 use std::net::SocketAddr;
@@ -38,6 +37,7 @@ use self::expansion::Expansion;
 pub(crate) use self::experimental::print_all_experimental_conf;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
+use self::subgraph::SubgraphConfiguration;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::plugin::plugins;
@@ -541,19 +541,7 @@ pub(crate) struct Apq {
     pub(crate) experimental_cache: Cache,
 
     #[serde(default)]
-    pub(crate) subgraph: ApqSubgraphWrapper,
-}
-
-/// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub(crate) struct ApqSubgraphWrapper {
-    /// options applying to all subgraphs
-    #[serde(default)]
-    pub(crate) all: SubgraphApq,
-    /// per subgraph options
-    #[serde(default)]
-    pub(crate) subgraphs: HashMap<String, SubgraphApq>,
+    pub(crate) subgraph: SubgraphConfiguration<SubgraphApq>,
 }
 
 /// Subgraph level Automatic Persisted Queries (APQ) configuration
@@ -635,32 +623,7 @@ pub(crate) struct RedisCache {
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Tls {
-    pub(crate) subgraph: TlsSubgraphWrapper,
-}
-
-/// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct TlsSubgraphWrapper {
-    /// options applying to all subgraphs
-    pub(crate) all: TlsSubgraph,
-    /// per subgraph options
-    pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
-}
-
-#[buildstructor::buildstructor]
-impl TlsSubgraphWrapper {
-    #[builder]
-    pub(crate) fn new(all: TlsSubgraph, subgraphs: HashMap<String, TlsSubgraph>) -> Self {
-        Self { all, subgraphs }
-    }
-}
-
-impl Default for TlsSubgraphWrapper {
-    fn default() -> Self {
-        Self::builder().all(TlsSubgraph::default()).build()
-    }
+    pub(crate) subgraph: SubgraphConfiguration<TlsSubgraph>,
 }
 
 /// Configuration options pertaining to the subgraph server component.
