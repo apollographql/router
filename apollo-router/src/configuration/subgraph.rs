@@ -1,12 +1,16 @@
 //! Subgraph configuration override behaviour
 
-use std::{collections::HashMap, fmt, marker::PhantomData};
+use std::collections::HashMap;
+use std::fmt;
+use std::marker::PhantomData;
 
 use schemars::JsonSchema;
-use serde::{
-    de::{self, DeserializeOwned, MapAccess, Visitor},
-    Deserialize, Serialize,
-};
+use serde::de;
+use serde::de::DeserializeOwned;
+use serde::de::MapAccess;
+use serde::de::Visitor;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Wrapper structure for subgraph configuration override
 ///
