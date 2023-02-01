@@ -245,6 +245,8 @@ async fn defer() {
                         operation_name: Some("t".to_string()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".to_string()),
+                        input_rewrites: None,
+                        output_rewrites: None,
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -285,6 +287,8 @@ async fn defer() {
                             operation_name: None,
                             operation_kind: OperationKind::Query,
                             id: Some("fetch2".to_string()),
+                            input_rewrites: None,
+                            output_rewrites: None,
                         })),
                     }))),
                 }],

@@ -63,13 +63,13 @@ static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
 struct AuthenticationPlugin {
     configuration: JWTConf,
     jwks: SharedDeduplicate,
-    jwks_url: Url,
+    jwks_urls: Vec<Url>,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
 struct JWTConf {
-    /// Retrieve our JWK Set from here
-    jwks_url: String,
+    /// Retrieve our JWK Sets from these locations
+    jwks_urls: Vec<String>,
     /// HTTP header expected to contain JWT
     #[serde(default = "default_header_name")]
     header_name: String,
@@ -85,7 +85,7 @@ struct JWTConf {
 impl Default for JWTConf {
     fn default() -> Self {
         Self {
-            jwks_url: Default::default(),
+            jwks_urls: Default::default(),
             header_name: default_header_name(),
             header_value_prefix: default_header_value_prefix(),
             cooldown: Default::default(),
@@ -205,7 +205,12 @@ impl Plugin for AuthenticationPlugin {
         {
             return Err("header_value_prefix must not contain whitespace".into());
         }
-        let url: Url = Url::from_str(&init.config.experimental.jwt.jwks_url)?;
+        let mut urls = vec![];
+        for s_url in &init.config.experimental.jwt.jwks_urls {
+            let url: Url = Url::from_str(s_url)?;
+            urls.push(url);
+        }
+
         // We have to help the compiler out a bit by casting our function item to be a function
         // pointer.
         let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
@@ -214,14 +219,14 @@ impl Plugin for AuthenticationPlugin {
         Ok(AuthenticationPlugin {
             configuration: init.config.experimental.jwt,
             jwks: Arc::new(deduplicator),
-            jwks_url: url,
+            jwks_urls: urls,
         })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let request_full_config = self.configuration.clone();
         let request_jwks = self.jwks.clone();
-        let request_jwks_url = self.jwks_url.clone();
+        let request_jwks_urls = self.jwks_urls.clone();
 
         fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
             move |_request: &router::Request| {
@@ -238,7 +243,7 @@ impl Plugin for AuthenticationPlugin {
             .checkpoint_async(move |request: router::Request| {
                 let my_config = request_full_config.clone();
                 let my_jwks = request_jwks.clone();
-                let my_jwks_url = request_jwks_url.clone();
+                let my_jwks_urls = request_jwks_urls.clone();
                 const AUTHENTICATION_KIND: &str = "JWT";
 
                 async move {
@@ -353,43 +358,47 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    request.context.enter_active_request().await;
-                    // Get the JWKS here
-                    let jwks_opt = match my_jwks.get(my_jwks_url).await {
-                        Ok(k) => k,
-                        Err(e) => {
-                            request.context.leave_active_request().await;
+                    // Search our set of JWKS to find the kid and process it
+                    // Note: This will search through JWKS in the order in which they are defined
+                    // in configuration. If the same "kid" is present in multiple JWKS, the router
+                    // will just use the first "kid" encountered.
+                    for jwks_url in my_jwks_urls {
+                        request.context.enter_active_request().await;
+                        // Get the JWKS here
+                        let jwks_opt = match my_jwks.get(jwks_url).await {
+                            Ok(k) => k,
+                            Err(e) => {
+                                request.context.leave_active_request().await;
 
-                            return failure_message(
-                                request.context,
-                                format!("Could not retrieve JWKS set: {e}"),
-                                StatusCode::INTERNAL_SERVER_ERROR, // XXX: Best error?
-                            );
-                        }
-                    };
-                    request.context.leave_active_request().await;
+                                return failure_message(
+                                    request.context,
+                                    format!("Could not retrieve JWKS set: {e}"),
+                                    StatusCode::INTERNAL_SERVER_ERROR, // XXX: Best error?
+                                );
+                            }
+                        };
+                        request.context.leave_active_request().await;
 
 
-                    let jwks = match jwks_opt {
-                        Some(k) => k,
-                        None => {
-                            return failure_message(
-                                request.context,
-                                "Could not find JWKS set at the configured location".to_string(),
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                            );
-                        }
-                    };
+                        let jwks = match jwks_opt {
+                            Some(k) => k,
+                            None => {
+                                return failure_message(
+                                    request.context,
+                                    "Could not find JWKS set at the configured location".to_string(),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                );
+                            }
+                        };
 
-                    // Now let's try to validate our token
-                    match jwks.find(&kid) {
-                        Some(jwk) => {
+                        // Now let's try to validate our token
+                        if let Some(jwk) = jwks.find(&kid) {
                             let decoding_key = match DecodingKey::from_jwk(jwk) {
                                 Ok(k) => k,
                                 Err(e) => {
                                     return failure_message(
                                         request.context,
-                                        format!("Could not create decoding key: {}", e),
+                                        format!("Could not create decoding key: {e}"),
                                         StatusCode::INTERNAL_SERVER_ERROR,
                                     );
                                 }
@@ -417,7 +426,7 @@ impl Plugin for AuthenticationPlugin {
                                 Err(e) => {
                                     return failure_message(
                                         request.context,
-                                        format!("Could not create decode JWT: {}", e),
+                                        format!("Could not create decode JWT: {e}"),
                                         StatusCode::UNAUTHORIZED,
                                     );
                                 }
@@ -429,7 +438,7 @@ impl Plugin for AuthenticationPlugin {
                             {
                                 return failure_message(
                                     request.context,
-                                    format!("Could not insert claims into context: {}", e),
+                                    format!("Could not insert claims into context: {e}"),
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
@@ -438,67 +447,64 @@ impl Plugin for AuthenticationPlugin {
                                 monotonic_counter.apollo_authentication_success_count = 1u64,
                                 kind = %AUTHENTICATION_KIND
                             );
-                            Ok(ControlFlow::Continue(request))
+                            return Ok(ControlFlow::Continue(request));
                         }
-                        None => {
-                            // We can't find this "kid". We will observe the COOLDOWN, if one is
-                            // set, to minimise the impact of DOS attacks via this vector.
-                            //
-                            // If there is no COOLDOWN, we'll trigger a cache update and set a
-                            // COOLDOWN.
-                            if COOLDOWN.load(Ordering::SeqCst) {
-                                // This is a metric and will not appear in the logs
-                                tracing::info!(
-                                    monotonic_counter.apollo_authentication_cooldown_count = 1u64,
-                                    kind = %AUTHENTICATION_KIND
-                                );
-                                let response = router::Response::error_builder()
-                                    .error(
-                                        graphql::Error::builder()
-                                            .message(
-                                                "Could not retrieve JWKS set: router cooling down",
-                                            )
-                                            .extension_code("AUTH_ERROR")
-                                            .build(),
-                                    )
-                                    .header(
-                                        http::header::RETRY_AFTER,
-                                        my_config
-                                            .cooldown
-                                            .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN)
-                                            .as_secs()
-                                            .to_string(),
-                                    )
-                                    .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                                    .context(request.context)
-                                    .build()?;
-                                Ok(ControlFlow::Break(response))
-                            } else {
-                                // We don't recognise this "kid". Clear our cache and impose a
-                                // COOLDOWN.
-                                // The COOLDOWN controls attempts to retrieve based on a new "kid".
-                                tracing::info!("Clearing cached JWKS");
-                                my_jwks.clear();
-                                // Only spawn 1 task to remove the cooldown
-                                if COOLDOWN
-                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                                    .is_ok()
-                                {
-                                    tokio::spawn(async move {
-                                        let t = my_config
-                                            .cooldown
-                                            .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
-                                        tokio::time::sleep(t).await;
-                                        COOLDOWN.store(false, Ordering::SeqCst);
-                                    });
-                                }
-                                failure_message(
-                                    request.context,
-                                    format!("Could not find kid: '{kid}' in JWKS set"),
-                                    StatusCode::UNAUTHORIZED,
+                    }
+                    // We can't find this "kid". We will observe the COOLDOWN, if one is
+                    // set, to minimise the impact of DOS attacks via this vector.
+                    //
+                    // If there is no COOLDOWN, we'll trigger a cache update and set a
+                    // COOLDOWN.
+                    if COOLDOWN.load(Ordering::SeqCst) {
+                        // This is a metric and will not appear in the logs
+                        tracing::info!(
+                            monotonic_counter.apollo_authentication_cooldown_count = 1u64,
+                            kind = %AUTHENTICATION_KIND);
+                            let response = router::Response::error_builder()
+                                .error(
+                                    graphql::Error::builder()
+                                        .message(
+                                            "Could not retrieve JWKS set: router cooling down",
+                                        )
+                                        .extension_code("AUTH_ERROR")
+                                        .build(),
                                 )
+                                .header(
+                                    http::header::RETRY_AFTER,
+                                    my_config
+                                        .cooldown
+                                        .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN)
+                                        .as_secs()
+                                        .to_string(),
+                                )
+                                .status_code(StatusCode::SERVICE_UNAVAILABLE)
+                                .context(request.context)
+                                .build()?;
+                            Ok(ControlFlow::Break(response))
+                        } else {
+                            // We don't recognise this "kid". Clear our cache and impose a
+                            // COOLDOWN.
+                            // The COOLDOWN controls attempts to retrieve based on a new "kid".
+                            tracing::info!("Clearing cached JWKS");
+                            my_jwks.clear();
+                            // Only spawn 1 task to remove the cooldown
+                            if COOLDOWN
+                                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                .is_ok()
+                            {
+                                tokio::spawn(async move {
+                                    let t = my_config
+                                        .cooldown
+                                        .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
+                                    tokio::time::sleep(t).await;
+                                    COOLDOWN.store(false, Ordering::SeqCst);
+                                });
                             }
-                        }
+                            failure_message(
+                                request.context,
+                                format!("Could not find kid: '{kid}' in JWKS set"),
+                                StatusCode::UNAUTHORIZED,
+                            )
                     }
                 }
             })
@@ -525,12 +531,13 @@ mod tests {
     use crate::services::supergraph;
 
     async fn build_a_default_test_harness() -> router::BoxCloneService {
-        build_a_test_harness(None, None).await
+        build_a_test_harness(None, None, false).await
     }
 
     async fn build_a_test_harness(
         header_name: Option<String>,
         header_value_prefix: Option<String>,
+        multiple_jwks: bool,
     ) -> router::BoxCloneService {
         // create a mock service we will use to test our plugin
         let mut mock_service = test::MockSupergraphService::new();
@@ -579,15 +586,27 @@ mod tests {
         }
 
         let jwks_url = format!("file://{}", jwks_file.display());
-        let mut config = serde_json::json!({
-            "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks_url": &jwks_url
+        let mut config = if multiple_jwks {
+            serde_json::json!({
+                "authentication": {
+                    "experimental" : {
+                        "jwt" : {
+                            "jwks_urls": [&jwks_url, &jwks_url]
+                        }
                     }
                 }
-            }
-        });
+            })
+        } else {
+            serde_json::json!({
+                "authentication": {
+                    "experimental" : {
+                        "jwt" : {
+                            "jwks_urls": [&jwks_url]
+                        }
+                    }
+                }
+            })
+        };
 
         if let Some(hn) = header_name {
             config["authentication"]["experimental"]["jwt"]["header_name"] =
@@ -882,8 +901,47 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
+        let test_harness = build_a_test_harness(None, None, true).await;
+
+        // Let's create a request with our operation name
+        let request_with_appropriate_name = supergraph::Request::canned_builder()
+            .operation_name("me".to_string())
+            .header(
+                http::header::AUTHORIZATION,
+                "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiIsImtpZCI6ImtleTEifQ.eyJleHAiOjEwMDAwMDAwMDAwLCJhbm90aGVyIGNsYWltIjoidGhpcyBpcyBhbm90aGVyIGNsYWltIn0.4GrmfxuUST96cs0YUC0DfLAG218m7vn8fO_ENfXnu5A",
+            )
+            .build()
+            .unwrap();
+
+        // ...And call our service stack with it
+        let mut service_response = test_harness
+            .oneshot(request_with_appropriate_name.try_into().unwrap())
+            .await
+            .unwrap();
+        let response: graphql::Response = serde_json::from_slice(
+            service_response
+                .next_response()
+                .await
+                .unwrap()
+                .unwrap()
+                .to_vec()
+                .as_slice(),
+        )
+        .unwrap();
+
+        assert_eq!(response.errors, vec![]);
+
+        assert_eq!(StatusCode::OK, service_response.response.status());
+
+        let expected_mock_response_data = "response created within the mock";
+        // with the expected message
+        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+    }
+
+    #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-        let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None).await;
+        let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None, false).await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -922,7 +980,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-        let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string())).await;
+        let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string()), false).await;
 
         // Let's create a request with our operation name
         let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -962,12 +1020,12 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-        let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string())).await;
+        let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
     }
 
     #[tokio::test]
     #[should_panic]
     async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-        let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string())).await;
+        let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
     }
 }

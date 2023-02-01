@@ -1284,7 +1284,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.text().await.unwrap(), format!("GET + {}", path));
+        assert_eq!(response.text().await.unwrap(), format!("GET + {path}"));
     }
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
@@ -1299,7 +1299,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.text().await.unwrap(), format!("POST + {}", path));
+        assert_eq!(response.text().await.unwrap(), format!("POST + {path}"));
     }
     server.shutdown().await
 }
@@ -1584,7 +1584,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    println!("response: {:?}", response);
+    println!("response: {response:?}");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),

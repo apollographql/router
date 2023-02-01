@@ -72,14 +72,14 @@ async fn query_jaeger_for_trace(id: String) -> Result<(), BoxError> {
         .append_pair("tags", &tags.to_string())
         .finish();
 
-    let url = format!("http://localhost:16686/api/traces?{}", params);
+    let url = format!("http://localhost:16686/api/traces?{params}");
     for _ in 0..10 {
         match find_valid_trace(&url).await {
             Ok(_) => {
                 return Ok(());
             }
             Err(e) => {
-                println!("error: {}", e);
+                println!("error: {e}");
                 tracing::warn!("{}", e);
             }
         }
@@ -165,8 +165,7 @@ fn verify_trace_participants(trace: &Value) -> Result<(), BoxError> {
     let expected_services = HashSet::from(["my_app", "router", "products"].map(|s| s.into()));
     if services != expected_services {
         return Err(BoxError::from(format!(
-            "incomplete traces, got {:?} expected {:?}",
-            services, expected_services
+            "incomplete traces, got {services:?} expected {expected_services:?}"
         )));
     }
     Ok(())
@@ -199,8 +198,7 @@ fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
         .collect();
     if !missing_operation_names.is_empty() {
         return Err(BoxError::from(format!(
-            "spans did not match, got {:?}, missing {:?}",
-            operation_names, missing_operation_names
+            "spans did not match, got {operation_names:?}, missing {missing_operation_names:?}"
         )));
     }
     Ok(())
@@ -240,7 +238,7 @@ fn parent_span<'a>(trace: &'a Value, span: &'a Value) -> Option<&'a Value> {
         .filter_map(|id| id.as_str())
         .filter_map(|id| {
             trace
-                .select_path(&format!("$..spans[?(@.spanID == '{}')]", id))
+                .select_path(&format!("$..spans[?(@.spanID == '{id}')]"))
                 .ok()?
                 .into_iter()
                 .next()
