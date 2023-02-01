@@ -33,8 +33,8 @@ sequenceDiagram
     participant ExecutionService
     participant SubgraphService(s)
 
-    Client->>RouterService: Sends request
-    RouterService->>SupergraphService: Transforms the raw HTTP request into a GraphQL/JSON request
+    Client->>RouterService (experimental): Sends request
+    RouterService (experimental)->>SupergraphService: Transforms the raw HTTP request into a GraphQL/JSON request
     SupergraphService->>ExecutionService: Initiates query<br/>plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
@@ -47,8 +47,8 @@ sequenceDiagram
     SubgraphService(s)-->>ExecutionService: 
     end
     ExecutionService-->>SupergraphService: Assembles and<br/>returns response
-    SupergraphService-->>RouterService: Returns GraphQL/JSON response
-    RouterService-->>Client: Returns an HTTP response
+    SupergraphService-->>RouterService (experimental): Returns GraphQL/JSON response
+    RouterService (experimental)-->>Client: Returns an HTTP response
 ```
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
