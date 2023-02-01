@@ -241,13 +241,20 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Propagating headers between subgraphs ([Issue #2128](https://github.com/apollographql/router/issues/2128))
 
-Passing headers between subgraph services is possible via Rhai script. An example has been added to the header propagation page.
+Passing headers between subgraph services is possible via Rhai script and we've added an example to the [header propagation](https://www.apollographql.com/docs/router/configuration/header-propagation) documentation.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2446
 
+### Propagating response headers to clients ([Issue #1284](https://github.com/apollographql/router/issues/1284))
+
+Passing headers from subgraph services to clients is possible via Rhai script and we've added an example to the [header propagation](https://www.apollographql.com/docs/router/configuration/header-propagation) documentation.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/2474
+
 ### IPv6 listening instructions ([Issue #1835](https://github.com/apollographql/router/issues/1835))
 
-Added documentation for listening on IPv6
+Added instructions for how to represent IPv6 listening addresses to our [Overview](https://www.apollographql.com/docs/router/configuration/overview) documentation.
+
 ```yaml
 supergraph:
   # The socket address and port to listen on.
@@ -277,14 +284,14 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 As a result of UX feedback, we are modifying the experimental JWT configuration. The `jwks_url` parameter is renamed to `jwks_urls` and now expects to receive an array of URLs, rather than a single URL.
 
-Here's a typical sample configuration fragment:
+We've updated the [JWT Authentication documentation](apollographql.com/docs/router/configuration/authn-jwt) accordingly, however here's a short sample configuration example:
 
 ```yaml
 authentication:
   experimental:
     jwt:
       jwks_urls:
-        - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+        - https://dev-abcd1234.us.auth0.com/.well-known/jwks.json
 ```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2500
