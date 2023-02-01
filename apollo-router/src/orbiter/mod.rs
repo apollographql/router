@@ -265,24 +265,24 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
             let path = path.join(".");
             if matches!(item.keyword_location().last(), Some(&PathChunk::Index(_))) {
                 *usage
-                    .entry(format!("configuration.{}.len", path))
+                    .entry(format!("configuration.{path}.len"))
                     .or_default() += 1;
             }
             match value {
                 Value::Bool(value) => {
                     *usage
-                        .entry(format!("configuration.{}.{}", path, value))
+                        .entry(format!("configuration.{path}.{value}"))
                         .or_default() += 1;
                 }
                 Value::Number(value) => {
                     *usage
-                        .entry(format!("configuration.{}.{}", path, value))
+                        .entry(format!("configuration.{path}.{value}"))
                         .or_default() += 1;
                 }
                 Value::String(_) => {
                     // Strings are never output
                     *usage
-                        .entry(format!("configuration.{}.<redacted>", path))
+                        .entry(format!("configuration.{path}.<redacted>"))
                         .or_default() += 1;
                 }
                 Value::Object(o) => {
@@ -295,7 +295,7 @@ fn visit_config(usage: &mut HashMap<String, u64>, config: &Value) {
                             .expect("schema node must resolve");
                         if let Some(Value::Bool(true)) = schema_node.get("additionalProperties") {
                             *usage
-                                .entry(format!("configuration.{}.len", path))
+                                .entry(format!("configuration.{path}.len"))
                                 .or_default() += o.len() as u64;
                         }
                     }
@@ -332,6 +332,7 @@ mod test {
                 .map(|a| a.to_string())
                 .collect(),
         );
+        usage.remove("args.anonymous_telemetry_disabled.true");
         usage.remove("args.apollo_graph_ref.<redacted>");
         usage.remove("args.apollo_key.<redacted>");
         insta::with_settings!({sort_maps => true}, {

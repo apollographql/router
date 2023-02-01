@@ -379,7 +379,7 @@ impl Executable {
             })) => {
                 let config_string = std::fs::read_to_string(config_path)?;
                 let output = generate_upgrade(&config_string, *diff)?;
-                println!("{}", output);
+                println!("{output}");
                 Ok(())
             }
             Some(Commands::Config(ConfigSubcommandArgs {

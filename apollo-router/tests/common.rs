@@ -49,7 +49,7 @@ impl TracingTest {
         let config_location =
             PathBuf::from_iter(["..", "apollo-router", "src", "testdata"]).join(config_location);
         let test_config_location = PathBuf::from_iter(["..", "target", "test_config.yaml"]);
-        fs::copy(&config_location, &test_config_location).expect("could not copy config");
+        fs::copy(config_location, &test_config_location).expect("could not copy config");
 
         tracing::subscriber::set_global_default(subscriber).unwrap();
         global::set_text_map_propagator(propagator);
@@ -116,7 +116,7 @@ impl TracingTest {
                     return (id, result);
                 }
                 Err(e) => {
-                    eprintln!("query failed: {}", e);
+                    eprintln!("query failed: {e}");
                 }
             }
             tokio::time::sleep(Duration::from_millis(100)).await;

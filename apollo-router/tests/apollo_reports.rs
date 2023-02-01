@@ -49,7 +49,7 @@ async fn get_router_service() -> BoxCloneService {
             serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
                 .expect("apollo_reports.router.yaml was invalid");
         config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
-            Some(serde_json::Value::String(format!("http://{}", addr)))
+            Some(serde_json::Value::String(format!("http://{addr}")))
         })
         .expect("Could not sub in endpoint");
 
@@ -208,7 +208,7 @@ async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
                 {
                     Ok(Ok(response)) => {
                         if response.contains("errors") {
-                            eprintln!("response had errors {}", response);
+                            eprintln!("response had errors {response}");
                         }
                         Ok(None)
                     }

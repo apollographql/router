@@ -76,9 +76,10 @@ impl TracingConfigurator for Config {
                 let socket = match &agent.endpoint {
                     AgentEndpoint::Default(_) => None,
                     AgentEndpoint::Url(u) => {
-                        let socket_addr = u.socket_addrs(|| None)?.pop().ok_or_else(|| {
-                            format!("cannot resolve url ({}) for jaeger agent", u)
-                        })?;
+                        let socket_addr = u
+                            .socket_addrs(|| None)?
+                            .pop()
+                            .ok_or_else(|| format!("cannot resolve url ({u}) for jaeger agent"))?;
                         Some(socket_addr)
                     }
                 };

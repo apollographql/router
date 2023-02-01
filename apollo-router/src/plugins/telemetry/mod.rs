@@ -32,9 +32,7 @@ use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::BaggagePropagator;
 use opentelemetry::sdk::propagation::TextMapCompositePropagator;
-use opentelemetry::sdk::propagation::TraceContextPropagator;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
@@ -633,19 +631,20 @@ impl Telemetry {
         // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
         // Waiting for the >=0.16.1 release
         if propagation.jaeger || tracing.jaeger.is_some() {
-            propagators.push(Box::new(opentelemetry_jaeger::Propagator::default()));
+            propagators.push(Box::<opentelemetry_jaeger::Propagator>::default());
         }
         if propagation.baggage {
-            propagators.push(Box::new(BaggagePropagator::default()));
+            propagators.push(Box::<opentelemetry::sdk::propagation::BaggagePropagator>::default());
         }
         if propagation.trace_context || tracing.otlp.is_some() {
-            propagators.push(Box::new(TraceContextPropagator::default()));
+            propagators
+                .push(Box::<opentelemetry::sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.is_some() {
-            propagators.push(Box::new(opentelemetry_zipkin::Propagator::default()));
+            propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
         if propagation.datadog || tracing.datadog.is_some() {
-            propagators.push(Box::new(opentelemetry_datadog::DatadogPropagator::default()));
+            propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
         }
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(

@@ -153,7 +153,7 @@ mod tests {
             .data
             .as_ref()
             .unwrap()
-            .select_values_and_paths(path, |_path, value| {
+            .select_values_and_paths(schema, path, |_path, value| {
                 values.push(value);
             });
 

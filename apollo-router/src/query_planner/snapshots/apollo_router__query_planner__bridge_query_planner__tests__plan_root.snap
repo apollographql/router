@@ -11,5 +11,7 @@ Fetch(
         operation_name: None,
         operation_kind: Query,
         id: None,
+        input_rewrites: None,
+        output_rewrites: None,
     },
 )

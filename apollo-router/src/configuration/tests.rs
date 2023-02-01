@@ -116,10 +116,7 @@ fn missing_subgraph_url() {
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
         assert_eq!(subgraph, "reviews");
     } else {
-        panic!(
-            "expected missing subgraph URL for 'reviews', got: {:?}",
-            schema_error
-        );
+        panic!("expected missing subgraph URL for 'reviews', got: {schema_error:?}");
     }
 }
 
@@ -229,16 +226,6 @@ fn empty_config() {
         Mode::NoUpgrade,
     )
     .expect("should have been ok with an empty config");
-}
-
-#[test]
-fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
-    let error = Configuration::fake_builder()
-        .supergraph(Supergraph::fake_builder().path("/test*").build())
-        .build()
-        .unwrap_err();
-
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
 }
 
 #[test]
@@ -635,7 +622,7 @@ fn upgrade_old_configuration() {
                     });
                 }
                 Err(e) => {
-                    panic!("migrated configuration had validation errors:\n{}\n\noriginal configuration:\n{}\n\nmigrated configuration:\n{}", e, input, new_config)
+                    panic!("migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}")
                 }
             }
         }
@@ -674,9 +661,9 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                 if k.as_str() == "properties" {
                     let properties = v.as_object().expect("properties must be an object");
                     for (k, v) in properties {
-                        let path = format!("{}.{}", path, k);
+                        let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
-                            errors.push(format!("{} was missing a description", path));
+                            errors.push(format!("{path} was missing a description"));
                         }
                         visit_schema(&path, v, errors)
                     }
@@ -844,6 +831,49 @@ impl<'de> Visitor<'de> for FieldVisitor {
 }
 
 const FIELDS: &[&str] = &["all", "subgraphs"];
+
+#[test]
+fn test_configuration_validate_and_sanitize() {
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/graphql/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(
+        &conf.supergraph.sanitized_path(),
+        "/graphql/g:supergraph_route"
+    );
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/test").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/test");
+
+    assert!(Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*/whatever").build())
+        .build()
+        .is_err());
+}
 
 #[test]
 fn test_subgraph_override() {
