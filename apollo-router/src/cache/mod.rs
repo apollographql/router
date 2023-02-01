@@ -113,7 +113,7 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.storage.insert(key, value.clone()).await;
+        self.storage.insert(key, value).await;
     }
 
     async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {

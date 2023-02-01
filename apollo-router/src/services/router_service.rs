@@ -219,9 +219,9 @@ where
                         context,
                     };
 
-                    let request_res = match apq {
+                    let request_res = match &apq {
                         None => Ok(request),
-                        Some(apq) => apq.request(request).await,
+                        Some(apq) => apq.supergraph_request(request).await,
                     };
 
                     let SupergraphResponse { response, context } =
@@ -251,10 +251,7 @@ where
                             }
                         }) {
                             Err(response) => response,
-                            Ok(request) => {
-                                let supergraph_service = supergraph_creator.create();
-                                supergraph_service.oneshot(request).await?
-                            }
+                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
                         };
 
                     let accepts_wildcard: bool = context
