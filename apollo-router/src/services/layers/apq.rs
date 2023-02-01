@@ -151,7 +151,7 @@ mod apq_tests {
     use crate::services::router_service::from_supergraph_mock_callback;
     use crate::Context;
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn it_works() {
         let hash = Cow::from("ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38");
         let hash2 = hash.clone();
@@ -243,6 +243,15 @@ mod apq_tests {
             .headers()
             .get(CACHE_CONTROL)
             .is_none());
+
+        // We need to yield here to make sure the router
+        // has had enough time to insert the full query into the apq cache.
+        //
+        // This is not needed in production for two reasons:
+        // - -- release mode will decrease the probability for a race.
+        // - if a race happens, a client will need to resubmit the full query once.
+        //      While this isn't great, subsequent queries will use APQ.
+        tokio::task::yield_now().await;
 
         let second_hash_only = SupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
