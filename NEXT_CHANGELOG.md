@@ -54,7 +54,6 @@ cors:
 
 By [@osamra-rbi](https://github.com/osamra-rbi) in https://github.com/apollographql/router/pull/2331
 
-
 ### Improved support for wildcards in `supergraph.path` configuration ([Issue #2406](https://github.com/apollographql/router/issues/2406))
 
 You can now use a wildcard in supergraph endpoint `path` like this:
@@ -197,6 +196,13 @@ struct Export {
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2424
+
+
+### Redis integration tests ([Issue #2174](https://github.com/apollographql/router/issues/2174)
+
+We now have integration tests for Redis usage with Automatic Persisted Queries and query planning.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2179
 
 ## 📃 Configuration
 
