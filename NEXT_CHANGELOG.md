@@ -284,11 +284,12 @@ In [#1573](https://github.com/apollographql/router/pull/1573), we removed the co
 Some checks however are very important and prevent us from inadvertently downgrading libraries and needing to open [#2512](https://github.com/apollographql/router/pull/2512).
 
 This PR does the following changes:
-- Introduce `cargo xtask licenses` to check if licenses.html is up to date.
-- Separate compliance (cargo-deny) and licenses generation (cargo-about) in xtask
+- Introduce `cargo xtask licenses` to check and update licenses.html.
+- Separate compliance (cargo-deny, which includes license checks) and licenses generation (cargo-about) in xtask
 - Enable compliance as part of our CI checks for each open PR
-- Enable compliance and licenses generation checks for each release PR
 - Update cargo xtask all so it checks compliance and licenses
+
+Updating licenses.html is now driven by `cargo xtask licenses`, which is part of the release checklist.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/XXX_TBD
 
