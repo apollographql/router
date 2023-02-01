@@ -119,7 +119,6 @@ impl Display for EntitlementReport {
 
 impl EntitlementReport {
     fn action(&self, state: RouterState) -> Action {
-        // A state of None indicates an OSS user
         match (state, &self.entitlement_state) {
             (RouterState::Startup, EntitlementState::Oss) => Action::PreventStartup,
             (RouterState::Running, EntitlementState::Oss) => Action::PreventReload,
