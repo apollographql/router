@@ -4,6 +4,7 @@ pub(crate) mod cors;
 mod expansion;
 mod experimental;
 mod schema;
+pub(crate) mod subgraph;
 #[cfg(test)]
 mod tests;
 mod upgrade;
