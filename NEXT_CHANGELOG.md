@@ -278,6 +278,20 @@ The `orbiter::test::test_visit_args` tests were failing in the event that `APOLL
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2488
 
+### CI: Enable compliance checks /except/ licenses.html update ([Issue #2514](https://github.com/apollographql/router/issues/2514))
+
+In [#1573](https://github.com/apollographql/router/pull/1573), we removed the compliance checks for non-release CI pipelines, because the cargo-about output would change ever so slightly.
+Some checks however are very important and prevent us from inadvertently downgrading libraries and needing to open [#2512](https://github.com/apollographql/router/pull/2512).
+
+This PR does the following changes:
+- Introduce `cargo xtask licenses` to check if licenses.html is up to date.
+- Separate compliance (cargo-deny) and licenses generation (cargo-about) in xtask
+- Enable compliance as part of our CI checks for each open PR
+- Enable compliance and licenses generation checks for each release PR
+- Update cargo xtask all so it checks compliance and licenses
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/XXX_TBD
+
 ## 🥼 Experimental
 
 ### JWT authentication ([Issue #912](https://github.com/apollographql/router/issues/912))

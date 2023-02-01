@@ -32,6 +32,9 @@ pub enum Command {
     /// Run linters for Router.
     Lint(commands::Lint),
 
+    /// Run licenses.html checks for Router.
+    Licenses(commands::Licenses),
+
     /// Run tests for Router.
     Test(commands::Test),
 
@@ -49,6 +52,7 @@ impl Xtask {
             Command::CheckCompliance(command) => command.run(),
             Command::Dist(command) => command.run(),
             Command::Lint(command) => command.run(),
+            Command::Licenses(command) => command.run(),
             Command::Test(command) => command.run(),
             Command::Package(command) => command.run(),
             Command::Release(command) => command.run(),

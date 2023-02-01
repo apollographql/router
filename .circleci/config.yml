@@ -283,6 +283,22 @@ commands:
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: cargo xtask check-compliance
 
+  xtask_check_licenses:
+    parameters:
+      os:
+        type: string
+    steps:
+      - restore_cache:
+          name: Restore .cargo
+          keys:
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+      - install_extra_tools:
+          os: << parameters.os >>
+      # cargo-about fetches a rustsec advisory DB, which has to happen on github.com over https
+      - run: git config --global --unset-all url.ssh://git@github.com.insteadof
+      - run: cargo xtask licenses
+
   windows_test_workspace:
     steps:
       - run:
@@ -378,6 +394,24 @@ jobs:
           steps:
             - linux_amd_install_baseline
             - xtask_check_compliance:
+                os: linux_amd
+  check_compliance_release:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - when:
+          condition:
+            equal: [*amd_linux_build_executor, << parameters.platform >>]
+          steps:
+            - linux_amd_install_baseline
+            - xtask_check_compliance:
+                os: linux_amd
+            - xtask_check_licenses:
                 os: linux_amd
   test:
     environment:
@@ -670,15 +704,10 @@ workflows:
             parameters:
               platform: [amd_linux_build]
 
-      # check-compliance is disabled for now because it is flaky
-      # `cargo about` seems to be non-deterministic and sometimes
-      # produces a different licenses.html file even though dependencies haven’t changed.
-      # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
-
-      # - check_compliance:
-      #     matrix:
-      #       parameters:
-      #         platform: [linux]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [amd_linux_build]
 
       - test_updated:
           requires:
@@ -744,7 +773,18 @@ workflows:
     when:
       not: << pipeline.parameters.nightly >>
     jobs:
+      - check_compliance_release:
+          matrix:
+            parameters:
+              platform:
+                [amd_linux_build]
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /v.*/
       - build_release:
+          requires: [check_compliance_release]
           matrix:
             parameters:
               platform:
