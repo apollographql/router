@@ -10,7 +10,7 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() {
-        let client = Client::open("redis://:router@127.0.0.1:6379").expect("opening ClusterClient");
+        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
         let mut connection = client
             .get_async_connection()
             .await
