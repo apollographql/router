@@ -81,6 +81,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) body: Option<T>,
     pub(crate) context: Option<Context>,
     pub(crate) sdl: Option<String>,
+    pub(crate) uri: Option<String>,
 }
 
 impl<T> Externalizable<T>
@@ -93,6 +94,7 @@ where
         body: Option<T>,
         context: Option<Context>,
         sdl: Option<String>,
+        uri: Option<String>,
     ) -> Self {
         Self {
             version: EXTERNALIZABLE_VERSION,
@@ -103,6 +105,7 @@ where
             body,
             context,
             sdl,
+            uri,
         }
     }
 
