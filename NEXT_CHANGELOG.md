@@ -278,6 +278,17 @@ The `orbiter::test::test_visit_args` tests were failing in the event that `APOLL
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2488
 
+### Yield in the APQ test to prevent flakiness.
+
+The APQ test would sometimes fail because we would make an APQ request before the router had enough time to insert the full query in the APQ cache. This commit introduces a yield to the test.
+
+This is not needed in production for two reasons:
+
+- `-- release` mode will decrease the probability for a race.
+- If a race happens, a client will need to resubmit the full query once. While this isn't great, subsequent queries will use APQ.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2519
+
 ## 🥼 Experimental
 
 ### JWT authentication ([Issue #912](https://github.com/apollographql/router/issues/912))
