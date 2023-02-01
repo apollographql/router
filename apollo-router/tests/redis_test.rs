@@ -10,10 +10,11 @@ mod test {
     use serde::Deserialize;
     use serde::Serialize;
     use serde_json::json;
+    use tower::BoxError;
     use tower::ServiceExt;
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn query_planner() {
+    async fn query_planner() -> Result<(), BoxError> {
         let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
         let mut connection = client
             .get_async_connection()
@@ -40,26 +41,17 @@ mod test {
                         }
                     }
                 }
-            }))
-            .unwrap()
+            }))?
             .schema(include_str!("fixtures/supergraph.graphql"))
             .build_supergraph()
-            .await
-            .unwrap();
+            .await?;
 
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name name2:name } }"#)
             .method(Method::POST)
-            .build()
-            .unwrap();
+            .build()?;
 
-        let res = supergraph
-            .oneshot(request)
-            .await
-            .unwrap()
-            .next_response()
-            .await
-            .unwrap();
+        let res = supergraph.oneshot(request).await?.next_response().await;
 
         println!("got res: {:?}", res);
 
@@ -79,10 +71,11 @@ mod test {
             .unwrap()
             .get("plan")
             .unwrap()
-            .get("root")
-            .unwrap();
+            .get("root");
 
         insta::assert_json_snapshot!(query_plan);
+
+        Ok(())
     }
 
     #[derive(Deserialize, Serialize)]
@@ -92,7 +85,7 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn apq() {
+    async fn apq() -> Result<(), BoxError> {
         let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
         let mut connection = client
             .get_async_connection()
@@ -116,12 +109,10 @@ mod test {
 
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
-            .configuration_json(config.clone())
-            .unwrap()
+            .configuration_json(config.clone())?
             .schema(include_str!("fixtures/supergraph.graphql"))
             .build_router()
-            .await
-            .unwrap();
+            .await?;
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
@@ -140,22 +131,19 @@ mod test {
         let request: router::Request = supergraph::Request::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
-            .build()
-            .unwrap()
+            .build()?
             .try_into()
             .unwrap();
 
         let res = router
             .clone()
             .oneshot(request)
-            .await
-            .unwrap()
+            .await?
             .into_graphql_response_stream()
             .await
             .next()
             .await
-            .unwrap()
-            .unwrap();
+            .unwrap()?;
         assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
 
         println!("got res: {:?}", res);
@@ -172,22 +160,19 @@ mod test {
             .query(r#"{ topProducts { name name2:name } }"#)
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
-            .build()
-            .unwrap()
+            .build()?
             .try_into()
             .unwrap();
 
         let res = router
             .clone()
             .oneshot(request)
-            .await
-            .unwrap()
+            .await?
             .into_graphql_response_stream()
             .await
             .next()
             .await
-            .unwrap()
-            .unwrap();
+            .unwrap()?;
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
         println!("got res: {:?}", res);
@@ -202,35 +187,32 @@ mod test {
         // it should have the same connection to Redis, but the in memory cache has been reset
         let router = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
-            .configuration_json(config.clone())
-            .unwrap()
+            .configuration_json(config.clone())?
             .schema(include_str!("fixtures/supergraph.graphql"))
             .build_router()
-            .await
-            .unwrap();
+            .await?;
 
         // a request with only the hash should succeed because it is stored in Redis
         let request: router::Request = supergraph::Request::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
-            .build()
-            .unwrap()
+            .build()?
             .try_into()
             .unwrap();
 
         let res = router
             .clone()
             .oneshot(request)
-            .await
-            .unwrap()
+            .await?
             .into_graphql_response_stream()
             .await
             .next()
             .await
-            .unwrap()
-            .unwrap();
+            .unwrap()?;
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
         println!("got res: {:?}", res);
+
+        Ok(())
     }
 }
