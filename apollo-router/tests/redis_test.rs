@@ -1,6 +1,5 @@
 #[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 mod test {
-    use apollo_router::graphql;
     use apollo_router::services::execution::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
@@ -68,8 +67,22 @@ mod test {
           .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
-        let query_plan: QueryPlannerContent = serde_json::from_str(&s).unwrap();
-        insta::assert_json_snapshot!(serde_json::to_value(query_plan).unwrap());
+        println!("got from redis: {s}");
+        let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
+        let query_plan: QueryPlan = serde_json::from_value(
+            query_plan_res
+                .as_object()
+                .unwrap()
+                .get("Ok")
+                .unwrap()
+                .get("Plan")
+                .unwrap()
+                .get("plan")
+                .unwrap()
+                .clone(),
+        )
+        .unwrap();
+        insta::assert_debug_snapshot!(query_plan);
     }
 
     #[derive(Deserialize, Serialize)]
