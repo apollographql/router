@@ -70,7 +70,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
     for action in &migration.actions {
         match action {
             Action::Delete { path } => {
-                if !jsonpath_lib::select(config, &format!("$.{}", path))
+                if !jsonpath_lib::select(config, &format!("$.{path}"))
                     .unwrap_or_default()
                     .is_empty()
                 {
@@ -81,7 +81,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Copy { from, to } => {
-                if !jsonpath_lib::select(config, &format!("$.{}", from))
+                if !jsonpath_lib::select(config, &format!("$.{from}"))
                     .unwrap_or_default()
                     .is_empty()
                 {
@@ -90,7 +90,7 @@ fn apply_migration(config: &Value, migration: &Migration) -> Result<Value, Confi
                 }
             }
             Action::Move { from, to } => {
-                if !jsonpath_lib::select(config, &format!("$.{}", from))
+                if !jsonpath_lib::select(config, &format!("$.{from}"))
                     .unwrap_or_default()
                     .is_empty()
                 {
@@ -156,28 +156,28 @@ pub(crate) fn generate_upgrade_output(
                 let trimmed = l.trim();
                 if !trimmed.starts_with('#') && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "-{}", l).expect("write will never fail");
+                        writeln!(output, "-{l}").expect("write will never fail");
                     }
                 } else if diff {
-                    writeln!(output, " {}", l).expect("write will never fail");
+                    writeln!(output, " {l}").expect("write will never fail");
                 } else {
-                    writeln!(output, "{}", l).expect("write will never fail");
+                    writeln!(output, "{l}").expect("write will never fail");
                 }
             }
             diff::Result::Both(l, _) => {
                 if diff {
-                    writeln!(output, " {}", l).expect("write will never fail");
+                    writeln!(output, " {l}").expect("write will never fail");
                 } else {
-                    writeln!(output, "{}", l).expect("write will never fail");
+                    writeln!(output, "{l}").expect("write will never fail");
                 }
             }
             diff::Result::Right(r) => {
                 let trimmed = r.trim();
                 if trimmed != "---" && !trimmed.is_empty() {
                     if diff {
-                        writeln!(output, "+{}", r).expect("write will never fail");
+                        writeln!(output, "+{r}").expect("write will never fail");
                     } else {
-                        writeln!(output, "{}", r).expect("write will never fail");
+                        writeln!(output, "{r}").expect("write will never fail");
                     }
                 }
             }

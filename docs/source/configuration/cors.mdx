@@ -112,6 +112,11 @@ cors:
   # Which response headers are available to scripts running in the
   # browser in response to a cross-origin request.
   expose_headers: []
+
+  # Adds the Access-Control-Max-Age header
+  # Can be set to a duration in time units 
+  # If not set, the header is not included
+  max_age: 2h
 ```
 
 ## Response `Vary` header

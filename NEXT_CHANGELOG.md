@@ -10,6 +10,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## 🚀 Features
 ## 🐛 Fixes
 ## 📃 Configuration
+Configuration changes will be [automatically migrated on load](https://www.apollographql.com/docs/router/configuration/overview#upgrading-your-router-configuration). However, you should update your source configuration files as these will become breaking changes in a future major release.
 ## 🛠 Maintenance
 ## 📚 Documentation
 ## 🥼 Experimental

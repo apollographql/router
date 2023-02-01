@@ -17,11 +17,9 @@ use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
-use super::QueryPlanOptions;
 use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::introspection::Introspection;
-use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -41,7 +39,6 @@ pub(crate) struct BridgeQueryPlanner {
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
-    deduplicate_variables: bool,
 }
 
 impl BridgeQueryPlanner {
@@ -50,9 +47,6 @@ impl BridgeQueryPlanner {
         introspection: Option<Arc<Introspection>>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
-        // FIXME: The variables deduplication parameter lives in the traffic_shaping section of the config
-        let deduplicate_variables =
-            TrafficShaping::get_configuration_deduplicate_variables(&configuration);
         Ok(Self {
             planner: Arc::new(
                 Planner::new(
@@ -68,7 +62,6 @@ impl BridgeQueryPlanner {
             schema,
             introspection,
             configuration,
-            deduplicate_variables,
         })
     }
 
@@ -134,9 +127,6 @@ impl BridgeQueryPlanner {
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
-                        options: QueryPlanOptions {
-                            enable_deduplicate_variables: self.deduplicate_variables,
-                        },
                     }),
                 })
             }
@@ -366,7 +356,7 @@ mod tests {
                 });
             }
             e => {
-                panic!("empty plan should have returned an EmptyPlanError: {:?}", e);
+                panic!("empty plan should have returned an EmptyPlanError: {e:?}");
             }
         }
     }

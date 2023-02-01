@@ -17,15 +17,13 @@ static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
 /// Configuration for exposing errors that originate from subgraphs
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
     /// Include errors from all subgraphs
-    #[serde(default)]
     all: bool,
 
     /// Include errors from specific subgraphs
-    #[serde(default)]
     subgraphs: HashMap<String, bool>,
 }
 
@@ -159,8 +157,8 @@ mod test {
 
         let account_mocks = vec![
             (
-                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
-                r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"},{"name":"Ada Lovelace"}]}}"#
+                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"}]}}"#
             )
         ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
         let account_service = MockSubgraph::new(account_mocks);
@@ -179,8 +177,8 @@ mod test {
                 r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
             ),
             (
-                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
-                r#"{"data":{"_entities":[{"name":"Table"},{"name":"Table"},{"name":"Couch"}]}}"#
+                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Table"},{"name":"Couch"}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
 

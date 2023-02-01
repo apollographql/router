@@ -186,7 +186,7 @@ where
                         graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
                             (
                                 "failed to decode a valid GraphQL request from path",
-                                format!("failed to decode a valid GraphQL request from path {}", e),
+                                format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })
                     })
@@ -199,17 +199,14 @@ where
                     .map_err(|e| {
                         (
                             "failed to get the request body",
-                            format!("failed to get the request body: {}", e),
+                            format!("failed to get the request body: {e}"),
                         )
                     })
                     .and_then(|bytes| {
                         serde_json::from_reader(bytes.reader()).map_err(|err| {
                             (
                                 "failed to deserialize the request body into JSON",
-                                format!(
-                                    "failed to deserialize the request body into JSON: {}",
-                                    err
-                                ),
+                                format!("failed to deserialize the request body into JSON: {err}"),
                             )
                         })
                     })
@@ -222,9 +219,9 @@ where
                         context,
                     };
 
-                    let request_res = match apq {
+                    let request_res = match &apq {
                         None => Ok(request),
-                        Some(apq) => apq.request(request).await,
+                        Some(apq) => apq.supergraph_request(request).await,
                     };
 
                     let SupergraphResponse { response, context } =
@@ -254,10 +251,7 @@ where
                             }
                         }) {
                             Err(response) => response,
-                            Ok(request) => {
-                                let supergraph_service = supergraph_creator.create();
-                                supergraph_service.oneshot(request).await?
-                            }
+                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
                         };
 
                     let accepts_wildcard: bool = context

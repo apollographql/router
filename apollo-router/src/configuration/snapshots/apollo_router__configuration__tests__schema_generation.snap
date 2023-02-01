@@ -26,7 +26,7 @@ expression: "&schema"
               "description": "The JWT configuration",
               "type": "object",
               "required": [
-                "jwks_url"
+                "jwks_urls"
               ],
               "properties": {
                 "cooldown": {
@@ -44,9 +44,12 @@ expression: "&schema"
                   "default": "Bearer",
                   "type": "string"
                 },
-                "jwks_url": {
-                  "description": "Retrieve our JWK Set from here",
-                  "type": "string"
+                "jwks_urls": {
+                  "description": "Retrieve our JWK Sets from these locations",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }
@@ -69,7 +72,8 @@ expression: "&schema"
           "GET",
           "POST",
           "OPTIONS"
-        ]
+        ],
+        "max_age": null
       },
       "type": "object",
       "properties": {
@@ -108,6 +112,11 @@ expression: "&schema"
             "type": "string"
           },
           "nullable": true
+        },
+        "max_age": {
+          "description": "The `Access-Control-Max-Age` header value in time units",
+          "default": null,
+          "type": "string"
         },
         "methods": {
           "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
@@ -548,7 +557,7 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "health-check": {
+    "health_check": {
       "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
@@ -2312,11 +2321,13 @@ expression: "&schema"
                   "properties": {
                     "ca": {
                       "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
                       "description": "The optional cert for tls config",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2328,6 +2339,7 @@ expression: "&schema"
                     },
                     "key": {
                       "description": "The optional private key file for TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2758,11 +2770,13 @@ expression: "&schema"
                   "properties": {
                     "ca": {
                       "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
                       "description": "The optional cert for tls config",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -2774,6 +2788,7 @@ expression: "&schema"
                     },
                     "key": {
                       "description": "The optional private key file for TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
@@ -3278,7 +3293,8 @@ expression: "&schema"
           "nullable": true
         },
         "deduplicate_variables": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "default": null,
           "type": "boolean",
           "nullable": true
         },

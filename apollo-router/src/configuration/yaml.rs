@@ -244,7 +244,7 @@ mod test {
 "#;
         let parsed = parse(yaml).unwrap();
         let root = parsed.root().unwrap();
-        assert_snapshot!(format!("{:#?}", root));
+        assert_snapshot!(format!("{root:#?}"));
     }
 
     #[test]

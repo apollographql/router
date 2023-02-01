@@ -69,7 +69,7 @@ impl Introspection {
             },
         )
         .map_err(|err| IntrospectionError {
-            message: format!("Deno runtime error: {:?}", err).into(),
+            message: format!("Deno runtime error: {err:?}").into(),
         })??;
         let introspection_result = response
             .pop()

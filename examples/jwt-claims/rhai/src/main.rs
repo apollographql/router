@@ -89,7 +89,7 @@ mod tests {
             "authentication": {
                 "experimental" : {
                     "jwt": {
-                        "jwks_url": &jwks_url
+                        "jwks_urls": [&jwks_url]
                     }
                 }
             }
