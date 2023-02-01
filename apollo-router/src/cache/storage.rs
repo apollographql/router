@@ -65,7 +65,6 @@ where
         Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
-
             redis: if let Some(urls) = _redis_urls {
                 match RedisCacheStorage::new(urls, None).await {
                     Err(e) => {
