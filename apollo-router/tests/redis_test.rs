@@ -69,20 +69,20 @@ mod test {
           .unwrap();
         println!("got from redis: {s}");
         let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
-        let query_plan: QueryPlan = serde_json::from_value(
-            query_plan_res
-                .as_object()
-                .unwrap()
-                .get("Ok")
-                .unwrap()
-                .get("Plan")
-                .unwrap()
-                .get("plan")
-                .unwrap()
-                .clone(),
-        )
-        .unwrap();
-        insta::assert_debug_snapshot!(query_plan);
+        // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
+        let query_plan = query_plan_res
+            .as_object()
+            .unwrap()
+            .get("Ok")
+            .unwrap()
+            .get("Plan")
+            .unwrap()
+            .get("plan")
+            .unwrap()
+            .get("root")
+            .unwrap();
+
+        insta::assert_json_snapshot!(query_plan);
     }
 
     #[derive(Deserialize, Serialize)]

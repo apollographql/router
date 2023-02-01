@@ -2,82 +2,14 @@
 source: apollo-router/tests/redis_test.rs
 expression: query_plan
 ---
-QueryPlan {
-    usage_reporting: UsageReporting {
-        stats_report_key: "# -\n{topProducts{name name}}",
-        referenced_fields_by_type: {
-            "Product": ReferencedFieldsForType {
-                field_names: [
-                    "name",
-                ],
-                is_interface: false,
-            },
-            "Query": ReferencedFieldsForType {
-                field_names: [
-                    "topProducts",
-                ],
-                is_interface: false,
-            },
-        },
-    },
-    root: Fetch(
-        FetchNode {
-            service_name: "products",
-            requires: [],
-            variable_usages: [],
-            operation: "{topProducts{name name2:name}}",
-            operation_name: None,
-            operation_kind: Query,
-            id: None,
-            input_rewrites: None,
-            output_rewrites: None,
-        },
-    ),
-    formatted_query_plan: Some(
-        "QueryPlan {\n  Fetch(service: \"products\") {\n    {\n      topProducts {\n        name\n        name2: name\n      }\n    }\n  },\n}",
-    ),
-    query: Query:
-      string: "{ topProducts { name name2:name } }"
-      fragments:
-      operations:
-        - name: None
-          kind: Query
-          selection_set: [
-        Field {
-            name: "topProducts",
-            alias: None,
-            selection_set: Some(
-                [
-                    Field {
-                        name: "name",
-                        alias: None,
-                        selection_set: None,
-                        field_type: String,
-                        skip: No,
-                        include: Yes,
-                    },
-                    Field {
-                        name: "name",
-                        alias: Some(
-                            "name2",
-                        ),
-                        selection_set: None,
-                        field_type: String,
-                        skip: No,
-                        include: Yes,
-                    },
-                ],
-            ),
-            field_type: List(
-                Named(
-                    "Product",
-                ),
-            ),
-            skip: No,
-            include: Yes,
-        },
-    ]
-          variables:
-      subselections: {}
-    ,
+{
+  "kind": "Fetch",
+  "serviceName": "products",
+  "variableUsages": [],
+  "operation": "{topProducts{name name2:name}}",
+  "operationName": null,
+  "operationKind": "query",
+  "id": null,
+  "inputRewrites": null,
+  "outputRewrites": null
 }
