@@ -2,7 +2,9 @@
 mod test {
     use apollo_router::graphql;
     use apollo_router::services::execution::QueryPlan;
+    use apollo_router::services::router;
     use apollo_router::services::supergraph;
+    use futures::StreamExt;
     use http::Method;
     use redis::AsyncCommands;
     use redis::Client;
@@ -24,21 +26,27 @@ mod test {
           .await
           .unwrap();
 
-        let router = setup_router(json!({
-            "supergraph": {
-                "query_planning": {
-                    "experimental_cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            "urls": ["redis://127.0.0.1:6379"]
+        let supergraph = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(json!({
+                "supergraph": {
+                    "query_planning": {
+                        "experimental_cache": {
+                            "in_memory": {
+                                "limit": 2
+                            },
+                            "redis": {
+                                "urls": ["redis://127.0.0.1:6379"]
+                            }
                         }
                     }
                 }
-            }
-        }))
-        .await;
+            }))
+            .unwrap()
+            .schema(include_str!("fixtures/supergraph.graphql"))
+            .build_supergraph()
+            .await
+            .unwrap();
 
         let request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name name2:name } }"#)
@@ -46,7 +54,13 @@ mod test {
             .build()
             .unwrap();
 
-        let res = query_with_router(router.clone(), request).await;
+        let res = supergraph
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
 
         println!("got res: {:?}", res);
 
@@ -87,7 +101,14 @@ mod test {
             }
         });
 
-        let router = setup_router(config.clone()).await;
+        let router = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(config.clone())
+            .unwrap()
+            .schema(include_str!("fixtures/supergraph.graphql"))
+            .build_router()
+            .await
+            .unwrap();
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
@@ -103,13 +124,25 @@ mod test {
 
         // an APQ should fail if we do not know about the hash
         // it should not set a value in Redis
-        let request = supergraph::Request::fake_builder()
+        let request: router::Request = supergraph::Request::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
             .build()
+            .unwrap()
+            .try_into()
             .unwrap();
 
-        let res = query_with_router(router.clone(), request).await;
+        let res = router
+            .clone()
+            .oneshot(request)
+            .await
+            .unwrap()
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
 
         println!("got res: {:?}", res);
@@ -122,14 +155,26 @@ mod test {
 
         // Now we register the query
         // it should set a value in Redis
-        let request = supergraph::Request::fake_builder()
+        let request: router::Request = supergraph::Request::fake_builder()
             .query(r#"{ topProducts { name name2:name } }"#)
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
             .build()
+            .unwrap()
+            .try_into()
             .unwrap();
 
-        let res = query_with_router(router.clone(), request).await;
+        let res = router
+            .clone()
+            .oneshot(request)
+            .await
+            .unwrap()
+            .into_graphql_response_stream()
+            .await
+            .next()
+            .await
+            .unwrap()
+            .unwrap();
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
         println!("got res: {:?}", res);
@@ -142,42 +187,37 @@ mod test {
 
         // we start a new router with the same config
         // it should have the same connection to Redis, but the in memory cache has been reset
-        let router = setup_router(config.clone()).await;
+        let router = apollo_router::TestHarness::builder()
+            .with_subgraph_network_requests()
+            .configuration_json(config.clone())
+            .unwrap()
+            .schema(include_str!("fixtures/supergraph.graphql"))
+            .build_router()
+            .await
+            .unwrap();
 
         // a request with only the hash should succeed because it is stored in Redis
-        let request = supergraph::Request::fake_builder()
+        let request: router::Request = supergraph::Request::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .method(Method::POST)
             .build()
+            .unwrap()
+            .try_into()
             .unwrap();
 
-        let res = query_with_router(router.clone(), request).await;
-        assert!(res.data.is_some());
-        assert!(res.errors.is_empty());
-        println!("got res: {:?}", res);
-    }
-
-    async fn setup_router(config: serde_json::Value) -> supergraph::BoxCloneService {
-        apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(config)
-            .unwrap()
-            .schema(include_str!("fixtures/supergraph.graphql"))
-            .build_supergraph()
-            .await
-            .unwrap()
-    }
-
-    async fn query_with_router(
-        router: supergraph::BoxCloneService,
-        request: supergraph::Request,
-    ) -> graphql::Response {
-        router
+        let res = router
+            .clone()
             .oneshot(request)
             .await
             .unwrap()
-            .next_response()
+            .into_graphql_response_stream()
+            .await
+            .next()
             .await
             .unwrap()
+            .unwrap();
+        assert!(res.data.is_some());
+        assert!(res.errors.is_empty());
+        println!("got res: {:?}", res);
     }
 }
