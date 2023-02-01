@@ -154,7 +154,7 @@ impl FromStr for Entitlement {
                 let mut validation = Validation::new(
                     jwk.common
                         .algorithm
-                        .expect("alg is required on all keys in router.jwks"),
+                        .expect("alg is required on all keys in router.jwks.json"),
                 );
                 validation.validate_exp = false;
                 validation.set_required_spec_claims(&["iss", "sub", "aud", "warnAt", "haltAt"]);
@@ -163,7 +163,7 @@ impl FromStr for Entitlement {
 
                 decode::<Claims>(
                     jwt,
-                    &DecodingKey::from_jwk(jwk).expect("router.jwks must be valid"),
+                    &DecodingKey::from_jwk(jwk).expect("router.jwks.json must be valid"),
                     &validation,
                 )
                 .map_err(Error::InvalidEntitlement)
