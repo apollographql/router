@@ -245,12 +245,7 @@ mod apq_tests {
             .is_none());
 
         // We need to yield here to make sure the router
-        // has had enough time to insert the full query into the apq cache.
-        //
-        // This is not needed in production for two reasons:
-        // - -- release mode will decrease the probability for a race.
-        // - if a race happens, a client will need to resubmit the full query once.
-        //      While this isn't great, subsequent queries will use APQ.
+        // runs the Drop implementation of the deduplicating cache Entry.
         tokio::task::yield_now().await;
 
         let second_hash_only = SupergraphRequest::fake_builder()
