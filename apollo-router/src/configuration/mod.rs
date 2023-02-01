@@ -621,7 +621,7 @@ impl Default for InMemoryCache {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {

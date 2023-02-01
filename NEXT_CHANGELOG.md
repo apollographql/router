@@ -24,3 +24,13 @@ Description! And a link to a [reference](http://url)
 By [@USERNAME](https://github.com/USERNAME) in https://github.com/apollographql/router/pull/PULL_NUMBER
 </KEEP> -->
 
+## 🚀 Features
+
+### Subgraph entity caching ([PR #](https://github.com/apollographql/router/pull/))
+
+First pass implementation of subgraph entity caching. This will cache individual queries returned by
+federated queries (not root operations), separated in the cache by type, key, subgraph query,
+root operation and variables.
+This is only an in memory LRU cache with 1024 entries, and does not support invalidation.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/
