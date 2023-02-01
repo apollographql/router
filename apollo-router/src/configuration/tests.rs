@@ -9,6 +9,7 @@ use regex::Regex;
 use rust_embed::RustEmbed;
 #[cfg(unix)]
 use schemars::gen::SchemaSettings;
+use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
@@ -672,24 +673,6 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-struct TestSubgraphOverride {
-    value: Option<u8>,
-    subgraph: SubgraphConfiguration<PluginConfig>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-struct PluginConfig {
-    #[serde(default = "set_true")]
-    a: bool,
-    #[serde(default)]
-    b: u8,
-}
-
-fn set_true() -> bool {
-    true
-}
-
 #[test]
 fn test_configuration_validate_and_sanitize() {
     let conf = Configuration::builder()
@@ -733,6 +716,24 @@ fn test_configuration_validate_and_sanitize() {
         .is_err());
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct TestSubgraphOverride {
+    value: Option<u8>,
+    subgraph: SubgraphConfiguration<PluginConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct PluginConfig {
+    #[serde(default = "set_true")]
+    a: bool,
+    #[serde(default)]
+    b: u8,
+}
+
+fn set_true() -> bool {
+    true
+}
+
 #[test]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
@@ -772,7 +773,7 @@ fn test_subgraph_override_json() {
             },
             "subgraphs": {
                 "products": {
-                    "b": 0
+                    "b": 1
                 }
             }
         }
@@ -788,7 +789,7 @@ fn test_subgraph_override_json() {
         "subgraph": {
             "subgraphs": {
                 "products": {
-                    "b": 0
+                    "b": 1
                 }
             },
             "all": {
@@ -801,5 +802,4 @@ fn test_subgraph_override_json() {
     assert!(!data.subgraph.all.a);
     // since products did not set the `a` field, it should take the override value from `all`
     assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
-    panic!()
 }
