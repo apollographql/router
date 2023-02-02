@@ -97,7 +97,7 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
 }
 
 #[allow(clippy::type_complexity)]
-pub(super) fn reload_tracing(
+pub(super) fn reload_fmt(
     layer: Box<
         dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
             + Send

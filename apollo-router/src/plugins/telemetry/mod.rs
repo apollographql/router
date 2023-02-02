@@ -55,8 +55,8 @@ use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+use self::reload::reload_fmt;
 use self::reload::reload_metrics;
-use self::reload::reload_tracing;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
@@ -242,7 +242,7 @@ impl Plugin for Telemetry {
         }
 
         reload_metrics(MetricsLayer::new(&self.meter_provider));
-        reload_tracing(Self::create_fmt_layer(&self.config));
+        reload_fmt(Self::create_fmt_layer(&self.config));
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
