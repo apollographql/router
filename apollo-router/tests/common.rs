@@ -105,6 +105,8 @@ impl IntegrationTest {
                 "--supergraph",
                 &PathBuf::from_iter(["..", "examples", "graphql", "local.graphql"])
                     .to_string_lossy(),
+                "--log",
+                "error,apollo_router=info",
             ])
             .stdout(Stdio::piped())
             .spawn()
@@ -239,7 +241,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_reloaded(&mut self) {
-        self.assert_log_contains("reloaded").await;
+        self.assert_log_contains("reload complete").await;
     }
 
     #[allow(dead_code)]

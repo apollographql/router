@@ -28,7 +28,7 @@ async fn test_invalid_config() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_reload_config() -> Result<(), BoxError> {
+async fn test_reload_config_valid() -> Result<(), BoxError> {
     let mut router = create_router(HAPPY_CONFIG).await?;
     router.start().await;
     router.assert_started().await;
