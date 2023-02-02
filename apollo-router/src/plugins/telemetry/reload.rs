@@ -4,6 +4,7 @@ use once_cell::sync::OnceCell;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use tower::BoxError;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
@@ -71,18 +72,21 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let (metrics_layer, metrics_handle) =
         tracing_subscriber::reload::Layer::new(MetricsLayer::new(&NoopMeterProvider::default()));
 
-    // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
-    tracing_subscriber::registry()
-        .with(opentelemetry_layer)
-        .with(fmt_layer)
-        .with(metrics_layer)
-        .with(EnvFilter::try_new(log_level)?)
-        .try_init()?;
-
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
-        .set(hot_tracer)
-        .map_err(|_| anyhow!("failed to set OpenTelemetry tracer"))?;
+        .get_or_try_init(move || {
+            // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
+            // the tracing registry is only created once
+            tracing_subscriber::registry()
+                .with(opentelemetry_layer)
+                .with(fmt_layer)
+                .with(metrics_layer)
+                .with(EnvFilter::try_new(log_level)?)
+                .try_init()?;
+
+            Ok(hot_tracer)
+        })
+        .map_err(|e: BoxError| anyhow!("failed to set OpenTelemetry tracer: {e}"))?;
     METRICS_LAYER_HANDLE
         .set(metrics_handle)
         .map_err(|_| anyhow!("failed to set metrics layer handle"))?;
