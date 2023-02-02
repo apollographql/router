@@ -246,7 +246,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_not_reloaded(&mut self) {
-        self.assert_log_contains("keeping previous configuration")
+        self.assert_log_contains("continuing with previous configuration")
             .await;
     }
 
