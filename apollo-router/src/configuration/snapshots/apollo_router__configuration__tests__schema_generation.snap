@@ -718,6 +718,70 @@ expression: "&schema"
                     }
                   },
                   "nullable": true
+                },
+                "subgraph": {
+                  "description": "The subgraph stage",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "request": {
+                      "description": "What information is passed to a request/response stage",
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "description": "Send the body",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "context": {
+                          "description": "Send the context",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "headers": {
+                          "description": "Send the headers",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "sdl": {
+                          "description": "Send the SDL",
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "nullable": true
+                    },
+                    "response": {
+                      "description": "What information is passed to a request/response stage",
+                      "default": null,
+                      "type": "object",
+                      "properties": {
+                        "body": {
+                          "description": "Send the body",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "context": {
+                          "description": "Send the context",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "headers": {
+                          "description": "Send the headers",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "sdl": {
+                          "description": "Send the SDL",
+                          "default": false,
+                          "type": "boolean"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "nullable": true
                 }
               },
               "nullable": true

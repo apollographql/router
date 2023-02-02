@@ -159,7 +159,7 @@ impl Plugin for ExternalPlugin {
                         request.context.enter_active_request().await;
 
                         // Second, call our co-processor and get a reply.
-                        let res = call_external(
+                        let res = call_external_router(
                             proto_url,
                             timeout,
                             PipelineStep::RouterRequest,
@@ -167,7 +167,6 @@ impl Plugin for ExternalPlugin {
                             payload,
                             context,
                             sdl,
-                            None,
                         )
                         .await;
 
@@ -279,7 +278,7 @@ impl Plugin for ExternalPlugin {
                     )?;
 
                     // Second, call our co-processor and get a reply.
-                    let co_processor_output = call_external(
+                    let co_processor_output = call_external_router(
                         proto_url,
                         timeout,
                         PipelineStep::RouterResponse,
@@ -287,7 +286,6 @@ impl Plugin for ExternalPlugin {
                         payload,
                         context,
                         sdl,
-                        None,
                     )
                     .await?;
 
@@ -385,7 +383,7 @@ impl Plugin for ExternalPlugin {
                         )?;
 
                         // Second, call our co-processor and get a reply.
-                        let co_processor_output = call_external(
+                        let co_processor_output = call_external_subgraph(
                             proto_url,
                             timeout,
                             PipelineStep::SubgraphRequest,
@@ -506,7 +504,7 @@ impl Plugin for ExternalPlugin {
                     )?;
 
                     // Second, call our co-processor and get a reply.
-                    let co_processor_output = call_external(
+                    let co_processor_output = call_external_subgraph(
                         proto_url,
                         timeout,
                         PipelineStep::SubgraphResponse,
@@ -605,7 +603,33 @@ fn prepare_external_params<'a>(
     Ok((headers_opt, payload_opt, context_opt, sdl_opt))
 }
 
-async fn call_external<T>(
+// TODO: exploit the PipelineStage enum for this,
+// it has all of the relevant configuration
+async fn call_external_router<T>(
+    url: String,
+    timeout: Option<Duration>,
+    stage: PipelineStep,
+    headers: Option<&HeaderMap<HeaderValue>>,
+    payload: Option<T>,
+    context: Option<Context>,
+    sdl: Option<String>,
+) -> Result<Externalizable<T>, BoxError>
+where
+    T: fmt::Debug + DeserializeOwned + Serialize + Send + Sync + 'static,
+{
+    let mut converted_headers = None;
+    if let Some(hdrs) = headers {
+        converted_headers = Some(externalize_header_map(hdrs)?);
+    };
+    let output = Externalizable::new(stage, converted_headers, payload, context, sdl, None);
+    tracing::debug!(?output, "externalized output");
+    output.call(&url, timeout).await
+}
+
+// TODO: exploit the PipelineStage enum for this,
+// it has all of the relevant configuration
+#[allow(clippy::too_many_arguments)]
+async fn call_external_subgraph<T>(
     url: String,
     timeout: Option<Duration>,
     stage: PipelineStep,

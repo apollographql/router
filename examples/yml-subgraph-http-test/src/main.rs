@@ -12,7 +12,7 @@ use anyhow::Result;
 // you can use the plugin by adding it to `router.yml`
 mod echo_co_processor;
 
-// `APOLLO_KEY="YOUR_APOLLO_KEY" APOLLO_GRAPH_REF="YOUR APOLLO GRAPH REF" cargo run -- -c ./router.yaml`
+// `APOLLO_KEY="YOUR_APOLLO_KEY" APOLLO_GRAPH_REF="YOUR_APOLLO_GRAPH_REF" cargo run -- -c ./router.yaml`
 fn main() -> Result<()> {
     apollo_router::main()
 }
