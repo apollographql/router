@@ -284,7 +284,7 @@ impl IntegrationTest {
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
     }
 
-    #[allow(dead_code)]
+    #[cfg(unix)]
     pub fn dump_stack_traces(&mut self) {
         if let Ok(trace) = rstack::TraceOptions::new()
             .symbols(true)
@@ -310,6 +310,8 @@ impl IntegrationTest {
             println!("failed to dump stack trace");
         }
     }
+    #[cfg(not(unix))]
+    pub fn dump_stack_traces(&mut self) {}
 }
 
 impl Drop for IntegrationTest {

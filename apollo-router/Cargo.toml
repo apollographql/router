@@ -221,7 +221,6 @@ reqwest = { version = "0.11.14", default-features = false, features = [
     "json",
     "stream",
 ] }
-rstack = { version = "0.3.2", features = ["dw"], default-features = false }
 similar-asserts = "1.4.2"
 tempfile = "3.3.0"
 test-binary = "2.0.0"
@@ -230,6 +229,10 @@ test-log = { version = "0.2.11", default-features = false, features = [
 ] }
 test-span = "0.7"
 tower-test = "0.4.0"
+
+
+[target.'cfg(unix)'.dev-dependencies]
+rstack = { version = "0.3.2", features = ["dw"], default-features = false }
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.
