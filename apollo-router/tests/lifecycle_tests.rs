@@ -57,7 +57,7 @@ async fn test_reload_config_with_broken_plugin() -> Result<(), BoxError> {
 async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError> {
     let mut router = create_router(HAPPY_CONFIG).await?;
     for i in 0..3 {
-        println!("iteration {}", i);
+        println!("iteration {i}");
         router.start().await;
         router.assert_started().await;
         router.run_query().await;

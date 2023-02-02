@@ -115,7 +115,7 @@ impl IntegrationTest {
         task::spawn(async move {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                println!("{}", line);
+                println!("{line}");
                 let _ = stdio_tx.send(line).await;
             }
         });
@@ -198,7 +198,7 @@ impl IntegrationTest {
         match client.execute(request).await {
             Ok(response) => (id, response),
             Err(err) => {
-                panic!("unable to send successful request to router, {}", err)
+                panic!("unable to send successful request to router, {err}")
             }
         }
     }
@@ -224,7 +224,7 @@ impl IntegrationTest {
     pub async fn graceful_shutdown(&mut self) {
         // Send a sig term and then wait for the process to finish.
         unsafe {
-            libc::kill(self.pid().into(), libc::SIGTERM);
+            libc::kill(self.pid(), libc::SIGTERM);
         }
         self.assert_shutdown().await;
     }
@@ -260,7 +260,7 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         self.dump_stack_traces();
-        panic!("'{}' not detected in logs", msg);
+        panic!("'{msg}' not detected in logs");
     }
 
     #[allow(dead_code)]
