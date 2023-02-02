@@ -62,14 +62,14 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
-    apq_layer: Option<APQLayer>,
+    apq_layer: APQLayer,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: Option<APQLayer>) -> Self {
+    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
@@ -219,10 +219,7 @@ where
                         context,
                     };
 
-                    let request_res = match &apq {
-                        None => Ok(request),
-                        Some(apq) => apq.supergraph_request(request).await,
-                    };
+                    let request_res = apq.supergraph_request(request).await;
 
                     let SupergraphResponse { response, context } =
                         match request_res.and_then(|request| {
@@ -433,7 +430,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
-    apq_layer: Option<APQLayer>,
+    apq_layer: APQLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -485,15 +482,15 @@ where
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
         let apq_layer = if configuration.supergraph.apq.enabled {
-            Some(APQLayer::with_cache(
+            APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(
                     &configuration.supergraph.apq.experimental_cache,
                     "APQ",
                 )
                 .await,
-            ))
+            )
         } else {
-            None
+            APQLayer::disabled()
         };
 
         Self {
