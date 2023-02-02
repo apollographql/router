@@ -17,47 +17,6 @@ pub struct Licenses {}
 impl Licenses {
     pub fn run(&self) -> Result<()> {
         eprintln!("Checking generated licenses.html file...");
-
-        let licenses_html_before = Self::digest_for_license_file()?;
-
-        cargo!([
-            "about",
-            "-L",
-            "error",
-            "generate",
-            "--workspace",
-            "-o",
-            "licenses.html",
-            "about.hbs",
-        ]);
-
-        let licences_html_after = Self::digest_for_license_file()?;
-
-        if licenses_html_before != licences_html_after {
-            eprintln!(
-                "{}",
-                String::from_utf8_lossy(
-                    Command::new(which::which("git")?)
-                        .args(["diff", LICENSES_HTML_PATH])
-                        .output()?
-                        .stdout
-                        .as_slice()
-                )
-            );
-
-            Err(anyhow!("🚨 licenses.html file is not up to date. 🚨\n\
-            Please run `cargo about generate --workspace -o licenses.html about.hbs` to generate an up to date licenses list, and check the file in to the repository.\n\
-            💡 You can install `cargo-about` by running `cargo install cargo-about`."))
-        } else {
-            Ok(())
-        }
-    }
-
-    pub fn run_local(&self) -> Result<()> {
-        eprintln!("Checking generated licenses.html file...");
-
-        cargo!(["deny", "-L", "error", "check"]);
-
         let licenses_html_before = Self::digest_for_license_file()?;
 
         cargo!([
