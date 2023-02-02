@@ -229,14 +229,12 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
-    fn pid(&mut self) -> Pid {
-        Pid::from_raw(
-            self.router
-                .as_ref()
-                .expect("router must have been started")
-                .id()
-                .expect("id expected") as i32,
-        )
+    fn pid(&mut self) -> i32 {
+        self.router
+            .as_ref()
+            .expect("router must have been started")
+            .id()
+            .expect("id expected") as i32
     }
 
     #[allow(dead_code)]
@@ -289,7 +287,7 @@ impl IntegrationTest {
         if let Ok(trace) = rstack::TraceOptions::new()
             .symbols(true)
             .thread_names(true)
-            .trace(self.pid().as_raw() as u32)
+            .trace(self.pid() as u32)
         {
             println!("dumped stack traces");
             for thread in trace.threads() {
