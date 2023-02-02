@@ -35,7 +35,11 @@ This PR does the following changes:
 - Introduce `cargo xtask licenses` to check and update licenses.html.
 - Separate compliance (cargo-deny, which includes license checks) and licenses generation (cargo-about) in xtask
 - Enable compliance as part of our CI checks for each open PR
-- Update cargo xtask all so it checks compliance and licenses
+- Update `cargo xtask all` so it runs tests, checks compliance and licenses
+- Introduce `cargo xtask dev` so it checks compliance and runs tests
+
+Use `cargo xtask all` before a release.
+Use `cargo xtask dev` before a PR.
 
 Updating licenses.html is now driven by `cargo xtask licenses`, which is part of the release checklist.
 
