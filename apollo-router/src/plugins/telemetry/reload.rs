@@ -17,39 +17,30 @@ use tracing_subscriber::Registry;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
+type LayeredTracer = Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>;
+
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     ReloadTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
+
 #[allow(clippy::type_complexity)]
 static METRICS_LAYER_HANDLE: OnceCell<
     Handle<
         MetricsLayer,
         Layered<
             tracing_subscriber::reload::Layer<
-                Box<
-                    dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
-                        + Send
-                        + Sync,
-                >,
-                Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>,
+                Box<dyn Layer<LayeredTracer> + Send + Sync>,
+                LayeredTracer,
             >,
-            Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>,
+            LayeredTracer,
         >,
     >,
 > = OnceCell::new();
 
-#[allow(clippy::type_complexity)]
 static FMT_LAYER_HANDLE: OnceCell<
-    Handle<
-        Box<
-            dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
-                + Send
-                + Sync,
-        >,
-        Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>,
-    >,
+    Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
@@ -105,17 +96,11 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
     }
 }
 
+#[allow(clippy::type_complexity)]
 pub(super) fn reload_tracing(
     layer: Box<
-        dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        ::tracing_subscriber::Registry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
-                    ::tracing_subscriber::Registry,
-                >,
-            > + Send
+        dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
+            + Send
             + Sync,
     >,
 ) {
