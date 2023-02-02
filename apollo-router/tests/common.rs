@@ -284,7 +284,7 @@ impl IntegrationTest {
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
     }
 
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     pub fn dump_stack_traces(&mut self) {
         if let Ok(trace) = rstack::TraceOptions::new()
             .symbols(true)
@@ -310,7 +310,7 @@ impl IntegrationTest {
             println!("failed to dump stack trace");
         }
     }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     pub fn dump_stack_traces(&mut self) {}
 }
 

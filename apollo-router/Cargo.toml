@@ -231,7 +231,7 @@ test-span = "0.7"
 tower-test = "0.4.0"
 
 
-[target.'cfg(unix)'.dev-dependencies]
+[target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.2", features = ["dw"], default-features = false }
 
 # See note above in this file about `^tracing` packages which also applies to
