@@ -217,12 +217,12 @@ impl PlanNode {
                     .collect_subselections(schema, initial_path, kind, subselections)
             }
             Self::Defer { primary, deferred } => {
-                let primary_path = initial_path.join(&primary.path.clone().unwrap_or_default());
+                let primary_path = initial_path.join(primary.path.clone().unwrap_or_default());
                 if let Some(primary_subselection) = &primary.subselection {
                     let query = reconstruct_full_query(&primary_path, kind, primary_subselection);
 
                     // ----------------------- Parse ---------------------------------
-                    let sub_selection = Query::parse(&query, schema, &Default::default())?;
+                    let sub_selection = Query::parse(query, schema, &Default::default())?;
                     // ----------------------- END Parse ---------------------------------
 
                     subselections.insert(
@@ -239,7 +239,7 @@ impl PlanNode {
                         let query = reconstruct_full_query(&current.query_path, kind, subselection);
 
                         // ----------------------- Parse ---------------------------------
-                        let sub_selection = Query::parse(&query, schema, &Default::default())?;
+                        let sub_selection = Query::parse(query, schema, &Default::default())?;
                         // ----------------------- END Parse ---------------------------------
 
                         subs.insert(
@@ -339,8 +339,8 @@ fn reconstruct_full_query(path: &Path, kind: &OperationKind, subselection: &str)
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }
-            json_ext::PathElement::Fragment(fragment) => {
-                write!(&mut query, "{{ {fragment}")
+            json_ext::PathElement::Fragment(name) => {
+                write!(&mut query, "{{ ... on {name}")
                     .expect("writing to a String should not fail because it can reallocate");
                 len += 1;
             }

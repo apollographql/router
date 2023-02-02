@@ -176,9 +176,8 @@ impl<'a> Visit for MetricVisitor<'a> {
             } else {
                 eprintln!(
                     "[tracing-opentelemetry]: Received Counter metric, but \
-                    provided u64: {} is greater than i64::MAX. Ignoring \
-                    this metric.",
-                    value
+                    provided u64: {value} is greater than i64::MAX. Ignoring \
+                    this metric."
                 );
             }
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {

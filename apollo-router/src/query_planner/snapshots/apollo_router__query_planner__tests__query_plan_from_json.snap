@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/query_planner/mod.rs
+source: apollo-router/src/query_planner/tests.rs
 expression: query_plan
 ---
 Sequence {
@@ -15,6 +15,8 @@ Sequence {
                 ),
                 operation_kind: Query,
                 id: None,
+                input_rewrites: None,
+                output_rewrites: None,
             },
         ),
         Parallel {
@@ -66,6 +68,8 @@ Sequence {
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
+                                        input_rewrites: None,
+                                        output_rewrites: None,
                                     },
                                 ),
                             },
@@ -127,6 +131,8 @@ Sequence {
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
+                                        input_rewrites: None,
+                                        output_rewrites: None,
                                     },
                                 ),
                             },
@@ -177,6 +183,8 @@ Sequence {
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
+                                        input_rewrites: None,
+                                        output_rewrites: None,
                                     },
                                 ),
                             },
@@ -237,6 +245,8 @@ Sequence {
                                         operation_name: None,
                                         operation_kind: Query,
                                         id: None,
+                                        input_rewrites: None,
+                                        output_rewrites: None,
                                     },
                                 ),
                             },

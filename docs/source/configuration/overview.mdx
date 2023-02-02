@@ -3,7 +3,7 @@ title: Configuring the Apollo Router
 description: Command arguments and YAML config
 ---
 
-> For installation instructions, see the [quickstart](../quickstart/).
+> For router installation instructions, see the [quickstart](../quickstart/).
 
 You run the Apollo Router with the following command (assuming you're in the same directory as the `router` executable):
 
@@ -66,7 +66,9 @@ The [graph API key](/studio/api-keys/#graph-api-keys) that the Apollo Router sho
 
 ## Command arguments
 
-Where indicated, some of these arguments can also be set via an environment variable. Command-line arguments always take precedence over environment variables if an option is provided both ways.
+The `router` command supports the arguments listed in the table below.
+
+Where indicated, some of these arguments can also be set via an environment variable. If you specify a configuration value using _both_ mechanisms, the command-line argument's value takes precedence.
 
 <table class="field-table api-ref">
   <thead>
@@ -90,9 +92,9 @@ Where indicated, some of these arguments can also be set via an environment vari
 
 The absolute or relative path to the Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema).
 
-To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](https://www.apollographql.com/docs/federation/quickstart/#3-compose-the-supergraph-schema).
+To learn how to compose your supergraph schema with the Rover CLI, see the [Federation quickstart](/federation/quickstart/local-composition/).
 
-**Required** if you are _not_ using managed federation.
+**Required** if you are _not_ using managed federation. If you _are_ using managed federation, do not provide this value.
 
 </td>
 </tr>
@@ -189,22 +191,9 @@ The default value is `10s` (ten seconds), which is also the minimum allowed valu
 </td>
 <td>
 
-The timeout for each of the polls to Apollo Uplink.
+The request timeout for each poll sent to Apollo Uplink.
 
 The default value is `30s` (thirty seconds).
-
-</td>
-</tr>
-
-<tr>
-<td style="min-width: 150px;">
-
-##### `schema`
-
-</td>
-<td>
-
-Prints out a JSON schema of the router's configuration file, including [plugin configuration](#plugins).
 
 </td>
 </tr>
@@ -223,6 +212,20 @@ Disable sending anonymous usage information to Apollo.
 
 </td>
 </tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--schema`
+
+</td>
+<td>
+
+Prints out a JSON schema of the router's configuration file, including [plugin configuration](#plugins).
+
+</td>
+</tr>
+
 <tr>
 <td>
 
@@ -250,7 +253,7 @@ Prints out the Apollo Router's version.
 
 <tbody>
 
-<tr class="required">
+<tr>
 <td>
 
 ##### `schema`
@@ -263,7 +266,7 @@ Prints out a JSON schema of the Router's configuration file, including [plugin c
 </td>
 </tr>
 
-<tr class="required">
+<tr>
 <td>
 
 ##### `upgrade`
@@ -281,22 +284,30 @@ Print configuration that has been upgraded to the current Router version.
 
 ## YAML config file
 
-The Apollo Router takes an optional YAML configuration file as input via the `--config` option. If the `--hot-reload` flag is also passed (or the `APOLLO_ROUTER_HOT_RELOAD` environment variable is set to `true`), the router automatically restarts when changes to the configuration file are made.
+The Apollo Router takes an optional YAML configuration file as input via the [`--config`](#-c----config) option:
 
-This file enables you to customize the router's behavior in many ways:
+```bash
+./router --config router.yaml
+```
+
+This file enables you to customize various aspects of your router's behavior, covered in the subsections below.
+
+> If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
 
 ### Listen address
 
-By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`, but you can specify a different address:
+By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
 
-IPv4:
+#### IPv4
+
 ```yaml title="router.yaml"
 supergraph:
   # The socket address and port to listen on
   listen: 127.0.0.1:4000
 ```
 
-IPv6:
+#### IPv6
+
 ```yaml title="router.yaml"
 supergraph:
   # The socket address and port to listen on. 
@@ -304,7 +315,10 @@ supergraph:
   listen: '[::1]:4000'
 ```
 
-The Apollo Router can also listen on a Unix socket (not supported on Windows):
+#### Unix socket
+
+> Listening on a Unix socket is not supported on Windows.
+
 ```yaml title="router_unix.yaml"
 supergraph:
   # Absolute path to a Unix socket
@@ -315,7 +329,7 @@ supergraph:
 
 By default, the router starts an HTTP server that exposes a `POST`/`GET` endpoint at path `/`.
 
-You can change this path by setting `server.path`:
+You can specify a different path by setting `supergraph.path`:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -339,39 +353,54 @@ Path parameters and wildcards are supported. For example:
 By default, the router does _not_ resolve introspection queries. You can enable introspection like so:
 
 ```yaml title="router.yaml"
+# Do not enable introspection in production!
 supergraph:
   introspection: true
 ```
 
-### Landing page
+### Landing pages
 
-By default, the router displays a landing page if you access its endpoint path via your browser. You can override this behavior to disable the landing page like so:
+The Apollo Router can serve any of the following landing pages to browsers that visit its [endpoint path](#endpoint-path):
 
-```yaml title="router.yaml"
-homepage:
-  enabled: false
-```
+- A basic landing page that displays an example query `curl` command (default)
 
-### Sandbox
+    ```yaml title="router.yaml"
+    # This is the default behavior. You don't need to include this config.
+    homepage:
+      enabled: true
+    ```
 
-You can enable the sandbox by editing your configuration file. Make sure introspection is enabled as well, and that homepage is disabled:
+- _No_ landing page
 
-```yaml title="router.yaml"
-sandbox:
-  enabled: true
-# make sure you enable introspection
-supergraph:
-  introspection: true
-# make sure homepage is disabled
-homepage:
-  enabled: false
-```
+    ```yaml title="router.yaml"
+    homepage:
+      enabled: false
+    ```
+
+- [Apollo Sandbox](/graphos/explorer/sandbox), which enables you to explore your schema and compose operations against it using the Explorer
+
+    Note the additional configuration required to use Sandbox:
+
+    ```yaml title="router.yaml"
+    sandbox:
+      enabled: true
+
+    # Sandbox uses introspection to obtain your router's schema.
+    supergraph:
+      introspection: true
+
+    # Sandbox requires the default landing page to be disabled.
+    homepage:
+      enabled: false
+    ```
+
+    > ⚠️ **Do not enable Sandbox in production!** Sandbox requires enabling introspection, which is strongly discouraged in production environments.
 
 ### Subgraph routing URLs
 
-By default, the Apollo Router extracts the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
+By default, the Apollo Router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required.
 
-However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so in your YAML configuration file with the `override_subgraph_url` option:
+However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
 ```yaml title="router.yaml"
 override_subgraph_url:
@@ -380,7 +409,7 @@ override_subgraph_url:
 
 In this example, the `accounts` subgraph URL is overridden to point to `http://localhost:8080`. The URL specified in the supergraph schema is ignored.
 
-Subgraphs _not_ included in the `override_subgraph_url` list continue to use the routing URL specified in the supergraph schema.
+Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
 
 ### HTTP header rules
 
@@ -394,9 +423,9 @@ See [Configuring CORS in the Apollo Router](./cors).
 
 See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
 
-### External Extensibility
+### External extensibility
 
-See [External Extensibility in the Apollo Router](./external).
+See [External extensibility in the Apollo Router](./external).
 
 ### OpenTelemetry tracing
 
@@ -404,9 +433,20 @@ See [Tracing in the Apollo Router](./tracing/).
 
 ### Automatic persisted queries (APQ)
 
-Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ the query string itself. This can significantly reduce network usage for very large query strings.
-The Apollo Router automatically supports APQ via its in-memory cache. See the [caching documentation](./caching) for related options.
-It is enabled by default, but can be disabled from the configuration:
+Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
+
+The Apollo Router supports using APQ in its communications with both clients _and_ subgraphs:
+
+- **In its communications with clients,** the router acts as a GraphQL server, because it receives queries from clients.
+- **In its communications with subgraphs,** the router acts as a GraphQL _client_, because it _sends_ queries to subgraphs.
+
+Because the router's role differs between these two interactions, you configure these APQ settings separately.
+
+#### APQ with clients
+
+The Apollo Router automatically supports APQ with clients via its in-memory cache. See the [caching documentation](./caching) for related options.
+
+You can _disable_ this APQ support like so:
 
 ```yaml
 supergraph:
@@ -414,33 +454,40 @@ supergraph:
     enabled: false
 ```
 
-Subgraph requests from the Router can use APQ (disabled by default). Enabling APQ on a subgraph can be done either globally or on a per-subgraph request. The following example shows how to use a mixture of both global and per-subgraph configuration to accomplish enabling APQ on the `products` subgraph, while otherwise disabling it:
+#### APQ with subgraphs
+
+By default, the Apollo Router does _not_ use APQ when sending queries to its subgraphs.
+
+You can configure this APQ support with a combination of global and per-subgraph settings:
 
 ```yaml title="router.yaml"
 supergraph:
   apq:
     subgraph:
-      # override for all subgraphs
+      # Disable subgraph APQ globally unless overridden per-subgraph
       all:
         enabled: false
-      # override per subgraph
+      # Override global APQ setting for individual subgraphs
       subgraphs:
         products:
           enabled: true
 ```
 
-For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
+In the example above, subgraph APQ is disabled _except for_ the `products` subgraph.
+
+> For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 
 ### TLS
 
-TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. It is possible to override the list, for all subgraphs or per subgraph:
+TLS connections to subgraphs are verified using the list of certificate authorities provided by the system. You can override this list with a combination of global and per-subgraph settings:
 
 ```yaml title="router.yaml"
 tls:
   subgraph:
+    # Use these certificate authorities unless overridden per-subgraph
     all:
       certificate_authorities: "${file./path/to/ca.crt}"
-    # override per subgraph
+    # Override global setting for individual subgraphs
     subgraphs:
       products:
         certificate_authorities: "${file./path/to/product_ca.crt}"
@@ -461,22 +508,23 @@ plugins:
 
 You can reference variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
 
-Only environment variable expansion is currently supported, and variables must be prefixed with `env.`
+Currently, the Apollo Router supports expansion of environment variables and file paths. Corresponding variables must be prefixed with `env.` or `file.`
 
-Unix-style expansion is used. For example:
+The router uses Unix-style expansion. Here are some examples:
 
 - `${env.ENV_VAR_NAME}` expands to the value of environment variable `ENV_VAR_NAME`.
 - `${env.ENV_VAR_NAME:-some_default}` expands to the value of environment variable `ENV_VAR_NAME`, or falls back to the value `some_default` if the environment variable is not defined.
-- `${file.a.txt}` expands to the content of `a.txt`.
-- `${file.a.txt:-some_default}` expands to the content of `a.txt`, or falls back to the value `some_default` if the file does not exist.
+- `${file.a.txt}` expands to the contents of the file `a.txt`.
+- `${file.a.txt:-some_default}` expands to the contents of the file `a.txt`, or falls back to the value `some_default` if the file does not exist.
 
 Variable expansions are valid only for YAML _values_, not keys:
 
-```yaml {4,8} title="router.yaml"
+<!-- TODO: Add back doc config validation when https://github.com/apollographql/router/issues/1374 is fixed -->
+```yaml
 supergraph:
-  listen: "${env.MY_LISTEN_ADDRESS}"
+  listen: "${env.MY_LISTEN_ADDRESS}" #highlight-line
 example:
-  password: "${env.MY_PASSWORD}"
+  password: "${env.MY_PASSWORD}" #highlight-line
 ```
 
 ### Reusing configuration
@@ -516,23 +564,24 @@ After you generate the schema, configure your text editor. Here are the instruct
 - [Sublime](https://github.com/sublimelsp/LSP-yaml)
 - [Vim](https://github.com/Quramy/vison)
 
-## Upgrading your Router configuration
+## Upgrading your router configuration
 
-Occasionally breaking changes are made to the Apollo Router yaml format. Usually to extend functionality or improve usability.
+New releases of the Apollo Router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
 
-When running the Router with old configuration:
+**If you run a new version of your router with a configuration file that it no longer supports:**
 
-1. if you have errors in your config then a warning will be emitted on startup.
-2. if the Router config can be upgraded automatically with no validation errors then it will continue to load.
-3. if the Router config had validation errors after automatic upgrade loading will stop.
+1. The router emits a warning on startup.
+2. The router attempts to translate your provided configuration to the new expected format.
+    - If the translation succeeds without errors, the router starts up as usual.
+    - If the translation fails, the router terminates.
 
-When you are notified that configuration can be upgraded use the `router config upgrade` command to see what your configuration should look like:
+If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
 
 ```bash
 ./router config upgrade <path_to_router.yaml>
 ```
 
-To see what changes were made output the upgraded config diff using:
+You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
 
 ```bash
 ./router config upgrade --diff <path_to_router.yaml>

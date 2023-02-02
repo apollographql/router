@@ -123,7 +123,7 @@ impl<'de> Visitor<'de> for HeaderNameVisitor {
     where
         E: Error,
     {
-        HeaderName::try_from(v).map_err(|e| de::Error::custom(format!("Invalid header name {}", e)))
+        HeaderName::try_from(v).map_err(|e| de::Error::custom(format!("Invalid header name {e}")))
     }
 }
 
@@ -149,7 +149,7 @@ impl<'de> Visitor<'de> for JSONQueryVisitor {
         E: Error,
     {
         JSONQuery::parse(v)
-            .map_err(|e| de::Error::custom(format!("Invalid JSON query path for '{}' {}", v, e)))
+            .map_err(|e| de::Error::custom(format!("Invalid JSON query path for '{v}' {e}")))
     }
 }
 
@@ -174,8 +174,7 @@ impl<'de> Visitor<'de> for HeaderValueVisitor {
     where
         E: Error,
     {
-        HeaderValue::try_from(v)
-            .map_err(|e| de::Error::custom(format!("Invalid header value {}", e)))
+        HeaderValue::try_from(v).map_err(|e| de::Error::custom(format!("Invalid header value {e}")))
     }
 }
 
@@ -205,7 +204,7 @@ where
         where
             E: Error,
         {
-            Regex::from_str(v).map_err(|e| de::Error::custom(format!("{}", e)))
+            Regex::from_str(v).map_err(|e| de::Error::custom(format!("{e}")))
         }
     }
     deserializer.deserialize_str(RegexVisitor)

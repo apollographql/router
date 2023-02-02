@@ -26,7 +26,7 @@ expression: "&schema"
               "description": "The JWT configuration",
               "type": "object",
               "required": [
-                "jwks_url"
+                "jwks_urls"
               ],
               "properties": {
                 "cooldown": {
@@ -44,9 +44,12 @@ expression: "&schema"
                   "default": "Bearer",
                   "type": "string"
                 },
-                "jwks_url": {
-                  "description": "Retrieve our JWK Set from here",
-                  "type": "string"
+                "jwks_urls": {
+                  "description": "Retrieve our JWK Sets from these locations",
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
                 }
               }
             }

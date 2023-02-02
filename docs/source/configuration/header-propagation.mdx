@@ -206,23 +206,74 @@ headers:
             value: "accounts"
 ```
 
+## Response header propagation
+
+It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
+
+This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
+
+1. For each subgraph response, copy header values into context.
+2. For the supergraph response, copy header values from the context onto the response.
+
+Example router.yaml that will use the Rhai script:
+
+```yaml title="router.yaml"
+rhai:
+  main: "main.rhai"
+```
+
+Example Rhai script that collects `set-cookie` headers from subgraphs and merges them into a single client response header.
+
+```rhai title="./rhai/main.rhai"
+fn router_service(service) {
+  let add_cookies_to_response = |response| {
+    if response.context["set_cookie_headers"]?.len > 0 {
+      let cookie = "";
+      for header in response.context["set_cookie_headers"] {
+        cookie += header + "; ";
+      }
+      response.headers["set-cookie"] = cookie;
+    }
+  };
+
+  service.map_response(add_cookies_to_response);
+}
+
+fn subgraph_service(service, subgraph) {
+    let store_cookies_from_subgraphs = |response| {
+      if response.headers["set-cookie"] != () {
+        if response.context["set_cookie_headers"] == () {
+          response.context.set_cookie_headers = []
+        }
+
+        response.context.set_cookie_headers += response.headers["set-cookie"]
+      }
+    };
+
+    service.map_response(store_cookies_from_subgraphs);
+}
+```
+
+If you would like to see a YAML based solution then [please leave us a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
 
 ## Propagation between subgraphs
 
 It is not currently possible to propagate headers between subgraphs using yaml config alone. It can however be achieved using [Rhai scripting]("../customizations/rhai").
 
-The approach relied on the feature that all requests have context that can be used to store data for the duration of the request: 
-1. On supbgraph response, copy header values into context.
-2. On supbgraph request, copy header values from context into the subgraph request.
+This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
 
+1. For each subgraph response, copy header values into context.
+2. For each subgraph request, copy header values from context into the subgraph request.
 
 Example router.yaml that will use the Rhai script:
-```rhai title="router.yaml"
+
+```yaml title="router.yaml"
 rhai:
   main: "main.rhai"
 ```
 
 Example Rhai script that copies `request-id` and `user` headers:
+
 ```rhai title="./rhai/main.rhai"
 fn subgraph_service(service, subgraph) {
     // The list of headers that you which to propagate.
@@ -236,7 +287,7 @@ fn subgraph_service(service, subgraph) {
             }
         }
     };
-  
+
     // Callback for subgraph responses. Pulls header values out of the response and inserts them into context.
     let response_callback = |response| {
         for key in headers {
@@ -245,7 +296,7 @@ fn subgraph_service(service, subgraph) {
             }
         }
     };
-  
+
     // Register the callbacks.
     service.map_request(request_callback);
     service.map_response(response_callback);

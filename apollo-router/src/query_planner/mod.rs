@@ -12,6 +12,7 @@ mod caching_query_planner;
 mod execution;
 pub(crate) mod fetch;
 mod plan;
+pub(crate) mod rewrites;
 mod selection;
 pub use plan::*;
 
