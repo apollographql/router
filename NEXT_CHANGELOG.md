@@ -44,3 +44,9 @@ Use `cargo xtask dev` before a PR.
 Updating licenses.html is now driven by `cargo xtask licenses`, which is part of the release checklist.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/XXX_TBD
+
+### Redis integration tests ([Issue #2174](https://github.com/apollographql/router/issues/2174)
+
+We now have integration tests for Redis usage with Automatic Persisted Queries and query planning.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2179

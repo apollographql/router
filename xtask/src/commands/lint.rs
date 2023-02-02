@@ -6,13 +6,23 @@ use structopt::StructOpt;
 use xtask::*;
 
 #[derive(Debug, StructOpt)]
-pub struct Lint {}
+pub struct Lint {
+    /// apply formatting fixes
+    #[structopt(long)]
+    fmt: bool,
+}
 
 const RUSTFMT_CONFIG: &[&str] = &["imports_granularity=Item", "group_imports=StdExternalCrate"];
 
 impl Lint {
     pub fn run(&self) -> Result<()> {
-        self.run_common(Self::check_fmt)
+        if self.fmt {
+            let status = Self::fmt_command()?.status()?;
+            ensure!(status.success(), "cargo fmt check failed");
+            Ok(())
+        } else {
+            self.run_common(Self::check_fmt)
+        }
     }
 
     pub fn run_local(&self) -> Result<()> {
