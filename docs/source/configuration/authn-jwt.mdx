@@ -3,26 +3,30 @@ title: JWT Authentication in the Apollo Router
 sidebar_title: JWT Authentication
 ---
 
-> ⚠️ **This Apollo Router feature is currently experimental.** As long as it's experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
+> ⚠️ **This feature requires an Apollo Enterprise plan. It is currently experimental.** As long as this feature is experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
 >
 > To provide feedback or otherwise participate in this feature, join [this GitHub discussion](https://github.com/apollographql/router/discussions/2391).
 
-The Apollo Router provides experimental support for request authentication via [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (JWT). This feature uses the popular [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken), which supports a variety of signature algorithms.
+The Apollo Router provides experimental support for request authentication via [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**). To use this feature, you must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
+
+If you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), adding JWT authentication to your router is comparatively straightforward. If you use your own custom IdP, additional configuration is required.
 
 ## How it works
 
 These are the high-level steps of JWT-based authentication with the Apollo Router:
 
-1. Whenever a client authenticates with your system, your identity provider (or a similar service) issues that client a valid JSON Web Token (JWT).
-2. In all followup requests to your supergraph, the authenticated client provides its JWT in a designated HTTP header.
+1. Whenever a client authenticates with your system, your IdP issues that client a valid JSON Web Token (JWT).
+2. In its subsequent requests to your router, the authenticated client provides its JWT in a designated HTTP header.
 3. Whenever your router receives a client request, it extracts the JWT from the designated header (if it's present).
-4. Your router validates the extracted JWT using a corresponding [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (JWK).
-    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL must provide keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a JWKS).
+4. Your router validates the extracted JWT using a corresponding [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**).
+    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL provides one or more keys as a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
     - JWT validation fails if the token is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
 
-5. The router extracts all **claims** from the validated JWT and includes them in the request's context, which makes them available to [router customizations](../customizations/overview/). This enables customizations to handle the request differently depending on the details of those claims ([see below](#accessing-jwt-claims-from-the-context)).
+5. The router extracts all **claims** from the validated JWT and includes them in the request's context, making them available to your [router customizations](../customizations/overview/), such as Rhai scripts.
+6. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs for more granular access control.
+    - For examples, [see below](#working-with-jwt-claims).
 
-## Setup
+## Turning it on
 
 You enable JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication.experimental` key:
 
@@ -30,19 +34,28 @@ You enable JWT authentication in your router's [YAML config file](./overview/#ya
 authentication:
   experimental:
     jwt:
-      jwks_urls:
+      jwks_urls: # This key is required.
         - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-      # These are the DEFAULT values for the following keys:
+      
+      # These keys are optional. Default values are shown.
       header_name: Authorization
       header_value_prefix: Bearer
       cooldown: 15s
 ```
 
-You will see a log message confirming which `jwks_urls` are in use during router startup that looks like this:
+Make sure to provide your config file to the router on startup!
+
+```bash
+./router --config router.yaml
+```
+
+When the router starts up, it displays a log message that confirms which `jwks_urls` are in use:
 
 ```
 2023-02-03T14:05:28.018932Z  INFO JWT authentication using JWKSets from these jwks_urls=["file:///router/jwks.json"]
 ```
+
+### Configuration options
 
 The following configuration options are supported:
 
@@ -63,11 +76,10 @@ The following configuration options are supported:
 </td>
 <td>
 
-**Required.** The list of URLs of the JWK Sets (JWKS) that the router should use. Each list entry Can be an `https://` or a `file://` URL.
+**Required.** A list of URLs for the JWK Sets (JWKS) that the router should use. Each list item can be an `https://` or a `file://` URL.
 
-**If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should never be accessible over the network.
-
-For more information, see [Providing keys to the router](#providing-keys-to-the-router).
+- **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
+- **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating a JWKS](#creating-a-jwks).
 
 </td>
 </tr>
@@ -110,9 +122,9 @@ The default value is `Bearer`.
 </td>
 <td>
 
-Whenever the router receives a JWT with a key ID (`kid`) that it doesn't recognize, it fetches up-to-date JWK Sets from its [`jwks_urls`](#jwks_urls), _as long as_ it's been _at least_ the amount of time specified by `cooldown`.
+Whenever the router receives a JWT with a key ID (`kid`) that it doesn't recognize, it fetches up-to-date JWK Sets from its [`jwks_urls`](#jwks_urls), _if_ it's been _at least_ the amount of time specified by `cooldown` since it last fetched.
 
-The default value is `15s`. In almost all cases, you don't need to override this value.
+The default value is `15s` (fifteen seconds), which is suitable for almost all use cases.
 
 </td>
 </tr>
@@ -120,13 +132,27 @@ The default value is `15s`. In almost all cases, you don't need to override this
 </tbody>
 </table>
 
-## Accessing JWT claims from the context
+## Working with JWT claims
 
-After the Apollo Router validates a client request's JWT, it adds that token's **claims** to the request's context at the key `apollo_authentication::JWT::claims`.
+After the Apollo Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
 
-This enables you to define custom logic for handling a request based on the details of the JWT's claims. You can define this logic as a Rhai script or a native Rust plugin. For details on these, see [Customizations for the Apollo Router](../customizations/overview/).
+> **Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
 
-Here's an example of a Rhai script that throws distinct errors for different invalid JWT claim details:
+Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic as a Rhai script or a native Rust plugin (for more on these, see [Customizations for the Apollo Router](../customizations/overview/)).
+
+### Example: Forwarding claims to subgraphs
+
+Below is an example Rhai script that forwards a JWT's claims to individual subgraphs via an HTTP header. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
+
+<ExpansionPanel title="Click to expand">
+
+</ExpansionPanel>
+
+### Example: Throwing errors for invalid claims
+
+Below is an example Rhai script that throws distinct errors for different invalid JWT claim details:
+
+<ExpansionPanel title="Click to expand">
 
 ```rhai title="jwt_claims.rhai"
 fn process_request(request) {
@@ -165,15 +191,26 @@ fn process_request(request) {
 }
 ```
 
-## Propagating JWTs to subgraphs
+</ExpansionPanel>
 
-Because clients provide their JWT via an HTTP header, you can propagate JWTs to some or all of your subgraphs using the Apollo Router's general-purpose [header propagation settings](./header-propagation).
+### Forwarding JWTs to subgraphs (uncommon)
 
-## Providing keys to the router
+Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs).
+
+If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
+
+## Creating a JWKS (advanced)
+
+> ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks_urls) to pass to your router.
+>
+> Consult this section if you use a custom IdP that doesn't currently publish a JWKS.
+
 
 The Apollo Router obtains each JSON Web Key (JWK) that it uses from URLs that you specify via the [`jwks_urls`](#jwks_urls) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a **JWK Set** (or JWKS).
 
 Many popular identity provider services (such as [Okta](https://developer.okta.com/docs/guides/validate-access-tokens/-/main/#retrieve-the-json-web-keys) and [Auth0](https://auth0.com/docs/secure/tokens/json-web-tokens/json-web-key-sets)) create a JWKS and its URL for you, and you can provide this URL directly to your router. If your identity provider _doesn't_ do this, you need to create and maintain your own JWKS at an `https://` or `file://` URL that your router can access.
+
+> **If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should never be accessible over the network.
 
 ### JWKS format
 
@@ -281,7 +318,7 @@ The router will thus attempt to verify with the most specific matching key.
 
 ## Observability
 
-If your router enables [tracing](./tracing/), the JWT authentication plugin has its own tracing span, named `authentication_plugin`.
+If your router enables [tracing](./tracing/), the JWT authentication plugin has its own tracing span: `authentication_plugin`
 
 If your router enables [metrics collection via Prometheus](./metrics/#using-prometheus), the JWT authentication plugin provides and exports the following metrics:
 
