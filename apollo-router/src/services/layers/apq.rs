@@ -189,14 +189,15 @@ mod apq_tests {
     use tower::Service;
 
     use super::*;
-    use crate::configuration::{Apq, Supergraph};
+    use crate::configuration::Apq;
+    use crate::configuration::Supergraph;
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::services::layers::content_negociation::ACCEPTS_JSON_CONTEXT_KEY;
-    use crate::services::router_service::{
-        from_supergraph_mock_callback, from_supergraph_mock_callback_and_configuration,
-    };
-    use crate::{Configuration, Context};
+    use crate::services::router_service::from_supergraph_mock_callback;
+    use crate::services::router_service::from_supergraph_mock_callback_and_configuration;
+    use crate::Configuration;
+    use crate::Context;
 
     #[tokio::test]
     async fn it_works() {
