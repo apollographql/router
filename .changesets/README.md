@@ -7,12 +7,14 @@ This directory keeps files which individually represent entries that will repres
 > The files within this directory use a **convention which must be obeyed** in order for the file to be slurped up by automated tooling.
 
 > **Warning**
+>
 > The aforementioned **tooling doesn't exist yet** but will be created soon. 😺
 
-For now, the required convention is:
+Create a file **by hand** in this directory for each individual changelog entry by using the required convention.  That convention is:
 
 1. Files in this directory must use the `.md` file extension.
-2. Files *must start with a prefix* that indicates the classification of the changeset.  The prefixes are as follows:
+2. Do not put multiple changelog entries in a single file.
+3. Files *must start with a prefix* that indicates the classification of the changeset.  The prefixes are as follows:
    - **Breaking**: `breaking_`
    - **Feature**: `feat_`
    - **Fixes**: `fix_`
@@ -20,8 +22,9 @@ For now, the required convention is:
    - **Maintenance**: `maint_`
    - **Documentation**: `docs_`
    - **Experimental**: `exp_`
-3. Other files will be ignored, including this `README.md`
-4. The files must use the following format:
+4. The pattern proceeding the prefix can be anything that matches `[a-z_]+` (i.e., any number of lowercased `a-z` and `_`).  Again, `.md` must be on the end as the extension.  For example, `feat_flying_forest_foxes.md`.
+5. Other files not matching the above convention will be ignored, including this `README.md`.
+6. The files must use the following format:
 
        ### Brief but complete sentence that stands on its own ([Issue #ISSUE_NUMBER](https://github.com/apollographql/router/issues/ISSUE_NUMBER))
 
