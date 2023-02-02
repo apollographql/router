@@ -64,7 +64,7 @@ impl Package {
         } else {
             self.output.to_owned()
         };
-        eprintln!("Creating tarball: {}", output_path);
+        eprintln!("Creating tarball: {output_path}");
         let mut file = flate2::write::GzEncoder::new(
             std::io::BufWriter::new(
                 std::fs::File::create(&output_path).context("could not create TGZ file")?,
@@ -72,7 +72,7 @@ impl Package {
             flate2::Compression::default(),
         );
         let mut ar = tar::Builder::new(&mut file);
-        eprintln!("Adding {}...", release_path);
+        eprintln!("Adding {release_path}...");
         ar.append_file(
             Path::new("dist").join(RELEASE_BIN),
             &mut std::fs::File::open(release_path).context("could not open binary")?,
@@ -80,7 +80,7 @@ impl Package {
         .context("could not add file to TGZ archive")?;
 
         for path in INCLUDE {
-            eprintln!("Adding {}...", path);
+            eprintln!("Adding {path}...");
             ar.append_file(
                 Path::new("dist").join(path),
                 &mut std::fs::File::open(PKG_PROJECT_ROOT.join(path))
@@ -159,6 +159,6 @@ impl fmt::Display for Target {
             Target::MacOS => TARGET_X86_64_MACOS,
             Target::Other => "unknown-target",
         };
-        write!(f, "{}", msg)
+        write!(f, "{msg}")
     }
 }
