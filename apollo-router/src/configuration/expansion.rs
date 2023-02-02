@@ -186,7 +186,7 @@ impl Expansion {
             }
 
             transformer_builder = transformer_builder.add_action(
-                Parser::parse(&format!("const({})", value), &default.config_path)
+                Parser::parse(&format!("const({value})"), &default.config_path)
                     .expect("migration must be valid"),
             );
         }
