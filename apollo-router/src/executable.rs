@@ -574,7 +574,7 @@ fn setup_panic_handler() {
     }
     std::panic::set_hook(Box::new(move |e| {
         if show_backtraces {
-            let backtrace = backtrace::Backtrace::new();
+            let backtrace = std::backtrace::Backtrace::capture();
             tracing::error!("{}\n{:?}", e, backtrace)
         } else {
             tracing::error!("{}", e)
