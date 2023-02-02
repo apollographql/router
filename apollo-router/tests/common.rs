@@ -19,7 +19,6 @@ use hyper::service::service_fn;
 use hyper::Body;
 use jsonpath_lib::Selector;
 use mime::APPLICATION_JSON;
-use nix::unistd::Pid;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
