@@ -42,7 +42,7 @@ impl FederationDemoRunner {
         loop {
             match reqwest::blocking::get("http://localhost:4100/graphql") {
                 Ok(_) => break,
-                Err(err) => eprintln!("{}", err),
+                Err(err) => eprintln!("{err}"),
             }
             sleep(Duration::from_secs(2));
         }

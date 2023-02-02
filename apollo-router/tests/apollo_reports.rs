@@ -53,13 +53,13 @@ async fn get_router_service() -> BoxCloneService {
         })
         .expect("Could not sub in endpoint");
 
-        let _ = ROUTER_SERVICE_RUNTIME.spawn(async move {
+        drop(ROUTER_SERVICE_RUNTIME.spawn(async move {
             axum::Server::from_tcp(listener)
                 .expect("mut be able to crete report receiver")
                 .serve(app.into_make_service())
                 .await
                 .expect("could not start axum server")
-        });
+        }));
 
         *router_service = Some(
             ROUTER_SERVICE_RUNTIME

@@ -111,8 +111,7 @@ impl Display for EntitlementReport {
 
         write!(
             f,
-            "TODO PREAMBLE\n\nViolations:\n{}\n\nTODO POSTAMBLE",
-            formatted_violations
+            "TODO PREAMBLE\n\nViolations:\n{formatted_violations}\n\nTODO POSTAMBLE"
         )
     }
 }

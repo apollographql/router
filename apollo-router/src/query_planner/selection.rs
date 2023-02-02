@@ -142,9 +142,9 @@ mod tests {
     use crate::graphql::Response;
     use crate::json_ext::Path;
 
-    fn select<'a>(
+    fn select(
         response: &Response,
-        path: &'a Path,
+        path: &Path,
         selections: &[Selection],
         schema: &Schema,
     ) -> Result<Value, FetchError> {
