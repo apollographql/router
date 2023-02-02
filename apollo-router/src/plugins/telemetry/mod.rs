@@ -55,10 +55,10 @@ use self::formatters::json::JsonFields;
 use self::formatters::text::TextFormatter;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+use self::reload::reload_metrics;
+use self::reload::reload_tracing;
+use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::reload::ReloadTracer;
-use crate::executable::FMT_LAYER_HANDLE;
-use crate::executable::METRICS_LAYER_HANDLE;
-use crate::executable::OPENTELEMETRY_TRACER_HANDLE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -104,6 +104,7 @@ pub(crate) mod config;
 pub(crate) mod formatters;
 pub(crate) mod metrics;
 mod otlp;
+pub(crate) mod reload;
 pub(crate) mod tracing;
 // Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
@@ -240,17 +241,8 @@ impl Plugin for Telemetry {
             opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
         }
 
-        if let Some(handle) = METRICS_LAYER_HANDLE.get() {
-            handle
-                .reload(MetricsLayer::new(&self.meter_provider))
-                .expect("metrics layer reload must succeed");
-        }
-
-        if let Some(handle) = FMT_LAYER_HANDLE.get() {
-            handle
-                .reload(Self::create_fmt_layer(&self.config))
-                .expect("fmt layer reload must succeed");
-        }
+        reload_metrics(MetricsLayer::new(&self.meter_provider));
+        reload_tracing(Self::create_fmt_layer(&self.config));
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
