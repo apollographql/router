@@ -51,15 +51,12 @@ mod test {
             .method(Method::POST)
             .build()?;
 
-        let res = supergraph.oneshot(request).await?.next_response().await;
-
-        println!("got res: {:?}", res);
+        let _ = supergraph.oneshot(request).await?.next_response().await;
 
         let s:String = connection
           .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
-        println!("got from redis: {s}");
         let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
         // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
         let query_plan = query_plan_res
@@ -146,8 +143,6 @@ mod test {
             .unwrap()?;
         assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
 
-        println!("got res: {:?}", res);
-
         let r: Option<String> = connection
             .get(&format!("apq\x00{query_hash}"))
             .await
@@ -175,7 +170,6 @@ mod test {
             .unwrap()?;
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
-        println!("got res: {:?}", res);
 
         let s: Option<String> = connection
             .get(&format!("apq\x00{query_hash}"))
@@ -211,7 +205,6 @@ mod test {
             .unwrap()?;
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
-        println!("got res: {:?}", res);
 
         Ok(())
     }
