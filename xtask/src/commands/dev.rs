@@ -2,7 +2,6 @@ use anyhow::Result;
 use structopt::StructOpt;
 
 use super::Compliance;
-use super::Licenses;
 use super::Lint;
 use super::Test;
 

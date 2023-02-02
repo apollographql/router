@@ -21,7 +21,7 @@ pub struct All {
 impl All {
     pub fn run(&self) -> Result<()> {
         eprintln!("Checking licenses...");
-        self.licenses.run_local()?;
+        self.licenses.run()?;
         eprintln!("Checking compliance...");
         self.compliance.run()?;
         eprintln!("Checking format and clippy...");
