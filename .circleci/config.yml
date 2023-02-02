@@ -13,7 +13,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:6.2.6
+      - image: cimg/redis:6.2.10
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
