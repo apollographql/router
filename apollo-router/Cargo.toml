@@ -174,7 +174,6 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"
-tap = "1.0.1"
 thiserror = "1.0.38"
 tokio = { version = "1.25.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
@@ -240,10 +239,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
-
-
-[target.'cfg(unix)'.dev-dependencies]
-nix = { version = "0.23.1" }
 
 [build-dependencies]
 tonic-build = "0.8.4"

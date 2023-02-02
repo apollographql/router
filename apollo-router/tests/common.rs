@@ -224,7 +224,9 @@ impl IntegrationTest {
     #[cfg(unix)]
     pub async fn graceful_shutdown(&mut self) {
         // Send a sig term and then wait for the process to finish.
-        nix::sys::signal::kill(self.pid(), nix::sys::signal::Signal::SIGTERM).unwrap();
+        unsafe {
+            libc::kill(self.pid().into(), libc::SIGTERM);
+        }
         self.assert_shutdown().await;
     }
 
