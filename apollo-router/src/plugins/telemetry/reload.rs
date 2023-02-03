@@ -66,6 +66,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
         .get_or_try_init(move || {
+            // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+            let log_level = format!("{log_level},salsa=error");
+
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
