@@ -594,7 +594,7 @@ mod test {
             mock_server: &'a MockServer,
             endpoint: &'a Url,
             responses: Vec<ResponseTemplate>,
-        ) -> () {
+        ) {
             let len = responses.len() as u64;
             Mock::given(method("POST"))
                 .and(path(endpoint.path()))
