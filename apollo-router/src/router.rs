@@ -162,10 +162,10 @@ pub enum SchemaSource {
     /// Apollo managed federation.
     #[display(fmt = "Registry")]
     Registry {
-        /// The Apollo key: <YOUR_GRAPH_API_KEY>
+        /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
         apollo_key: String,
 
-        /// The apollo graph reference: <YOUR_GRAPH_ID>@<VARIANT>
+        /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
         apollo_graph_ref: String,
 
         /// The endpoint polled to fetch its latest supergraph schema.
@@ -419,10 +419,10 @@ pub enum EntitlementSource {
     /// Apollo uplink.
     #[display(fmt = "Registry")]
     Registry {
-        /// The Apollo key: <YOUR_GRAPH_API_KEY>
+        /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
         apollo_key: String,
 
-        /// The apollo graph reference: <YOUR_GRAPH_ID>@<VARIANT>
+        /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
         apollo_graph_ref: String,
 
         /// The endpoint polled to fetch its latest supergraph schema.

@@ -44,7 +44,7 @@ impl JaegerRunner {
         loop {
             match reqwest::blocking::get("http://localhost:16686") {
                 Ok(_) => break,
-                Err(err) => eprintln!("{}", err),
+                Err(err) => eprintln!("{err}"),
             }
             sleep(Duration::from_secs(2));
         }

@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.65.0"
+rust-version = "1.67.0"
 edition = "2021"
 build = "build/main.rs"
 
@@ -83,7 +83,7 @@ graphql_client = "0.11.0"
 hex = "0.4.3"
 http = "0.2.8"
 http-body = "0.4.5"
-heck = "0.4.0"
+heck = "0.4.1"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.23", features = ["server", "client"] }
@@ -169,6 +169,7 @@ sha2 = "0.10.6"
 serde = { version = "1.0.149", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
+serde_millis = "0.1.1"
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
