@@ -361,6 +361,8 @@ impl Plugin for AuthenticationPlugin {
         let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
         let deduplicator = Deduplicate::with_capacity(g_f, urls.len());
 
+        tracing::info!(jwks_urls=?init.config.experimental.jwt.jwks_urls, "JWT authentication using JWKSets from these");
+
         Ok(AuthenticationPlugin {
             configuration: init.config.experimental.jwt,
             jwks: Arc::new(deduplicator),

@@ -38,6 +38,12 @@ authentication:
       cooldown: 15s
 ```
 
+You will see a log message confirming which `jwks_urls` are in use during router startup that looks like this:
+
+```
+2023-02-03T14:05:28.018932Z  INFO JWT authentication using JWKSets from these jwks_urls=["file:///router/jwks.json"]
+```
+
 The following configuration options are supported:
 
 <table class="field-table api-ref">
