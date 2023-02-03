@@ -222,7 +222,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     pub async fn graceful_shutdown(&mut self) {
         // Send a sig term and then wait for the process to finish.
         unsafe {
@@ -231,6 +231,10 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
+    #[cfg(not(target_os = "linux"))]
+    pub async fn graceful_shutdown(&mut self) {}
+
+    #[allow(dead_code)]
     fn pid(&mut self) -> i32 {
         self.router
             .as_ref()
