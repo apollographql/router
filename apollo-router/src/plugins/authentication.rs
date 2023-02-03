@@ -207,22 +207,21 @@ async fn get_jwks(url: Url) -> Option<JwkSet> {
 #[derive(Debug, Default)]
 struct JWTCriteria {
     alg: Algorithm,
-    #[allow(unused)]
-    iss: Option<String>,
     kid: Option<String>,
 }
 
-fn get_iss(_jwt: &str) -> Option<String> {
-    // TODO: iss isn't in the header, so we need to write some custom code to extract it from the payload
-    None
-}
-
+/// Search the list of JWKS to find a key we can use to decode a JWT.
+///
+/// The search criteria allow us to match a variety of keys depending on which criteria are provided
+/// by the JWT header. The only mandatory parameter is "alg".
+/// Note: "none" is not implemented by jsonwebtoken, so it can't be part of the [`Algorithm`] enum.
 async fn search_jwks(
     my_jwks: SharedDeduplicate,
     criteria: &JWTCriteria,
     jwks_urls: Vec<Url>,
     context: &Context,
 ) -> Result<Option<Jwk>, BoxError> {
+    const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     for jwks_url in jwks_urls {
         context.enter_active_request().await;
@@ -260,6 +259,12 @@ async fn search_jwks(
                     key_score += 1;
                     algorithm == criteria.alg
                 }
+                // If a key doesn't have an algorithm, then we match the "alg" specified in the
+                // search criteria against all of the algorithms that we support.  If the
+                // key.algorithm parameters match the type of parameters for the "family" of the
+                // criteria "alg", then we update the key to use the value of "alg" provided in
+                // the search criteria.
+                // If not, then this is not a usable key for this JWT
                 None => match criteria.alg {
                     Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
                         if let AlgorithmParameters::OctetKey(_) = key.algorithm {
@@ -282,15 +287,7 @@ async fn search_jwks(
                             false
                         }
                     }
-                    Algorithm::ES256 | Algorithm::ES384 => {
-                        if let AlgorithmParameters::OctetKeyPair(_) = key.algorithm {
-                            key.common.algorithm = Some(criteria.alg);
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    Algorithm::EdDSA => {
+                    Algorithm::ES256 | Algorithm::ES384 | Algorithm::EdDSA => {
                         if let AlgorithmParameters::EllipticCurve(_) = key.algorithm {
                             key.common.algorithm = Some(criteria.alg);
                             true
@@ -317,21 +314,25 @@ async fn search_jwks(
             //
             // Multiple keys may meet the matching criteria, but they have a score. They get 1
             // point for having an explicitly matching algorithm and 1 point for an explicitly
-            // matching kid. We sort our candidates and pick the key with the highest score.
-            candidates.push((key_score, key));
-            // The highest score a key can achieve is 2, if we find one with a a score of 2, let's
-            // stop looking
-            if key_score == 2 {
-                break;
+            // matching kid. We will sort our candidates and pick the key with the highest score.
+
+            // If we find a key with a HIGHEST_SCORE, let's stop looking.
+            if key_score == HIGHEST_SCORE {
+                return Ok(Some(key));
             }
+
+            candidates.push((key_score, key));
         }
     }
-    tracing::info!("candidates: {:?}", candidates);
+    tracing::debug!("jwk candidates: {:?}", candidates);
     if candidates.is_empty() {
         Ok(None)
     } else {
-        candidates.sort_by(|a, b| a.0.cmp(&b.0));
-        Ok(Some(candidates.swap_remove(0).1))
+        // Only sort if we need to
+        if candidates.len() > 1 {
+            candidates.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        Ok(Some(candidates.pop().expect("list isn't empty").1))
     }
 }
 
@@ -406,6 +407,7 @@ impl Plugin for AuthenticationPlugin {
                             monotonic_counter.apollo_authentication_failure_count = 1u64,
                             kind = %AUTHENTICATION_KIND
                         );
+                        tracing::info!(message = %msg, "jwt authentication failure");
                         let response = router::Response::error_builder()
                             .error(
                                 graphql::Error::builder()
@@ -492,13 +494,8 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // Issuer isn't in the header, so try to extract it
-                    // from the claims.
-                    let iss = get_iss(jwt);
-
                     // Extract our search criteria from our jwt
                     let criteria = JWTCriteria {
-                        iss,
                         kid: jwt_header.kid,
                         alg: jwt_header.alg,
                     };
@@ -666,6 +663,34 @@ mod tests {
     use crate::plugin::test;
     use crate::services::supergraph;
 
+    fn create_an_url(filename: &str) -> String {
+        let jwks_base = Path::new("tests");
+
+        let jwks_path = jwks_base.join("fixtures").join(filename);
+        #[cfg(target_os = "windows")]
+        let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
+        #[cfg(not(target_os = "windows"))]
+        let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
+
+        #[cfg(target_os = "windows")]
+        {
+            // We need to manipulate our canonicalized file if we are on Windows.
+            // We replace windows path separators with posix path separators
+            // We also drop the first 3 characters from the path since they will be
+            // something like (drive letter may vary) '\\?\C:' and that isn't
+            // a valid URI
+            let mut file_string = jwks_file.display().to_string();
+            file_string = file_string.replace("\\", "/");
+            let len = file_string
+                .char_indices()
+                .nth(3)
+                .map_or(0, |(idx, _ch)| idx);
+            jwks_file = file_string[len..].into();
+        }
+
+        format!("file://{}", jwks_file.display())
+    }
+
     async fn build_a_default_test_harness() -> router::BoxCloneService {
         build_a_test_harness(None, None, false).await
     }
@@ -697,31 +722,8 @@ mod tests {
             mock_service
         });
 
-        let jwks_base = Path::new("tests");
+        let jwks_url = create_an_url("jwks.json");
 
-        let jwks_path = jwks_base.join("fixtures").join("jwks.json");
-        #[cfg(target_os = "windows")]
-        let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
-        #[cfg(not(target_os = "windows"))]
-        let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
-
-        #[cfg(target_os = "windows")]
-        {
-            // We need to manipulate our canonicalized file if we are on Windows.
-            // We replace windows path separators with posix path separators
-            // We also drop the first 3 characters from the path since they will be
-            // something like (drive letter may vary) '\\?\C:' and that isn't
-            // a valid URI
-            let mut file_string = jwks_file.display().to_string();
-            file_string = file_string.replace("\\", "/");
-            let len = file_string
-                .char_indices()
-                .nth(3)
-                .map_or(0, |(idx, _ch)| idx);
-            jwks_file = file_string[len..].into();
-        }
-
-        let jwks_url = format!("file://{}", jwks_file.display());
         let mut config = if multiple_jwks {
             serde_json::json!({
                 "authentication": {
@@ -1163,5 +1165,118 @@ mod tests {
     #[should_panic]
     async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
         let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
+    }
+
+    fn build_jwks_search_components() -> (SharedDeduplicate, Vec<Url>) {
+        let mut sets = vec![];
+        let mut urls = vec![];
+
+        let jwks_url = create_an_url("jwks.json");
+
+        sets.push(jwks_url);
+
+        for s_url in &sets {
+            let url: Url = Url::from_str(s_url).expect("created a valid url");
+            urls.push(url);
+        }
+
+        // We have to help the compiler out a bit by casting our function item to be a function
+        // pointer.
+        let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
+        let deduplicator = Arc::new(Deduplicate::with_capacity(g_f, urls.len()));
+        (deduplicator, urls)
+    }
+
+    #[tokio::test]
+    async fn it_finds_key_with_criteria_kid_and_algorithm() {
+        let (deduplicator, urls) = build_jwks_search_components();
+        let context = Context::new();
+
+        let criteria = JWTCriteria {
+            kid: Some("key2".to_string()),
+            alg: Algorithm::HS256,
+        };
+
+        let key = search_jwks(deduplicator, &criteria, urls, &context)
+            .await
+            .expect("search worked")
+            .expect("found a key");
+        assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    }
+
+    #[tokio::test]
+    async fn it_finds_best_matching_key_with_criteria_algorithm() {
+        let (deduplicator, urls) = build_jwks_search_components();
+        let context = Context::new();
+
+        let criteria = JWTCriteria {
+            kid: None,
+            alg: Algorithm::HS256,
+        };
+
+        let key = search_jwks(deduplicator, &criteria, urls, &context)
+            .await
+            .expect("search worked")
+            .expect("found a key");
+        assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+        assert_eq!("key1", key.common.key_id.unwrap());
+    }
+
+    #[tokio::test]
+    async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
+        let (deduplicator, urls) = build_jwks_search_components();
+        let context = Context::new();
+
+        let criteria = JWTCriteria {
+            kid: None,
+            alg: Algorithm::RS512,
+        };
+
+        assert!(search_jwks(deduplicator, &criteria, urls, &context)
+            .await
+            .expect("search worked")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn it_finds_key_with_criteria_algorithm_ec() {
+        let (deduplicator, urls) = build_jwks_search_components();
+        let context = Context::new();
+
+        let criteria = JWTCriteria {
+            kid: None,
+            alg: Algorithm::ES256,
+        };
+
+        let key = search_jwks(deduplicator, &criteria, urls, &context)
+            .await
+            .expect("search worked")
+            .expect("found a key");
+        assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
+        assert_eq!(
+            "afda85e09a320cf748177874592de64d",
+            key.common.key_id.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn it_finds_key_with_criteria_algorithm_rsa() {
+        let (deduplicator, urls) = build_jwks_search_components();
+        let context = Context::new();
+
+        let criteria = JWTCriteria {
+            kid: None,
+            alg: Algorithm::RS256,
+        };
+
+        let key = search_jwks(deduplicator, &criteria, urls, &context)
+            .await
+            .expect("search worked")
+            .expect("found a key");
+        assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
+        assert_eq!(
+            "022516583d56b68faf40260fda72978a",
+            key.common.key_id.unwrap()
+        );
     }
 }
