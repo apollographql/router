@@ -17,7 +17,12 @@ use http::header::CONTENT_TYPE;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
+use jsonwebtoken::jwk::AlgorithmParameters;
+use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::jwk::KeyOperations;
+use jsonwebtoken::jwk::PublicKeyUse;
+use jsonwebtoken::Algorithm;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
 use mime::APPLICATION_JSON;
@@ -25,6 +30,7 @@ use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use thiserror::Error;
 use tokio::fs::read_to_string;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -59,6 +65,15 @@ static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
     Ok(Client::new())
 });
+
+#[derive(Error, Debug)]
+pub(crate) enum Error {
+    #[error("JWKSet cannot be loaded")]
+    JwkSet,
+
+    #[error("header_value_prefix must not contain whitespace")]
+    BadHeaderValuePrefix,
+}
 
 struct AuthenticationPlugin {
     configuration: JWTConf,
@@ -189,6 +204,137 @@ async fn get_jwks(url: Url) -> Option<JwkSet> {
     Some(jwks)
 }
 
+#[derive(Debug, Default)]
+struct JWTCriteria {
+    alg: Algorithm,
+    #[allow(unused)]
+    iss: Option<String>,
+    kid: Option<String>,
+}
+
+fn get_iss(_jwt: &str) -> Option<String> {
+    // TODO: iss isn't in the header, so we need to write some custom code to extract it from the payload
+    None
+}
+
+async fn search_jwks(
+    my_jwks: SharedDeduplicate,
+    criteria: &JWTCriteria,
+    jwks_urls: Vec<Url>,
+    context: &Context,
+) -> Result<Option<Jwk>, BoxError> {
+    let mut candidates = vec![];
+    for jwks_url in jwks_urls {
+        context.enter_active_request().await;
+        // Get the JWKS here
+        let jwks_opt = match my_jwks.get(jwks_url).await {
+            Ok(k) => k,
+            Err(e) => {
+                context.leave_active_request().await;
+                return Err(e.into());
+            }
+        };
+        context.leave_active_request().await;
+        let jwks = jwks_opt.ok_or(Error::JwkSet)?;
+        // Try to figure out if our jwks contains a candidate key (i.e.: a key which matches our
+        // criteria)
+        for mut key in jwks.keys {
+            let mut key_score = 0;
+            // We are only interested in keys which are used for signature verification
+            let mut proceed = if let Some(purpose) = &key.common.public_key_use {
+                purpose == &PublicKeyUse::Signature
+            } else if let Some(purpose) = &key.common.key_operations {
+                purpose.contains(&KeyOperations::Verify)
+            } else {
+                false
+            };
+
+            if !proceed {
+                continue;
+            }
+
+            // Furthermore, we would like our algorithms to match, or at least the kty
+            // If we have an algorithm that matches, boost the score
+            proceed = match key.common.algorithm {
+                Some(algorithm) => {
+                    key_score += 1;
+                    algorithm == criteria.alg
+                }
+                None => match criteria.alg {
+                    Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
+                        if let AlgorithmParameters::OctetKey(_) = key.algorithm {
+                            key.common.algorithm = Some(criteria.alg);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Algorithm::RS256
+                    | Algorithm::RS384
+                    | Algorithm::RS512
+                    | Algorithm::PS256
+                    | Algorithm::PS384
+                    | Algorithm::PS512 => {
+                        if let AlgorithmParameters::RSA(_) = key.algorithm {
+                            key.common.algorithm = Some(criteria.alg);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Algorithm::ES256 | Algorithm::ES384 => {
+                        if let AlgorithmParameters::OctetKeyPair(_) = key.algorithm {
+                            key.common.algorithm = Some(criteria.alg);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    Algorithm::EdDSA => {
+                        if let AlgorithmParameters::EllipticCurve(_) = key.algorithm {
+                            key.common.algorithm = Some(criteria.alg);
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                },
+            };
+
+            if !proceed {
+                continue;
+            }
+
+            // If we have a kid that matches boost the score
+            if criteria.kid.is_some() && key.common.key_id == criteria.kid {
+                key_score += 1;
+            }
+
+            // If we get here we have a key that:
+            //  - may be used for signature verification
+            //  - has a matching algorithm, or if JWT has no algorithm, a matching key type
+            // It may have a matching kid if the JWT has a kid and it matches the key kid
+            //
+            // Multiple keys may meet the matching criteria, but they have a score. They get 1
+            // point for having an explicitly matching algorithm and 1 point for an explicitly
+            // matching kid. We sort our candidates and pick the key with the highest score.
+            candidates.push((key_score, key));
+            // The highest score a key can achieve is 2, if we find one with a a score of 2, let's
+            // stop looking
+            if key_score == 2 {
+                break;
+            }
+        }
+    }
+    tracing::info!("candidates: {:?}", candidates);
+    if candidates.is_empty() {
+        Ok(None)
+    } else {
+        candidates.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(Some(candidates.swap_remove(0).1))
+    }
+}
+
 #[async_trait::async_trait]
 impl Plugin for AuthenticationPlugin {
     type Config = Conf;
@@ -203,7 +349,7 @@ impl Plugin for AuthenticationPlugin {
             .iter()
             .any(u8::is_ascii_whitespace)
         {
-            return Err("header_value_prefix must not contain whitespace".into());
+            return Err(Error::BadHeaderValuePrefix.into());
         }
         let mut urls = vec![];
         for s_url in &init.config.experimental.jwt.jwks_urls {
@@ -214,7 +360,7 @@ impl Plugin for AuthenticationPlugin {
         // We have to help the compiler out a bit by casting our function item to be a function
         // pointer.
         let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
-        let deduplicator = Deduplicate::with_capacity(g_f, 1);
+        let deduplicator = Deduplicate::with_capacity(g_f, urls.len());
 
         Ok(AuthenticationPlugin {
             configuration: init.config.experimental.jwt,
@@ -346,120 +492,103 @@ impl Plugin for AuthenticationPlugin {
                         }
                     };
 
-                    // Try to find the kid of the header
-                    let kid = match jwt_header.kid {
-                        Some(k) => k,
-                        None => {
-                            return failure_message(
-                                request.context,
-                                "Missing kid value from JWT header".to_string(),
-                                StatusCode::BAD_REQUEST,
-                            );
-                        }
+                    // Issuer isn't in the header, so try to extract it
+                    // from the claims.
+                    let iss = get_iss(jwt);
+
+                    // Extract our search criteria from our jwt
+                    let criteria = JWTCriteria {
+                        iss,
+                        kid: jwt_header.kid,
+                        alg: jwt_header.alg,
                     };
 
                     // Search our set of JWKS to find the kid and process it
                     // Note: This will search through JWKS in the order in which they are defined
-                    // in configuration. If the same "kid" is present in multiple JWKS, the router
-                    // will just use the first "kid" encountered.
-                    for jwks_url in my_jwks_urls {
-                        request.context.enter_active_request().await;
-                        // Get the JWKS here
-                        let jwks_opt = match my_jwks.get(jwks_url).await {
+                    // in configuration.
+
+                    let jwk_opt = match search_jwks(my_jwks.clone(), &criteria, my_jwks_urls, &request.context).await {
+                        Ok(j) => j,
+                        Err(e) => {
+                            return failure_message(
+                                request.context,
+                                format!("Could not retrieve JWKS set: {e}"),
+                                StatusCode::INTERNAL_SERVER_ERROR, // XXX: Best error?
+                            );
+                        }
+                    };
+
+                    if let Some(jwk) = jwk_opt {
+                        let decoding_key = match DecodingKey::from_jwk(&jwk) {
                             Ok(k) => k,
                             Err(e) => {
-                                request.context.leave_active_request().await;
-
                                 return failure_message(
                                     request.context,
-                                    format!("Could not retrieve JWKS set: {e}"),
-                                    StatusCode::INTERNAL_SERVER_ERROR, // XXX: Best error?
+                                    format!("Could not create decoding key: {e}"),
+                                    StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
                         };
-                        request.context.leave_active_request().await;
 
-
-                        let jwks = match jwks_opt {
-                            Some(k) => k,
+                        let algorithm = match jwk.common.algorithm {
+                            Some(a) => a,
                             None => {
                                 return failure_message(
                                     request.context,
-                                    "Could not find JWKS set at the configured location".to_string(),
+                                    "Jwk does not contain an algorithm".to_string(),
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
                         };
 
-                        // Now let's try to validate our token
-                        if let Some(jwk) = jwks.find(&kid) {
-                            let decoding_key = match DecodingKey::from_jwk(jwk) {
-                                Ok(k) => k,
-                                Err(e) => {
-                                    return failure_message(
-                                        request.context,
-                                        format!("Could not create decoding key: {e}"),
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                    );
-                                }
-                            };
+                        let validation = Validation::new(algorithm);
 
-                            let algorithm = match jwk.common.algorithm {
-                                Some(a) => a,
-                                None => {
-                                    return failure_message(
-                                        request.context,
-                                        "Jwk does not contain an algorithm".to_string(),
-                                        StatusCode::INTERNAL_SERVER_ERROR,
-                                    );
-                                }
-                            };
-
-                            let validation = Validation::new(algorithm);
-
-                            let token_data = match decode::<serde_json::Value>(
-                                jwt,
-                                &decoding_key,
-                                &validation,
-                            ) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    return failure_message(
-                                        request.context,
-                                        format!("Could not create decode JWT: {e}"),
-                                        StatusCode::UNAUTHORIZED,
-                                    );
-                                }
-                            };
-
-                            if let Err(e) = request
-                                .context
-                                .insert("apollo_authentication::JWT::claims", token_data.claims)
-                            {
+                        let token_data = match decode::<serde_json::Value>(
+                            jwt,
+                            &decoding_key,
+                            &validation,
+                        ) {
+                            Ok(v) => v,
+                            Err(e) => {
                                 return failure_message(
                                     request.context,
-                                    format!("Could not insert claims into context: {e}"),
-                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    format!("Could not create decode JWT: {e}"),
+                                    StatusCode::UNAUTHORIZED,
                                 );
                             }
-                            // This is a metric and will not appear in the logs
-                            tracing::info!(
-                                monotonic_counter.apollo_authentication_success_count = 1u64,
-                                kind = %AUTHENTICATION_KIND
+                        };
+
+                        if let Err(e) = request
+                            .context
+                            .insert("apollo_authentication::JWT::claims", token_data.claims)
+                        {
+                            return failure_message(
+                                request.context,
+                                format!("Could not insert claims into context: {e}"),
+                                StatusCode::INTERNAL_SERVER_ERROR,
                             );
-                            return Ok(ControlFlow::Continue(request));
                         }
+                        // This is a metric and will not appear in the logs
+                        tracing::info!(
+                            monotonic_counter.apollo_authentication_success_count = 1u64,
+                            kind = %AUTHENTICATION_KIND
+                        );
+                        return Ok(ControlFlow::Continue(request));
                     }
-                    // We can't find this "kid". We will observe the COOLDOWN, if one is
-                    // set, to minimise the impact of DOS attacks via this vector.
+
+                    // We can't find a key to process this JWT.
+                    //
+                    // Only perform a potential COOLDOWN if the JWT had a kid.
+                    //
+                    // We will observe the COOLDOWN, if one is set, to minimise the impact
+                    // of DOS attacks via this vector.
                     //
                     // If there is no COOLDOWN, we'll trigger a cache update and set a
                     // COOLDOWN.
-                    if COOLDOWN.load(Ordering::SeqCst) {
-                        // This is a metric and will not appear in the logs
-                        tracing::info!(
-                            monotonic_counter.apollo_authentication_cooldown_count = 1u64,
-                            kind = %AUTHENTICATION_KIND);
+                    if criteria.kid.is_some() {
+                        if COOLDOWN.load(Ordering::SeqCst) {
+                            // This is a metric and will not appear in the logs
+                            tracing::info!(monotonic_counter.apollo_authentication_cooldown_count = 1u64, kind = %AUTHENTICATION_KIND);
                             let response = router::Response::error_builder()
                                 .error(
                                     graphql::Error::builder()
@@ -502,9 +631,16 @@ impl Plugin for AuthenticationPlugin {
                             }
                             failure_message(
                                 request.context,
-                                format!("Could not find kid: '{kid}' in JWKS set"),
+                                format!("Could not find kid: '{:?}' in JWKS sets", criteria.kid),
                                 StatusCode::UNAUTHORIZED,
                             )
+                        }
+                    } else {
+                        failure_message(
+                            request.context,
+                            format!("Could not find a suitable key for: alg: '{:?}', kid: '{:?}' in JWKS sets", criteria.alg, criteria.kid),
+                            StatusCode::UNAUTHORIZED,
+                        )
                     }
                 }
             })
