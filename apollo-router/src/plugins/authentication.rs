@@ -240,24 +240,31 @@ async fn search_jwks(
         for mut key in jwks.keys {
             let mut key_score = 0;
             // We are only interested in keys which are used for signature verification
-            let mut proceed = if let Some(purpose) = &key.common.public_key_use {
-                purpose == &PublicKeyUse::Signature
+            if let Some(purpose) = &key.common.public_key_use {
+                if purpose != &PublicKeyUse::Signature {
+                    continue;
+                }
             } else if let Some(purpose) = &key.common.key_operations {
-                purpose.contains(&KeyOperations::Verify)
+                if !purpose.contains(&KeyOperations::Verify) {
+                    continue;
+                }
             } else {
-                false
+                continue;
             };
 
-            if !proceed {
-                continue;
+            // Let's see if we have a specified kid and if they match
+            if criteria.kid.is_some() && key.common.key_id == criteria.kid {
+                key_score += 1;
             }
 
             // Furthermore, we would like our algorithms to match, or at least the kty
             // If we have an algorithm that matches, boost the score
-            proceed = match key.common.algorithm {
+            match key.common.algorithm {
                 Some(algorithm) => {
+                    if algorithm != criteria.alg {
+                        continue;
+                    }
                     key_score += 1;
-                    algorithm == criteria.alg
                 }
                 // If a key doesn't have an algorithm, then we match the "alg" specified in the
                 // search criteria against all of the algorithms that we support.  If the
@@ -265,13 +272,15 @@ async fn search_jwks(
                 // criteria "alg", then we update the key to use the value of "alg" provided in
                 // the search criteria.
                 // If not, then this is not a usable key for this JWT
+                // Note: Matching algorithm parameters may seem unusual, but the appropriate
+                // algorithm details are not structured for easy consumption in jsonwebtoken and
+                // this is the simplest way to determine algorithm family.
                 None => match criteria.alg {
                     Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
                         if let AlgorithmParameters::OctetKey(_) = key.algorithm {
                             key.common.algorithm = Some(criteria.alg);
-                            true
                         } else {
-                            false
+                            continue;
                         }
                     }
                     Algorithm::RS256
@@ -282,30 +291,19 @@ async fn search_jwks(
                     | Algorithm::PS512 => {
                         if let AlgorithmParameters::RSA(_) = key.algorithm {
                             key.common.algorithm = Some(criteria.alg);
-                            true
                         } else {
-                            false
+                            continue;
                         }
                     }
                     Algorithm::ES256 | Algorithm::ES384 | Algorithm::EdDSA => {
                         if let AlgorithmParameters::EllipticCurve(_) = key.algorithm {
                             key.common.algorithm = Some(criteria.alg);
-                            true
                         } else {
-                            false
+                            continue;
                         }
                     }
                 },
             };
-
-            if !proceed {
-                continue;
-            }
-
-            // If we have a kid that matches boost the score
-            if criteria.kid.is_some() && key.common.key_id == criteria.kid {
-                key_score += 1;
-            }
 
             // If we get here we have a key that:
             //  - may be used for signature verification
