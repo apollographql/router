@@ -1,4 +1,5 @@
 pub(crate) mod all;
+pub(crate) mod changeset;
 pub(crate) mod compliance;
 pub(crate) mod dist;
 pub(crate) mod lint;

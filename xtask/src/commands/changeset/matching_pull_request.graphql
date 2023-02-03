@@ -1,0 +1,36 @@
+fragment PrInfo on PullRequest {
+  url
+  number
+  author {
+    __typename
+    login
+  }
+  title
+  closingIssuesReferences(last: 4) {
+    nodes {
+      url
+      number
+      repository {
+        nameWithOwner
+      }
+    }
+  }
+  body
+}
+fragment PrSearchResult on SearchResultItemConnection {
+  issueCount
+  nodes {
+    __typename
+    ...PrInfo
+  }
+ }
+
+query MatchingPullRequest($search: String!) {
+  search(
+    type: ISSUE
+    query: $search
+    first: 1
+  ) {
+    ...PrSearchResult
+  }
+}

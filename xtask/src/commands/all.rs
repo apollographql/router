@@ -9,6 +9,7 @@ use super::Test;
 pub struct All {
     #[structopt(flatten)]
     compliance: Compliance,
+
     #[structopt(flatten)]
     lint: Lint,
     #[structopt(flatten)]
