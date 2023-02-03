@@ -345,8 +345,8 @@ impl PlanNode {
 }
 
 impl DeferredNode {
-    fn execute<'a, 'b>(
-        &'b self,
+    fn execute<'a>(
+        &self,
         parameters: &'a ExecutionParameters<'a>,
         parent_value: &Value,
         sender: futures::channel::mpsc::Sender<Response>,
