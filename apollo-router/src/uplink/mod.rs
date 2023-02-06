@@ -83,19 +83,30 @@ impl Endpoints {
         Endpoints::RoundRobin { urls, current: 0 }
     }
 
+    /// Return an iterator of endpoints to check on a poll of uplink.
+    /// Fallback will always return URLs in the same order.
+    /// Round-robin will return an iterator that cycles over the URLS starting at the next URL
     fn iter<'a>(&'a mut self) -> Box<dyn Iterator<Item = &'a Url> + Send + 'a> {
         match self {
             Endpoints::Fallback { urls } => Box::new(urls.iter()),
-            Endpoints::RoundRobin { urls, current } => Box::new(
-                urls.iter()
-                    .cycle()
-                    .skip(*current)
-                    .map(|url| {
-                        *current += 1;
-                        url
-                    })
-                    .take(urls.len()),
-            ),
+            Endpoints::RoundRobin { urls, current } => {
+                // Prevent current from getting large.
+                *current %= urls.len();
+
+                // The iterator cycles, but will skip to the next untried URL and is finally limited by the number of URLs.
+                // This gives us a sliding window of URLs to try on each poll to uplink.
+                // The returned iterator will increment current each time it is called.
+                Box::new(
+                    urls.iter()
+                        .cycle()
+                        .skip(*current)
+                        .map(|url| {
+                            *current += 1;
+                            url
+                        })
+                        .take(urls.len()),
+                )
+            }
         }
     }
 }
@@ -181,8 +192,6 @@ where
                 }
             }
 
-            // This could potentially cause a perceived hang on shutdown as it has no knowledge if the sender is closed.
-            // In particular interval could be set to something large for some reason.
             tokio::time::sleep(interval).await;
         }
     };
