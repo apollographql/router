@@ -62,14 +62,14 @@ where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
     supergraph_creator: Arc<SF>,
-    apq_layer: Option<APQLayer>,
+    apq_layer: APQLayer,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: Option<APQLayer>) -> Self {
+    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
@@ -186,7 +186,7 @@ where
                         graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
                             (
                                 "failed to decode a valid GraphQL request from path",
-                                format!("failed to decode a valid GraphQL request from path {}", e),
+                                format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })
                     })
@@ -199,17 +199,14 @@ where
                     .map_err(|e| {
                         (
                             "failed to get the request body",
-                            format!("failed to get the request body: {}", e),
+                            format!("failed to get the request body: {e}"),
                         )
                     })
                     .and_then(|bytes| {
                         serde_json::from_reader(bytes.reader()).map_err(|err| {
                             (
                                 "failed to deserialize the request body into JSON",
-                                format!(
-                                    "failed to deserialize the request body into JSON: {}",
-                                    err
-                                ),
+                                format!("failed to deserialize the request body into JSON: {err}"),
                             )
                         })
                     })
@@ -222,10 +219,7 @@ where
                         context,
                     };
 
-                    let request_res = match apq {
-                        None => Ok(request),
-                        Some(apq) => apq.request(request).await,
-                    };
+                    let request_res = apq.supergraph_request(request).await;
 
                     let SupergraphResponse { response, context } =
                         match request_res.and_then(|request| {
@@ -254,10 +248,7 @@ where
                             }
                         }) {
                             Err(response) => response,
-                            Ok(request) => {
-                                let supergraph_service = supergraph_creator.create();
-                                supergraph_service.oneshot(request).await?
-                            }
+                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
                         };
 
                     let accepts_wildcard: bool = context
@@ -439,7 +430,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
-    apq_layer: Option<APQLayer>,
+    apq_layer: APQLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -491,15 +482,15 @@ where
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
         let apq_layer = if configuration.supergraph.apq.enabled {
-            Some(APQLayer::with_cache(
+            APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(
                     &configuration.supergraph.apq.experimental_cache,
                     "APQ",
                 )
                 .await,
-            ))
+            )
         } else {
-            None
+            APQLayer::disabled()
         };
 
         Self {

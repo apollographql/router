@@ -11,7 +11,6 @@ use super::log;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
-use super::QueryPlanOptions;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -59,7 +58,6 @@ impl QueryPlan {
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     query: &self.query,
-                    options: &self.options,
                 },
                 &root,
                 &Value::default(),
@@ -87,7 +85,6 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
-    pub(crate) options: &'a QueryPlanOptions,
 }
 
 impl PlanNode {
@@ -247,7 +244,6 @@ impl PlanNode {
                                         schema: parameters.schema,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
-                                        options: parameters.options,
                                         query: parameters.query,
                                     },
                                     current_dir,
@@ -349,8 +345,8 @@ impl PlanNode {
 }
 
 impl DeferredNode {
-    fn execute<'a, 'b>(
-        &'b self,
+    fn execute<'a>(
+        &self,
         parameters: &'a ExecutionParameters<'a>,
         parent_value: &Value,
         sender: futures::channel::mpsc::Sender<Response>,
@@ -391,7 +387,6 @@ impl DeferredNode {
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
         let ctx = parameters.context.clone();
-        let opt = parameters.options.clone();
         let query = parameters.query.clone();
         let mut primary_receiver = primary_sender.subscribe();
         let mut value = parent_value.clone();
@@ -429,7 +424,6 @@ impl DeferredNode {
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,
                             query: &query,
-                            options: &opt,
                         },
                         &Path::default(),
                         &value,

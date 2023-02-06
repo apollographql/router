@@ -1,0 +1,5 @@
+health_check:
+  enabled: true
+homepage:
+  enabled: true
+

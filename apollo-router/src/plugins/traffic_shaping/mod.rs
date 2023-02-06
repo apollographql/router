@@ -44,7 +44,6 @@ use crate::services::subgraph;
 use crate::services::subgraph_service::Compression;
 use crate::services::supergraph;
 use crate::services::SubgraphRequest;
-use crate::Configuration;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const APOLLO_TRAFFIC_SHAPING: &str = "apollo.traffic_shaping";
@@ -142,22 +141,19 @@ struct RouterShaping {
     timeout: Option<Duration>,
 }
 
-#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(PartialEq, Debug, Clone, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
 // FIXME: This struct is pub(crate) because we need its configuration in the query planner service.
 // Remove this once the configuration yml changes.
 /// Configuration for the experimental traffic shaping plugin
 pub(crate) struct Config {
-    #[serde(default)]
     /// Applied at the router level
     router: Option<RouterShaping>,
-    #[serde(default)]
     /// Applied on all subgraphs
     all: Option<Shaping>,
-    #[serde(default)]
     /// Applied on specific subgraphs
     subgraphs: HashMap<String, Shaping>,
-    /// Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
+    /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
 }
 
@@ -356,15 +352,6 @@ impl TrafficShaping {
         } else {
             Either::B(service)
         }
-    }
-}
-
-impl TrafficShaping {
-    pub(crate) fn get_configuration_deduplicate_variables(configuration: &Configuration) -> bool {
-        configuration
-            .plugin_configuration(APOLLO_TRAFFIC_SHAPING)
-            .map(|conf| conf.get("deduplicate_variables") == Some(&serde_json::Value::Bool(true)))
-            .unwrap_or_default()
     }
 }
 

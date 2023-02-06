@@ -69,7 +69,7 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
                                 if err.is_full() {
                                     std::thread::sleep(Duration::from_millis(50));
                                 } else {
-                                    panic!("event channel failed: {}", err);
+                                    panic!("event channel failed: {err}");
                                 }
                             }
                         }
@@ -80,10 +80,10 @@ fn watch_with_duration(path: &Path, duration: Duration) -> impl Stream<Item = ()
         },
         config,
     )
-    .unwrap_or_else(|_| panic!("could not create watch on: {:?}", config_file_path));
+    .unwrap_or_else(|_| panic!("could not create watch on: {config_file_path:?}"));
     watcher
         .watch(&config_file_path, RecursiveMode::NonRecursive)
-        .unwrap_or_else(|_| panic!("could not watch: {:?}", config_file_path));
+        .unwrap_or_else(|_| panic!("could not watch: {config_file_path:?}"));
     // Tell watchers once they should read the file once,
     // then listen to fs events.
     stream::once(future::ready(()))
@@ -104,7 +104,6 @@ pub(crate) mod tests {
     use std::env::temp_dir;
     use std::fs::File;
     use std::io::Seek;
-    use std::io::SeekFrom;
     use std::io::Write;
     use std::path::PathBuf;
 
@@ -134,7 +133,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn write_and_flush(file: &mut File, contents: &str) {
-        file.seek(SeekFrom::Start(0)).unwrap();
+        file.rewind().unwrap();
         file.set_len(0).unwrap();
         file.write_all(contents.as_bytes()).unwrap();
         file.flush().unwrap();

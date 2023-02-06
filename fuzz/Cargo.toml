@@ -11,7 +11,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-apollo-smith = { version = "0.3.1", features = ["parser-impl"] }
+apollo-smith = { version = "0.3.2", features = ["parser-impl"] }
 apollo-parser = "0.4.1"
 env_logger = "0.10.0"
 log = "0.4"

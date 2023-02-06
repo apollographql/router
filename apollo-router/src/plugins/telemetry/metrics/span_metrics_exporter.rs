@@ -55,7 +55,7 @@ impl SpanExporter for Exporter {
                 .end_time
                 .duration_since(span.start_time)
                 .unwrap_or_default()
-                .as_secs_f64() as f64;
+                .as_secs_f64();
 
             // Convert it in seconds
             let idle: f64 = idle as f64 / 1_000_000_000_f64;

@@ -175,10 +175,8 @@ impl Prepare {
 
         if let Version::Nightly = &self.version {
             println!("Skipping requirement that GITHUB_TOKEN is set in the environment because this is a nightly release which doesn't yet need it.");
-        } else {
-            if std::env::var("GITHUB_TOKEN").is_err() {
-                return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
-            }
+        } else if std::env::var("GITHUB_TOKEN").is_err() {
+            return Err(anyhow!("the GITHUB_TOKEN environment variable must be set to a valid personal access token prior to starting a release. Obtain a personal access token at https://github.com/settings/tokens which has the 'repo' scope."));
         }
         Ok(())
     }
@@ -187,8 +185,8 @@ impl Prepare {
     /// (release) or "#.#.#-rc.#" (release candidate)
     fn switch_to_release_branch(&self, version: &str) -> Result<()> {
         println!("creating release branch");
-        git!("fetch", "origin", &format!("dev:{}", version));
-        git!("checkout", &version);
+        git!("fetch", "origin", &format!("dev:{version}"));
+        git!("checkout", version);
         Ok(())
     }
 
@@ -231,7 +229,7 @@ impl Prepare {
                             panic!("unexpected rev-parse HEAD");
                         }
                     }
-                    Err(e) => panic!("failed to open: {}", e),
+                    Err(e) => panic!("failed to open: {e}"),
                 };
 
                 replace_in_file!(
@@ -268,14 +266,13 @@ impl Prepare {
             replace_in_file!(
                 "./apollo-router-scaffold/templates/base/Cargo.toml",
                 "^apollo-router\\s*=\\s*\"[^\"]+\"",
-                format!("apollo-router = \"{}\"", resolved_version)
+                format!("apollo-router = \"{resolved_version}\"")
             );
             replace_in_file!(
                 "./apollo-router-scaffold/templates/base/xtask/Cargo.toml",
                 r#"^apollo-router-scaffold = \{\s*git\s*=\s*"https://github.com/apollographql/router.git",\s*tag\s*=\s*"v[^"]+"\s*\}$"#,
                 format!(
-                    r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{}" }}"#,
-                    resolved_version
+                    r#"apollo-router-scaffold = {{ git = "https://github.com/apollographql/router.git", tag = "v{resolved_version}" }}"#
                 )
             );
         }
@@ -289,7 +286,7 @@ impl Prepare {
         replace_in_file!(
             "./scripts/install.sh",
             "^PACKAGE_VERSION=.*$",
-            format!("PACKAGE_VERSION=\"v{}\"", version)
+            format!("PACKAGE_VERSION=\"v{version}\"")
         );
         Ok(())
     }
@@ -305,15 +302,12 @@ impl Prepare {
         replace_in_file!(
             "./docs/source/containerization/docker.mdx",
             "with your chosen version. e.g.: `v[^`]+`",
-            format!("with your chosen version. e.g.: `v{}`", version)
+            format!("with your chosen version. e.g.: `v{version}`")
         );
         replace_in_file!(
             "./docs/source/containerization/kubernetes.mdx",
             "https://github.com/apollographql/router/tree/[^/]+/helm/chart/router",
-            format!(
-                "https://github.com/apollographql/router/tree/v{}/helm/chart/router",
-                version
-            )
+            format!("https://github.com/apollographql/router/tree/v{version}/helm/chart/router")
         );
         let helm_chart = String::from_utf8(
             std::process::Command::new(which::which("helm")?)
@@ -350,13 +344,13 @@ impl Prepare {
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
             "^version:.*?$",
-            format!("version: {}", version)
+            format!("version: {version}")
         );
 
         replace_in_file!(
             "./helm/chart/router/Chart.yaml",
             "appVersion: \"v[^\"]+\"",
-            format!("appVersion: \"v{}\"", version)
+            format!("appVersion: \"v{version}\"")
         );
 
         if !std::process::Command::new(which::which("helm-docs")?)
@@ -383,10 +377,7 @@ impl Prepare {
                 replace_in_file!(
                     entry.path(),
                     r#"^(?P<indentation>\s+)image:\s*ghcr.io/apollographql/router:v.*$"#,
-                    format!(
-                        "${{indentation}}image: ghcr.io/apollographql/router:v{}",
-                        version
-                    )
+                    format!("${{indentation}}image: ghcr.io/apollographql/router:v{version}")
                 );
             }
         }
@@ -445,16 +436,10 @@ impl Prepare {
     /// Run `cargo xtask check-compliance`.
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
-        cargo!([
-            "about",
-            "generate",
-            "--workspace",
-            "-o",
-            "licenses.html",
-            "about.hbs"
-        ]);
+        cargo!(["xtask", "check-compliance"]);
         if !self.skip_license_ckeck {
-            cargo!(["xtask", "check-compliance"]);
+            println!("updating licenses.html");
+            cargo!(["xtask", "licenses"]);
         }
         Ok(())
     }
@@ -479,7 +464,7 @@ impl Prepare {
 
         println!("creating release PR");
         git!("add", "-u");
-        git!("commit", "-m", &format!("release {}", version));
+        git!("commit", "-m", &format!("release {version}"));
         git!(
             "push",
             "--set-upstream",
@@ -493,12 +478,12 @@ impl Prepare {
                 "router",
                 &PullsCreateRequest {
                     base: "main".to_string(),
-                    body: format!("Release {}", version),
+                    body: format!("Release {version}"),
                     draft: None,
                     head: version.to_string(),
                     issue: 0,
                     maintainer_can_modify: None,
-                    title: format!("Release {}", version),
+                    title: format!("Release {version}"),
                 },
             )
             .await

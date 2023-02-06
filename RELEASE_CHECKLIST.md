@@ -82,7 +82,7 @@ in lieu of an official changelog.
   - Paste the output in the `Kubernetes Configuration` example of the `docs/source/containerization/kubernetes.mdx` file
 9. Update `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
 10. Update the `image` of the Docker image within `docker-compose*.yml` files inside the `dockerfiles` directory.
-11. Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.
+11. Update the license list with `cargo xtask licenses`.
     (If not installed, you can install `cargo-about` by running `cargo install cargo-about`.)
 12. Add a new section in `CHANGELOG.md` with the contents of `NEXT_CHANGELOG.md`
 13. Put a Release date and the version number on the new `CHANGELOG.md` section
