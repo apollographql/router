@@ -230,7 +230,14 @@ impl IntegrationTest {
 
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
-        todo!("implement graceful shutdown signal on windows")
+        // On windows we have to do complicated things to gracefully shutdown. One day we may get around to this, but it's not a priority.
+        let _ = self
+            .router
+            .as_mut()
+            .expect("router not started")
+            .kill()
+            .await;
+        self.assert_shutdown().await;
     }
 
     #[allow(dead_code)]
