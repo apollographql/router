@@ -1,3 +1,6 @@
+# This operation is used to generate Rust code which lives in a file directly
+# next to this with the same name but a `.rs` extension.  For instructions on
+# how to generate the code, see the top of `./mod.rs`.
 fragment PrInfo on PullRequest {
   url
   number
