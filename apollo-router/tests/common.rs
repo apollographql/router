@@ -222,7 +222,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    #[cfg(target_os = "linux")]
+    #[cfg(target_family = "unix")]
     pub async fn graceful_shutdown(&mut self) {
         // Send a sig term and then wait for the process to finish.
         unsafe {
@@ -231,7 +231,7 @@ impl IntegrationTest {
         self.assert_shutdown().await;
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {}
 
     #[allow(dead_code)]
