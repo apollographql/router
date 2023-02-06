@@ -128,10 +128,7 @@ where
                 }
                 .into(),
             );
-            // Prevent the situation where repeated UplinkResponse::Unchanged could prevent shutdown.
-            if sender.is_closed() {
-                break;
-            }
+
             match fetch::<Query>(&query_body, &mut endpoints.iter(), timeout).await {
                 Ok(value) => {
                     let response: UplinkResponse<Response> = value.into();
