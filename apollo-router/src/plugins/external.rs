@@ -45,10 +45,10 @@ struct ExternalPlugin {
     sdl: Arc<String>,
 }
 
-/// What information is passed to a request/response stage
+/// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
-struct BaseConf {
+struct RouterConf {
     /// Send the headers
     headers: bool,
     /// Send the context
@@ -59,21 +59,37 @@ struct BaseConf {
     sdl: bool,
 }
 
+/// What information is passed to a subgraph request/response stage
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default)]
+struct SubgraphConf {
+    /// Send the headers
+    headers: bool,
+    /// Send the context
+    context: bool,
+    /// Send the body
+    body: bool,
+    /// Send the service name
+    service: bool,
+    /// Send the subgraph URL
+    url: bool,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
 struct RouterStage {
     /// The request configuration
-    request: Option<BaseConf>,
+    request: Option<RouterConf>,
     /// The response configuration
-    response: Option<BaseConf>,
+    response: Option<RouterConf>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct SubgraphStage {
     #[serde(default)]
-    request: Option<BaseConf>,
+    request: Option<SubgraphConf>,
     #[serde(default)]
-    response: Option<BaseConf>,
+    response: Option<SubgraphConf>,
 }
 
 /// The stages request/response configuration
@@ -573,7 +589,7 @@ type ExternalParams<'a> = (
 );
 
 fn prepare_external_params<'a>(
-    config: &'a BaseConf,
+    config: &'a RouterConf,
     headers: &'a HeaderMap<HeaderValue>,
     bytes: &'a Bytes,
     context: &'a Context,
