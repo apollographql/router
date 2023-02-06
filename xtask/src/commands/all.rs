@@ -10,7 +10,6 @@ use super::Test;
 pub struct All {
     #[structopt(flatten)]
     compliance: Compliance,
-
     #[structopt(flatten)]
     licenses: Licenses,
     #[structopt(flatten)]
