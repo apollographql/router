@@ -137,7 +137,7 @@ pub(crate) fn stream_supergraph(
             tokio::time::sleep(interval).await;
         }
     };
-    let _ = tokio::task::spawn(task.with_current_subscriber());
+    drop(tokio::task::spawn(task.with_current_subscriber()));
 
     ReceiverStream::new(receiver)
 }

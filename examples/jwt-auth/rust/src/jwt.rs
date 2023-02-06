@@ -28,8 +28,8 @@
 //! key: hex encoded key
 //!
 //! There are also two optional parameters
-//! time_tolerance: <u64>
-//! max_token_life: <u64>
+//! time_tolerance: `u64`
+//! max_token_life: `u64`
 //!
 //! Both of these parameters are in units of seconds. Both default to 15 mins if
 //! not specified
