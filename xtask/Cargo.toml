@@ -41,5 +41,4 @@ tinytemplate = "1.2.1"
 tokio = "1.25.0"
 which = "4"
 zip = { version = "0.6", default-features = false }
-sha2 = "0.10"
 walkdir = "2.3.2"

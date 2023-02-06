@@ -2,27 +2,21 @@ use anyhow::Result;
 use structopt::StructOpt;
 
 use super::Compliance;
-use super::Licenses;
 use super::Lint;
 use super::Test;
 
 #[derive(Debug, StructOpt)]
-pub struct All {
+pub struct Dev {
     #[structopt(flatten)]
     compliance: Compliance,
-
-    #[structopt(flatten)]
-    licenses: Licenses,
     #[structopt(flatten)]
     lint: Lint,
     #[structopt(flatten)]
     test: Test,
 }
 
-impl All {
+impl Dev {
     pub fn run(&self) -> Result<()> {
-        eprintln!("Checking licenses...");
-        self.licenses.run()?;
         eprintln!("Checking compliance...");
         self.compliance.run()?;
         eprintln!("Checking format and clippy...");
