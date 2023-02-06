@@ -1,3 +1,15 @@
+// THIS FILE IS GENERATED
+// THIS FILE IS GENERATED
+// THIS FILE IS GENERATED
+// See the instructions in `./mod.rs` for how to regenerate it.  It is
+// generated based on the operation that sits alongside it in this same file.
+// Unfortunately, this comment will not be preserved and needs to be manually
+// preserved if it's desired to keep it around.  Luckily, I don't think this
+// operation will change very often.
+// THIS FILE IS GENERATED
+// THIS FILE IS GENERATED
+// THIS FILE IS GENERATED
+
 #![allow(clippy::all, warnings)]
 pub struct MatchingPullRequest;
 pub mod matching_pull_request {
