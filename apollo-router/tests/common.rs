@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
-use std::net::{SocketAddr, TcpListener};
+use std::net::SocketAddr;
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -38,7 +39,9 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use uuid::Uuid;
 use wiremock::matchers::method;
-use wiremock::{Mock, Respond, ResponseTemplate};
+use wiremock::Mock;
+use wiremock::Respond;
+use wiremock::ResponseTemplate;
 
 static LOCK: OnceCell<Arc<Mutex<bool>>> = OnceCell::new();
 
