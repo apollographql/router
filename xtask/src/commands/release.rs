@@ -436,16 +436,10 @@ impl Prepare {
     /// Run `cargo xtask check-compliance`.
     fn check_compliance(&self) -> Result<()> {
         println!("checking compliance");
-        cargo!([
-            "about",
-            "generate",
-            "--workspace",
-            "-o",
-            "licenses.html",
-            "about.hbs"
-        ]);
+        cargo!(["xtask", "check-compliance"]);
         if !self.skip_license_ckeck {
-            cargo!(["xtask", "check-compliance"]);
+            println!("updating licenses.html");
+            cargo!(["xtask", "licenses"]);
         }
         Ok(())
     }

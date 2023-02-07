@@ -85,7 +85,7 @@ http-body = "0.4.5"
 heck = "0.4.1"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
-hyper = { version = "0.14.23", features = ["server", "client"] }
+hyper = { version = "0.14.24", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.2", features = ["http1", "http2"] }
 indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
@@ -158,7 +158,7 @@ reqwest = { version = "0.11.14", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.14+v2.3.0"
+router-bridge = "0.1.15+v2.3.1"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
@@ -238,6 +238,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
+wiremock = "0.5.12"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.2", features = ["dw"], default-features = false }
