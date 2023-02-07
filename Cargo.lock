@@ -4297,9 +4297,9 @@ dependencies = [
 
 [[package]]
 name = "redis_cluster_async"
-version = "0.7.0"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6b2bda8e41b4abd38386c64fe61e3c2dda2df8cf2768d0b3a47ce060336f0fe0"
+checksum = "3ee1556d15936b948e248d5fce3b540c96194fbda59ef11d8fa7a48571fa5ddd"
 dependencies = [
  "crc16",
  "futures",
