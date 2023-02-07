@@ -33,12 +33,15 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::apollo_graph_reference;
+use crate::services::execution;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
-use crate::services::{execution, router, subgraph, supergraph};
+use crate::services::router;
+use crate::services::subgraph;
+use crate::services::supergraph;
 use crate::tracer::TraceId;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
