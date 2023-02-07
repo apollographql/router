@@ -251,11 +251,9 @@ impl Create {
                         .items(&["Branch Name", "Random Name"])
                         .interact_on_opt(&Term::stderr())?
                         .expect("no naming convention was selected");
-                    if selection == 0 {
-                        true
-                    } else {
-                        false
-                    }
+
+                    // Match if the first index was "Branch Name" (from `items`)
+                    selection == 0
                 };
 
                 let branch_name: Option<String> = match git2::Repository::open_from_env() {
