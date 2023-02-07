@@ -33,7 +33,7 @@ use matching_pull_request::matching_pull_request::{ResponseData,Variables};
 use matching_pull_request::MatchingPullRequest;
 use memorable_wordlist;
 use serde::Serialize;
-use std::{fmt, fs, path::PathBuf, slice::Iter, str::FromStr};
+use std::{fmt, fs, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 use tinytemplate::{format_unescaped, TinyTemplate};
 use xtask::PKG_PROJECT_ROOT;
@@ -106,11 +106,9 @@ impl Classification {
         }
     }
 
-    /// This definition of how to iterate over classifications is responsible
-    /// for the ordering that eventually appears in the emitted CHANGELOG. It's
-    /// also the order options are displayed in the TUI.
-    pub fn iterator() -> Iter<'static, Classification> {
-        static CLASSIFICATIONS: [Classification; 7] = [
+    /// Defines the ordering that eventually appears in the emitted CHANGELOG
+    /// and the order options appear in the TUI.
+    const ORDERED_ALL: &'static [Self] = &[
             Classification::Breaking,
             Classification::Feature,
             Classification::Fix,
@@ -118,9 +116,7 @@ impl Classification {
             Classification::Maintenance,
             Classification::Documentation,
             Classification::Experimental,
-        ];
-        CLASSIFICATIONS.iter()
-    }
+    ];
 }
 
 type ParseError = &'static str;
@@ -195,7 +191,7 @@ impl Create {
             .build()
             .unwrap()
             .block_on(async {
-                let items = Classification::iterator().collect_vec();
+                let items = Classification::ORDERED_ALL;
 
                 let selected_classification: Classification = if self.classification.is_some() {
                     println!(
