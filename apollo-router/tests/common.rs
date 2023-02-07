@@ -35,6 +35,7 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::task;
+use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tower::BoxError;
 use tracing::info_span;
@@ -46,6 +47,7 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use uuid::Uuid;
 
+static SUBGRAPHS: OnceCell<JoinHandle<()>> = OnceCell::new();
 static LOCK: OnceCell<Arc<Mutex<bool>>> = OnceCell::new();
 
 pub struct IntegrationTest {
@@ -72,7 +74,8 @@ impl IntegrationTest {
             .lock_owned()
             .await;
 
-        tokio::task::spawn(subgraph());
+        // Only spawn subgraphs if they are not already spawned
+        SUBGRAPHS.get_or_init(|| tokio::task::spawn(subgraph()));
 
         let mut test_config_location = std::env::temp_dir();
         test_config_location.push("test_config.yaml");
