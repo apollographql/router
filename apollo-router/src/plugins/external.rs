@@ -39,13 +39,82 @@ use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
-use crate::services::router;
-use crate::services::subgraph;
+use crate::services::{execution, router, subgraph, supergraph};
 use crate::tracer::TraceId;
 use crate::Context;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
+type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
+
+#[async_trait::async_trait]
+impl Plugin for ExternalPlugin<HTTPClientService> {
+    type Config = Conf;
+
+    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        // todo: grab tls config from configuration
+        let tls_config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(http_connector);
+
+        let http_client = ServiceBuilder::new()
+            .layer(TimeoutLayer::new(
+                init.config
+                    .timeout
+                    .unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT),
+            ))
+            .service(hyper::Client::builder().build(connector));
+
+        ExternalPlugin::new(http_client, init.config, init.supergraph_sdl)
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        self.router_service(service)
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        self.supergraph_service(service)
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        self.execution_service(service)
+    }
+
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        self.subgraph_service(name, service)
+    }
+}
+
+// This macro allows us to use it in our plugin registry!
+// register_plugin takes a group name, and a plugin name.
+//
+// In order to keep the plugin names consistent,
+// we use using the `Reverse domain name notation`
+register_plugin!(
+    "experimental",
+    "external",
+    ExternalPlugin<HTTPClientService>
+);
+
+// -------------------------------------------------------------------------------------------------------
+
+/// This is where the real implementation happens.
+/// The structure above calls the functions defined below.
+///
+/// This structure is generic over the HTTP Service so we can test the plugin seamlessly.
 #[derive(Debug)]
 struct ExternalPlugin<C>
 where
@@ -61,6 +130,276 @@ where
     sdl: Arc<String>,
 }
 
+impl<C> ExternalPlugin<C>
+where
+    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+{
+    fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
+        Ok(Self {
+            http_client,
+            configuration,
+            sdl,
+        })
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        let request_sdl = self.sdl.clone();
+        let response_sdl = self.sdl.clone();
+
+        let request_full_config = self.configuration.clone();
+        let response_full_config = self.configuration.clone();
+
+        let request_layer = if self
+            .configuration
+            .stages
+            .as_ref()
+            .and_then(|x| x.router.as_ref())
+            .and_then(|x| x.request.as_ref())
+            .is_some()
+        {
+            // Safe to unwrap here because we just confirmed that all optional elements are present
+            let request_config = request_full_config
+                .stages
+                .unwrap()
+                .router
+                .unwrap()
+                .request
+                .unwrap();
+            Some(AsyncCheckpointLayer::new(
+                move |mut request: router::Request| {
+                    let my_sdl = request_sdl.to_string();
+                    let proto_url = request_full_config.url.clone();
+                    let timeout = request_full_config.timeout;
+                    let request_config = request_config.clone();
+                    async move {
+                        // Call into our out of process processor with a body of our body
+                        // First, extract the data we need from our request and prepare our
+                        // external call. Use our configuration to figure out which data to send.
+
+                        let (parts, body) = request.router_request.into_parts();
+                        let b_bytes = body::to_bytes(body).await?;
+
+                        let (headers, payload, context, sdl) = prepare_external_params(
+                            &request_config,
+                            &parts.headers,
+                            &b_bytes,
+                            &request.context,
+                            my_sdl,
+                        )?;
+
+                        request.context.enter_active_request().await;
+
+                        // Second, call our co-processor and get a reply.
+                        let res = call_external(
+                            proto_url,
+                            timeout,
+                            PipelineStep::RouterRequest,
+                            headers,
+                            payload,
+                            context,
+                            sdl,
+                        )
+                        .await;
+
+                        request.context.leave_active_request().await;
+
+                        let co_processor_output = res?;
+
+                        tracing::debug!(?co_processor_output, "co-processor returned");
+
+                        // Thirdly, we need to interpret the control flow which may have been
+                        // updated by our co-processor and decide if we should proceed or stop.
+
+                        if matches!(co_processor_output.control, Control::Break(_)) {
+                            // Ensure the code is a valid http status code
+                            let code = co_processor_output.control.get_http_status()?;
+
+                            let res = if !code.is_success() {
+                                router::Response::error_builder()
+                                    .errors(vec![Error {
+                                        message: co_processor_output
+                                            .body
+                                            .unwrap_or(serde_json::Value::Null)
+                                            .to_string(),
+                                        ..Default::default()
+                                    }])
+                                    .status_code(code)
+                                    .context(request.context)
+                                    .build()?
+                            } else {
+                                router::Response::builder()
+                                    .data(
+                                        co_processor_output
+                                            .body
+                                            .unwrap_or(serde_json::Value::Null)
+                                            .to_string(),
+                                    )
+                                    .status_code(code)
+                                    .context(request.context)
+                                    .build()?
+                            };
+                            return Ok(ControlFlow::Break(res));
+                        }
+
+                        // Finally, process our reply and act on the contents. Our processing logic is
+                        // that we replace "bits" of our incoming request with the updated bits if they
+                        // are present in our co_processor_output.
+
+                        let new_body = match co_processor_output.body {
+                            Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+                            None => Body::from(b_bytes),
+                        };
+
+                        request.router_request = http::Request::from_parts(parts, new_body);
+
+                        if let Some(context) = co_processor_output.context {
+                            request.context = context;
+                        }
+
+                        if let Some(headers) = co_processor_output.headers {
+                            *request.router_request.headers_mut() =
+                                internalize_header_map(headers)?;
+                        }
+
+                        Ok(ControlFlow::Continue(request))
+                    }
+                },
+            ))
+        } else {
+            None
+        };
+
+        let response_layer = if self
+            .configuration
+            .stages
+            .as_ref()
+            .and_then(|x| x.router.as_ref())
+            .and_then(|x| x.response.as_ref())
+            .is_some()
+        {
+            // Safe to unwrap here because we just confirmed that all optional elements are present
+            let response_config = response_full_config
+                .stages
+                .unwrap()
+                .router
+                .unwrap()
+                .response
+                .unwrap();
+            Some(MapFutureLayer::new(move |fut| {
+                let my_sdl = response_sdl.to_string();
+                let proto_url = response_full_config.url.clone();
+                let timeout = response_full_config.timeout;
+                let response_config = response_config.clone();
+                async move {
+                    let mut response: router::Response = fut.await?;
+
+                    // Call into our out of process processor with a body of our body
+                    // First, extract the data we need from our response and prepare our
+                    // external call. Use our configuration to figure out which data to send.
+
+                    let (parts, body) = response.response.into_parts();
+                    let b_bytes = body::to_bytes(body).await?;
+
+                    let (headers, payload, context, sdl) = prepare_external_params(
+                        &response_config,
+                        &parts.headers,
+                        &b_bytes,
+                        &response.context,
+                        my_sdl,
+                    )?;
+
+                    // Second, call our co-processor and get a reply.
+                    response.context.enter_active_request().await;
+                    let co_processor_result = call_external(
+                        proto_url,
+                        timeout,
+                        PipelineStep::RouterResponse,
+                        headers,
+                        payload,
+                        context,
+                        sdl,
+                    )
+                    .await;
+                    response.context.leave_active_request().await;
+                    tracing::debug!(?co_processor_result, "co-processor returned");
+                    let co_processor_output = co_processor_result?;
+
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
+
+                    let new_body = match co_processor_output.body {
+                        Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+                        None => Body::from(b_bytes),
+                    };
+
+                    response.response = http::Response::from_parts(parts, new_body);
+
+                    if let Some(context) = co_processor_output.context {
+                        response.context = context;
+                    }
+
+                    if let Some(headers) = co_processor_output.headers {
+                        *response.response.headers_mut() = internalize_header_map(headers)?;
+                    }
+
+                    Ok::<router::Response, BoxError>(response)
+                }
+            }))
+        } else {
+            None
+        };
+
+        fn external_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
+            move |_request: &router::Request| {
+                tracing::info_span!(
+                    EXTERNAL_SPAN_NAME,
+                    "external service" = stringify!(router::Request),
+                    "otel.kind" = "INTERNAL"
+                )
+            }
+        }
+
+        ServiceBuilder::new()
+            .instrument(external_service_span())
+            .option_layer(request_layer)
+            .option_layer(response_layer)
+            .buffered()
+            .service(service)
+            .boxed()
+    }
+
+    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
+        service
+    }
+
+    fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
+        service
+    }
+
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        if let Some(stages) = &self.configuration.stages {
+            if let Some(subgraph_stage) = &stages.subgraph {
+                subgraph_stage.as_service(
+                    self.http_client.clone(),
+                    service,
+                    self.configuration.url.clone(),
+                    self.configuration.timeout,
+                )
+            } else {
+                service
+            }
+        } else {
+            service
+        }
+    }
+}
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
@@ -354,292 +693,6 @@ struct Conf {
     stages: Option<Stages>,
 }
 
-#[async_trait::async_trait]
-impl Plugin
-    for ExternalPlugin<tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>>
-{
-    type Config = Conf;
-
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        let mut http_connector = HttpConnector::new();
-        http_connector.set_nodelay(true);
-        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-        http_connector.enforce_http(false);
-
-        // todo: grab tls config from configuration
-        let tls_config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
-            .with_no_client_auth();
-
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
-            .with_tls_config(tls_config)
-            .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http_connector);
-
-        let http_client = ServiceBuilder::new()
-            .layer(TimeoutLayer::new(
-                init.config
-                    .timeout
-                    .unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT),
-            ))
-            .service(hyper::Client::builder().build(connector));
-
-        Ok(Self {
-            http_client,
-            configuration: init.config,
-            sdl: init.supergraph_sdl,
-        })
-    }
-
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        if let Some(stages) = &self.configuration.stages {
-            if let Some(subgraph_stage) = &stages.subgraph {
-                subgraph_stage.as_service(
-                    self.http_client.clone(),
-                    service,
-                    self.configuration.url.clone(),
-                    self.configuration.timeout,
-                )
-            } else {
-                service
-            }
-        } else {
-            service
-        }
-    }
-
-    fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        let request_sdl = self.sdl.clone();
-        let response_sdl = self.sdl.clone();
-
-        let request_full_config = self.configuration.clone();
-        let response_full_config = self.configuration.clone();
-
-        let request_layer = if self
-            .configuration
-            .stages
-            .as_ref()
-            .and_then(|x| x.router.as_ref())
-            .and_then(|x| x.request.as_ref())
-            .is_some()
-        {
-            // Safe to unwrap here because we just confirmed that all optional elements are present
-            let request_config = request_full_config
-                .stages
-                .unwrap()
-                .router
-                .unwrap()
-                .request
-                .unwrap();
-            Some(AsyncCheckpointLayer::new(
-                move |mut request: router::Request| {
-                    let my_sdl = request_sdl.to_string();
-                    let proto_url = request_full_config.url.clone();
-                    let timeout = request_full_config.timeout;
-                    let request_config = request_config.clone();
-                    async move {
-                        // Call into our out of process processor with a body of our body
-                        // First, extract the data we need from our request and prepare our
-                        // external call. Use our configuration to figure out which data to send.
-
-                        let (parts, body) = request.router_request.into_parts();
-                        let b_bytes = body::to_bytes(body).await?;
-
-                        let (headers, payload, context, sdl) = prepare_external_params(
-                            &request_config,
-                            &parts.headers,
-                            &b_bytes,
-                            &request.context,
-                            my_sdl,
-                        )?;
-
-                        request.context.enter_active_request().await;
-
-                        // Second, call our co-processor and get a reply.
-                        let res = call_external(
-                            proto_url,
-                            timeout,
-                            PipelineStep::RouterRequest,
-                            headers,
-                            payload,
-                            context,
-                            sdl,
-                        )
-                        .await;
-
-                        request.context.leave_active_request().await;
-
-                        let co_processor_output = res?;
-
-                        tracing::debug!(?co_processor_output, "co-processor returned");
-
-                        // Thirdly, we need to interpret the control flow which may have been
-                        // updated by our co-processor and decide if we should proceed or stop.
-
-                        if matches!(co_processor_output.control, Control::Break(_)) {
-                            // Ensure the code is a valid http status code
-                            let code = co_processor_output.control.get_http_status()?;
-
-                            let res = if !code.is_success() {
-                                router::Response::error_builder()
-                                    .errors(vec![Error {
-                                        message: co_processor_output
-                                            .body
-                                            .unwrap_or(serde_json::Value::Null)
-                                            .to_string(),
-                                        ..Default::default()
-                                    }])
-                                    .status_code(code)
-                                    .context(request.context)
-                                    .build()?
-                            } else {
-                                router::Response::builder()
-                                    .data(
-                                        co_processor_output
-                                            .body
-                                            .unwrap_or(serde_json::Value::Null)
-                                            .to_string(),
-                                    )
-                                    .status_code(code)
-                                    .context(request.context)
-                                    .build()?
-                            };
-                            return Ok(ControlFlow::Break(res));
-                        }
-
-                        // Finally, process our reply and act on the contents. Our processing logic is
-                        // that we replace "bits" of our incoming request with the updated bits if they
-                        // are present in our co_processor_output.
-
-                        let new_body = match co_processor_output.body {
-                            Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
-                            None => Body::from(b_bytes),
-                        };
-
-                        request.router_request = http::Request::from_parts(parts, new_body);
-
-                        if let Some(context) = co_processor_output.context {
-                            request.context = context;
-                        }
-
-                        if let Some(headers) = co_processor_output.headers {
-                            *request.router_request.headers_mut() =
-                                internalize_header_map(headers)?;
-                        }
-
-                        Ok(ControlFlow::Continue(request))
-                    }
-                },
-            ))
-        } else {
-            None
-        };
-
-        let response_layer = if self
-            .configuration
-            .stages
-            .as_ref()
-            .and_then(|x| x.router.as_ref())
-            .and_then(|x| x.response.as_ref())
-            .is_some()
-        {
-            // Safe to unwrap here because we just confirmed that all optional elements are present
-            let response_config = response_full_config
-                .stages
-                .unwrap()
-                .router
-                .unwrap()
-                .response
-                .unwrap();
-            Some(MapFutureLayer::new(move |fut| {
-                let my_sdl = response_sdl.to_string();
-                let proto_url = response_full_config.url.clone();
-                let timeout = response_full_config.timeout;
-                let response_config = response_config.clone();
-                async move {
-                    let mut response: router::Response = fut.await?;
-
-                    // Call into our out of process processor with a body of our body
-                    // First, extract the data we need from our response and prepare our
-                    // external call. Use our configuration to figure out which data to send.
-
-                    let (parts, body) = response.response.into_parts();
-                    let b_bytes = body::to_bytes(body).await?;
-
-                    let (headers, payload, context, sdl) = prepare_external_params(
-                        &response_config,
-                        &parts.headers,
-                        &b_bytes,
-                        &response.context,
-                        my_sdl,
-                    )?;
-
-                    // Second, call our co-processor and get a reply.
-                    response.context.enter_active_request().await;
-                    let co_processor_result = call_external(
-                        proto_url,
-                        timeout,
-                        PipelineStep::RouterResponse,
-                        headers,
-                        payload,
-                        context,
-                        sdl,
-                    )
-                    .await;
-                    response.context.leave_active_request().await;
-                    tracing::debug!(?co_processor_result, "co-processor returned");
-                    let co_processor_output = co_processor_result?;
-
-                    // Third, process our reply and act on the contents. Our processing logic is
-                    // that we replace "bits" of our incoming response with the updated bits if they
-                    // are present in our co_processor_output. If they aren't present, just use the
-                    // bits that we sent to the co_processor.
-
-                    let new_body = match co_processor_output.body {
-                        Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
-                        None => Body::from(b_bytes),
-                    };
-
-                    response.response = http::Response::from_parts(parts, new_body);
-
-                    if let Some(context) = co_processor_output.context {
-                        response.context = context;
-                    }
-
-                    if let Some(headers) = co_processor_output.headers {
-                        *response.response.headers_mut() = internalize_header_map(headers)?;
-                    }
-
-                    Ok::<router::Response, BoxError>(response)
-                }
-            }))
-        } else {
-            None
-        };
-
-        fn external_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
-            move |_request: &router::Request| {
-                tracing::info_span!(
-                    EXTERNAL_SPAN_NAME,
-                    "external service" = stringify!(router::Request),
-                    "otel.kind" = "INTERNAL"
-                )
-            }
-        }
-
-        ServiceBuilder::new()
-            .instrument(external_service_span())
-            .option_layer(request_layer)
-            .option_layer(response_layer)
-            .buffered()
-            .service(service)
-            .boxed()
-    }
-}
-
 type ExternalParams<'a> = (
     Option<&'a HeaderMap<HeaderValue>>,
     Option<serde_json::Value>,
@@ -727,21 +780,6 @@ fn internalize_header_map(
     }
     Ok(output)
 }
-
-// This macro allows us to use it in our plugin registry!
-// register_plugin takes a group name, and a plugin name.
-//
-// In order to keep the plugin names consistent,
-// we use using the `Reverse domain name notation`
-
-type MyExternalPluginGenericType =
-    tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
-
-register_plugin!(
-    "experimental",
-    "external",
-    ExternalPlugin<MyExternalPluginGenericType>
-);
 
 #[cfg(test)]
 mod tests {
