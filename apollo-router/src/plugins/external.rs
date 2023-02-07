@@ -14,17 +14,22 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::Uri;
 use hyper::body;
+use hyper::client::HttpConnector;
 use hyper::Body;
+use hyper_rustls::ConfigBuilderExt;
+use hyper_rustls::HttpsConnector;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::util::MapFutureLayer;
 use tower::BoxError;
+use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
+use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -33,14 +38,17 @@ use crate::register_plugin;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
+use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
 use crate::services::subgraph;
+use crate::tracer::TraceId;
 use crate::Context;
 
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 #[derive(Debug)]
 struct ExternalPlugin {
+    http_client: hyper::Client<HttpsConnector<HttpConnector>>,
     configuration: Conf,
     sdl: Arc<String>,
 }
@@ -92,6 +100,213 @@ struct SubgraphStage {
     response: Option<SubgraphConf>,
 }
 
+impl SubgraphStage {
+    pub(crate) fn as_service(
+        &self,
+        http_client: impl Service<hyper::Request<Body>>,
+        service: subgraph::BoxService,
+        // TODO: put it where relevant
+        coprocessor_url: String,
+        timeout: Option<Duration>,
+    ) -> subgraph::BoxService {
+        let request_layer = self.request.as_ref().map(|request_config| {
+            let request_config = request_config.clone();
+            let coprocessor_url = coprocessor_url.clone();
+            AsyncCheckpointLayer::new(move |mut request: subgraph::Request| {
+                let coprocessor_url = coprocessor_url.clone();
+
+                async move {
+                    // Call into our out of process processor with a body of our body
+                    // First, extract the data we need from our request and prepare our
+                    // external call. Use our configuration to figure out which data to send.
+                    let (parts, body) = request.subgraph_request.into_parts();
+                    let bytes = Bytes::from(serde_json::to_vec(&body)?);
+
+                    let headers_to_send = request_config
+                        .headers
+                        .then(|| externalize_header_map(&parts.headers))
+                        .transpose()?;
+                    // TODO: why is it a serde_json::Value here ?
+                    // is it because the request and the response should be the same?
+                    let body_to_send = request_config
+                        .body
+                        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+                        .transpose()?;
+                    let context_to_send = request_config.context.then(|| request.context.clone());
+                    let uri = request_config.url.then(|| parts.uri.to_string());
+
+                    let payload = Externalizable {
+                        version: EXTERNALIZABLE_VERSION,
+                        stage: PipelineStep::SubgraphRequest.to_string(),
+                        control: Control::default(),
+                        id: TraceId::maybe_new().map(|id| id.to_string()),
+                        headers: headers_to_send,
+                        body: body_to_send,
+                        context: context_to_send,
+                        sdl: None,
+                        uri,
+                    };
+
+                    tracing::debug!(?payload, "externalized output");
+                    let co_processor_output = payload.call(&coprocessor_url, timeout).await?;
+
+                    tracing::debug!(?co_processor_output, "co-processor returned");
+
+                    // Thirdly, we need to interpret the control flow which may have been
+                    // updated by our co-processor and decide if we should proceed or stop.
+
+                    if matches!(co_processor_output.control, Control::Break(_)) {
+                        // Ensure the code is a valid http status code
+                        let code = co_processor_output.control.get_http_status()?;
+
+                        let res = if !code.is_success() {
+                            subgraph::Response::error_builder()
+                                .errors(vec![Error {
+                                    message: co_processor_output
+                                        .body
+                                        .unwrap_or(serde_json::Value::Null)
+                                        .to_string(),
+                                    ..Default::default()
+                                }])
+                                .status_code(code)
+                                .context(request.context)
+                                .build()?
+                        } else {
+                            let graphql_response: crate::graphql::Response =
+                                serde_json::from_value(
+                                    co_processor_output.body.unwrap_or(serde_json::Value::Null),
+                                )
+                                .unwrap(); //todo
+                            subgraph::Response {
+                                response: http::Response::builder()
+                                    .status(code)
+                                    .body(graphql_response)?,
+                                context: request.context,
+                            }
+                        };
+                        return Ok(ControlFlow::Break(res));
+                    }
+
+                    // Finally, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming request with the updated bits if they
+                    // are present in our co_processor_output.
+
+                    let new_body: crate::graphql::Request = match co_processor_output.body {
+                        Some(value) => serde_json::from_value(value)?,
+                        None => body,
+                    };
+
+                    request.subgraph_request = http::Request::from_parts(parts, new_body);
+
+                    if let Some(context) = co_processor_output.context {
+                        request.context = context;
+                    }
+
+                    if let Some(headers) = co_processor_output.headers {
+                        *request.subgraph_request.headers_mut() = internalize_header_map(headers)?;
+                    }
+
+                    if let Some(uri) = co_processor_output.uri {
+                        *request.subgraph_request.uri_mut() = uri.parse()?;
+                    }
+
+                    Ok(ControlFlow::Continue(request))
+                }
+            })
+        });
+
+        let response_layer = self.response.as_ref().map(|response_config| {
+            let response_config = response_config.clone();
+            let coprocessor_url = coprocessor_url.clone();
+            let timeout = timeout.clone();
+
+            MapFutureLayer::new(move |fut| {
+                let coprocessor_url = coprocessor_url.clone();
+                let response_config = response_config.clone();
+                async move {
+                    let mut response: subgraph::Response = fut.await?;
+
+                    // Call into our out of process processor with a body of our body
+                    // First, extract the data we need from our response and prepare our
+                    // external call. Use our configuration to figure out which data to send.
+
+                    let (parts, body) = response.response.into_parts();
+                    let bytes = Bytes::from(serde_json::to_vec(&body)?);
+
+                    let headers_to_send = response_config
+                        .headers
+                        .then(|| externalize_header_map(&parts.headers))
+                        .transpose()?;
+                    // TODO: why is it a serde_json::Value here ?
+                    // is it because the request and the response should be the same?
+                    let body_to_send = response_config
+                        .body
+                        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+                        .transpose()?;
+                    let context_to_send = response_config.context.then(|| response.context.clone());
+
+                    let payload = Externalizable {
+                        version: EXTERNALIZABLE_VERSION,
+                        stage: PipelineStep::SubgraphRequest.to_string(),
+                        control: Control::default(),
+                        id: TraceId::maybe_new().map(|id| id.to_string()),
+                        headers: headers_to_send,
+                        body: body_to_send,
+                        context: context_to_send,
+                        sdl: None,
+                        uri: None,
+                    };
+
+                    tracing::debug!(?payload, "externalized output");
+                    let co_processor_output = payload.call(&coprocessor_url, timeout).await?;
+
+                    tracing::debug!(?co_processor_output, "co-processor returned");
+
+                    // Third, process our reply and act on the contents. Our processing logic is
+                    // that we replace "bits" of our incoming response with the updated bits if they
+                    // are present in our co_processor_output. If they aren't present, just use the
+                    // bits that we sent to the co_processor.
+
+                    let new_body: crate::graphql::Response = match co_processor_output.body {
+                        Some(value) => serde_json::from_value(value)?,
+                        None => body,
+                    };
+
+                    response.response = http::Response::from_parts(parts, new_body);
+
+                    if let Some(context) = co_processor_output.context {
+                        response.context = context;
+                    }
+
+                    if let Some(headers) = co_processor_output.headers {
+                        *response.response.headers_mut() = internalize_header_map(headers)?;
+                    }
+
+                    Ok::<subgraph::Response, BoxError>(response)
+                }
+            })
+        });
+
+        fn external_service_span() -> impl Fn(&subgraph::Request) -> tracing::Span + Clone {
+            move |_request: &subgraph::Request| {
+                tracing::info_span!(
+                    EXTERNAL_SPAN_NAME,
+                    "external service" = stringify!(subgraph::Request),
+                    "otel.kind" = "INTERNAL"
+                )
+            }
+        }
+
+        ServiceBuilder::new()
+            .instrument(external_service_span())
+            .option_layer(request_layer)
+            .option_layer(response_layer)
+            .buffer(20_000)
+            .service(service)
+            .boxed()
+    }
+}
+
 /// The stages request/response configuration
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
@@ -121,10 +336,51 @@ impl Plugin for ExternalPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let mut http_connector = HttpConnector::new();
+        http_connector.set_nodelay(true);
+        http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
+        http_connector.enforce_http(false);
+
+        // todo: grab tls config from configuration
+        let tls_config = rustls::ClientConfig::builder()
+            .with_safe_defaults()
+            .with_native_roots()
+            .with_no_client_auth();
+
+        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+            .with_tls_config(tls_config)
+            .https_or_http()
+            .enable_http1()
+            .enable_http2()
+            .wrap_connector(http_connector);
+
+        let http_client = ServiceBuilder::new().service(hyper::Client::builder().build(connector));
         Ok(ExternalPlugin {
             configuration: init.config,
+            http_client,
             sdl: init.supergraph_sdl,
         })
+    }
+    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+        if let Some(stages) = &self.configuration.stages {
+            if let Some(subgraph_stage) = &stages.subgraph {
+                subgraph_stage.as_service(
+                    self.http_client.clone(),
+                    service,
+                    self.configuration.url.clone(),
+                    self.configuration.timeout,
+                )
+            } else {
+                service
+            }
+        } else {
+            service
+        }
+        // let request_sdl = self.sdl.clone();
+        // let response_sdl = self.sdl.clone();
+
+        // let request_full_config = self.configuration.clone();
+        // let response_full_config = self.configuration.clone();
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -175,7 +431,7 @@ impl Plugin for ExternalPlugin {
                         request.context.enter_active_request().await;
 
                         // Second, call our co-processor and get a reply.
-                        let res = call_external_router(
+                        let res = call_external(
                             proto_url,
                             timeout,
                             PipelineStep::RouterRequest,
@@ -294,7 +550,7 @@ impl Plugin for ExternalPlugin {
                     )?;
 
                     // Second, call our co-processor and get a reply.
-                    let co_processor_output = call_external_router(
+                    let co_processor_output = call_external(
                         proto_url,
                         timeout,
                         PipelineStep::RouterResponse,
@@ -352,233 +608,6 @@ impl Plugin for ExternalPlugin {
             .service(service)
             .boxed()
     }
-
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        let request_sdl = self.sdl.clone();
-        let response_sdl = self.sdl.clone();
-
-        let request_full_config = self.configuration.clone();
-        let response_full_config = self.configuration.clone();
-
-        let request_layer = if self
-            .configuration
-            .stages
-            .as_ref()
-            .and_then(|x| x.subgraph.as_ref())
-            .and_then(|x| x.request.as_ref())
-            .is_some()
-        {
-            // Safe to unwrap here because we just confirmed that all optional elements are present
-            let request_config = request_full_config
-                .stages
-                .unwrap()
-                .subgraph
-                .unwrap()
-                .request
-                .unwrap();
-            Some(AsyncCheckpointLayer::new(
-                move |mut request: subgraph::Request| {
-                    let my_sdl = request_sdl.to_string();
-                    let proto_url = request_full_config.url.clone();
-                    let timeout = request_full_config.timeout;
-                    let request_config = request_config.clone();
-                    async move {
-                        // Call into our out of process processor with a body of our body
-                        // First, extract the data we need from our request and prepare our
-                        // external call. Use our configuration to figure out which data to send.
-
-                        let (parts, body) = request.subgraph_request.into_parts();
-                        let bytes = Bytes::from(serde_json::to_vec(&body)?);
-
-                        let (headers, payload, context, sdl) = prepare_external_params(
-                            &request_config,
-                            &parts.headers,
-                            &bytes,
-                            &request.context,
-                            my_sdl,
-                        )?;
-
-                        // Second, call our co-processor and get a reply.
-                        let co_processor_output = call_external_subgraph(
-                            proto_url,
-                            timeout,
-                            PipelineStep::SubgraphRequest,
-                            headers,
-                            payload,
-                            context,
-                            sdl,
-                            Some(&parts.uri),
-                        )
-                        .await?;
-
-                        tracing::debug!(?co_processor_output, "co-processor returned");
-
-                        // Thirdly, we need to interpret the control flow which may have been
-                        // updated by our co-processor and decide if we should proceed or stop.
-
-                        if matches!(co_processor_output.control, Control::Break(_)) {
-                            // Ensure the code is a valid http status code
-                            let code = co_processor_output.control.get_http_status()?;
-
-                            let res = if !code.is_success() {
-                                subgraph::Response::error_builder()
-                                    .errors(vec![Error {
-                                        message: co_processor_output
-                                            .body
-                                            .unwrap_or(serde_json::Value::Null)
-                                            .to_string(),
-                                        ..Default::default()
-                                    }])
-                                    .status_code(code)
-                                    .context(request.context)
-                                    .build()?
-                            } else {
-                                let graphql_response: crate::graphql::Response =
-                                    serde_json::from_value(
-                                        co_processor_output.body.unwrap_or(serde_json::Value::Null),
-                                    )
-                                    .unwrap(); //todo
-                                subgraph::Response {
-                                    response: http::Response::builder()
-                                        .status(code)
-                                        .body(graphql_response)?,
-                                    context: request.context,
-                                }
-                            };
-                            return Ok(ControlFlow::Break(res));
-                        }
-
-                        // Finally, process our reply and act on the contents. Our processing logic is
-                        // that we replace "bits" of our incoming request with the updated bits if they
-                        // are present in our co_processor_output.
-
-                        let new_body: crate::graphql::Request = match co_processor_output.body {
-                            Some(value) => serde_json::from_value(value)?,
-                            None => body,
-                        };
-
-                        request.subgraph_request = http::Request::from_parts(parts, new_body);
-
-                        if let Some(context) = co_processor_output.context {
-                            request.context = context;
-                        }
-
-                        if let Some(headers) = co_processor_output.headers {
-                            *request.subgraph_request.headers_mut() =
-                                internalize_header_map(headers)?;
-                        }
-
-                        if let Some(uri) = co_processor_output.uri {
-                            *request.subgraph_request.uri_mut() = uri.parse()?;
-                        }
-
-                        Ok(ControlFlow::Continue(request))
-                    }
-                },
-            ))
-        } else {
-            None
-        };
-
-        let response_layer = if self
-            .configuration
-            .stages
-            .as_ref()
-            .and_then(|x| x.subgraph.as_ref())
-            .and_then(|x| x.response.as_ref())
-            .is_some()
-        {
-            // Safe to unwrap here because we just confirmed that all optional elements are present
-            let response_config = response_full_config
-                .stages
-                .unwrap()
-                .subgraph
-                .unwrap()
-                .response
-                .unwrap();
-            Some(MapFutureLayer::new(move |fut| {
-                let my_sdl = response_sdl.to_string();
-                let proto_url = response_full_config.url.clone();
-                let timeout = response_full_config.timeout;
-                let response_config = response_config.clone();
-                async move {
-                    let mut response: subgraph::Response = fut.await?;
-
-                    // Call into our out of process processor with a body of our body
-                    // First, extract the data we need from our response and prepare our
-                    // external call. Use our configuration to figure out which data to send.
-
-                    let (parts, body) = response.response.into_parts();
-                    let bytes = Bytes::from(serde_json::to_vec(&body)?);
-
-                    let (headers, payload, context, sdl) = prepare_external_params(
-                        &response_config,
-                        &parts.headers,
-                        &bytes,
-                        &response.context,
-                        my_sdl,
-                    )?;
-
-                    // Second, call our co-processor and get a reply.
-                    let co_processor_output = call_external_subgraph(
-                        proto_url,
-                        timeout,
-                        PipelineStep::SubgraphResponse,
-                        headers,
-                        payload,
-                        context,
-                        sdl,
-                        None,
-                    )
-                    .await?;
-
-                    tracing::debug!(?co_processor_output, "co-processor returned");
-
-                    // Third, process our reply and act on the contents. Our processing logic is
-                    // that we replace "bits" of our incoming response with the updated bits if they
-                    // are present in our co_processor_output. If they aren't present, just use the
-                    // bits that we sent to the co_processor.
-
-                    let new_body: crate::graphql::Response = match co_processor_output.body {
-                        Some(value) => serde_json::from_value(value)?,
-                        None => body,
-                    };
-
-                    response.response = http::Response::from_parts(parts, new_body);
-
-                    if let Some(context) = co_processor_output.context {
-                        response.context = context;
-                    }
-
-                    if let Some(headers) = co_processor_output.headers {
-                        *response.response.headers_mut() = internalize_header_map(headers)?;
-                    }
-
-                    Ok::<subgraph::Response, BoxError>(response)
-                }
-            }))
-        } else {
-            None
-        };
-
-        fn external_service_span() -> impl Fn(&subgraph::Request) -> tracing::Span + Clone {
-            move |_request: &subgraph::Request| {
-                tracing::info_span!(
-                    EXTERNAL_SPAN_NAME,
-                    "external service" = stringify!(subgraph::Request),
-                    "otel.kind" = "INTERNAL"
-                )
-            }
-        }
-
-        ServiceBuilder::new()
-            .instrument(external_service_span())
-            .option_layer(request_layer)
-            .option_layer(response_layer)
-            .buffer(20_000)
-            .service(service)
-            .boxed()
-    }
 }
 
 type ExternalParams<'a> = (
@@ -602,14 +631,13 @@ fn prepare_external_params<'a>(
     let mut context_opt = None;
     let mut sdl_opt = None;
 
-    if config.body || config.headers {
-        if config.body {
-            payload_opt = Some(serde_json::from_slice(bytes)?);
-        }
-        if config.headers {
-            headers_opt = Some(headers);
-        }
+    if config.body {
+        payload_opt = Some(serde_json::from_slice(bytes)?);
     }
+    if config.headers {
+        headers_opt = Some(headers);
+    }
+
     if config.context {
         context_opt = Some(context.clone());
     }
@@ -621,7 +649,7 @@ fn prepare_external_params<'a>(
 
 // TODO: exploit the PipelineStage enum for this,
 // it has all of the relevant configuration
-async fn call_external_router<T>(
+async fn call_external<T>(
     url: String,
     timeout: Option<Duration>,
     stage: PipelineStep,
@@ -637,39 +665,7 @@ where
     if let Some(hdrs) = headers {
         converted_headers = Some(externalize_header_map(hdrs)?);
     };
-    let output = Externalizable::new(stage, converted_headers, payload, context, sdl, None);
-    tracing::debug!(?output, "externalized output");
-    output.call(&url, timeout).await
-}
-
-// TODO: exploit the PipelineStage enum for this,
-// it has all of the relevant configuration
-#[allow(clippy::too_many_arguments)]
-async fn call_external_subgraph<T>(
-    url: String,
-    timeout: Option<Duration>,
-    stage: PipelineStep,
-    headers: Option<&HeaderMap<HeaderValue>>,
-    payload: Option<T>,
-    context: Option<Context>,
-    sdl: Option<String>,
-    uri: Option<&Uri>,
-) -> Result<Externalizable<T>, BoxError>
-where
-    T: fmt::Debug + DeserializeOwned + Serialize + Send + Sync + 'static,
-{
-    let mut converted_headers = None;
-    if let Some(hdrs) = headers {
-        converted_headers = Some(externalize_header_map(hdrs)?);
-    };
-    let output = Externalizable::new(
-        stage,
-        converted_headers,
-        payload,
-        context,
-        sdl,
-        uri.map(std::string::ToString::to_string),
-    );
+    let output = Externalizable::new(stage, converted_headers, payload, context, sdl);
     tracing::debug!(?output, "externalized output");
     output.call(&url, timeout).await
 }

@@ -31,7 +31,7 @@ static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
 });
 
 /// Version of our externalised data. Rev this if it changes
-const EXTERNALIZABLE_VERSION: u8 = 1;
+pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
@@ -94,7 +94,6 @@ where
         body: Option<T>,
         context: Option<Context>,
         sdl: Option<String>,
-        uri: Option<String>,
     ) -> Self {
         Self {
             version: EXTERNALIZABLE_VERSION,
@@ -105,7 +104,7 @@ where
             body,
             context,
             sdl,
-            uri,
+            uri: None,
         }
     }
 
