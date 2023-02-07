@@ -17,8 +17,10 @@ pub mod matching_pull_request {
     use std::result::Result;
     pub const OPERATION_NAME: &str = "MatchingPullRequest";
     pub const QUERY : & str = "# This operation is used to generate Rust code which lives in a file directly\n# next to this with the same name but a `.rs` extension.  For instructions on\n# how to generate the code, see the top of `./mod.rs`.\nfragment PrInfo on PullRequest {\n  url\n  number\n  author {\n    __typename\n    login\n  }\n  title\n  closingIssuesReferences(last: 4) {\n    nodes {\n      url\n      number\n      repository {\n        nameWithOwner\n      }\n    }\n  }\n  body\n}\nfragment PrSearchResult on SearchResultItemConnection {\n  issueCount\n  nodes {\n    __typename\n    ...PrInfo\n  }\n }\n\nquery MatchingPullRequest($search: String!) {\n  search(\n    type: ISSUE\n    query: $search\n    first: 1\n  ) {\n    ...PrSearchResult\n  }\n}\n" ;
+    use serde::Deserialize;
+    use serde::Serialize;
+
     use super::*;
-    use serde::{Deserialize, Serialize};
     #[allow(dead_code)]
     type Boolean = bool;
     #[allow(dead_code)]
