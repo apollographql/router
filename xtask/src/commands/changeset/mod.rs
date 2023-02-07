@@ -29,7 +29,7 @@ use console::style;
 use dialoguer::{console::Term, theme::ColorfulTheme, Confirm, Editor, Input, Select};
 use git2;
 use itertools::Itertools;
-use matching_pull_request::matching_pull_request::Variables;
+use matching_pull_request::matching_pull_request::{ResponseData,Variables};
 use matching_pull_request::MatchingPullRequest;
 use memorable_wordlist;
 use serde::Serialize;
@@ -170,10 +170,7 @@ async fn github_graphql_post_request(
     token: &str,
     url: &str,
     request_body: &graphql_client::QueryBody<Variables>,
-) -> Result<
-    graphql_client::Response<matching_pull_request::matching_pull_request::ResponseData>,
-    ::reqwest::Error,
-> {
+) -> Result<graphql_client::Response<ResponseData>, ::reqwest::Error> {
     let client = Client::builder().build()?;
 
     let res = client
@@ -186,9 +183,7 @@ async fn github_graphql_post_request(
         .json(request_body)
         .send()
         .await?;
-    let response_body: graphql_client::Response<
-        matching_pull_request::matching_pull_request::ResponseData,
-    > = res.json().await?;
+    let response_body: graphql_client::Response<ResponseData> = res.json().await?;
     Ok(response_body)
 }
 
@@ -479,7 +474,7 @@ fn get_token_from_gh_cli(gh_cli_path: PathBuf) -> Result<String, &'static str> {
 }
 
 fn pr_info_from_response(
-    response_data: matching_pull_request::matching_pull_request::ResponseData,
+    response_data: ResponseData,
 ) -> Vec<matching_pull_request::matching_pull_request::PrInfo> {
     response_data.search.nodes.map(|node| {
         let maybe_prs = node.into_iter().map(|p| {
