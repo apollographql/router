@@ -612,7 +612,7 @@ jobs:
             cd artifacts && sha1sum *.tar.gz > sha1sums.txt
       - run:
           command: >
-            gh release create $VERSION --notes-file NEXT_CHANGELOG.md --title $VERSION artifacts/*
+            gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/*
       - setup_remote_docker:
           version: 20.10.11
           docker_layer_caching: true
