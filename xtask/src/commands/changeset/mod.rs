@@ -169,9 +169,7 @@ pub struct Create {
 async fn github_graphql_post_request(
     token: &str,
     url: &str,
-    request_body: &graphql_client::QueryBody<
-        matching_pull_request::matching_pull_request::Variables,
-    >,
+    request_body: &graphql_client::QueryBody<Variables>,
 ) -> Result<
     graphql_client::Response<matching_pull_request::matching_pull_request::ResponseData>,
     ::reqwest::Error,
