@@ -1,4 +1,5 @@
 use opentelemetry::sdk::export::metrics::aggregation;
+use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
@@ -41,8 +42,33 @@ impl MetricsConfigurator for super::super::otlp::Config {
             Some(exporter) => {
                 let exporter = opentelemetry_otlp::new_pipeline()
                     .metrics(
-                        opentelemetry::sdk::metrics::selectors::simple::inexpensive(),
-                        aggregation::stateless_temporality_selector(),
+                        selectors::simple::histogram([
+                            // 1-500 ms
+                            1.0,
+                            2.0,
+                            5.0,
+                            10.0,
+                            20.0,
+                            50.0,
+                            100.0,
+                            200.0,
+                            500.0,
+                            // 1-500 seconds
+                            1_000.0,
+                            2000.0,
+                            5_000.0,
+                            10_000.0,
+                            20_000.0,
+                            50_000.0,
+                            100_000.0,
+                            200_000.0,
+                            500_000.0,
+                            // 1000-5000 seconds
+                            1_000_000.0,
+                            2_000_000.0,
+                            5_000_000.0,
+                        ]),
+                        aggregation::delta_temporality_selector(),
                         opentelemetry::runtime::Tokio,
                     )
                     .with_exporter(exporter)
