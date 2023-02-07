@@ -7,8 +7,8 @@
 
 use graphql_client::GraphQLQuery;
 
-use crate::uplink::schema::supergraph_sdl_query::FetchErrorCode;
-use crate::uplink::schema::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
+use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
+use crate::uplink::schema_stream::supergraph_sdl_query::SupergraphSdlQueryRouterConfig;
 use crate::uplink::UplinkRequest;
 use crate::uplink::UplinkResponse;
 
@@ -68,7 +68,7 @@ mod test {
 
     use futures::stream::StreamExt;
 
-    use crate::uplink::schema::SupergraphSdlQuery;
+    use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
 
     #[tokio::test]

@@ -4,10 +4,12 @@ use futures::prelude::*;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
+use Event::HaltEntitlement;
 use Event::NoMoreConfiguration;
 use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
 use Event::Shutdown;
+use Event::WarnEntitlement;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -81,6 +83,14 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             } => Errored(NoEntitlement),
             _ => self,
         }
+    }
+
+    pub(crate) async fn warn_entitlement(self) -> Self {
+        self
+    }
+
+    pub(crate) async fn halt_entitlement(self) -> Self {
+        self
     }
 
     async fn update_inputs<S>(
@@ -339,6 +349,8 @@ where
                         .update_inputs(&mut self, None, None, Some(Arc::new(entitlement)))
                         .await
                 }
+                WarnEntitlement => state.warn_entitlement().await,
+                HaltEntitlement => state.halt_entitlement().await,
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
