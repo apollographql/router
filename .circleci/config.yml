@@ -13,6 +13,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
+      - image: cimg/redis:6.2.6
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
@@ -379,6 +380,7 @@ jobs:
             - linux_amd_install_baseline
             - xtask_check_compliance:
                 os: linux_amd
+
   test:
     environment:
       <<: *common_job_environment
@@ -670,15 +672,10 @@ workflows:
             parameters:
               platform: [amd_linux_build]
 
-      # check-compliance is disabled for now because it is flaky
-      # `cargo about` seems to be non-deterministic and sometimes
-      # produces a different licenses.html file even though dependencies haven’t changed.
-      # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
-
-      # - check_compliance:
-      #     matrix:
-      #       parameters:
-      #         platform: [linux]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [amd_linux_build]
 
       - test_updated:
           requires:
