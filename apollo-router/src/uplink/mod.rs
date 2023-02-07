@@ -209,14 +209,15 @@ where
     Query: graphql_client::GraphQLQuery,
 {
     for url in urls {
-        return match http_request::<Query>(url.as_str(), request_body, timeout).await {
-            Ok(response) => match response.data {
-                None => Err(Error::EmptyResponse),
-                Some(response_data) => Ok(response_data),
-            },
+        match http_request::<Query>(url.as_str(), request_body, timeout).await {
+            Ok(response) => {
+                return match response.data {
+                    None => Err(Error::EmptyResponse),
+                    Some(response_data) => Ok(response_data),
+                }
+            }
             Err(e) => {
                 tracing::warn!("failed to fetch from Uplink endpoint {}: {}", url, e);
-                continue;
             }
         };
     }
