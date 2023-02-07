@@ -238,6 +238,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 ] }
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
+wiremock = "0.5.12"
 
 [build-dependencies]
 tonic-build = "0.8.4"
