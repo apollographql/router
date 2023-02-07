@@ -36,7 +36,7 @@ use serde::Serialize;
 use std::{fmt, fs, path::PathBuf, slice::Iter, str::FromStr};
 use structopt::StructOpt;
 use tinytemplate::{format_unescaped, TinyTemplate};
-use xtask::*;
+use xtask::PKG_PROJECT_ROOT;
 
 #[derive(Serialize)]
 struct TemplateResource {
