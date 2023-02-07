@@ -725,7 +725,7 @@ expression: "&schema"
                   "type": "object",
                   "properties": {
                     "request": {
-                      "description": "What information is passed to a request/response stage",
+                      "description": "What information is passed to a subgraph request/response stage",
                       "default": null,
                       "type": "object",
                       "properties": {
@@ -744,8 +744,13 @@ expression: "&schema"
                           "default": false,
                           "type": "boolean"
                         },
-                        "sdl": {
-                          "description": "Send the SDL",
+                        "service": {
+                          "description": "Send the service name",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "url": {
+                          "description": "Send the subgraph URL",
                           "default": false,
                           "type": "boolean"
                         }
@@ -753,7 +758,7 @@ expression: "&schema"
                       "nullable": true
                     },
                     "response": {
-                      "description": "What information is passed to a request/response stage",
+                      "description": "What information is passed to a subgraph request/response stage",
                       "default": null,
                       "type": "object",
                       "properties": {
@@ -772,8 +777,13 @@ expression: "&schema"
                           "default": false,
                           "type": "boolean"
                         },
-                        "sdl": {
-                          "description": "Send the SDL",
+                        "service": {
+                          "description": "Send the service name",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "url": {
+                          "description": "Send the subgraph URL",
                           "default": false,
                           "type": "boolean"
                         }

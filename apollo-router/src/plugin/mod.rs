@@ -326,6 +326,21 @@ where
 /// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
+    ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new::<$plugin_type<$generic>>($group, $name)
+            });
+        };
+    };
+
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {

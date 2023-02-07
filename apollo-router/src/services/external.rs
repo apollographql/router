@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::Method;
 use http::StatusCode;
+use hyper::Body;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
@@ -17,13 +19,14 @@ use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
+use tower::Service;
 
 use crate::error::LicenseError;
 use crate::services::apollo_graph_reference;
 use crate::tracer::TraceId;
 use crate::Context;
 
-const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
+pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
@@ -126,6 +129,37 @@ where
         let response: Self = response.json().await?;
 
         Ok(response)
+    }
+
+    pub(crate) async fn call_with_client<C>(
+        self,
+        mut client: C,
+        uri: &str,
+    ) -> Result<Self, BoxError>
+    where
+        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
+        tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
+
+        let request = hyper::Request::builder()
+            .uri(uri)
+            .method(Method::POST)
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .body(serde_json::to_vec(&self)?.into())?;
+
+        let response = client.call(request).await?;
+        // TODO: refactor once it compiles
+        serde_json::from_slice(
+            &hyper::body::to_bytes(response.into_body())
+                .await
+                .map_err(BoxError::from)?,
+        )
+        .map_err(BoxError::from)
     }
 }
 

@@ -12,7 +12,6 @@ use bytes::Bytes;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
-use http::Uri;
 use hyper::body;
 use hyper::client::HttpConnector;
 use hyper::Body;
@@ -22,6 +21,7 @@ use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
+use tower::timeout::TimeoutLayer;
 use tower::util::MapFutureLayer;
 use tower::BoxError;
 use tower::Service;
@@ -29,7 +29,6 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::graphql;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -38,6 +37,7 @@ use crate::register_plugin;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
+use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
 use crate::services::subgraph;
@@ -47,8 +47,16 @@ use crate::Context;
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 #[derive(Debug)]
-struct ExternalPlugin {
-    http_client: hyper::Client<HttpsConnector<HttpConnector>>,
+struct ExternalPlugin<C>
+where
+    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+{
+    http_client: C,
     configuration: Conf,
     sdl: Arc<String>,
 }
@@ -101,18 +109,27 @@ struct SubgraphStage {
 }
 
 impl SubgraphStage {
-    pub(crate) fn as_service(
+    pub(crate) fn as_service<C>(
         &self,
-        http_client: impl Service<hyper::Request<Body>>,
+        http_client: C,
         service: subgraph::BoxService,
         // TODO: put it where relevant
         coprocessor_url: String,
         timeout: Option<Duration>,
-    ) -> subgraph::BoxService {
+    ) -> subgraph::BoxService
+    where
+        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+    {
         let request_layer = self.request.as_ref().map(|request_config| {
             let request_config = request_config.clone();
             let coprocessor_url = coprocessor_url.clone();
             AsyncCheckpointLayer::new(move |mut request: subgraph::Request| {
+                let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
 
                 async move {
@@ -148,9 +165,14 @@ impl SubgraphStage {
                     };
 
                     tracing::debug!(?payload, "externalized output");
-                    let co_processor_output = payload.call(&coprocessor_url, timeout).await?;
 
-                    tracing::debug!(?co_processor_output, "co-processor returned");
+                    request.context.enter_active_request().await;
+                    let co_processor_result = payload
+                        .call_with_client(http_client, &coprocessor_url)
+                        .await;
+                    request.context.leave_active_request().await;
+                    tracing::debug!(?co_processor_result, "co-processor returned");
+                    let co_processor_output = co_processor_result?;
 
                     // Thirdly, we need to interpret the control flow which may have been
                     // updated by our co-processor and decide if we should proceed or stop.
@@ -218,7 +240,6 @@ impl SubgraphStage {
         let response_layer = self.response.as_ref().map(|response_config| {
             let response_config = response_config.clone();
             let coprocessor_url = coprocessor_url.clone();
-            let timeout = timeout.clone();
 
             MapFutureLayer::new(move |fut| {
                 let coprocessor_url = coprocessor_url.clone();
@@ -258,9 +279,11 @@ impl SubgraphStage {
                     };
 
                     tracing::debug!(?payload, "externalized output");
-                    let co_processor_output = payload.call(&coprocessor_url, timeout).await?;
-
-                    tracing::debug!(?co_processor_output, "co-processor returned");
+                    response.context.enter_active_request().await;
+                    let co_processor_result = payload.call(&coprocessor_url, timeout).await;
+                    response.context.leave_active_request().await;
+                    tracing::debug!(?co_processor_result, "co-processor returned");
+                    let co_processor_output = co_processor_result?;
 
                     // Third, process our reply and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming response with the updated bits if they
@@ -332,7 +355,9 @@ struct Conf {
 }
 
 #[async_trait::async_trait]
-impl Plugin for ExternalPlugin {
+impl Plugin
+    for ExternalPlugin<tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>>
+{
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -354,13 +379,21 @@ impl Plugin for ExternalPlugin {
             .enable_http2()
             .wrap_connector(http_connector);
 
-        let http_client = ServiceBuilder::new().service(hyper::Client::builder().build(connector));
-        Ok(ExternalPlugin {
-            configuration: init.config,
+        let http_client = ServiceBuilder::new()
+            .layer(TimeoutLayer::new(
+                init.config
+                    .timeout
+                    .unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT),
+            ))
+            .service(hyper::Client::builder().build(connector));
+
+        Ok(Self {
             http_client,
+            configuration: init.config,
             sdl: init.supergraph_sdl,
         })
     }
+
     fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         if let Some(stages) = &self.configuration.stages {
             if let Some(subgraph_stage) = &stages.subgraph {
@@ -376,11 +409,6 @@ impl Plugin for ExternalPlugin {
         } else {
             service
         }
-        // let request_sdl = self.sdl.clone();
-        // let response_sdl = self.sdl.clone();
-
-        // let request_full_config = self.configuration.clone();
-        // let response_full_config = self.configuration.clone();
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -550,7 +578,8 @@ impl Plugin for ExternalPlugin {
                     )?;
 
                     // Second, call our co-processor and get a reply.
-                    let co_processor_output = call_external(
+                    response.context.enter_active_request().await;
+                    let co_processor_result = call_external(
                         proto_url,
                         timeout,
                         PipelineStep::RouterResponse,
@@ -559,9 +588,10 @@ impl Plugin for ExternalPlugin {
                         context,
                         sdl,
                     )
-                    .await?;
-
-                    tracing::debug!(?co_processor_output, "co-processor returned");
+                    .await;
+                    response.context.leave_active_request().await;
+                    tracing::debug!(?co_processor_result, "co-processor returned");
+                    let co_processor_output = co_processor_result?;
 
                     // Third, process our reply and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming response with the updated bits if they
@@ -703,7 +733,15 @@ fn internalize_header_map(
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("experimental", "external", ExternalPlugin);
+
+type MyExternalPluginGenericType =
+    tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
+
+register_plugin!(
+    "experimental",
+    "external",
+    ExternalPlugin<MyExternalPluginGenericType>
+);
 
 #[cfg(test)]
 mod tests {
