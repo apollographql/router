@@ -384,17 +384,18 @@ where
     }
 
     fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        if let Some(stages) = &self.configuration.stages {
-            if let Some(subgraph_stage) = &stages.subgraph {
-                subgraph_stage.as_service(
-                    self.http_client.clone(),
-                    service,
-                    self.configuration.url.clone(),
-                    self.configuration.timeout,
-                )
-            } else {
-                service
-            }
+        if let Some(subgraph_stage) = self
+            .configuration
+            .stages
+            .as_ref()
+            .and_then(|stages| stages.subgraph.as_ref())
+        {
+            subgraph_stage.as_service(
+                self.http_client.clone(),
+                service,
+                self.configuration.url.clone(),
+                self.configuration.timeout,
+            )
         } else {
             service
         }
