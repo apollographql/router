@@ -1,13 +1,18 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
+
+// tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
+// current suggestion is to explicitly allow the lint in the module that imports the protos.
+// Read more: https://github.com/hyperium/tonic/issues/1056
+#![allow(clippy::derive_partial_eq_without_eq)]
+
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
-use std::time::Duration;
 use std::time::SystemTime;
 
 use buildstructor::Builder;
 use displaydoc::Display;
-use futures::Stream;
+use graphql_client::GraphQLQuery;
 use itertools::Itertools;
 use jsonwebtoken::decode;
 use jsonwebtoken::jwk::JwkSet;
@@ -19,12 +24,85 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use url::Url;
 
 use crate::spec::Schema;
+use crate::uplink::entitlement::entitlement_request::EntitlementRequestRouterEntitlements;
+use crate::uplink::entitlement::entitlement_request::FetchErrorCode;
+use crate::uplink::UplinkRequest;
+use crate::uplink::UplinkResponse;
 use crate::Configuration;
 
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    query_path = "src/uplink/entitlement_query.graphql",
+    schema_path = "src/uplink/uplink.graphql",
+    request_derives = "Debug",
+    response_derives = "PartialEq, Debug, Deserialize",
+    deprecated = "warn"
+)]
+pub(crate) struct EntitlementRequest {}
+
+impl From<UplinkRequest> for entitlement_request::Variables {
+    fn from(req: UplinkRequest) -> Self {
+        entitlement_request::Variables {
+            api_key: req.api_key,
+            graph_ref: req.graph_ref,
+            unless_id: req.id,
+        }
+    }
+}
+
+impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
+    fn from(response: entitlement_request::ResponseData) -> Self {
+        match response.router_entitlements {
+            EntitlementRequestRouterEntitlements::RouterEntitlementsResult(result) => {
+                if let Some(entitlement) = result.entitlement {
+                    match Entitlement::from_str(&entitlement.jwt) {
+                        Ok(entitlement) => UplinkResponse::Result {
+                            response: entitlement,
+                            id: result.id,
+                            // this will truncate the number of seconds to under u64::MAX, which should be
+                            // a large enough delay anyway
+                            delay: result.min_delay_seconds as u64,
+                        },
+                        Err(error) => UplinkResponse::Error {
+                            retry_later: true,
+                            code: "INVALID_ENTITLEMENT".to_string(),
+                            message: error.to_string(),
+                        },
+                    }
+                } else {
+                    UplinkResponse::Result {
+                        response: Entitlement::default(),
+                        id: result.id,
+                        // this will truncate the number of seconds to under u64::MAX, which should be
+                        // a large enough delay anyway
+                        delay: result.min_delay_seconds as u64,
+                    }
+                }
+            }
+            EntitlementRequestRouterEntitlements::Unchanged(response) => {
+                UplinkResponse::Unchanged {
+                    id: Some(response.id),
+                    delay: Some(response.min_delay_seconds as u64),
+                }
+            }
+            EntitlementRequestRouterEntitlements::FetchError(error) => UplinkResponse::Error {
+                retry_later: error.code == FetchErrorCode::RETRY_LATER,
+                code: match error.code {
+                    FetchErrorCode::AUTHENTICATION_FAILED => "AUTHENTICATION_FAILED".to_string(),
+                    FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
+                    FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
+                    FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::Other(other) => other,
+                },
+                message: error.message,
+            },
+        }
+    }
+}
 
 #[derive(Error, Display, Debug)]
 pub enum Error {
@@ -72,7 +150,7 @@ enum OneOrMany<T> {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-struct Claims {
+pub(crate) struct Claims {
     iss: String,
     sub: String,
     aud: OneOrMany<Audience>,
@@ -133,11 +211,25 @@ impl EntitlementReport {
 
 /// Entitlement controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
-#[allow(dead_code)]
 #[derive(Debug, Default)]
 pub struct Entitlement {
-    claims: Option<Claims>,
+    pub(crate) claims: Option<Claims>,
     configuration_restrictions: Vec<ConfigurationRestriction>,
+}
+
+impl Display for Entitlement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(claims) = &self.claims {
+            write!(
+                f,
+                "{}",
+                serde_json::to_string(claims)
+                    .unwrap_or_else(|_| "claim serialization error".to_string())
+            )
+        } else {
+            write!(f, "no entitlement")
+        }
+    }
 }
 
 impl FromStr for Entitlement {
@@ -175,17 +267,6 @@ impl FromStr for Entitlement {
             .transpose()
             .map(|e| e.unwrap_or_default())
     }
-}
-
-pub(crate) fn stream_entitlement(
-    _api_key: String,
-    _graph_ref: String,
-    _urls: Option<Vec<Url>>,
-    mut _interval: Duration,
-    _timeout: Duration,
-) -> impl Stream<Item = Result<Entitlement, String>> {
-    // TODO This will be tackled as a separate PR
-    futures::stream::empty()
 }
 
 /// An individual check for the router.yaml.
@@ -265,6 +346,7 @@ mod test {
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
+    use futures::stream::StreamExt;
     use insta::assert_snapshot;
     use serde_json::json;
 
@@ -275,8 +357,10 @@ mod test {
     use crate::uplink::entitlement::ConfigurationRestriction;
     use crate::uplink::entitlement::Entitlement;
     use crate::uplink::entitlement::EntitlementReport;
+    use crate::uplink::entitlement::EntitlementRequest;
     use crate::uplink::entitlement::OneOrMany;
     use crate::uplink::entitlement::RouterState;
+    use crate::uplink::stream_from_uplink;
     use crate::Configuration;
 
     // For testing we restrict healthcheck
@@ -444,5 +528,32 @@ mod test {
             "haltAt": 123,
         }))
         .expect("json must deserialize");
+    }
+
+    #[tokio::test]
+    async fn integration_test() {
+        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
+            std::env::var("TEST_APOLLO_KEY"),
+            std::env::var("TEST_APOLLO_GRAPH_REF"),
+        ) {
+            let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+                apollo_key,
+                apollo_graph_ref,
+                None,
+                Duration::from_secs(1),
+                Duration::from_secs(5),
+            )
+            .take(1)
+            .collect::<Vec<_>>()
+            .await;
+
+            assert!(results
+                .get(0)
+                .expect("expected one result")
+                .as_ref()
+                .expect("entitlement should be OK")
+                .claims
+                .is_some())
+        }
     }
 }

@@ -4,6 +4,58 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.10.1] - 2023-02-07
+
+## 🐛 Fixes
+
+### Federation v2.3.1 ([Issue #2556](https://github.com/apollographql/router/issues/2556))
+
+Update to [Federation v2.3.1](https://github.com/apollographql/federation/blob/main/query-planner-js/CHANGELOG.md#231) to fix subtle bug in `@interfaceObject`.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2554
+
+## 🛠 Maintenance
+
+### Redis integration tests ([Issue #2174](https://github.com/apollographql/router/issues/2174))
+
+We now have integration tests for Redis usage with Automatic Persisted Queries and query planning.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2179
+
+### CI: Enable compliance checks _except_ `licenses.html` update ([Issue #2514](https://github.com/apollographql/router/issues/2514))
+
+In [#1573](https://github.com/apollographql/router/pull/1573), we removed the compliance checks for non-release CI pipelines, because `cargo-about` output would change ever so slightly on each run.
+
+While many of the checks provided by the compliance check are license related, some checks prevent us from inadvertently downgrading libraries and needing to open, e.g., [Issue #2512](https://github.com/apollographql/router/pull/2512).
+
+This set of changes includes the following:
+- Introduce `cargo xtask licenses` to update licenses.html.
+- Separate compliance (`cargo-deny`, which includes license checks) and licenses generation (`cargo-about`) in `xtask`
+- Enable compliance as part of our CI checks for each open PR
+- Update `cargo xtask all` so it runs tests, checks compliance and updates `licenses.html`
+- Introduce `cargo xtask dev` so it checks compliance and runs tests
+
+Going forward, when developing on the Router source:
+
+- Use `cargo xtask all`  to make sure everything is up to date before a release.
+- Use `cargo xtask dev` before a PR.
+
+As a last note, updating `licenses.html` is now driven by `cargo xtask licenses`, which is part of the release checklist and automated through our release tooling in `xtask`.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2520
+
+### Fix flaky tracing integration test ([Issue #2548](https://github.com/apollographql/router/issues/2548))
+
+Disable federated-tracing (FTV1) in tests by lowering the sampling rate to zero so that consistent results are generated in test snapshots.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2549
+
+### Update to Rust 1.67
+
+We've updated the Minimum Supported Rust Version (MSRV) version to v1.67.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2496 and https://github.com/apollographql/router/pull/2499
+
 # [1.10.0] - 2023-02-01
 
 ## 🚀 Features

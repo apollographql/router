@@ -24,6 +24,9 @@ pub enum Command {
     /// Locally run all the checks required before a release.
     All(commands::All),
 
+    /// Produce or consume changesets
+    Changeset(commands::changeset::Command),
+
     /// Check the code for licence and security compliance.
     CheckCompliance(commands::Compliance),
 
@@ -53,6 +56,7 @@ impl Xtask {
     pub fn run(&self) -> Result<()> {
         match &self.command {
             Command::All(command) => command.run(),
+            Command::Changeset(command) => command.run(),
             Command::CheckCompliance(command) => command.run(),
             Command::Dist(command) => command.run(),
             Command::Dev(command) => command.run(),

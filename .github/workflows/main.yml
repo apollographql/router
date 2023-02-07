@@ -12,4 +12,4 @@ jobs:
         uses: mskelton/changelog-reminder-action@v3.0.0
         with:
           changelogRegex: '\.changesets/(breaking|feat|fix|config|maint|docs|exp)_.*\.md'
-          message: "@${{ github.actor }}, please create a file in `/.changesets/` following [these instructions](https://github.com/apollographql/router/blob/HEAD/.changesets/README.md)."
+          message: "@${{ github.actor }}, please consider creating a changeset entry in `/.changesets/`. [These instructions](https://github.com/apollographql/router/blob/HEAD/.changesets/README.md) describe the process and tooling."
