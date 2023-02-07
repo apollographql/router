@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::string::ToString;
 use std::time::Duration;
 
 use http::header::ACCEPT;
@@ -11,8 +10,6 @@ use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
 use hyper::Body;
-use once_cell::sync::Lazy;
-use reqwest::Client;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -21,17 +18,9 @@ use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
 
-use crate::error::LicenseError;
-use crate::services::apollo_graph_reference;
-use crate::tracer::TraceId;
 use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
-
-static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
-    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    Ok(Client::new())
-});
 
 /// Version of our externalised data. Rev this if it changes
 pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
@@ -91,51 +80,7 @@ impl<T> Externalizable<T>
 where
     T: Debug + DeserializeOwned + Serialize + Send + Sync,
 {
-    pub(crate) fn new(
-        stage: PipelineStep,
-        headers: Option<HashMap<String, Vec<String>>>,
-        body: Option<T>,
-        context: Option<Context>,
-        sdl: Option<String>,
-    ) -> Self {
-        Self {
-            version: EXTERNALIZABLE_VERSION,
-            stage: stage.to_string(),
-            control: Control::default(),
-            id: TraceId::maybe_new().map(|id| id.to_string()),
-            headers,
-            body,
-            context,
-            sdl,
-            uri: None,
-        }
-    }
-
-    pub(crate) async fn call(self, url: &str, timeout: Option<Duration>) -> Result<Self, BoxError> {
-        let my_client = CLIENT.as_ref().map_err(|e| e.to_string())?.clone();
-        let t = timeout.unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT);
-
-        tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
-        let response = my_client
-            .post(url)
-            .json(&self)
-            .header(ACCEPT, "application/json")
-            .header(CONTENT_TYPE, "application/json")
-            .timeout(t)
-            .send()
-            .await?;
-
-        // Let's process our response
-        let response: Self = response.json().await?;
-
-        Ok(response)
-    }
-
-    pub(crate) async fn call_with_client<C>(
-        self,
-        mut client: C,
-        uri: &str,
-    ) -> Result<Self, BoxError>
+    pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
         C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
             + Clone
@@ -154,21 +99,9 @@ where
 
         let response = client.call(request).await?;
         // TODO: refactor once it compiles
-        serde_json::from_slice(
-            &hyper::body::to_bytes(response.into_body())
-                .await
-                .map_err(BoxError::from)?,
-        )
-        .map_err(BoxError::from)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::CLIENT;
-
-    #[test]
-    fn it_will_not_externalize_without_environment() {
-        assert!(CLIENT.as_ref().is_err());
+        hyper::body::to_bytes(response.into_body())
+            .await
+            .map_err(BoxError::from)
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
     }
 }
