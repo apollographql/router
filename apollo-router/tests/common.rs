@@ -1,7 +1,6 @@
 use std::collections::HashMap;
-use std::convert::Infallible;
 use std::fs;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -10,13 +9,6 @@ use std::time::SystemTime;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
-use http::Request;
-use http::Response;
-use http::StatusCode;
-use hyper::server::Server;
-use hyper::service::make_service_fn;
-use hyper::service::service_fn;
-use hyper::Body;
 use jsonpath_lib::Selector;
 use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
@@ -35,7 +27,6 @@ use tokio::process::Child;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::task;
-use tokio::task::JoinHandle;
 use tokio::time::Instant;
 use tower::BoxError;
 use tracing::info_span;
@@ -46,8 +37,9 @@ use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 use uuid::Uuid;
+use wiremock::matchers::method;
+use wiremock::{Mock, Respond, ResponseTemplate};
 
-static SUBGRAPHS: OnceCell<JoinHandle<()>> = OnceCell::new();
 static LOCK: OnceCell<Arc<Mutex<bool>>> = OnceCell::new();
 
 pub struct IntegrationTest {
@@ -57,6 +49,29 @@ pub struct IntegrationTest {
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    _subgraphs: wiremock::MockServer,
+}
+
+struct TracedResponder(ResponseTemplate);
+
+impl Respond for TracedResponder {
+    fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
+        let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
+            .with_service_name("products")
+            .build_simple()
+            .unwrap();
+        let tracer = tracer_provider.tracer("products");
+        let headers: HashMap<String, String> = request
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str().to_string(), value.as_str().to_string()))
+            .collect();
+        let context = opentelemetry_jaeger::Propagator::new().extract(&headers);
+        let mut span = tracer.start_with_context("HTTP POST", &context);
+        span.end_with_timestamp(SystemTime::now());
+        tracer_provider.force_flush();
+        self.0.clone()
+    }
 }
 
 impl IntegrationTest {
@@ -74,11 +89,32 @@ impl IntegrationTest {
             .lock_owned()
             .await;
 
-        // Only spawn subgraphs if they are not already spawned
-        SUBGRAPHS.get_or_init(|| tokio::task::spawn(subgraph()));
+        let mut listener = None;
+        for _ in 0..100 {
+            if let Ok(new_listener) = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 4005))) {
+                listener = Some(new_listener);
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        if listener.is_none() {
+            panic!("could not listen")
+        }
+
+        let subgraphs = wiremock::MockServer::builder()
+            .listener(listener.expect("just checked; qed"))
+            .start()
+            .await;
+
+        Mock::given(method("POST"))
+            .respond_with(TracedResponder(ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})
+            )))
+            .mount(&subgraphs)
+            .await;
 
         let mut test_config_location = std::env::temp_dir();
         test_config_location.push("test_config.yaml");
+
         fs::write(&test_config_location, config).expect("could not write config");
 
         let router_location = build_test_binary("integration-test-router", "../test-binaries")
@@ -92,6 +128,7 @@ impl IntegrationTest {
             _lock: lock,
             stdio_tx,
             stdio_rx,
+            _subgraphs: subgraphs,
         }
     }
 
@@ -350,51 +387,53 @@ impl ValueExt for Value {
     }
 }
 
-// starts a local server emulating the products subgraph
-async fn subgraph() {
-    async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
-        // create the opentelemetry-jaeger tracing infrastructure
-        let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
-            .with_service_name("products")
-            .build_simple()
-            .unwrap();
-        let tracer = tracer_provider.tracer("products");
-
-        //extract the trace id from headers and create a child span from it
-        assert!(
-            request.headers().get("uber-trace-id").is_some(),
-            "the uber-trace-id is absent, trace propagation is broken"
-        );
-
-        let headers: HashMap<String, String> = request
-            .headers()
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_string(),
-                    value.to_str().unwrap().to_string(),
-                )
-            })
-            .collect();
-        let context = opentelemetry_jaeger::Propagator::new().extract(&headers);
-        let mut span = tracer.start_with_context("HTTP POST", &context);
-        tokio::time::sleep(Duration::from_millis(2)).await;
-        span.end_with_timestamp(SystemTime::now());
-        tracer_provider.force_flush();
-
-        // send the response
-        let _ = hyper::body::to_bytes(request.into_body()).await.unwrap();
-        Ok(Response::builder()
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .status(StatusCode::OK)
-            .body(
-                r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#
-                    .into(),
-            )
-            .unwrap())
-    }
-
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-    let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
-    server.await.unwrap();
-}
+// // starts a local server emulating the products subgraph
+// async fn subgraph() {
+//     async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
+//         // create the opentelemetry-jaeger tracing infrastructure
+//         let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
+//             .with_service_name("products")
+//             .build_simple()
+//             .unwrap();
+//         let tracer = tracer_provider.tracer("products");
+//
+//         //extract the trace id from headers and create a child span from it
+//         assert!(
+//             request.headers().get("uber-trace-id").is_some(),
+//             "the uber-trace-id is absent, trace propagation is broken"
+//         );
+//
+//         let headers: HashMap<String, String> = request
+//             .headers()
+//             .iter()
+//             .map(|(name, value)| {
+//                 (
+//                     name.as_str().to_string(),
+//                     value.to_str().unwrap().to_string(),
+//                 )
+//             })
+//             .collect();
+//         let context = opentelemetry_jaeger::Propagator::new().extract(&headers);
+//         let mut span = tracer.start_with_context("HTTP POST", &context);
+//         tokio::time::sleep(Duration::from_millis(2)).await;
+//         span.end_with_timestamp(SystemTime::now());
+//         tracer_provider.force_flush();
+//
+//         // send the response
+//         let _ = hyper::body::to_bytes(request.into_body()).await.unwrap();
+//         Ok(Response::builder()
+//             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+//             .status(StatusCode::OK)
+//             .body(
+//                 r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#
+//                     .into(),
+//             )
+//             .unwrap())
+//     }
+//
+//     let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+//     let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
+//     if let Err(e) = server.await {
+//         println!("server error {}", e);
+//     }
+// }

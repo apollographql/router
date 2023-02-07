@@ -1458,9 +1458,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.14.23"
+version = "0.14.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "034711faac9d2166cb1baf1a2fb0b60b1f277f8492fd72176c17f3515e1abd3c"
+checksum = "5e011372fa0b68db8350aa7a248930ecc7839bf46d8485577d69f117a75f164c"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2919,9 +2919,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.14+v2.3.0"
+version = "0.1.15+v2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4d4dab86e5374bae8d65f18080226dc00a3773f9fea2e7e29f32e8a184fc725e"
+checksum = "bef8642e2b90e72eb436513531b7cd27a5b3146462ca23bd6f63c8e5c29594e4"
 dependencies = [
  "anyhow",
  "async-channel",
