@@ -10,10 +10,19 @@ This directory keeps files which individually represent entries that will repres
 >
 > The aforementioned **tooling doesn't exist yet** but will be created soon. 😺
 
-Create a file **by hand** in this directory for each individual changelog entry by using the required convention.  That convention is:
+### How to create a Changelog entry
+
+1. Push the change you are writing a changeset for up to GitHub.
+2. Open a pull request for it.  Note that your PR title and body will be used to pre-populate the changeset.
+3. On your local checkout, **run `cargo xtask changeset create` from the root of the repository** and follow the prompts.
+4. Add, commit and push the changeset file that is created and push it up to GitHub.
+
+### Conventions used in this `.changesets/` directory
+
+The convention used in this directory and obeyed by the `cargo xtask changeset create` command is:
 
 1. Files in this directory must use the `.md` file extension.
-2. Do not put multiple changelog entries in a single file.
+2. There must not be multiple changelog entries in a single file.
 3. Files *must start with a prefix* that indicates the classification of the changeset.  The prefixes are as follows:
    - **Breaking**: `breaking_`
    - **Feature**: `feat_`

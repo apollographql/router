@@ -881,7 +881,17 @@ async fn http_query_rust(
 async fn query_rust(
     request: supergraph::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
-    query_rust_with_config(request, serde_json::json!({})).await
+    query_rust_with_config(
+        request,
+        serde_json::json!({
+            "telemetry":{
+              "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            }
+        }),
+    )
+    .await
 }
 
 async fn http_query_rust_with_config(
