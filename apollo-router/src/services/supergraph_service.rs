@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use std::task::Poll;
 
+use crate::_private::TelemetryPlugin;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -337,10 +338,12 @@ impl PluggableSupergraphServiceBuilder {
         .await;
 
         let mut plugins = self.plugins;
-        // Activate all plugins.
-        // We must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+        // Activate the telemetry plugin.
+        // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in plugins.iter_mut() {
-            plugin.activate();
+            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<TelemetryPlugin>() {
+                telemetry.activate();
+            }
         }
 
         let plugins = Arc::new(plugins);

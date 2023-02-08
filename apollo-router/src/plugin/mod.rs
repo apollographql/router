@@ -182,10 +182,6 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
-    /// Called once all plugins have been initialized and it is safe to assume that this plugin will take effect.
-    /// Interaction with globals is safe in this method.
-    fn activate(&mut self) {}
-
     /// This function is EXPERIMENTAL and its signature is subject to change.
     ///
     /// This service runs at the very beginning and very end of the request lifecycle.
@@ -234,15 +230,6 @@ pub trait Plugin: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
-
-    /// Support downcasting.
-    #[cfg(test)]
-    fn as_any(&self) -> &dyn std::any::Any
-    where
-        Self: Sized,
-    {
-        self
-    }
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -280,16 +267,17 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
         service: subgraph::BoxService,
     ) -> subgraph::BoxService;
 
-    /// Called once all plugins have been initialized and it is safe to assume that this plugin will take effect.
-    fn activate(&mut self);
-
     /// Return the name of the plugin.
     fn name(&self) -> &'static str;
 
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
+    /// Support downcasting
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Support downcasting
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 #[async_trait]
@@ -314,10 +302,6 @@ where
         self.subgraph_service(name, service)
     }
 
-    fn activate(&mut self) {
-        self.activate()
-    }
-
     fn name(&self) -> &'static str {
         self.name()
     }
@@ -328,6 +312,10 @@ where
     }
 
     fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
         self
     }
 }

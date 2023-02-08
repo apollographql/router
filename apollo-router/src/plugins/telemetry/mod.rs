@@ -210,41 +210,6 @@ impl Plugin for Telemetry {
         })
     }
 
-    fn activate(&mut self) {
-        // Only apply things if we were executing in the context of a vanilla the Apollo executable.
-        // Users that are rolling their own routers will need to set up telemetry themselves.
-        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            // The reason that this has to happen here is that we are interacting with global state.
-            // If we do this logic during plugin init then if a subsequent plugin fails to init then we
-            // will already have set the new tracer provider and we will be in an inconsistent state.
-            // activate is infallible, so if we get here we know the new pipeline is ready to go.
-            let tracer_provider = self
-                .tracer_provider
-                .take()
-                .expect("must have new tracer_provider");
-
-            let tracer = tracer_provider.versioned_tracer(
-                GLOBAL_TRACER_NAME,
-                Some(env!("CARGO_PKG_VERSION")),
-                None,
-            );
-            hot_tracer.reload(tracer);
-
-            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
-            // To ensure we don't hang tracing providers are dropped in a blocking task.
-            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
-            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
-            tokio::task::spawn_blocking(move || drop(last_provider));
-            opentelemetry::global::set_error_handler(handle_error)
-                .expect("otel error handler lock poisoned, fatal");
-
-            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
-        }
-
-        reload_metrics(MetricsLayer::new(&self.meter_provider));
-        reload_fmt(Self::create_fmt_layer(&self.config));
-    }
-
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
         let config_later = self.config.clone();
@@ -480,6 +445,41 @@ impl Plugin for Telemetry {
 }
 
 impl Telemetry {
+    pub(crate) fn activate(&mut self) {
+        // Only apply things if we were executing in the context of a vanilla the Apollo executable.
+        // Users that are rolling their own routers will need to set up telemetry themselves.
+        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            // The reason that this has to happen here is that we are interacting with global state.
+            // If we do this logic during plugin init then if a subsequent plugin fails to init then we
+            // will already have set the new tracer provider and we will be in an inconsistent state.
+            // activate is infallible, so if we get here we know the new pipeline is ready to go.
+            let tracer_provider = self
+                .tracer_provider
+                .take()
+                .expect("must have new tracer_provider");
+
+            let tracer = tracer_provider.versioned_tracer(
+                GLOBAL_TRACER_NAME,
+                Some(env!("CARGO_PKG_VERSION")),
+                None,
+            );
+            hot_tracer.reload(tracer);
+
+            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
+            // To ensure we don't hang tracing providers are dropped in a blocking task.
+            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
+            tokio::task::spawn_blocking(move || drop(last_provider));
+            opentelemetry::global::set_error_handler(handle_error)
+                .expect("otel error handler lock poisoned, fatal");
+
+            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+        }
+
+        reload_metrics(MetricsLayer::new(&self.meter_provider));
+        reload_fmt(Self::create_fmt_layer(&self.config));
+    }
+
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
         let propagation = config
             .clone()
