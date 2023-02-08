@@ -3,7 +3,7 @@ title: JWT Authentication in the Apollo Router
 sidebar_title: JWT Authentication
 ---
 
-> ⚠️ **This feature requires an Apollo Enterprise plan. It is currently experimental.** As long as this feature is experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
+> ⚠️ **This feature is currently experimental.** As long as this feature is experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
 >
 > To provide feedback or otherwise participate in this feature, join [this GitHub discussion](https://github.com/apollographql/router/discussions/2391).
 
@@ -29,26 +29,34 @@ These are the high-level steps of JWT-based authentication with the Apollo Route
 
 ## Turning it on
 
-You enable JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication.experimental` key:
+You enable JWT authentication for your router with the following steps:
 
-```yaml title="router.yaml"
-authentication:
-  experimental:
-    jwt:
-      jwks_urls: # This key is required.
-        - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-      
-      # These keys are optional. Default values are shown.
-      header_name: Authorization
-      header_value_prefix: Bearer
-      cooldown: 15s
-```
+1. Set configuration options for JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication.experimental` key:
 
-Make sure you're providing your config file to the router on startup!
+    ```yaml title="router.yaml"
+    authentication:
+      experimental:
+        jwt:
+          jwks_urls: # This key is required.
+            - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
 
-```bash
-./router --config router.yaml
-```
+          # These keys are optional. Default values are shown.
+          header_name: Authorization
+          header_value_prefix: Bearer
+          cooldown: 15s
+    ```
+
+    These options are documented [below](#configuration-options).
+
+2. Pass all of the following to the `router` executable on startup:
+
+    - The path to the router's YAML configuration file (via the `--config` option)
+    - The graph ref for the [GraphOS variant](/graphos/graphs/overview#variants) your router should use (via the `APOLLO_GRAPH_REF` environment variable)
+    - A [graph API key](/graphos/api-keys/graph-api-keys) that enables the router to authenticate with GraphOS to fetch its supergraph schema (via the `APOLLO_KEY` environment variable)
+
+    ```bash
+    APOLLO_GRAPH_REF=docs-example-graph@main APOLLO_KEY="..." ./router --config router.yaml
+    ```
 
 When the router starts up, it displays a log message that confirms which `jwks_urls` are in use:
 
@@ -80,7 +88,7 @@ The following configuration options are supported:
 **Required.** A list of URLs, each for a different JWK Set (JWKS) that the router should use. Each item can be an `https://` or a `file://` URL.
 
 - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
-- **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks).
+- **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 
 </td>
 </tr>
@@ -147,6 +155,8 @@ Below is an example Rhai script that forwards a JWT's claims to individual subgr
 
 <ExpansionPanel title="Click to expand">
 
+TODO
+
 </ExpansionPanel>
 
 ### Example: Throwing errors for invalid claims
@@ -194,12 +204,6 @@ fn process_request(request) {
 
 </ExpansionPanel>
 
-### Forwarding JWTs to subgraphs (uncommon)
-
-Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs).
-
-If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
-
 ## Creating your own JWKS (advanced)
 
 > ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks_urls) to pass to your router.
@@ -210,9 +214,9 @@ The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs tha
 
 To provide a JWKS to your router, configure your IdP service to do the following whenever its collection of valid JWKs changes (such as when a JWK expires or is rotated):
 
-1. [Generate a valid JWKS object](#jwks-format) that includes the details of every JWK that the router requires to perform token validation.
+1. Generate a [valid JWKS object](#jwks-format) that includes the details of every JWK that the router requires to perform token validation.
 2. Write the JWKS object to a location that your router can reach via a `file://` or `https://` URL.
-    - **If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should never be accessible over the network.
+    - ⚠️ **If _any_ of your JWKs uses a symmetric signature algorithm (such as `HS256`), always use a `file://` URL.** Symmetric signature algorithms use a shared key that should _never_ be accessible over the network.
 
 Again, make sure the IdP is configured to perform these steps _every time_ its collection of JWKs changes!
 
@@ -224,7 +228,7 @@ A JWKS is a JSON object with a single top-level property: `keys`. The value of `
 {
   "keys": [
     {
-      // These properties are explained below.
+      // These JWK properties are explained below.
       "kty": "RSA",
       "alg": "RS256",
       "kid": "abc123",
@@ -236,9 +240,9 @@ A JWKS is a JSON object with a single top-level property: `keys`. The value of `
 }
 ```
 
-It's common for a JWKS to contain only a _single_ JWK, or sometimes two if your IdP is in the process of rotating a key.
+It's common for the `keys` array to contain only a _single_ JWK, or sometimes two if your IdP is in the process of rotating a key.
 
-### JWK object properties
+### JWK object reference
 
 JWK object properties fall into two categories:
 
@@ -294,7 +298,7 @@ Short for **algorithm**. The exact cryptographic algorithm to use with the JWK, 
 
 Short for **key identifier**. The JWK's unique identifier. Your IdP should generate each JWK's `kid` at the same time that it generates the JWK itself.
 
-JWTs created with a particular key include that key's identifier in their payload, which enables the router to know which key to use for validation.
+JWTs created with a particular key can include that key's identifier in their payload, which helps the router determine which JWK to use for validation.
 
 </td>
 </tr>
@@ -320,6 +324,8 @@ For keys you're using to perform JWT authentication, this value should be `sig`.
 #### Algorithm-specific properties
 
 ##### RSA
+
+> See also the [JWA spec](https://www.rfc-editor.org/rfc/rfc7518#section-6.3).
 
 ```json
 {
@@ -353,7 +359,7 @@ For keys you're using to perform JWT authentication, this value should be `sig`.
 </td>
 <td>
 
-TODO
+The RSA public key's modulus value, as the base64-encoded value of the unsigned integer.
 
 </td>
 </tr>
@@ -366,7 +372,9 @@ TODO
 </td>
 <td>
 
-TODO
+The RSA public key's exponent value, as the base64-encoded value of the unsigned integer.
+
+This value is often `AQAB`, which is the base64 encoding for the exponent `65537`.
 
 </td>
 </tr>
@@ -375,6 +383,8 @@ TODO
 </table>
 
 ##### EC (elliptic curve)
+
+> See also the [JWA spec](https://www.rfc-editor.org/rfc/rfc7518#section-6.2).
 
 ```json
 {
@@ -410,7 +420,13 @@ TODO
 </td>
 <td>
 
-TODO
+Indicates which cryptographic curve is used with this public key.
+
+Spec-defined curves include:
+
+- `P-256`
+- `P-384`
+- `P-521`
 
 </td>
 </tr>
@@ -423,7 +439,7 @@ TODO
 </td>
 <td>
 
-TODO
+The x-coordinate of the elliptic curve point for this public key, as the base64-encoded value of the coordinate's octet string representation.
 
 </td>
 </tr>
@@ -436,7 +452,7 @@ TODO
 </td>
 <td>
 
-TODO
+The y-coordinate of the elliptic curve point for this public key, as the base64-encoded value of the coordinate's octet string representation.
 
 </td>
 </tr>
@@ -444,7 +460,7 @@ TODO
 </tbody>
 </table>
 
-##### HMAC
+##### Symmetric key algorithms (such as HMAC)
 
 ```json
 {
@@ -478,7 +494,9 @@ TODO
 </td>
 <td>
 
-TODO
+The value of the shared symmetric key, as the base64-encoded value of the key's octet sequence representation.
+
+**⚠️ If your JWK uses a symmetric signature algorithm, always [provide your JWKS to the router](#jwks_urls) via a `file://` URL!** Shared keys should never be made available over the network.
 
 </td>
 </tr>
@@ -498,6 +516,12 @@ The router searches through the set of configured JWKSets to find the best match
  1. a matching `kty`
 
 The router will thus attempt to verify with the most specific matching key.
+
+## Forwarding JWTs to subgraphs (uncommon)
+
+Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs) to enable fine-grained access control.
+
+If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
 
 ## Observability
 
