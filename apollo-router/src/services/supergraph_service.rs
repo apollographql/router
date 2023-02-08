@@ -1676,6 +1676,145 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn interface_object_response_processing() {
+        let schema = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          {
+            query: Query
+          }
+
+          directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+          directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+          directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+          type Book implements Product
+            @join__implements(graph: PRODUCTS, interface: "Product")
+            @join__type(graph: PRODUCTS, key: "id")
+          {
+            id: ID!
+            description: String
+            price: Float
+            pages: Int
+            reviews: [Review!]! @join__field
+          }
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            PRODUCTS @join__graph(name: "products", url: "products")
+            REVIEWS @join__graph(name: "reviews", url: "reviews")
+          }
+
+          scalar link__Import
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          type Movie implements Product
+            @join__implements(graph: PRODUCTS, interface: "Product")
+            @join__type(graph: PRODUCTS, key: "id")
+          {
+            id: ID!
+            description: String
+            price: Float
+            duration: Int
+            reviews: [Review!]! @join__field
+          }
+
+          interface Product
+            @join__type(graph: PRODUCTS, key: "id")
+            @join__type(graph: REVIEWS, key: "id", isInterfaceObject: true)
+          {
+            id: ID!
+            description: String @join__field(graph: PRODUCTS)
+            price: Float @join__field(graph: PRODUCTS)
+            reviews: [Review!]! @join__field(graph: REVIEWS)
+          }
+
+          type Query
+            @join__type(graph: PRODUCTS)
+            @join__type(graph: REVIEWS)
+          {
+            products: [Product!]! @join__field(graph: PRODUCTS)
+            allReviewedProducts: [Product!]! @join__field(graph: REVIEWS)
+            bestRatedProducts(limit: Int): [Product!]! @join__field(graph: REVIEWS)
+          }
+
+          type Review
+            @join__type(graph: REVIEWS)
+          {
+            author: String
+            text: String
+            rating: Int
+          }
+        "#;
+
+        let query = r#"
+          {
+            allReviewedProducts {
+              id
+              price
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs([
+            ("products", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{__typename price}}}",
+                        "variables": {"representations":[{"__typename":"Product","id":"1"},{"__typename":"Product","id":"2"}]}
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities":[{"price":12.99},{"price":14.99}]}
+                    }},
+                )
+                .build()),
+            ("reviews", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "{allReviewedProducts{__typename id}}"
+                    }},
+                    serde_json::json! {{
+                        "data": {"allReviewedProducts":[{"__typename":"Product","id":"1"},{"__typename":"Product","id":"2"}]}
+                    }},
+                )
+                .build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+        println!("{response:?}");
+
+        assert_eq!(
+            serde_json::to_value(&response.data).unwrap(),
+            serde_json::json!({ "allReviewedProducts": [ {"id": "1", "price": 12.99}, {"id": "2", "price": 14.99} ]}),
+        );
+    }
+
+    #[tokio::test]
     async fn only_query_interface_object_subgraph() {
         // This test has 2 subgraphs, one with an interface and another with that interface
         // declared as an @interfaceObject. It then sends a query that can be entirely

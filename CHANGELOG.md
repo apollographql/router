@@ -4,6 +4,40 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.10.2] - 2023-02-08
+
+## 🐛 Fixes
+
+### Resolve incorrect nullification when using `@interfaceObject` with particular response objects ([PR #2530](https://github.com/apollographql/router/pull/2530))
+
+> Note: This follows up on the v1.10.1 release which also attempted to fix this, but inadvertently excluded a required part of the fix due to an administrative oversight.
+
+The Federation 2.3.x `@interfaceObject` feature implies that an interface type in the supergraph may be locally handled as an object type by some specific subgraphs.  Therefore, such subgraphs may return objects whose `__typename` is the interface type in their response. In some cases, those `__typename` were leading the Router to unexpectedly and incorrectly nullify the underlying objects.  This was not caught in the initial integration of Federation 2.3.
+
+By [@pcmanus](https://github.com/pcmanus) in https://github.com/apollographql/router/pull/2530
+
+## 🛠 Maintenance
+
+### Refactor Uplink implementation ([Issue #2547](https://github.com/apollographql/router/issues/2547))
+
+The Apollo Uplink implementation within Apollo Router, which is used for fetching data _from_ Apollo GraphOS, has been decomposed into a reusable component so that it can be used more generically for fetching artifacts.  This generally improved code quality and resulted in several new tests being added.
+
+Additionally, our round-robin fetching behaviour is now more durable. Previously, on failure, there would be a delay before trying the next round-robin URL. Now, all URLs will be tried in sequence until exhausted. If ultimately all URLs fail, then the usual delay is applied before trying again.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2537
+
+### Improve Changelog management through conventions and tooling ([PR #2545](https://github.com/apollographql/router/pull/2545), [PR #2534](https://github.com/apollographql/router/pull/2534))
+
+New tooling and conventions adjust our "incoming changelog in the next release" mechanism to no longer rely on a single file, but instead leverage a "file per feature" pattern in conjunction with tooling to create that file.
+
+This stubbing takes place through the use of a new command:
+
+    cargo xtask changeset create
+
+For more information on the process, read the [README in the `./.changesets` directory](https://github.com/apollographql/router/blob/HEAD/.changesets/README.md) or consult the referenced Pull Requests below.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2545 and https://github.com/apollographql/router/pull/2534
+
 # [1.10.1] - 2023-02-07
 
 ## 🐛 Fixes

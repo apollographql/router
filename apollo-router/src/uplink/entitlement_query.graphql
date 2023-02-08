@@ -1,0 +1,21 @@
+query EntitlementRequest($apiKey: String!, $graph_ref: String!, $unlessId: ID) {
+
+    routerEntitlements(unlessId: $unlessId, apiKey: $apiKey, ref: $graph_ref) {
+        __typename
+        ... on RouterEntitlementsResult {
+            id
+            minDelaySeconds
+            entitlement {
+                jwt
+            }
+        }
+        ... on Unchanged {
+            id
+            minDelaySeconds
+        }
+        ... on FetchError {
+            code
+            message
+        }
+    }
+}
