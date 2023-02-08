@@ -540,7 +540,13 @@ impl Query {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
-                            if !parameters.schema.object_types.contains_key(input_type) {
+                            // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
+                            // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
+                            // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
+                            // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
+                            if !parameters.schema.object_types.contains_key(input_type)
+                                && !parameters.schema.interfaces.contains_key(input_type)
+                            {
                                 parameters.nullified.push(path.clone());
                                 *output = Value::Null;
                                 return Ok(());
@@ -677,8 +683,12 @@ impl Query {
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
                         if name.as_str() == TYPENAME {
-                            if input_value.is_string() {
-                                *output_value = input_value.clone();
+                            if let Some(input_str) = input_value.as_str() {
+                                if parameters.schema.object_types.contains_key(input_str) {
+                                    *output_value = input_value.clone();
+                                } else {
+                                    return Err(InvalidValue);
+                                }
                             }
                         } else {
                             path.push(PathElement::Key(field_name.as_str().to_string()));
