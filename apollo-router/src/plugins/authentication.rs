@@ -18,6 +18,7 @@ use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
 use jsonwebtoken::jwk::AlgorithmParameters;
+use jsonwebtoken::jwk::EllipticCurve;
 use jsonwebtoken::jwk::Jwk;
 use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::jwk::KeyOperations;
@@ -147,7 +148,7 @@ async fn get_jwks(url: Url) -> Option<JwkSet> {
         apollo_graph_reference()
             .ok_or(LicenseError::MissingGraphReference)
             .map_err(|e| {
-                tracing::error!(%e, "could not activate commercial features");
+                tracing::error!(%e, "could not activate authentication feature");
                 e
             })
             .ok()?;
@@ -169,7 +170,7 @@ async fn get_jwks(url: Url) -> Option<JwkSet> {
         let my_client = CLIENT
             .as_ref()
             .map_err(|e| {
-                tracing::error!(%e, "could not activate commercial features");
+                tracing::error!(%e, "could not activate authentication feature");
                 e
             })
             .ok()?
@@ -237,20 +238,17 @@ async fn search_jwks(
         let jwks = jwks_opt.ok_or(Error::JwkSet)?;
         // Try to figure out if our jwks contains a candidate key (i.e.: a key which matches our
         // criteria)
-        for mut key in jwks.keys {
-            let mut key_score = 0;
+        for mut key in jwks.keys.into_iter().filter(|key| {
             // We are only interested in keys which are used for signature verification
             if let Some(purpose) = &key.common.public_key_use {
-                if purpose != &PublicKeyUse::Signature {
-                    continue;
-                }
+                purpose == &PublicKeyUse::Signature
             } else if let Some(purpose) = &key.common.key_operations {
-                if !purpose.contains(&KeyOperations::Verify) {
-                    continue;
-                }
+                purpose.contains(&KeyOperations::Verify)
             } else {
-                continue;
-            };
+                false
+            }
+        }) {
+            let mut key_score = 0;
 
             // Let's see if we have a specified kid and if they match
             if criteria.kid.is_some() && key.common.key_id == criteria.kid {
@@ -275,32 +273,42 @@ async fn search_jwks(
                 // Note: Matching algorithm parameters may seem unusual, but the appropriate
                 // algorithm details are not structured for easy consumption in jsonwebtoken and
                 // this is the simplest way to determine algorithm family.
-                None => match criteria.alg {
-                    Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512 => {
-                        if let AlgorithmParameters::OctetKey(_) = key.algorithm {
+                None => match (criteria.alg, &key.algorithm) {
+                    (
+                        Algorithm::HS256 | Algorithm::HS384 | Algorithm::HS512,
+                        AlgorithmParameters::OctetKey(_),
+                    ) => {
+                        key.common.algorithm = Some(criteria.alg);
+                    }
+                    (
+                        Algorithm::RS256
+                        | Algorithm::RS384
+                        | Algorithm::RS512
+                        | Algorithm::PS256
+                        | Algorithm::PS384
+                        | Algorithm::PS512,
+                        AlgorithmParameters::RSA(_),
+                    ) => {
+                        key.common.algorithm = Some(criteria.alg);
+                    }
+                    (Algorithm::ES256, AlgorithmParameters::EllipticCurve(params)) => {
+                        if params.curve == EllipticCurve::P256 {
                             key.common.algorithm = Some(criteria.alg);
-                        } else {
-                            continue;
                         }
                     }
-                    Algorithm::RS256
-                    | Algorithm::RS384
-                    | Algorithm::RS512
-                    | Algorithm::PS256
-                    | Algorithm::PS384
-                    | Algorithm::PS512 => {
-                        if let AlgorithmParameters::RSA(_) = key.algorithm {
+                    (Algorithm::ES384, AlgorithmParameters::EllipticCurve(params)) => {
+                        if params.curve == EllipticCurve::P384 {
                             key.common.algorithm = Some(criteria.alg);
-                        } else {
-                            continue;
                         }
                     }
-                    Algorithm::ES256 | Algorithm::ES384 | Algorithm::EdDSA => {
-                        if let AlgorithmParameters::EllipticCurve(_) = key.algorithm {
+                    (Algorithm::EdDSA, AlgorithmParameters::EllipticCurve(params)) => {
+                        if params.curve == EllipticCurve::Ed25519 {
                             key.common.algorithm = Some(criteria.alg);
-                        } else {
-                            continue;
                         }
+                    }
+                    _ => {
+                        tracing::info!(?criteria.alg, ?key.algorithm, "Ignoring unsupported algorithm combination");
+                        continue;
                     }
                 },
             };
@@ -322,7 +330,15 @@ async fn search_jwks(
             candidates.push((key_score, key));
         }
     }
-    tracing::debug!("jwk candidates: {:?}", candidates);
+
+    tracing::debug!(
+        "jwk candidates: {:?}",
+        candidates
+            .iter()
+            .map(|(score, candidate)| (score, &candidate.common.key_id, candidate.common.algorithm))
+            .collect::<Vec<(&usize, &Option<String>, Option<Algorithm>)>>()
+    );
+
     if candidates.is_empty() {
         Ok(None)
     } else {
@@ -510,7 +526,7 @@ impl Plugin for AuthenticationPlugin {
                             return failure_message(
                                 request.context,
                                 format!("Could not retrieve JWKS set: {e}"),
-                                StatusCode::INTERNAL_SERVER_ERROR, // XXX: Best error?
+                                StatusCode::INTERNAL_SERVER_ERROR,
                             );
                         }
                     };
@@ -1202,6 +1218,7 @@ mod tests {
             .expect("search worked")
             .expect("found a key");
         assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+        assert_eq!("key2", key.common.key_id.unwrap());
     }
 
     #[tokio::test]
