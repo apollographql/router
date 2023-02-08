@@ -307,7 +307,7 @@ async fn search_jwks(
                         }
                     }
                     _ => {
-                        tracing::info!(?criteria.alg, ?key.algorithm, "Ignoring unsupported algorithm combination");
+                        // We'll ignore combinations we don't recognise
                         continue;
                     }
                 },
