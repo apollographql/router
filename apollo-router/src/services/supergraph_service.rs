@@ -1773,7 +1773,7 @@ mod tests {
             ("products", MockSubgraph::builder()
                 .with_json(
                     serde_json::json! {{
-                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{price}}}",
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{__typename price}}}",
                         "variables": {"representations":[{"__typename":"Product","id":"1"},{"__typename":"Product","id":"2"}]}
                     }},
                     serde_json::json! {{
