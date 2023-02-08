@@ -225,7 +225,6 @@ struct SubgraphConf {
     url: bool,
 }
 
-
 /// The stages request/response configuration
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
