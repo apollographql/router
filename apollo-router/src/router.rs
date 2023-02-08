@@ -52,8 +52,8 @@ use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
-use crate::uplink::entitlement::EntitlementRequest;
-use crate::uplink::schema::SupergraphSdlQuery;
+use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
 use crate::uplink::Endpoints;
 
@@ -781,6 +781,12 @@ pub(crate) enum Event {
 
     /// Update entitlement.
     UpdateEntitlement(Entitlement),
+
+    /// The entitlement has entered warn_at has passed.
+    WarnEntitlement,
+
+    /// The entitlement has halt_at has passed.
+    HaltEntitlement,
 
     /// There were no more updates to entitlement.
     NoMoreEntitlement,
