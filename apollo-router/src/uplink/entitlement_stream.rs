@@ -262,8 +262,18 @@ mod test {
 
         let past_system_time = now_system_time - Duration::from_secs(1024);
         let past_instant = to_instant(past_system_time);
-        assert!(past_instant < now_instant - Duration::from_secs(1023));
-        assert!(past_instant > now_instant - Duration::from_secs(1025));
+        assert!(
+            past_instant
+                < now_instant
+                    .checked_sub(Duration::from_secs(1023))
+                    .expect("must be able to create instant")
+        );
+        assert!(
+            past_instant
+                > now_instant
+                    .checked_sub(Duration::from_secs(1025))
+                    .expect("must be able to create instant")
+        );
     }
 
     #[tokio::test]
