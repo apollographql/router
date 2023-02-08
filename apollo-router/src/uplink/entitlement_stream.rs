@@ -148,10 +148,14 @@ where
                         // We got a new claim, so clear the previous checks.
                         this.checks.clear();
                         // Insert the new checks.
-                        this.checks
-                            .insert_at(Event::WarnEntitlement, (to_instant(claim.warn_at)).into());
-                        this.checks
-                            .insert_at(Event::HaltEntitlement, (to_instant(claim.halt_at)).into());
+                        this.checks.insert_at(
+                            Event::WarnEntitlement,
+                            (to_positive_instant(claim.warn_at)).into(),
+                        );
+                        this.checks.insert_at(
+                            Event::HaltEntitlement,
+                            (to_positive_instant(claim.halt_at)).into(),
+                        );
                         next
                     }
                     // Upstream has a new event with no claim
@@ -174,7 +178,8 @@ where
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
 /// The generated instant is only approximate.
-fn to_instant(system_time: SystemTime) -> Instant {
+/// Subtracting from instants is not supported on all platforms, so if the calculated instant was in the past we just return now as we don't care about how long ago the instant was, just that it happened already.
+fn to_positive_instant(system_time: SystemTime) -> Instant {
     // This is approximate as there is no real conversion between SystemTime and Instant
     let now_instant = Instant::now();
     let now_system_time = SystemTime::now();
@@ -184,9 +189,7 @@ fn to_instant(system_time: SystemTime) -> Instant {
         Ok(duration) => now_instant + duration,
 
         // system_time was in the past.
-        Err(e) => now_instant
-            .checked_sub(e.duration())
-            .expect("system time can always be converted into an instant"),
+        Err(_) => now_instant,
     }
 }
 
@@ -219,7 +222,7 @@ mod test {
     use crate::uplink::entitlement::Claims;
     use crate::uplink::entitlement::Entitlement;
     use crate::uplink::entitlement::OneOrMany;
-    use crate::uplink::entitlement_stream::to_instant;
+    use crate::uplink::entitlement_stream::to_positive_instant;
     use crate::uplink::entitlement_stream::EntitlementRequest;
     use crate::uplink::entitlement_stream::EventStreamExt;
     use crate::uplink::stream_from_uplink;
@@ -256,24 +259,15 @@ mod test {
         let now_system_time = SystemTime::now();
         let now_instant = Instant::now();
         let future_system_time = now_system_time + Duration::from_secs(1024);
-        let future_instant = to_instant(future_system_time);
+        let future_instant = to_positive_instant(future_system_time);
         assert!(future_instant < now_instant + Duration::from_secs(1025));
         assert!(future_instant > now_instant + Duration::from_secs(1023));
 
+        // An instant in the past will return something greater than the original now_instant, but less than a new instant.
         let past_system_time = now_system_time - Duration::from_secs(1024);
-        let past_instant = to_instant(past_system_time);
-        assert!(
-            past_instant
-                < now_instant
-                    .checked_sub(Duration::from_secs(1023))
-                    .expect("must be able to create instant")
-        );
-        assert!(
-            past_instant
-                > now_instant
-                    .checked_sub(Duration::from_secs(1025))
-                    .expect("must be able to create instant")
-        );
+        let past_instant = to_positive_instant(past_system_time);
+        assert!(past_instant > now_instant);
+        assert!(past_instant < Instant::now());
     }
 
     #[tokio::test]
