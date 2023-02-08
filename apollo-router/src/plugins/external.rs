@@ -225,6 +225,31 @@ struct SubgraphConf {
     url: bool,
 }
 
+
+/// The stages request/response configuration
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default)]
+struct Stages {
+    /// The router stage
+    router: Option<RouterStage>,
+    /// The subgraph stage
+    subgraph: Option<SubgraphStage>,
+}
+
+/// Configures the externalization plugin
+#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+struct Conf {
+    /// The url you'd like to offload processing to
+    url: String,
+    /// The timeout for external requests
+    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
+    #[schemars(with = "String", default)]
+    timeout: Option<Duration>,
+    /// The stages request/response configuration
+    #[serde(default)]
+    stages: Option<Stages>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
 struct RouterStage {
@@ -679,29 +704,7 @@ impl SubgraphStage {
     }
 }
 
-/// The stages request/response configuration
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default)]
-struct Stages {
-    /// The router stage
-    router: Option<RouterStage>,
-    /// The subgraph stage
-    subgraph: Option<SubgraphStage>,
-}
-
-/// Configures the externalization plugin
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct Conf {
-    /// The url you'd like to offload processing to
-    url: String,
-    /// The timeout for external requests
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "String", default)]
-    timeout: Option<Duration>,
-    /// The stages request/response configuration
-    #[serde(default)]
-    stages: Option<Stages>,
-}
+// -----------------------------------------------------------------------------------------------------
 
 /// Convert a HeaderMap into a HashMap
 fn externalize_header_map(
