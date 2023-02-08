@@ -1,4 +1,4 @@
-query SupergraphSdl($apiKey: String!, $graph_ref: String!, $ifAfterId: ID) {
+query SupergraphSdlQuery($apiKey: String!, $graph_ref: String!, $ifAfterId: ID) {
     routerConfig(ref: $graph_ref, apiKey: $apiKey, ifAfterId: $ifAfterId) {
         __typename
         ... on RouterConfigResult {
