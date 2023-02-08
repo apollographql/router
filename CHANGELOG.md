@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
-### Resolve incorrect nullification when using `@interfaceObject` with particular response objects
+### Resolve incorrect nullification when using `@interfaceObject` with particular response objects ([PR #2530](https://github.com/apollographql/router/pull/2530))
 
 > Note: This follows up on the v1.10.1 release which also attempted to fix this, but inadvertently excluded a required part of the fix due to an administrative oversight.
 
@@ -18,7 +18,7 @@ By [@pcmanus](https://github.com/pcmanus) in https://github.com/apollographql/ro
 
 ## 🛠 Maintenance
 
-### Refactor Uplink implementation ([Issue #2547](https://github.com/apollographql/router/issues/2547)
+### Refactor Uplink implementation ([Issue #2547](https://github.com/apollographql/router/issues/2547))
 
 The Apollo Uplink implementation within Apollo Router, which is used for fetching data _from_ Apollo GraphOS, has been decomposed into a reusable component so that it can be used more generically for fetching artifacts.  This generally improved code quality and resulted in several new tests being added.
 
