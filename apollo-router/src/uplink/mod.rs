@@ -13,7 +13,9 @@ use url::Url;
 //TODO Remove once everything is hooked up
 #[allow(dead_code)]
 pub(crate) mod entitlement;
-pub(crate) mod schema;
+#[allow(dead_code)]
+pub(crate) mod entitlement_stream;
+pub(crate) mod schema_stream;
 
 const GCP_URL: &str = "https://uplink.api.apollographql.com/graphql";
 const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
@@ -259,7 +261,7 @@ mod test {
     use wiremock::ResponseTemplate;
 
     use crate::uplink::entitlement::Entitlement;
-    use crate::uplink::entitlement::EntitlementRequest;
+    use crate::uplink::entitlement_stream::EntitlementRequest;
     use crate::uplink::stream_from_uplink;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
