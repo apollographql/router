@@ -1,10 +1,15 @@
 use std::time::Duration;
 
 use serde::Serialize;
+
 #[derive(Serialize, Debug)]
 pub(crate) struct DurationHistogram {
+    /// `Vec` indices represents a duration bucket.
+    /// `Vec` items are the sums of values in each bucket.
     pub(crate) buckets: Vec<u64>,
-    pub(crate) entries: u64,
+
+    /// The sum of values in all buckets
+    pub(crate) total: u64,
 }
 
 impl Default for DurationHistogram {
@@ -27,7 +32,7 @@ impl DurationHistogram {
     pub(crate) fn new(init_size: Option<usize>) -> Self {
         Self {
             buckets: vec![0; init_size.unwrap_or(DurationHistogram::DEFAULT_SIZE)],
-            entries: 0,
+            total: 0,
         }
     }
 
@@ -56,7 +61,7 @@ impl DurationHistogram {
         if bucket > DurationHistogram::MAXIMUM_SIZE {
             panic!("bucket is out of bounds of the bucket array");
         }
-        self.entries += value as u64;
+        self.total += value as u64;
         if bucket >= self.buckets.len() {
             self.buckets.resize(bucket + 1, 0);
         }

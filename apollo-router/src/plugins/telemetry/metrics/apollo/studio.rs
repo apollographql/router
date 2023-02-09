@@ -195,9 +195,9 @@ impl From<QueryLatencyStats>
 {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
-            request_count: stats.request_latencies.entries,
+            request_count: stats.request_latencies.total,
             latency_count: stats.request_latencies.buckets_to_i64(),
-            cache_hits: stats.cache_hits.entries,
+            cache_hits: stats.cache_hits.total,
             cache_latency_count: stats.cache_hits.buckets_to_i64(),
             persisted_query_hits: stats.persisted_query_hits,
             persisted_query_misses: stats.persisted_query_misses,
@@ -245,7 +245,7 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
         Self {
             return_type: stat.return_type,
             errors_count: stat.errors_count,
-            observed_execution_count: stat.latency.entries,
+            observed_execution_count: stat.latency.total,
             estimated_execution_count: stat.estimated_execution_count as u64,
             requests_with_errors_count: stat.requests_with_errors_count,
             latency_count: stat.latency.buckets_to_i64(),
