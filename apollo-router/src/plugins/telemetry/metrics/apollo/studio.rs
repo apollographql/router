@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::ops::Add;
 use std::ops::AddAssign;
 use std::time::Duration;
 
@@ -29,37 +28,12 @@ pub(crate) struct Stats {
     pub(crate) referenced_fields_by_type: HashMap<String, ReferencedFieldsForType>,
 }
 
-impl Add<SingleStats> for SingleStats {
-    type Output = Stats;
-
-    fn add(self, rhs: SingleStats) -> Self::Output {
-        Stats {
-            stats_with_context: self.stats_with_context + rhs.stats_with_context,
-            // No merging required here because references fields by type will always be the same for each stats report key.
-            referenced_fields_by_type: rhs.referenced_fields_by_type,
-        }
-    }
-}
-
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleContextualizedStats {
     pub(crate) context: StatsContext,
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
 }
-
-impl Add<SingleContextualizedStats> for SingleContextualizedStats {
-    type Output = ContextualizedStats;
-
-    fn add(self, stats: SingleContextualizedStats) -> Self::Output {
-        let mut res = ContextualizedStats::default();
-        res += self;
-        res += stats;
-
-        res
-    }
-}
-
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleQueryLatencyStats {
@@ -74,17 +48,6 @@ pub(crate) struct SingleQueryLatencyStats {
     pub(crate) registered_operation: bool,
     pub(crate) forbidden_operation: bool,
     pub(crate) without_field_instrumentation: bool,
-}
-
-impl Add<SingleQueryLatencyStats> for SingleQueryLatencyStats {
-    type Output = QueryLatencyStats;
-    fn add(self, stats: SingleQueryLatencyStats) -> Self::Output {
-        let mut res = QueryLatencyStats::default();
-        res += self;
-        res += stats;
-
-        res
-    }
 }
 
 #[derive(Default, Debug, Serialize)]
