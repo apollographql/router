@@ -797,14 +797,18 @@ mod tests {
 
         let mock_http_client = MockHttpClientService::new();
 
-        let mock_service = MockRouterService::new().boxed();
+        let mock_router_service = MockRouterService::new().boxed();
 
         let service = router_stage.as_service(
             mock_http_client,
-            mock_service,
+            mock_router_service,
             "http://test".to_string(),
             Arc::new("".to_string()),
         );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        dbg!(service.oneshot(request.try_into().unwrap()).await.unwrap());
     }
 
     #[test]
