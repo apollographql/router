@@ -68,7 +68,7 @@ pub(crate) struct SingleFieldStat {
     pub(crate) errors_count: u64,
     pub(crate) estimated_execution_count: f64,
     pub(crate) requests_with_errors_count: u64,
-    pub(crate) latency: DurationHistogram,
+    pub(crate) latency: DurationHistogram<f64>,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -161,7 +161,7 @@ pub(crate) struct FieldStat {
     errors_count: u64,
     estimated_execution_count: f64,
     requests_with_errors_count: u64,
-    latency: DurationHistogram,
+    latency: DurationHistogram<f64>,
 }
 
 impl AddAssign<SingleFieldStat> for FieldStat {
@@ -245,9 +245,11 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
         Self {
             return_type: stat.return_type,
             errors_count: stat.errors_count,
-            observed_execution_count: stat.latency.total,
-            estimated_execution_count: stat.estimated_execution_count as u64,
             requests_with_errors_count: stat.requests_with_errors_count,
+
+            // Round sampling-rate-compensated floating-point estimates to nearest integers:
+            estimated_execution_count: stat.estimated_execution_count as u64,
+            observed_execution_count: stat.latency.total as u64,
             latency_count: stat.latency.buckets_to_i64(),
         }
     }
@@ -383,7 +385,7 @@ mod test {
 
     fn field_stat(count: &mut Count) -> SingleFieldStat {
         let mut latency = DurationHistogram::default();
-        latency.increment_duration(Some(Duration::from_secs(1)), 1);
+        latency.increment_duration(Some(Duration::from_secs(1)), 1.0);
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
