@@ -66,8 +66,12 @@ pub(crate) struct SingleTypeStat {
 pub(crate) struct SingleFieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
-    pub(crate) estimated_execution_count: f64,
     pub(crate) requests_with_errors_count: u64,
+
+    // Floating-point estimates that compensate for the sampling rate,
+    // rounded to integers when converting to Protobuf after aggregating
+    // a number of requests.
+    pub(crate) estimated_execution_count: f64,
     pub(crate) latency: DurationHistogram<f64>,
 }
 
@@ -159,8 +163,12 @@ impl AddAssign<SingleTypeStat> for TypeStat {
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
-    estimated_execution_count: f64,
     requests_with_errors_count: u64,
+
+    // Floating-point estimates that compensate for the sampling rate,
+    // rounded to integers when converting to Protobuf after aggregating
+    // a number of requests.
+    estimated_execution_count: f64,
     latency: DurationHistogram<f64>,
 }
 

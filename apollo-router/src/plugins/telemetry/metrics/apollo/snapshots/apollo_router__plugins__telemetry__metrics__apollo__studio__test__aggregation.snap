@@ -652,8 +652,8 @@ expression: aggregated_metrics
                   "field1": {
                     "return_type": "String",
                     "errors_count": 16,
-                    "estimated_execution_count": 18.0,
                     "requests_with_errors_count": 20,
+                    "estimated_execution_count": 18.0,
                     "latency": {
                       "buckets": [
                         0.0,
@@ -809,8 +809,8 @@ expression: aggregated_metrics
                   "field2": {
                     "return_type": "String",
                     "errors_count": 22,
-                    "estimated_execution_count": 24.0,
                     "requests_with_errors_count": 26,
+                    "estimated_execution_count": 24.0,
                     "latency": {
                       "buckets": [
                         0.0,
@@ -970,8 +970,8 @@ expression: aggregated_metrics
                   "field1": {
                     "return_type": "String",
                     "errors_count": 28,
-                    "estimated_execution_count": 30.0,
                     "requests_with_errors_count": 32,
+                    "estimated_execution_count": 30.0,
                     "latency": {
                       "buckets": [
                         0.0,
@@ -1127,8 +1127,8 @@ expression: aggregated_metrics
                   "field2": {
                     "return_type": "String",
                     "errors_count": 34,
-                    "estimated_execution_count": 36.0,
                     "requests_with_errors_count": 38,
+                    "estimated_execution_count": 36.0,
                     "latency": {
                       "buckets": [
                         0.0,
