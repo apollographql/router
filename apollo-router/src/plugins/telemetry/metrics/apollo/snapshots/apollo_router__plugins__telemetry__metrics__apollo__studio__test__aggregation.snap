@@ -167,7 +167,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
-                "entries": 2
+                "total": 2
               },
               "persisted_query_hits": 2,
               "persisted_query_misses": 0,
@@ -320,7 +320,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
-                "entries": 2
+                "total": 2
               },
               "root_error_stats": {
                 "children": {
@@ -489,7 +489,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
-                "entries": 2
+                "total": 2
               },
               "private_cache_ttl_count": {
                 "buckets": [
@@ -640,7 +640,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
-                "entries": 2
+                "total": 2
               },
               "registered_operation_count": 2,
               "forbidden_operation_count": 2,
@@ -803,7 +803,7 @@ expression: aggregated_metrics
                         0,
                         2
                       ],
-                      "entries": 2
+                      "total": 2
                     }
                   },
                   "field2": {
@@ -960,7 +960,7 @@ expression: aggregated_metrics
                         0,
                         2
                       ],
-                      "entries": 2
+                      "total": 2
                     }
                   }
                 }
@@ -1121,7 +1121,7 @@ expression: aggregated_metrics
                         0,
                         2
                       ],
-                      "entries": 2
+                      "total": 2
                     }
                   },
                   "field2": {
@@ -1278,7 +1278,7 @@ expression: aggregated_metrics
                         0,
                         2
                       ],
-                      "entries": 2
+                      "total": 2
                     }
                   }
                 }
