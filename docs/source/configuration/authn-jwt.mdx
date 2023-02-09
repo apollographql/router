@@ -3,14 +3,18 @@ title: JWT Authentication in the Apollo Router
 sidebar_title: JWT Authentication
 ---
 
-> ⚠️ **This feature is currently experimental.** As long as this feature is experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
+> ⚠️ **This feature is currently experimental.** As long as it's experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
 >
 > To provide feedback or otherwise participate in this feature, join [this GitHub discussion](https://github.com/apollographql/router/discussions/2391).
 
-The Apollo Router provides experimental support for request authentication via [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**). To use this feature, you must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
+The Apollo Router provides experimental support for request authentication via [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**).
 
-- If you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), adding JWT authentication to your router is comparatively straightforward.
-- If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
+To use this feature:
+
+- You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
+- You must [connect your router to GraphOS](./overview/#environment-variables).
+
+If you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), adding JWT authentication to your router is comparatively straightforward. If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
 
 ## How it works
 
@@ -151,21 +155,44 @@ Because claims are added to the context, you can define custom logic for handlin
 
 ### Example: Forwarding claims to subgraphs
 
-Below is an example Rhai script that forwards a JWT's claims to individual subgraphs via an HTTP header. This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
+Below is an example Rhai script that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
+
+> [Learn more about creating Rhai scripts.](../customizations/rhai/)
 
 <ExpansionPanel title="Click to expand">
 
-TODO
+```rhai title="claims_forwarding.rhai"
+fn subgraph_service(service, subgraph) {
+  let f = |request| {
+    // Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
+    // value `apollo_authentication::JWT::claims`
+    let claims = request.context[APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims ==() {
+      throw #{
+        status: 401
+      };
+    }
+    // Add each claim key-value pair as a separate HTTP header
+    for key in claims.keys() {
+      request.subgraph.headers[key] = claims[key];
+    }
+  };
+
+  service.map_request(f);
+}
+```
 
 </ExpansionPanel>
 
 ### Example: Throwing errors for invalid claims
 
-Below is an example Rhai script that throws distinct errors for different invalid JWT claim details:
+Below is an example Rhai script that throws distinct errors for different invalid JWT claim details.
+
+> [Learn more about creating Rhai scripts.](../customizations/rhai/)
 
 <ExpansionPanel title="Click to expand">
 
-```rhai title="jwt_claims.rhai"
+```rhai title="claims_validation.rhai"
 fn process_request(request) {
     try {
         // Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
