@@ -241,7 +241,7 @@ fn supergraph_service(service) {
 
 fn subgraph_service(service, subgraph) {
     let store_cookies_from_subgraphs = |response| {
-      if response.headers["set-cookie"] != () {
+      if "set-cookie" in response.headers {
         if response.context["set_cookie_headers"] == () {
           response.context.set_cookie_headers = []
         }
