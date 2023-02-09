@@ -68,7 +68,7 @@ pub(crate) struct SingleFieldStat {
     pub(crate) errors_count: u64,
     pub(crate) estimated_execution_count: f64,
     pub(crate) requests_with_errors_count: u64,
-    pub(crate) latency: Duration,
+    pub(crate) latency: DurationHistogram,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -166,7 +166,7 @@ pub(crate) struct FieldStat {
 
 impl AddAssign<SingleFieldStat> for FieldStat {
     fn add_assign(&mut self, stat: SingleFieldStat) {
-        self.latency.increment_duration(Some(stat.latency), 1);
+        self.latency += stat.latency;
         self.requests_with_errors_count += stat.requests_with_errors_count;
         self.estimated_execution_count += stat.estimated_execution_count;
         self.errors_count += stat.errors_count;
@@ -382,12 +382,14 @@ mod test {
     }
 
     fn field_stat(count: &mut Count) -> SingleFieldStat {
+        let mut latency = DurationHistogram::default();
+        latency.increment_duration(Some(Duration::from_secs(1)), 1);
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
             estimated_execution_count: count.inc_f64(),
             requests_with_errors_count: count.inc_u64(),
-            latency: Duration::from_secs(1),
+            latency,
         }
     }
 

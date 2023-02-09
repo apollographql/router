@@ -1,3 +1,4 @@
+use std::ops::AddAssign;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -15,6 +16,19 @@ pub(crate) struct DurationHistogram {
 impl Default for DurationHistogram {
     fn default() -> Self {
         DurationHistogram::new(None)
+    }
+}
+
+impl AddAssign for DurationHistogram {
+    fn add_assign(&mut self, other: DurationHistogram) {
+        self.total += other.total;
+        if self.buckets.len() < other.buckets.len() {
+            self.buckets.resize(other.buckets.len(), 0)
+        }
+        self.buckets
+            .iter_mut()
+            .zip(other.buckets)
+            .for_each(|(slot, value)| *slot += value)
     }
 }
 
@@ -194,5 +208,25 @@ mod test {
             DurationHistogram::duration_to_bucket(Duration::from_nanos(1e64 as u64)),
             DurationHistogram::MAXIMUM_SIZE
         );
+    }
+
+    #[test]
+    fn add_assign() {
+        let mut h1 = DurationHistogram::new(Some(0));
+        h1.increment_duration(Some(Duration::from_nanos(2000)), 1);
+        h1.increment_duration(Some(Duration::from_nanos(2010)), 1);
+        h1.increment_duration(Some(Duration::from_nanos(4000)), 1);
+        assert_eq!(h1.buckets, [0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(h1.total, 3);
+
+        let mut h2 = DurationHistogram::new(Some(0));
+        h2.increment_duration(Some(Duration::from_nanos(1500)), 1);
+        h2.increment_duration(Some(Duration::from_nanos(2020)), 1);
+        assert_eq!(h2.buckets, [0, 0, 0, 0, 0, 1, 0, 0, 1]);
+        assert_eq!(h2.total, 2);
+
+        h1 += h2;
+        assert_eq!(h1.buckets, [0, 0, 0, 0, 0, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(h1.total, 5);
     }
 }
