@@ -195,16 +195,16 @@ impl From<QueryLatencyStats>
 {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
-            latency_count: stats.request_latencies.buckets,
             request_count: stats.request_latencies.entries,
+            latency_count: stats.request_latencies.buckets_to_i64(),
             cache_hits: stats.cache_hits.entries,
-            cache_latency_count: stats.cache_hits.buckets,
+            cache_latency_count: stats.cache_hits.buckets_to_i64(),
             persisted_query_hits: stats.persisted_query_hits,
             persisted_query_misses: stats.persisted_query_misses,
             root_error_stats: Some(stats.root_error_stats.into()),
             requests_with_errors_count: stats.requests_with_errors_count,
-            public_cache_ttl_count: stats.public_cache_ttl_count.buckets,
-            private_cache_ttl_count: stats.private_cache_ttl_count.buckets,
+            public_cache_ttl_count: stats.public_cache_ttl_count.buckets_to_i64(),
+            private_cache_ttl_count: stats.private_cache_ttl_count.buckets_to_i64(),
             registered_operation_count: stats.registered_operation_count,
             forbidden_operation_count: stats.forbidden_operation_count,
             requests_without_field_instrumentation: stats.requests_without_field_instrumentation,
@@ -248,7 +248,7 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
             observed_execution_count: stat.latency.entries,
             estimated_execution_count: stat.estimated_execution_count as u64,
             requests_with_errors_count: stat.requests_with_errors_count,
-            latency_count: stat.latency.buckets,
+            latency_count: stat.latency.buckets_to_i64(),
         }
     }
 }

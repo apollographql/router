@@ -3,7 +3,7 @@ use std::time::Duration;
 use serde::Serialize;
 #[derive(Serialize, Debug)]
 pub(crate) struct DurationHistogram {
-    pub(crate) buckets: Vec<i64>,
+    pub(crate) buckets: Vec<u64>,
     pub(crate) entries: u64,
 }
 
@@ -46,13 +46,13 @@ impl DurationHistogram {
         unbounded_bucket as usize
     }
 
-    pub(crate) fn increment_duration(&mut self, duration: Option<Duration>, value: i64) {
+    pub(crate) fn increment_duration(&mut self, duration: Option<Duration>, value: u64) {
         if let Some(duration) = duration {
             self.increment_bucket(DurationHistogram::duration_to_bucket(duration), value)
         }
     }
 
-    fn increment_bucket(&mut self, bucket: usize, value: i64) {
+    fn increment_bucket(&mut self, bucket: usize, value: u64) {
         if bucket > DurationHistogram::MAXIMUM_SIZE {
             panic!("bucket is out of bounds of the bucket array");
         }
@@ -61,6 +61,12 @@ impl DurationHistogram {
             self.buckets.resize(bucket + 1, 0);
         }
         self.buckets[bucket] += value;
+    }
+
+    /// Convert to the type expected by the Protobuf-generated struct for `repeated sint64`.
+    pub(crate) fn buckets_to_i64(self) -> Vec<i64> {
+        // This optimizes to nothing: https://rust.godbolt.org/z/YMh8e55de
+        self.buckets.into_iter().map(|x| x as i64).collect()
     }
 }
 
@@ -83,7 +89,7 @@ mod test {
                     } else if buffered_zeroes != 0 {
                         result.push(0 - buffered_zeroes);
                     }
-                    result.push(*value);
+                    result.push(*value as i64);
                     buffered_zeroes = 0;
                 }
             }
