@@ -273,7 +273,7 @@ impl RouterStage {
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
     {
         let request_layer = self.request.clone().map(|request_config| {
             let coprocessor_url = coprocessor_url.clone();
@@ -735,6 +735,7 @@ fn internalize_header_map(
 
 #[cfg(test)]
 mod tests {
+    use crate::plugin::test::{MockHttpClientService, MockRouterService};
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
@@ -785,6 +786,25 @@ mod tests {
             .build_router()
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request() {
+        let router_stage = RouterStage {
+            request: None,
+            response: None,
+        };
+
+        let mock_http_client = MockHttpClientService::new();
+
+        let mock_service = MockRouterService::new().boxed();
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_service,
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
     }
 
     #[test]
