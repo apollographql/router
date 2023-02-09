@@ -23,19 +23,30 @@
 mod matching_pull_request;
 mod scalars;
 
+use std::fmt;
+use std::fs;
+use std::path::PathBuf;
+use std::str::FromStr;
+
 use ::reqwest::Client;
 use anyhow::Result;
 use console::style;
-use dialoguer::{console::Term, theme::ColorfulTheme, Confirm, Editor, Input, Select};
+use dialoguer::console::Term;
+use dialoguer::theme::ColorfulTheme;
+use dialoguer::Confirm;
+use dialoguer::Editor;
+use dialoguer::Input;
+use dialoguer::Select;
 use git2;
 use itertools::Itertools;
-use matching_pull_request::matching_pull_request::{ResponseData,Variables};
+use matching_pull_request::matching_pull_request::ResponseData;
+use matching_pull_request::matching_pull_request::Variables;
 use matching_pull_request::MatchingPullRequest;
 use memorable_wordlist;
 use serde::Serialize;
-use std::{fmt, fs, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
-use tinytemplate::{format_unescaped, TinyTemplate};
+use tinytemplate::format_unescaped;
+use tinytemplate::TinyTemplate;
 use xtask::PKG_PROJECT_ROOT;
 
 #[derive(Serialize)]
@@ -109,13 +120,13 @@ impl Classification {
     /// Defines the ordering that eventually appears in the emitted CHANGELOG
     /// and the order options appear in the TUI.
     const ORDERED_ALL: &'static [Self] = &[
-            Classification::Breaking,
-            Classification::Feature,
-            Classification::Fix,
-            Classification::Configuration,
-            Classification::Maintenance,
-            Classification::Documentation,
-            Classification::Experimental,
+        Classification::Breaking,
+        Classification::Feature,
+        Classification::Fix,
+        Classification::Configuration,
+        Classification::Maintenance,
+        Classification::Documentation,
+        Classification::Experimental,
     ];
 }
 
