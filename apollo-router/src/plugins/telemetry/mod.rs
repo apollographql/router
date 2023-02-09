@@ -60,16 +60,20 @@ use tracing_subscriber::Registry;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
+use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
+use self::tracing::apollo_telemetry::decode_ftv1_trace;
 #[cfg(not(feature = "console"))]
 use crate::executable::GLOBAL_ENV_FILTER;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 #[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::config::default_display_filename;
@@ -84,6 +88,7 @@ use crate::plugins::telemetry::formatters::text::TextFormatter;
 #[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
@@ -127,6 +132,7 @@ const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
+const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -304,6 +310,7 @@ impl Plugin for Telemetry {
         let config = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
@@ -369,7 +376,7 @@ impl Plugin for Telemetry {
                         )
                         .await;
                         Self::update_metrics_on_last_response(
-                            &ctx, config, metrics, sender, start, result,
+                            &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
                         )
                     }
                 },
@@ -1105,6 +1112,7 @@ impl Telemetry {
     fn update_metrics_on_last_response(
         ctx: &Context,
         config: Arc<Conf>,
+        field_level_instrumentation_ratio: f64,
         metrics: BasicMetrics,
         sender: Sender,
         start: Instant,
@@ -1113,7 +1121,13 @@ impl Telemetry {
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
-                    Self::update_apollo_metrics(ctx, sender, true, start.elapsed());
+                    Self::update_apollo_metrics(
+                        ctx,
+                        field_level_instrumentation_ratio,
+                        sender,
+                        true,
+                        start.elapsed(),
+                    );
                 }
                 let mut metric_attrs = Vec::new();
                 // Fill attributes from error
@@ -1157,6 +1171,7 @@ impl Telemetry {
                             {
                                 Self::update_apollo_metrics(
                                     &ctx,
+                                    field_level_instrumentation_ratio,
                                     sender.clone(),
                                     has_errors,
                                     start.elapsed(),
@@ -1172,6 +1187,7 @@ impl Telemetry {
 
     fn update_apollo_metrics(
         context: &Context,
+        field_level_instrumentation_ratio: f64,
         sender: Sender,
         has_errors: bool,
         duration: Duration,
@@ -1195,6 +1211,9 @@ impl Telemetry {
                     ..Default::default()
                 }
             } else {
+                let traces = Self::subgraph_ftv1_traces(context);
+                let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
+                let root_error_stats = Self::per_path_error_stats(&traces);
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1223,9 +1242,10 @@ impl Telemetry {
                                     latency: duration,
                                     has_errors,
                                     persisted_query_hit,
+                                    root_error_stats,
                                     ..Default::default()
                                 },
-                                ..Default::default()
+                                per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
@@ -1244,6 +1264,120 @@ impl Telemetry {
             }
         };
         sender.send(SingleReport::Stats(metrics));
+    }
+
+    fn subgraph_ftv1_traces(context: &Context) -> Vec<proto::reports::Trace> {
+        if let Some(Value::Array(array)) = context.get_json_value(SUBGRAPH_FTV1) {
+            array
+                .iter()
+                .filter_map(|value| decode_ftv1_trace(value.as_str()?))
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    // https://github.com/apollographql/apollo-server/blob/6ff88e87c52/packages/server/src/plugin/usageReporting/stats.ts#L283
+    fn per_type_stat(
+        traces: &[proto::reports::Trace],
+        field_level_instrumentation_ratio: f64,
+    ) -> HashMap<String, SingleTypeStat> {
+        fn recur(
+            per_type: &mut HashMap<String, SingleTypeStat>,
+            field_execution_weight: f64,
+            node: &proto::reports::trace::Node,
+        ) {
+            for child in &node.child {
+                recur(per_type, field_execution_weight, child)
+            }
+            let response_name = if let Some(ResponseName(response_name)) = &node.id {
+                response_name
+            } else {
+                return;
+            };
+            let field_name = if node.original_field_name.is_empty() {
+                response_name
+            } else {
+                &node.original_field_name
+            };
+            if field_name.is_empty()
+                || node.parent_type.is_empty()
+                || node.r#type.is_empty()
+                || node.start_time == 0
+                || node.end_time == 0
+            {
+                return;
+            }
+            let field_stat = per_type
+                .entry(node.parent_type.clone())
+                .or_default()
+                .per_field_stat
+                .entry(field_name.clone())
+                .or_insert_with(|| metrics::apollo::studio::SingleFieldStat {
+                    return_type: node.r#type.clone(), // not `Default::default()`’s empty string
+                    errors_count: 0,
+                    latency: Default::default(),
+                    estimated_execution_count: 0.0,
+                    requests_with_errors_count: 0,
+                });
+            let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
+            field_stat
+                .latency
+                .increment_duration(Some(latency), field_execution_weight);
+            field_stat.estimated_execution_count += field_execution_weight;
+            field_stat.errors_count += node.error.len() as u64;
+            if !node.error.is_empty() {
+                field_stat.requests_with_errors_count += 1;
+            }
+        }
+
+        // For example, `field_level_instrumentation_ratio == 0.03` means we send a
+        // `apollo-federation-include-trace: ftv1` header with 3% of subgraph requests.
+        // To compensate, assume that each trace we recieve is representative of 33.3… requests.
+        // Metrics that recieve this treatment are kept as floating point values in memory,
+        // and converted to integers after aggregating values for a number of requests.
+        let field_execution_weight = 1.0 / field_level_instrumentation_ratio;
+
+        let mut per_type = HashMap::new();
+        for trace in traces {
+            if let Some(node) = &trace.root {
+                recur(&mut per_type, field_execution_weight, node)
+            }
+        }
+        per_type
+    }
+
+    fn per_path_error_stats(traces: &[proto::reports::Trace]) -> SinglePathErrorStats {
+        fn recur<'node>(
+            stats_root: &mut SinglePathErrorStats,
+            path: &mut Vec<&'node String>,
+            node: &'node proto::reports::trace::Node,
+        ) {
+            if let Some(ResponseName(name)) = &node.id {
+                path.push(name)
+            }
+            if !node.error.is_empty() {
+                let mut stats = &mut *stats_root;
+                for &name in &*path {
+                    stats = stats.children.entry(name.clone()).or_default();
+                }
+                stats.errors_count += node.error.len() as u64;
+                stats.requests_with_errors_count += 1;
+            }
+            for child in &node.child {
+                recur(stats_root, path, child)
+            }
+            if let Some(ResponseName(_)) = &node.id {
+                path.pop();
+            }
+        }
+        let mut root = Default::default();
+        for trace in traces {
+            if let Some(node) = &trace.root {
+                recur(&mut root, &mut Vec::new(), node)
+            }
+        }
+        root
     }
 }
 
@@ -1349,6 +1483,16 @@ impl ApolloFtv1Handler {
             {
                 // Record the ftv1 trace for processing later
                 Span::current().record("apollo_private.ftv1", ftv1.as_str());
+                resp.context
+                    .upsert_json_value(SUBGRAPH_FTV1, |value: Value| {
+                        let mut vec = match value {
+                            Value::Array(array) => array,
+                            Value::Null => Vec::new(),
+                            _ => panic!("unexpected JSON value kind"),
+                        };
+                        vec.push(Value::String(ftv1.clone()));
+                        Value::Array(vec)
+                    })
             }
         }
         resp
