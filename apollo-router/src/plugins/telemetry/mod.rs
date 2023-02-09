@@ -927,7 +927,7 @@ impl Telemetry {
     fn apollo_handler(&self) -> ApolloFtv1Handler {
         let mut rng = rand::thread_rng();
 
-        if rng.gen_ratio((self.field_level_instrumentation_ratio * 100.0) as u32, 100) {
+        if rng.gen_bool(self.field_level_instrumentation_ratio) {
             ApolloFtv1Handler::Enabled
         } else {
             ApolloFtv1Handler::Disabled
