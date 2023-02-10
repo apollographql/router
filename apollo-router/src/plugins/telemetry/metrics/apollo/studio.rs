@@ -71,7 +71,7 @@ pub(crate) struct SingleFieldStat {
     // Floating-point estimates that compensate for the sampling rate,
     // rounded to integers when converting to Protobuf after aggregating
     // a number of requests.
-    pub(crate) estimated_execution_count: f64,
+    pub(crate) observed_execution_count: u64,
     pub(crate) latency: DurationHistogram<f64>,
 }
 
@@ -164,11 +164,10 @@ pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
     requests_with_errors_count: u64,
-
+    observed_execution_count: u64,
     // Floating-point estimates that compensate for the sampling rate,
     // rounded to integers when converting to Protobuf after aggregating
     // a number of requests.
-    estimated_execution_count: f64,
     latency: DurationHistogram<f64>,
 }
 
@@ -176,7 +175,7 @@ impl AddAssign<SingleFieldStat> for FieldStat {
     fn add_assign(&mut self, stat: SingleFieldStat) {
         self.latency += stat.latency;
         self.requests_with_errors_count += stat.requests_with_errors_count;
-        self.estimated_execution_count += stat.estimated_execution_count;
+        self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
     }
@@ -255,9 +254,9 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
             errors_count: stat.errors_count,
             requests_with_errors_count: stat.requests_with_errors_count,
 
+            observed_execution_count: stat.observed_execution_count,
             // Round sampling-rate-compensated floating-point estimates to nearest integers:
-            estimated_execution_count: stat.estimated_execution_count as u64,
-            observed_execution_count: stat.latency.total as u64,
+            estimated_execution_count: stat.latency.total as u64,
             latency_count: stat.latency.buckets_to_i64(),
         }
     }
@@ -397,7 +396,7 @@ mod test {
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
-            estimated_execution_count: count.inc_f64(),
+            observed_execution_count: count.inc_u64(),
             requests_with_errors_count: count.inc_u64(),
             latency,
         }
@@ -411,10 +410,6 @@ mod test {
         fn inc_u64(&mut self) -> u64 {
             self.count += 1;
             self.count
-        }
-        fn inc_f64(&mut self) -> f64 {
-            self.count += 1;
-            self.count as f64
         }
     }
 }

@@ -653,7 +653,7 @@ expression: aggregated_metrics
                     "return_type": "String",
                     "errors_count": 16,
                     "requests_with_errors_count": 20,
-                    "estimated_execution_count": 18.0,
+                    "observed_execution_count": 18,
                     "latency": {
                       "buckets": [
                         0.0,
@@ -810,7 +810,7 @@ expression: aggregated_metrics
                     "return_type": "String",
                     "errors_count": 22,
                     "requests_with_errors_count": 26,
-                    "estimated_execution_count": 24.0,
+                    "observed_execution_count": 24,
                     "latency": {
                       "buckets": [
                         0.0,
@@ -971,7 +971,7 @@ expression: aggregated_metrics
                     "return_type": "String",
                     "errors_count": 28,
                     "requests_with_errors_count": 32,
-                    "estimated_execution_count": 30.0,
+                    "observed_execution_count": 30,
                     "latency": {
                       "buckets": [
                         0.0,
@@ -1128,7 +1128,7 @@ expression: aggregated_metrics
                     "return_type": "String",
                     "errors_count": 34,
                     "requests_with_errors_count": 38,
-                    "estimated_execution_count": 36.0,
+                    "observed_execution_count": 36,
                     "latency": {
                       "buckets": [
                         0.0,
