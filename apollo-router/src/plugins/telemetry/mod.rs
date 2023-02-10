@@ -46,6 +46,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
@@ -102,7 +103,6 @@ use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
-use tracing_subscriber::fmt::format::JsonFields;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
