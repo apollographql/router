@@ -4,6 +4,45 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.10.3] - 2023-02-10
+
+## 🐛 Fixes
+
+### Per-type metrics based on FTV1 from subgraphs ([Issue #2551](https://github.com/apollographql/router/issues/2551))
+
+[Since version 1.7.0](https://github.com/apollographql/router/blob/dev/CHANGELOG.md#traces-wont-cause-missing-field-stats-issue-2267), Apollo Router generates metrics directly instead of deriving them from traces being sent to Apollo Studio. However, these metrics were incomplete. This adds, based on data reported by subgraphs, the following:
+
+- Statistics about each field of each type of the GraphQL type system
+- Statistics about errors at each path location of GraphQL responses
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2541
+
+## 🛠 Maintenance
+
+### Run `rustfmt` on `xtask/`, too ([Issue #2557](https://github.com/apollographql/router/issues/2557))
+
+Our `xtask` runs `cargo fmt --all` which reformats of Rust code in all crates of the workspace. However, the code of xtask itself is a separate workspace. In order for it to be formatted with the same configuration, running a second `cargo` command is required. This adds that second command, and applies the corresponding formatting.
+
+Fixes https://github.com/apollographql/router/issues/2557
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2561
+
+## 🧪 Experimental
+
+### Add support to JWT Authentication for JWK without specified `alg`
+
+Prior to this change, the router would only make use of a JWK for JWT verification if the key had an `alg` property.
+
+Now, the router searches through the set of configured JWKS (JSON Web Key Sets) to find the best matching JWK according to the following criteria:
+
+ - a matching `kid` and `alg`; or
+ - a matching `kid` and _algorithm family_ (`kty`, per the [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517); or
+ - a matching _algorithm family_ (`kty`)
+
+The algorithm family is used when the JWKS contain a JWK for which no `alg` is specified.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2540
+
 # [1.10.2] - 2023-02-08
 
 ## 🐛 Fixes

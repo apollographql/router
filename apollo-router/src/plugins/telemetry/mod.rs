@@ -1235,14 +1235,14 @@ impl Telemetry {
                     return_type: node.r#type.clone(), // not `Default::default()`’s empty string
                     errors_count: 0,
                     latency: Default::default(),
-                    estimated_execution_count: 0.0,
+                    observed_execution_count: 0,
                     requests_with_errors_count: 0,
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
                 .latency
                 .increment_duration(Some(latency), field_execution_weight);
-            field_stat.estimated_execution_count += field_execution_weight;
+            field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
             if !node.error.is_empty() {
                 field_stat.requests_with_errors_count += 1;
