@@ -531,18 +531,16 @@ The value of the shared symmetric key, as the base64-encoded value of the key's 
 </tbody>
 </table>
 
-### JWK Key Matching
+### JWK matching
 
-Some Identity Providers (IdPs) don't specify an `alg` or a `kid` for their keys. They will specify a `kty`, since that is mandatory in the JWKS specification..
+To match an incoming JWT with its corresponding JWK, the router proceeds through descending "specificity levels" of match criteria until it identifies the first compatible JWK from its JWK Sets:
 
-The router searches through the set of configured JWKSets to find the best matching JWK according to the following criteria:
+1. The JWT and JWK match both `kid` and `alg` exactly.
+2. The JWT and JWK match `kid`, and the JWT's `alg` is compatible with the JWK's `kty`.
+3. The JWT and JWK match `alg` exactly.
+4. The JWT's `alg` is compatible with the JWK's `kty`.
 
- 1. a matching `kid` and `alg`
- 1. a matching `kid` and algorithm `kty`
- 1. a matching `alg`
- 1. a matching `kty`
-
-The router will thus attempt to verify with the most specific matching key.
+This matching strategy is necessary because some identity providers (IdPs) don't specify [`alg` or `kid`](#universal-properties) values in their JWKS. However, they _always_ specify a `kty`, because that value is required by the JWK specification.
 
 ## Forwarding JWTs to subgraphs (uncommon)
 
