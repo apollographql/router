@@ -158,7 +158,7 @@ reqwest = { version = "0.11.14", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.15"
+router-bridge = "0.1.16+v2.3.2"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
@@ -177,7 +177,7 @@ sys-info = "0.9.1"
 thiserror = "1.0.38"
 tokio = { version = "1.25.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
-tokio-util = { version = "0.7.4", features = ["net", "codec", "time"] }
+tokio-util = { version = "0.7.6", features = ["net", "codec", "time"] }
 tonic = { version = "0.8.3", features = ["transport", "tls", "tls-roots", "gzip"] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.3.5", features = [
@@ -241,7 +241,7 @@ walkdir = "2.3.2"
 wiremock = "0.5.17"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
-rstack = { version = "0.3.2", features = ["dw"], default-features = false }
+rstack = { version = "0.3.3", features = ["dw"], default-features = false }
 
 
 [build-dependencies]

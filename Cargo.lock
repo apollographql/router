@@ -4524,9 +4524,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.1.15+v2.3.1"
+version = "0.1.16+v2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bef8642e2b90e72eb436513531b7cd27a5b3146462ca23bd6f63c8e5c29594e4"
+checksum = "cf6e25c7ac63021c0b77824dc6137e22600c5b59046b1be31f92c9fba8ac3b13"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5699,9 +5699,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.4"
+version = "0.7.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bb2e075f03b3d66d8d8785356224ba688d2906a371015e225beeb65ca92c740"
+checksum = "bc6a3b08b64e6dfad376fa2432c7b1f01522e37a623c3050bc95db2d3ff21583"
 dependencies = [
  "bytes",
  "futures-core",
