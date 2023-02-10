@@ -20,7 +20,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -175,7 +174,6 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "apollo-compiler",
- "apollo-encoder 0.4.0",
  "apollo-parser 0.4.1",
  "arc-swap",
  "askama",
@@ -304,16 +302,12 @@ dependencies = [
  "apollo-router",
  "apollo-smith",
  "arbitrary",
- "async-trait",
  "criterion",
- "futures",
  "memory-stats",
  "once_cell",
  "serde_json",
- "serde_json_bytes",
  "tokio",
  "tower",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -429,7 +423,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "http",
  "schemars",
  "serde",
@@ -940,10 +933,7 @@ dependencies = [
 name = "compose-your-graphql-router"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "apollo-router",
- "futures",
- "serde_json",
  "tokio",
  "tower",
 ]
@@ -1081,7 +1071,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "http",
  "tower",
  "tracing",
@@ -1099,7 +1088,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -1761,7 +1749,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -1775,7 +1762,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -2217,7 +2203,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "schemars",
  "serde",
  "serde_json",
@@ -2697,7 +2682,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "hex",
  "http",
  "jwt-simple",
@@ -2716,7 +2700,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -3343,7 +3326,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -4006,7 +3988,6 @@ dependencies = [
  "anyhow",
  "apollo-router",
  "async-trait",
- "futures",
  "http",
  "schemars",
  "serde",
@@ -4368,7 +4349,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -4381,7 +4361,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -4394,7 +4373,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -4407,7 +4385,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -4420,7 +4397,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-router",
- "futures",
  "http",
  "serde_json",
  "tokio",
@@ -5221,12 +5197,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.4.1",
  "apollo-router",
  "async-trait",
- "futures",
- "http",
- "once_cell",
  "tower",
  "tracing",
 ]
