@@ -1,4 +1,7 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
 //! Utilities used for [`super::AxumHttpServerFactory`]
+
+use std::sync::Arc;
 
 use async_compression::tokio::write::BrotliDecoder;
 use async_compression::tokio::write::GzipDecoder;
@@ -14,8 +17,9 @@ use opentelemetry::global;
 use opentelemetry::trace::TraceContextExt;
 use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
-use tracing::Level;
 use tracing::Span;
+
+use crate::uplink::entitlement::Entitlement;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
@@ -93,7 +97,9 @@ pub(super) async fn decompress_request_body(
 }
 
 #[derive(Clone, Default)]
-pub(crate) struct PropagatingMakeSpan;
+pub(crate) struct PropagatingMakeSpan {
+    pub(crate) entitlement: Arc<Entitlement>,
+}
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
     fn make_span(&mut self, request: &http::Request<B>) -> Span {
@@ -111,24 +117,34 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
         {
             // We have a valid remote span, attach it to the current thread before creating the root span.
             let _context_guard = context.attach();
-            tracing::span!(
-                Level::INFO,
+            self.create_span(request)
+        } else {
+            // No remote span, we can go ahead and create the span without context.
+            self.create_span(request)
+        }
+    }
+}
+
+impl PropagatingMakeSpan {
+    fn create_span<B>(&mut self, request: &Request<B>) -> Span {
+        if self.entitlement.warn || self.entitlement.halt {
+            tracing::error_span!(
+                REQUEST_SPAN_NAME,
+                "http.method" = %request.method(),
+                "http.route" = %request.uri(),
+                "http.flavor" = ?request.version(),
+                "http.status" = 500, // This prevents setting later
+                "otel.kind" = "SERVER",
+                "apollo_router.entitlement" = "Expired: http://todo.router.apollographql.com"
+            )
+        } else {
+            tracing::info_span!(
                 REQUEST_SPAN_NAME,
                 "http.method" = %request.method(),
                 "http.route" = %request.uri(),
                 "http.flavor" = ?request.version(),
                 "otel.kind" = "SERVER",
 
-            )
-        } else {
-            // No remote span, we can go ahead and create the span without context.
-            tracing::span!(
-                Level::INFO,
-                REQUEST_SPAN_NAME,
-                "http.method" = %request.method(),
-                "http.route" = %request.uri(),
-                "http.flavor" = ?request.version(),
-                "otel.kind" = "SERVER",
             )
         }
     }

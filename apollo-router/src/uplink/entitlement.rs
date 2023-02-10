@@ -8,7 +8,9 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
+use std::time::Duration;
 use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use buildstructor::Builder;
 use displaydoc::Display;
@@ -20,6 +22,7 @@ use jsonwebtoken::Validation;
 use once_cell::sync::OnceCell;
 use regex::Regex;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
@@ -33,31 +36,6 @@ static JWKS: OnceCell<JwkSet> = OnceCell::new();
 pub enum Error {
     /// invalid entitlement: {0}
     InvalidEntitlement(jsonwebtoken::errors::Error),
-
-    /// entitlement violations: {0}
-    EntitlementViolations(EntitlementReport),
-}
-
-#[derive(Eq, PartialEq)]
-pub(crate) enum RouterState {
-    Startup,
-    Running,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum EntitlementState {
-    Oss,
-    Entitled,
-    Warning,
-    Halt,
-}
-
-#[derive(Eq, PartialEq)]
-pub(crate) enum Action {
-    PreventStartup,
-    PreventReload,
-    Warn,
-    Halt,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
@@ -79,67 +57,62 @@ pub(crate) struct Claims {
     pub(crate) iss: String,
     pub(crate) sub: String,
     pub(crate) aud: OneOrMany<Audience>,
-    #[serde(with = "serde_millis", rename = "warnAt")]
+    #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "warnAt")]
     pub(crate) warn_at: SystemTime,
-    #[serde(with = "serde_millis", rename = "haltAt")]
+    #[serde(deserialize_with = "deserialize_epoch_seconds", rename = "haltAt")]
     pub(crate) halt_at: SystemTime,
 }
 
-impl Claims {
-    fn entitlement_state(&self) -> EntitlementState {
-        let now = SystemTime::now();
-        if self.halt_at < now {
-            EntitlementState::Halt
-        } else if self.warn_at < now {
-            EntitlementState::Warning
-        } else {
-            EntitlementState::Entitled
-        }
-    }
+fn deserialize_epoch_seconds<'de, D>(deserializer: D) -> Result<SystemTime, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let seconds = i32::deserialize(deserializer)?;
+    Ok(UNIX_EPOCH + Duration::from_secs(seconds as u64))
 }
 
 #[derive(Debug)]
-pub struct EntitlementReport {
-    entitlement_state: EntitlementState,
-    configuration_violations: Vec<ConfigurationRestriction>,
+pub(crate) struct EntitlementReport {
+    restricted_config_in_use: Vec<ConfigurationRestriction>,
+}
+
+impl EntitlementReport {
+    pub(crate) fn uses_restricted_features(&self) -> bool {
+        !self.restricted_config_in_use.is_empty()
+    }
 }
 
 impl Display for EntitlementReport {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let formatted_violations = self
-            .configuration_violations
+        let restricted_config = self
+            .restricted_config_in_use
             .iter()
-            .map(|v| format!("* {} at {}", v.name, v.path))
-            .join("\n");
+            .map(|v| format!("* {}\n  {}", v.name, v.path.replace("$.", ".")))
+            .join("\n\n");
 
-        write!(
-            f,
-            "TODO PREAMBLE\n\nViolations:\n{formatted_violations}\n\nTODO POSTAMBLE"
-        )
-    }
-}
-
-impl EntitlementReport {
-    fn action(&self, state: RouterState) -> Action {
-        match (state, &self.entitlement_state) {
-            (RouterState::Startup, EntitlementState::Oss) => Action::PreventStartup,
-            (RouterState::Running, EntitlementState::Oss) => Action::PreventReload,
-            (_, EntitlementState::Warning) => Action::Warn,
-            (_, EntitlementState::Halt) => Action::Halt,
-            (_, EntitlementState::Entitled) => {
-                // This can never happen as Entitlement::check does not create a report for entitled users.
-                panic!("entitlement report should not have been created")
-            }
-        }
+        write!(f, "Configuration yaml:\n{restricted_config}")
     }
 }
 
 /// Entitlement controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 pub struct Entitlement {
     pub(crate) claims: Option<Claims>,
     pub(crate) configuration_restrictions: Vec<ConfigurationRestriction>,
+    pub(crate) warn: bool,
+    pub(crate) halt: bool,
+}
+
+impl Default for Entitlement {
+    fn default() -> Self {
+        Self {
+            claims: None,
+            configuration_restrictions: Self::configuration_restrictions(),
+            warn: false,
+            halt: false,
+        }
+    }
 }
 
 impl Display for Entitlement {
@@ -186,6 +159,8 @@ impl FromStr for Entitlement {
                 .map(|r| Entitlement {
                     claims: Some(r.claims),
                     configuration_restrictions: Self::configuration_restrictions(),
+                    warn: false,
+                    halt: false,
                 })
             })
             .find_or_last(|r| r.is_ok())
@@ -212,26 +187,20 @@ impl Entitlement {
         })
     }
 
+    pub(crate) fn halted(&self) -> Self {
+        let mut clone = self.clone();
+        clone.warn = true;
+        clone.halt = true;
+        clone
+    }
+
     pub(crate) fn check(
         &self,
         configuration: &Configuration,
         _schema: &Schema,
-    ) -> Result<(), EntitlementReport> {
-        let configuration_violations = self.validate_configuration(configuration);
-        let entitlement_state = self
-            .claims
-            .as_ref()
-            .map(|claims| claims.entitlement_state())
-            .unwrap_or(EntitlementState::Oss);
-        if configuration_violations.is_empty()
-            || matches!(entitlement_state, EntitlementState::Entitled)
-        {
-            Ok(())
-        } else {
-            Err(EntitlementReport {
-                entitlement_state,
-                configuration_violations,
-            })
+    ) -> EntitlementReport {
+        EntitlementReport {
+            restricted_config_in_use: self.validate_configuration(configuration),
         }
     }
 
@@ -275,14 +244,12 @@ mod test {
     use serde_json::json;
 
     use crate::spec::Schema;
-    use crate::uplink::entitlement::Action;
     use crate::uplink::entitlement::Audience;
     use crate::uplink::entitlement::Claims;
     use crate::uplink::entitlement::ConfigurationRestriction;
     use crate::uplink::entitlement::Entitlement;
     use crate::uplink::entitlement::EntitlementReport;
     use crate::uplink::entitlement::OneOrMany;
-    use crate::uplink::entitlement::RouterState;
     use crate::Configuration;
 
     // For testing we restrict healthcheck
@@ -301,44 +268,22 @@ mod test {
         ]
     }
 
-    fn test_claim(warn_delta: i32, halt_delta: i32) -> Claims {
+    fn test_claims() -> Claims {
         let now = SystemTime::now();
         Claims {
             iss: "".to_string(),
             sub: "".to_string(),
             aud: OneOrMany::One(Audience::Cloud),
-            warn_at: if warn_delta < 0 {
-                now - Duration::from_secs(warn_delta.unsigned_abs() as u64)
-            } else {
-                now + Duration::from_secs(warn_delta as u64)
-            },
-            halt_at: if halt_delta < 0 {
-                now - Duration::from_secs(halt_delta.unsigned_abs() as u64)
-            } else {
-                now + Duration::from_secs(halt_delta as u64)
-            },
+            warn_at: now,
+            halt_at: now,
         }
-    }
-
-    #[test]
-    fn test_oss() {
-        let report = check(
-            Entitlement {
-                claims: None,
-                configuration_restrictions: configuration_restrictions(),
-            },
-            include_str!("testdata/oss.router.yaml"),
-            include_str!("testdata/oss.graphql"),
-        );
-
-        report.expect("should have been entitled");
     }
 
     fn check(
         entitlement: Entitlement,
         router_yaml: &str,
         supergraph_schema: &str,
-    ) -> Result<(), EntitlementReport> {
+    ) -> EntitlementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
@@ -347,68 +292,42 @@ mod test {
     }
 
     #[test]
-    fn test_oss_restricted_features_via_config() {
+    fn test_oss() {
         let report = check(
             Entitlement {
                 claims: None,
                 configuration_restrictions: configuration_restrictions(),
+                warn: false,
+                halt: false,
             },
-            include_str!("testdata/restricted.router.yaml"),
+            include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
-        let err = report.expect_err("should have got error");
-        assert_snapshot!(err.to_string());
-        assert!(err.action(RouterState::Startup) == Action::PreventStartup);
-        assert!(err.action(RouterState::Running) == Action::PreventReload);
+        assert!(
+            report.restricted_config_in_use.is_empty(),
+            "should not have found restricted features"
+        );
     }
 
     #[test]
-    fn test_restricted_features_via_config_warning() {
+    fn test_restricted_features_via_config() {
         let report = check(
             Entitlement {
-                claims: Some(test_claim(-1, 1)),
+                claims: None,
                 configuration_restrictions: configuration_restrictions(),
+                warn: false,
+                halt: false,
             },
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
-        let err = report.expect_err("should have got error");
-        assert_snapshot!(err.to_string());
-        assert!(err.action(RouterState::Startup) == Action::Warn);
-        assert!(err.action(RouterState::Running) == Action::Warn);
-    }
-
-    #[test]
-    fn test_restricted_features_via_config_halt() {
-        let report = check(
-            Entitlement {
-                claims: Some(test_claim(-1, -1)),
-                configuration_restrictions: configuration_restrictions(),
-            },
-            include_str!("testdata/restricted.router.yaml"),
-            include_str!("testdata/oss.graphql"),
+        assert!(
+            !report.restricted_config_in_use.is_empty(),
+            "should have found restricted features"
         );
-
-        let err = report.expect_err("should have got error");
-        assert_snapshot!(err.to_string());
-        assert!(err.action(RouterState::Startup) == Action::Halt);
-        assert!(err.action(RouterState::Running) == Action::Halt);
-    }
-
-    #[test]
-    fn test_restricted_features_via_config_ok() {
-        let report = check(
-            Entitlement {
-                claims: Some(test_claim(1, 1)),
-                configuration_restrictions: configuration_restrictions(),
-            },
-            include_str!("testdata/restricted.router.yaml"),
-            include_str!("testdata/oss.graphql"),
-        );
-
-        report.expect("should have been entitled");
+        assert_snapshot!(report.to_string());
     }
 
     #[test]
@@ -420,8 +339,8 @@ mod test {
                 iss: "https://www.apollographql.com/".to_string(),
                 sub: "apollo".to_string(),
                 aud: OneOrMany::One(Audience::SelfHosted),
-                warn_at: UNIX_EPOCH + Duration::from_millis(1676808000),
-                halt_at: UNIX_EPOCH + Duration::from_millis(1678017600),
+                warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
+                halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
             }),
         );
     }

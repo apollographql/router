@@ -82,6 +82,7 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
+use crate::uplink::entitlement::Entitlement;
 use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::Context;
@@ -211,6 +212,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
+            Arc::new(Entitlement::default()),
         )
         .await
         .expect("Failed to create server factory");
@@ -265,6 +267,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
+            Arc::new(Entitlement::default()),
         )
         .await?;
     let mut default_headers = HeaderMap::new();
@@ -328,6 +331,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
+            Arc::new(Entitlement::default()),
         )
         .await
         .expect("Failed to create server factory")
@@ -1752,6 +1756,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
+            Arc::new(Entitlement::default()),
         )
         .await
         .expect("Failed to create server factory");
@@ -1779,6 +1784,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
+            Arc::new(Entitlement::default()),
         )
         .await
         .unwrap();

@@ -1,15 +1,15 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 use std::sync::Arc;
 
 use futures::prelude::*;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
-use Event::HaltEntitlement;
 use Event::NoMoreConfiguration;
 use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
 use Event::Shutdown;
-use Event::WarnEntitlement;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -85,14 +85,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
-    pub(crate) async fn warn_entitlement(self) -> Self {
-        self
-    }
-
-    pub(crate) async fn halt_entitlement(self) -> Self {
-        self
-    }
-
     async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
@@ -123,6 +115,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             state_machine,
                             &mut None,
                             None,
+                            None,
                             configuration.clone(),
                             schema.clone(),
                             entitlement.clone(),
@@ -139,7 +132,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 entitlement,
                 server_handle,
                 router_service_factory,
-                ..
             } => {
                 tracing::info!("reloading");
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
@@ -147,6 +139,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     state_machine,
                     server_handle,
                     Some(router_service_factory),
+                    Some(entitlement.clone()),
                     new_configuration.unwrap_or_else(|| configuration.clone()),
                     new_schema.unwrap_or_else(|| schema.clone()),
                     new_entitlement.unwrap_or_else(|| entitlement.clone()),
@@ -162,7 +155,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
                         match server_handle {
                             None => {
-                                tracing::info!("fatal error while trying to reload; {}", e);
+                                tracing::error!("fatal error while trying to reload; {}", e);
                                 Some(Errored(e))
                             }
                             Some(_) => {
@@ -199,9 +192,10 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
         previous_router_service_factory: Option<&FA::RouterFactory>,
+        previous_entitlement: Option<Arc<Entitlement>>,
         configuration: Arc<Configuration>,
         schema: Arc<String>,
-        entitlement: Arc<Entitlement>,
+        mut entitlement: Arc<Entitlement>,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
     ) -> Result<State<FA>, ApolloRouterError>
     where
@@ -212,6 +206,36 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Schema::parse(&schema, &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
+
+        // Check the entitlements
+        let report = entitlement.check(&configuration, &parsed_schema);
+        if report.uses_restricted_features() {
+            if entitlement.claims.is_none() {
+                if previous_entitlement.unwrap_or_default().claims.is_some() {
+                    // We've somehow gone from a state of entitlement to no claims,
+                    // This shouldn't be possible, but if this happens then force a shutdown as we can't guarantee
+                    tracing::error!("You no longer have an Apollo license, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
+                    entitlement = Arc::new(entitlement.halted());
+                } else {
+                    // This is OSS, so fail to reload or start.
+                    if std::env::var("APOLLO_KEY").is_ok()
+                        && std::env::var("APOLLO_GRAPH_REF").is_ok()
+                    {
+                        tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nIf you have a license then set APOLLO_KEY and APOLLO_GRAPH_REF environment variables and you’re good to go!\n\nAlternatively, if you manually manage your entitlement token then set the APOLLO_ROUTER_ENTITLEMENT env variable.\n\nSee http://router.apollographql.com for more information.", report);
+                    } else {
+                        tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nSee http://router.apollographql.com for more information.", report);
+                    }
+                    return Err(ApolloRouterError::EntitlementViolation);
+                }
+            } else if entitlement.halt {
+                tracing::error!("Your Apollo license has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
+            } else if entitlement.warn {
+                tracing::error!("Your Apollo license has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
+            }
+        } else {
+            // If restricted features are not in use then it doesn't matter if the license has expired, so give them the default entitlement which doesn't have warn/halt set.
+            entitlement = Arc::new(Entitlement::default())
+        }
 
         let router_service_factory = state_machine
             .router_configurator
@@ -237,6 +261,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         Default::default(),
                         Default::default(),
                         web_endpoints,
+                        entitlement.clone(),
                     )
                     .await?
             }
@@ -247,6 +272,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         router_service_factory.clone(),
                         configuration.clone(),
                         web_endpoints,
+                        entitlement.clone(),
                     )
                     .await?
             }
@@ -324,6 +350,7 @@ where
 
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
+            tracing::debug!("got event {}", event);
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
@@ -342,8 +369,6 @@ where
                         .update_inputs(&mut self, None, None, Some(Arc::new(entitlement)))
                         .await
                 }
-                WarnEntitlement => state.warn_entitlement().await,
-                HaltEntitlement => state.halt_entitlement().await,
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
@@ -373,12 +398,14 @@ mod tests {
     use std::sync::Mutex;
     use std::task::Context;
     use std::task::Poll;
+    use std::time::SystemTime;
 
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
     use mockall::mock;
     use mockall::Sequence;
     use multimap::MultiMap;
+    use serde_json::json;
     use test_log::test;
     use tower::BoxError;
     use tower::Service;
@@ -392,39 +419,191 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::uplink::entitlement::{Audience, Claims, ConfigurationRestriction, OneOrMany};
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
+    }
+
+    macro_rules! assert_matches {
+        // `()` indicates that the macro takes no argument.
+        ($actual:expr, $pattern:pat) => {
+            let result = $actual;
+            if !matches!(result, $pattern) {
+                panic!("got {:?} but expected {}", result, stringify!($pattern));
+            }
+        };
     }
 
     #[test(tokio::test)]
     async fn no_configuration() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert!(matches!(
+        assert_matches!(
             execute(server_factory, router_factory, vec![NoMoreConfiguration],).await,
-            Err(NoConfiguration),
-        ));
+            Err(NoConfiguration)
+        );
     }
 
     #[test(tokio::test)]
     async fn no_schema() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert!(matches!(
+        assert_matches!(
             execute(server_factory, router_factory, vec![NoMoreSchema],).await,
-            Err(NoSchema),
-        ));
+            Err(NoSchema)
+        );
     }
 
     #[test(tokio::test)]
     async fn no_entitlement() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert!(matches!(
+        assert_matches!(
             execute(server_factory, router_factory, vec![NoMoreEntitlement],).await,
-            Err(NoEntitlement),
-        ));
+            Err(NoEntitlement)
+        );
+    }
+
+    fn test_claims() -> Claims {
+        let now = SystemTime::now();
+        Claims {
+            iss: "".to_string(),
+            sub: "".to_string(),
+            aud: OneOrMany::One(Audience::Cloud),
+            warn_at: now,
+            halt_at: now,
+        }
+    }
+
+    fn test_config_restricted() -> Configuration {
+        let mut config = Configuration::builder().build().unwrap();
+        config.validated_yaml = Some(json!({"restricted": true}));
+        config
+    }
+
+    fn test_entitlement(claims: Option<Claims>, halt: bool, warn: bool) -> Entitlement {
+        Entitlement {
+            claims,
+            halt,
+            warn,
+            configuration_restrictions: vec![ConfigurationRestriction::builder()
+                .path("$.restricted")
+                .value(true)
+                .name("Test")
+                .build()],
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn restricted_entitled() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateEntitlement(test_entitlement(Some(test_claims()), false, false)),
+                    Shutdown
+                ],
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+    }
+
+    #[test(tokio::test)]
+    async fn restricted_entitled_halted() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateEntitlement(test_entitlement(Some(test_claims()), true, true)),
+                    Shutdown
+                ],
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+    }
+
+    #[test(tokio::test)]
+    async fn restricted_entitled_warn() {
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateEntitlement(test_entitlement(Some(test_claims()), true, false)),
+                    Shutdown
+                ],
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+    }
+
+    #[test(tokio::test)]
+    async fn restricted_entitled_unentitled() {
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateEntitlement(test_entitlement(Some(test_claims()), false, false)),
+                    UpdateEntitlement(test_entitlement(None, false, false)),
+                    Shutdown
+                ],
+            )
+            .await,
+            Ok(())
+        );
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+    }
+
+    #[test(tokio::test)]
+    async fn restricted_unentitled() {
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
+
+        assert_matches!(
+            execute(
+                server_factory,
+                router_factory,
+                vec![
+                    UpdateConfiguration(test_config_restricted()),
+                    UpdateSchema(example_schema()),
+                    UpdateEntitlement(test_entitlement(None, false, false)),
+                    Shutdown
+                ],
+            )
+            .await,
+            Err(ApolloRouterError::EntitlementViolation)
+        );
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
 
     #[test(tokio::test)]
@@ -439,10 +618,10 @@ mod tests {
     async fn shutdown_during_startup() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        assert!(matches!(
+        assert_matches!(
             execute(server_factory, router_factory, vec![Shutdown],).await,
-            Ok(()),
-        ));
+            Ok(())
+        );
     }
 
     #[test(tokio::test)]
@@ -450,7 +629,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -462,8 +641,8 @@ mod tests {
                 ],
             )
             .await,
-            Ok(()),
-        ));
+            Ok(())
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
@@ -472,7 +651,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -485,8 +664,8 @@ mod tests {
                 ],
             )
             .await,
-            Ok(()),
-        ));
+            Ok(())
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
@@ -495,7 +674,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -508,8 +687,8 @@ mod tests {
                 ],
             )
             .await,
-            Ok(()),
-        ));
+            Ok(())
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
@@ -518,7 +697,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(2);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -540,8 +719,8 @@ mod tests {
                 ],
             )
             .await,
-            Ok(()),
-        ));
+            Ok(())
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
@@ -550,7 +729,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(1);
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -562,8 +741,8 @@ mod tests {
                 ],
             )
             .await,
-            Ok(()),
-        ));
+            Ok(())
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
@@ -577,7 +756,7 @@ mod tests {
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0);
 
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -588,8 +767,8 @@ mod tests {
                 ],
             )
             .await,
-            Err(ApolloRouterError::ServiceCreationError(_)),
-        ));
+            Err(ApolloRouterError::ServiceCreationError(_))
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 0);
     }
 
@@ -615,7 +794,7 @@ mod tests {
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
-        assert!(matches!(
+        assert_matches!(
             execute(
                 server_factory,
                 router_factory,
@@ -628,8 +807,8 @@ mod tests {
                 ],
             )
             .await,
-            Ok(()),
-        ));
+            Ok(())
+        );
         assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
@@ -716,6 +895,7 @@ mod tests {
             main_listener: Option<Listener>,
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
+            _entitlment: Arc<Entitlement>,
         ) -> Self::Future
         where
             RF: RouterFactory,

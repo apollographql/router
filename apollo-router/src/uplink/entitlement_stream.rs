@@ -109,7 +109,7 @@ pub(crate) enum Error {
 pin_project! {
     /// This stream wrapper will cause check the current entitlement at the point of warn_at or halt_at.
     /// This means that the state machine can be kept clean, and not have to deal with setting it's own timers and also avoids lots of racy scenarios as entitlement checks are guaranteed to happen after an entitlement update even if they were in the past.
-    struct EntitlementExpander<Upstream>
+    pub(crate) struct EntitlementExpander<Upstream>
     where
         Upstream: Stream<Item = Event>,
     {
@@ -135,27 +135,46 @@ where
 
             // No expired claim is ready so go for upstream
             Poll::Pending | Poll::Ready(None) => {
-                let next = this.upstream.poll_next(cx);
-                match (&next, active_checks) {
+                let mut next = this.upstream.poll_next(cx);
+                match (&mut next, active_checks) {
                     // Upstream has a new event with a claim
-                    (
-                        Poll::Ready(Some(Event::UpdateEntitlement(Entitlement {
-                            claims: Some(claim),
-                            ..
-                        }))),
-                        _,
-                    ) => {
+                    (Poll::Ready(Some(Event::UpdateEntitlement(entitlement))), _)
+                        if entitlement.claims.is_some() =>
+                    {
                         // We got a new claim, so clear the previous checks.
                         this.checks.clear();
-                        // Insert the new checks.
-                        this.checks.insert_at(
-                            Event::WarnEntitlement,
-                            (to_positive_instant(claim.warn_at)).into(),
-                        );
-                        this.checks.insert_at(
-                            Event::HaltEntitlement,
-                            (to_positive_instant(claim.halt_at)).into(),
-                        );
+                        let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
+                        let halt_at = to_positive_instant(claims.halt_at);
+                        let warn_at = to_positive_instant(claims.warn_at);
+                        let now = Instant::now();
+                        // Insert the new checks. If any of the boundaries are in the past then just update the entitlement in place
+                        if halt_at > now {
+                            // Only add halt if it isn't immediately going to be triggered.
+                            this.checks.insert_at(
+                                Event::UpdateEntitlement(Entitlement {
+                                    halt: true,
+                                    warn: true,
+                                    ..entitlement.clone()
+                                }),
+                                (halt_at).into(),
+                            );
+                        } else {
+                            entitlement.halt = true;
+                        }
+                        if warn_at > now && !entitlement.halt {
+                            // Only add warn if it isn't immediately going to be triggered and halt is not already set.
+                            // Something that is halted is by definition also warn.
+                            this.checks.insert_at(
+                                Event::UpdateEntitlement(Entitlement {
+                                    warn: true,
+                                    ..entitlement.clone()
+                                }),
+                                (warn_at).into(),
+                            );
+                        } else {
+                            entitlement.warn = true;
+                        }
+
                         next
                     }
                     // Upstream has a new event with no claim
@@ -193,7 +212,7 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     }
 }
 
-trait EventStreamExt: Stream<Item = Event> {
+pub(crate) trait EventStreamExt: Stream<Item = Event> {
     fn expand_entitlements(self) -> EntitlementExpander<Self>
     where
         Self: Sized,
@@ -271,8 +290,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn entitlement_expander_claim() {
-        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 15)])
+    async fn entitlement_expander() {
+        let events_stream = futures::stream::iter(vec![entitlement_with_claim(15, 30)])
             .expand_entitlements()
             .map(SimpleEvent::from);
 
@@ -285,6 +304,29 @@ mod test {
                 SimpleEvent::HaltEntitlement
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn entitlement_expander_warn_now() {
+        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 15)])
+            .expand_entitlements()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(
+            events,
+            &[SimpleEvent::WarnEntitlement, SimpleEvent::HaltEntitlement]
+        );
+    }
+
+    #[tokio::test]
+    async fn entitlement_expander_halt_now() {
+        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 0)])
+            .expand_entitlements()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(events, &[SimpleEvent::HaltEntitlement]);
     }
 
     #[tokio::test]
@@ -320,7 +362,7 @@ mod test {
     async fn entitlement_expander_no_claim_claim() {
         let events_stream = futures::stream::iter(vec![
             entitlement_with_no_claim(),
-            entitlement_with_claim(0, 15),
+            entitlement_with_claim(15, 30),
         ])
         .expand_entitlements()
         .map(SimpleEvent::from);
@@ -344,9 +386,9 @@ mod test {
 
         tokio::task::spawn(async move {
             // This simulates a new claim coming in before in between the warning and halt
-            let _ = tx.send(entitlement_with_claim(0, 30)).await;
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            let _ = tx.send(entitlement_with_claim(0, 30)).await;
+            let _ = tx.send(entitlement_with_claim(15, 45)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let _ = tx.send(entitlement_with_claim(15, 30)).await;
         });
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
@@ -372,6 +414,8 @@ mod test {
                 halt_at: now + Duration::from_millis(halt_delta),
             }),
             configuration_restrictions: vec![],
+            warn: false,
+            halt: false,
         })
     }
 
@@ -379,6 +423,8 @@ mod test {
         Event::UpdateEntitlement(Entitlement {
             claims: None,
             configuration_restrictions: vec![],
+            warn: false,
+            halt: false,
         })
     }
 
@@ -402,9 +448,9 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
+                Event::UpdateEntitlement(e) if e.halt => SimpleEvent::HaltEntitlement,
+                Event::UpdateEntitlement(e) if e.warn => SimpleEvent::WarnEntitlement,
                 Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
-                Event::WarnEntitlement => SimpleEvent::WarnEntitlement,
-                Event::HaltEntitlement => SimpleEvent::HaltEntitlement,
                 Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }

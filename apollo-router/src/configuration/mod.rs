@@ -1,5 +1,6 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Logic for loading configuration in to an object model
-// This entire file is license key functionality
 pub(crate) mod cors;
 mod expansion;
 mod experimental;
