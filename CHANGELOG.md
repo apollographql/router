@@ -41,7 +41,7 @@ Now, the router searches through the set of configured JWKS (JSON Web Key Sets) 
 
 The algorithm family is used when the JWKS contain a JWK for which no `alg` is specified.
 
-By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2540 and https://github.com/apollographql/router/pull/2540
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2540
 
 # [1.10.2] - 2023-02-08
 
