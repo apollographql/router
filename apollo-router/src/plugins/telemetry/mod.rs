@@ -749,7 +749,11 @@ impl Telemetry {
 
                 Ok(SupergraphResponse { context, response })
             }
-            Err(err) => Err(err),
+            Err(err) => {
+                metric_attrs.push(KeyValue::new("status", "500"));
+
+                Err(err)
+            }
         };
 
         // http_requests_total - the total number of HTTP requests received
@@ -982,6 +986,7 @@ impl Telemetry {
                 );
             }
             Err(err) => {
+                metric_attrs.push(KeyValue::new("status", "500"));
                 // Fill attributes from error
                 if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
                     metric_attrs.extend(
