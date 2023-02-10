@@ -1,10 +1,13 @@
-use anyhow::{anyhow, Error, Result};
+use std::str::FromStr;
+
+use anyhow::anyhow;
+use anyhow::Error;
+use anyhow::Result;
 use cargo_metadata::MetadataCommand;
 use chrono::prelude::Utc;
 use git2::Repository;
 use octorust::types::PullsCreateRequest;
 use octorust::Client;
-use std::str::FromStr;
 use structopt::StructOpt;
 use tap::TapFallible;
 use walkdir::WalkDir;
