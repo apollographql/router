@@ -26,7 +26,7 @@
     {
       "fileMatch": [
         "^\\.tool-versions$",
-        "^dockerfiles/diy/dockerfiles/Dockerfile\\.repo$",
+        "(^|/)Dockerfile[^/]*$",
         "^rust-toolchain\\.toml$",
         "^docs/.*?\\.mdx$"
       ],
