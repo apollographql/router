@@ -15,7 +15,7 @@ Arguments for this command are described below.
 
 ## Environment variables
 
-If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/), set these environment variables in its startup command:
+If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in its startup command:
 
 ```bash
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
@@ -38,7 +38,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 </td>
 <td>
 
-The graph ref of the registered Apollo graph and variant that the router fetches its supergraph schema from.
+The graph ref of the GraphOS graph and variant that the router fetches its supergraph schema from.
 
 **Required** if using managed federation.
 
@@ -52,7 +52,7 @@ The graph ref of the registered Apollo graph and variant that the router fetches
 </td>
 <td>
 
-The [graph API key](/studio/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with Apollo Studio when fetching its supergraph schema.
+The [graph API key](/graphos/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with GraphOS when fetching its supergraph schema.
 
 **Required** if using managed federation.
 
