@@ -82,6 +82,7 @@ use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
@@ -101,6 +102,7 @@ use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
+use tracing_subscriber::fmt::format::JsonFields;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
