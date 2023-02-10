@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.10.2](https://img.shields.io/badge/Version-1.10.2-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.10.2](https://img.shields.io/badge/AppVersion-v1.10.2-informational?style=flat-square)
+![Version: 1.10.3](https://img.shields.io/badge/Version-1.10.3-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.10.3](https://img.shields.io/badge/AppVersion-v1.10.3-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.10.2
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.10.3
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.10.2
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.10.2 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.10.3 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._

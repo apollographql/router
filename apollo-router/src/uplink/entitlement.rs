@@ -12,7 +12,6 @@ use std::time::SystemTime;
 
 use buildstructor::Builder;
 use displaydoc::Display;
-use graphql_client::GraphQLQuery;
 use itertools::Itertools;
 use jsonwebtoken::decode;
 use jsonwebtoken::jwk::JwkSet;
@@ -26,83 +25,9 @@ use serde_json::Value;
 use thiserror::Error;
 
 use crate::spec::Schema;
-use crate::uplink::entitlement::entitlement_request::EntitlementRequestRouterEntitlements;
-use crate::uplink::entitlement::entitlement_request::FetchErrorCode;
-use crate::uplink::UplinkRequest;
-use crate::uplink::UplinkResponse;
 use crate::Configuration;
 
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
-
-#[derive(GraphQLQuery)]
-#[graphql(
-    query_path = "src/uplink/entitlement_query.graphql",
-    schema_path = "src/uplink/uplink.graphql",
-    request_derives = "Debug",
-    response_derives = "PartialEq, Debug, Deserialize",
-    deprecated = "warn"
-)]
-pub(crate) struct EntitlementRequest {}
-
-impl From<UplinkRequest> for entitlement_request::Variables {
-    fn from(req: UplinkRequest) -> Self {
-        entitlement_request::Variables {
-            api_key: req.api_key,
-            graph_ref: req.graph_ref,
-            unless_id: req.id,
-        }
-    }
-}
-
-impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
-    fn from(response: entitlement_request::ResponseData) -> Self {
-        match response.router_entitlements {
-            EntitlementRequestRouterEntitlements::RouterEntitlementsResult(result) => {
-                if let Some(entitlement) = result.entitlement {
-                    match Entitlement::from_str(&entitlement.jwt) {
-                        Ok(entitlement) => UplinkResponse::Result {
-                            response: entitlement,
-                            id: result.id,
-                            // this will truncate the number of seconds to under u64::MAX, which should be
-                            // a large enough delay anyway
-                            delay: result.min_delay_seconds as u64,
-                        },
-                        Err(error) => UplinkResponse::Error {
-                            retry_later: true,
-                            code: "INVALID_ENTITLEMENT".to_string(),
-                            message: error.to_string(),
-                        },
-                    }
-                } else {
-                    UplinkResponse::Result {
-                        response: Entitlement::default(),
-                        id: result.id,
-                        // this will truncate the number of seconds to under u64::MAX, which should be
-                        // a large enough delay anyway
-                        delay: result.min_delay_seconds as u64,
-                    }
-                }
-            }
-            EntitlementRequestRouterEntitlements::Unchanged(response) => {
-                UplinkResponse::Unchanged {
-                    id: Some(response.id),
-                    delay: Some(response.min_delay_seconds as u64),
-                }
-            }
-            EntitlementRequestRouterEntitlements::FetchError(error) => UplinkResponse::Error {
-                retry_later: error.code == FetchErrorCode::RETRY_LATER,
-                code: match error.code {
-                    FetchErrorCode::AUTHENTICATION_FAILED => "AUTHENTICATION_FAILED".to_string(),
-                    FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
-                    FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
-                    FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
-                    FetchErrorCode::Other(other) => other,
-                },
-                message: error.message,
-            },
-        }
-    }
-}
 
 #[derive(Error, Display, Debug)]
 pub enum Error {
@@ -114,13 +39,13 @@ pub enum Error {
 }
 
 #[derive(Eq, PartialEq)]
-enum RouterState {
+pub(crate) enum RouterState {
     Startup,
     Running,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum EntitlementState {
+pub(crate) enum EntitlementState {
     Oss,
     Entitled,
     Warning,
@@ -128,7 +53,7 @@ enum EntitlementState {
 }
 
 #[derive(Eq, PartialEq)]
-enum Action {
+pub(crate) enum Action {
     PreventStartup,
     PreventReload,
     Warn,
@@ -137,27 +62,27 @@ enum Action {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum Audience {
+pub(crate) enum Audience {
     SelfHosted,
     Cloud,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(untagged)]
-enum OneOrMany<T> {
+pub(crate) enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub(crate) struct Claims {
-    iss: String,
-    sub: String,
-    aud: OneOrMany<Audience>,
+    pub(crate) iss: String,
+    pub(crate) sub: String,
+    pub(crate) aud: OneOrMany<Audience>,
     #[serde(with = "serde_millis", rename = "warnAt")]
-    warn_at: SystemTime,
+    pub(crate) warn_at: SystemTime,
     #[serde(with = "serde_millis", rename = "haltAt")]
-    halt_at: SystemTime,
+    pub(crate) halt_at: SystemTime,
 }
 
 impl Claims {
@@ -211,10 +136,10 @@ impl EntitlementReport {
 
 /// Entitlement controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Entitlement {
     pub(crate) claims: Option<Claims>,
-    configuration_restrictions: Vec<ConfigurationRestriction>,
+    pub(crate) configuration_restrictions: Vec<ConfigurationRestriction>,
 }
 
 impl Display for Entitlement {
@@ -271,7 +196,7 @@ impl FromStr for Entitlement {
 
 /// An individual check for the router.yaml.
 #[derive(Builder, Clone, Debug, Serialize, Deserialize)]
-struct ConfigurationRestriction {
+pub(crate) struct ConfigurationRestriction {
     name: String,
     path: String,
     value: Value,
@@ -346,7 +271,6 @@ mod test {
     use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
-    use futures::stream::StreamExt;
     use insta::assert_snapshot;
     use serde_json::json;
 
@@ -357,10 +281,8 @@ mod test {
     use crate::uplink::entitlement::ConfigurationRestriction;
     use crate::uplink::entitlement::Entitlement;
     use crate::uplink::entitlement::EntitlementReport;
-    use crate::uplink::entitlement::EntitlementRequest;
     use crate::uplink::entitlement::OneOrMany;
     use crate::uplink::entitlement::RouterState;
-    use crate::uplink::stream_from_uplink;
     use crate::Configuration;
 
     // For testing we restrict healthcheck
@@ -425,13 +347,13 @@ mod test {
     }
 
     #[test]
-    fn test_oss_commercial_features_via_config() {
+    fn test_oss_restricted_features_via_config() {
         let report = check(
             Entitlement {
                 claims: None,
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -442,13 +364,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_warning() {
+    fn test_restricted_features_via_config_warning() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(-1, 1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -459,13 +381,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_halt() {
+    fn test_restricted_features_via_config_halt() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(-1, -1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -476,13 +398,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_ok() {
+    fn test_restricted_features_via_config_ok() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(1, 1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -528,32 +450,5 @@ mod test {
             "haltAt": 123,
         }))
         .expect("json must deserialize");
-    }
-
-    #[tokio::test]
-    async fn integration_test() {
-        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
-            std::env::var("TEST_APOLLO_KEY"),
-            std::env::var("TEST_APOLLO_GRAPH_REF"),
-        ) {
-            let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
-                apollo_key,
-                apollo_graph_ref,
-                None,
-                Duration::from_secs(1),
-                Duration::from_secs(5),
-            )
-            .take(1)
-            .collect::<Vec<_>>()
-            .await;
-
-            assert!(results
-                .get(0)
-                .expect("expected one result")
-                .as_ref()
-                .expect("entitlement should be OK")
-                .claims
-                .is_some())
-        }
     }
 }
