@@ -110,16 +110,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "apollo-encoder"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "555c85cfb5672ee5d5925db34c15b8bc53e97bf5c67eb0a75d54ee9fe51ec8f0"
-dependencies = [
- "apollo-parser",
- "thiserror",
-]
-
-[[package]]
 name = "apollo-parser"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -137,7 +127,6 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "apollo-compiler",
- "apollo-encoder",
  "apollo-parser",
  "arc-swap",
  "askama",
