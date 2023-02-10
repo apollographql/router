@@ -53,6 +53,7 @@ async-compression = { version = "0.3.15", features = [
 async-trait = "0.1.64"
 atty = "0.2.14"
 axum = { version = "0.6.4", features = ["headers", "json", "original-uri"] }
+backtrace = "0.3.67"
 base64 = "0.20.0"
 buildstructor = "0.5.1"
 bytes = "1.2.1"
@@ -222,7 +223,6 @@ reqwest = { version = "0.11.14", default-features = false, features = [
 ] }
 similar-asserts = "1.4.2"
 tempfile = "3.3.0"
-test-binary = "2.0.0"
 test-log = { version = "0.2.11", default-features = false, features = [
     "trace",
 ] }
@@ -238,9 +238,6 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
 wiremock = "0.5.17"
-
-[target.'cfg(target_os = "linux")'.dev-dependencies]
-rstack = { version = "0.3.2", features = ["dw"], default-features = false }
 
 [build-dependencies]
 tonic-build = "0.8.4"

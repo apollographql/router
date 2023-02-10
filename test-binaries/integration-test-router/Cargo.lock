@@ -134,6 +134,7 @@ dependencies = [
  "async-trait",
  "atty",
  "axum",
+ "backtrace",
  "base64 0.20.0",
  "buildstructor",
  "bytes",
