@@ -36,6 +36,7 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
+use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
@@ -386,6 +387,7 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
+        let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
         let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
@@ -413,7 +415,7 @@ impl Plugin for Telemetry {
                 )
             })
             .map_request(move |req| apollo_handler.request_ftv1(req))
-            .map_response(move |resp| apollo_handler.store_ftv1(resp))
+            .map_response(move |resp| apollo_handler.store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
                     Self::store_subgraph_request_attributes(
@@ -1176,11 +1178,17 @@ impl Telemetry {
         sender.send(SingleReport::Stats(metrics));
     }
 
-    fn subgraph_ftv1_traces(context: &Context) -> Vec<proto::reports::Trace> {
+    /// Returns `[(subgraph_name, trace), …]`
+    fn subgraph_ftv1_traces(context: &Context) -> Vec<(ByteString, proto::reports::Trace)> {
         if let Some(Value::Array(array)) = context.get_json_value(SUBGRAPH_FTV1) {
             array
                 .iter()
-                .filter_map(|value| decode_ftv1_trace(value.as_str()?))
+                .filter_map(|value| match value.as_array()?.as_slice() {
+                    [Value::String(subgraph_name), trace] => {
+                        Some((subgraph_name.clone(), decode_ftv1_trace(trace.as_str()?)?))
+                    }
+                    _ => None,
+                })
                 .collect()
         } else {
             Vec::new()
@@ -1189,7 +1197,7 @@ impl Telemetry {
 
     // https://github.com/apollographql/apollo-server/blob/6ff88e87c52/packages/server/src/plugin/usageReporting/stats.ts#L283
     fn per_type_stat(
-        traces: &[proto::reports::Trace],
+        traces: &[(ByteString, proto::reports::Trace)],
         field_level_instrumentation_ratio: f64,
     ) -> HashMap<String, SingleTypeStat> {
         fn recur(
@@ -1249,7 +1257,7 @@ impl Telemetry {
         let field_execution_weight = 1.0 / field_level_instrumentation_ratio;
 
         let mut per_type = HashMap::new();
-        for trace in traces {
+        for (_subgraph_name, trace) in traces {
             if let Some(node) = &trace.root {
                 recur(&mut per_type, field_execution_weight, node)
             }
@@ -1257,7 +1265,9 @@ impl Telemetry {
         per_type
     }
 
-    fn per_path_error_stats(traces: &[proto::reports::Trace]) -> SinglePathErrorStats {
+    fn per_path_error_stats(
+        traces: &[(ByteString, proto::reports::Trace)],
+    ) -> SinglePathErrorStats {
         fn recur<'node>(
             stats_root: &mut SinglePathErrorStats,
             path: &mut Vec<&'node String>,
@@ -1282,9 +1292,10 @@ impl Telemetry {
             }
         }
         let mut root = Default::default();
-        for trace in traces {
+        for (subgraph_name, trace) in traces {
             if let Some(node) = &trace.root {
-                recur(&mut root, &mut Vec::new(), node)
+                let path = format!("service:{}", subgraph_name.as_str());
+                recur(&mut root, &mut vec![&path], node)
             }
         }
         root
@@ -1385,7 +1396,7 @@ impl ApolloFtv1Handler {
         req
     }
 
-    fn store_ftv1(&self, resp: SubgraphResponse) -> SubgraphResponse {
+    fn store_ftv1(&self, subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphResponse {
         // Stash the FTV1 data
         if let ApolloFtv1Handler::Enabled = self {
             if let Some(serde_json_bytes::Value::String(ftv1)) =
@@ -1400,7 +1411,7 @@ impl ApolloFtv1Handler {
                             Value::Null => Vec::new(),
                             _ => panic!("unexpected JSON value kind"),
                         };
-                        vec.push(Value::String(ftv1.clone()));
+                        vec.push(json!([subgraph_name.clone(), ftv1.clone()]));
                         Value::Array(vec)
                     })
             }
