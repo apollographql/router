@@ -30,7 +30,7 @@ use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
 
-mod aggregation;
+pub(crate) mod aggregation;
 pub(crate) mod apollo;
 pub(crate) mod layer;
 pub(crate) mod otlp;
@@ -40,6 +40,7 @@ pub(crate) mod span_metrics_exporter;
 pub(crate) const METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
 pub(crate) const METRIC_PREFIX_COUNTER: &str = "counter.";
 pub(crate) const METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
+pub(crate) const METRIC_PREFIX_VALUE: &str = "value.";
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 
@@ -534,9 +535,9 @@ pub(crate) struct BasicMetrics {
     pub(crate) http_requests_duration: Histogram<f64>,
 }
 
-impl Default for BasicMetrics {
-    fn default() -> BasicMetrics {
-        let meter = opentelemetry::global::meter_provider().meter("apollo/router");
+impl BasicMetrics {
+    pub(crate) fn new(meter_provider: &impl MeterProvider) -> BasicMetrics {
+        let meter = meter_provider.meter("apollo/router");
         BasicMetrics {
             http_requests_total: meter
                 .u64_counter("apollo_router_http_requests_total")

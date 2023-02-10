@@ -251,7 +251,7 @@ mod test {
     ) -> Result<Telemetry, BoxError> {
         Telemetry::new(PluginInit::new(
             config::Conf {
-                logging: None,
+                logging: Default::default(),
                 metrics: None,
                 tracing: None,
                 apollo: Some(apollo_config),

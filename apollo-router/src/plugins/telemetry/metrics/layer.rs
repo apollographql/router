@@ -232,10 +232,10 @@ pub(crate) struct MetricsLayer {
     instruments: Instruments,
 }
 
-impl Default for MetricsLayer {
-    fn default() -> Self {
+impl MetricsLayer {
+    pub(crate) fn new(meter_provider: &impl MeterProvider) -> Self {
         Self {
-            meter: opentelemetry::global::meter_provider().meter("apollo/router"),
+            meter: meter_provider.meter("apollo/router"),
             instruments: Default::default(),
         }
     }
