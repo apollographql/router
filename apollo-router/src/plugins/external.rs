@@ -739,6 +739,7 @@ fn internalize_header_map(
 
 #[cfg(test)]
 mod tests {
+    use futures::future::BoxFuture;
     use http::header::ACCEPT;
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
@@ -826,16 +827,17 @@ mod tests {
             Ok(router_response)
         });
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| /* async */ {
-            // let deserialized_request: Externalizable<String> =
-            //     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
-            //         .unwrap();
-            // dbg!(&deserialized_request);
-            // let deserialized_body: graphql::Request =
-            //     serde_json::from_str(&deserialized_request.body.unwrap()).unwrap();
-            // dbg!(&deserialized_body);
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+                dbg!(&deserialized_request);
+                let deserialized_body: graphql::Request =
+                    serde_json::from_value(deserialized_request.body.unwrap()).unwrap();
+                dbg!(&deserialized_body);
 
-            Ok(hyper::Response::builder()
+                Ok(hyper::Response::builder()
                  .body(Body::from(r##"{
                     "version": 1,
                     "stage": "RouterRequest",
@@ -880,6 +882,7 @@ mod tests {
                     "sdl": "schema\n  @core(feature: \"https://specs.apollo.dev/core/v0.1\"),\n  @core(feature: \"https://specs.apollo.dev/join/v0.1\")\n{\n  query: Query\n  mutation: Mutation\n}\n\ndirective @core(feature: String!) repeatable on SCHEMA\n\ndirective @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION\n\ndirective @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE\n\ndirective @join__owner(graph: join__Graph!) on OBJECT | INTERFACE\n\ndirective @join__graph(name: String!, url: String!) on ENUM_VALUE\n\nscalar join__FieldSet\n\nenum join__Graph {\n  ACCOUNTS @join__graph(name: \"accounts\" url: \"http://localhost:4001\")\n  INVENTORY @join__graph(name: \"inventory\" url: \"http://localhost:4004\")\n  PRODUCTS @join__graph(name: \"products\" url: \"http://localhost:4003\")\n  REVIEWS @join__graph(name: \"reviews\" url: \"http://localhost:4002\")\n}\n\ntype Mutation {\n  createProduct(name: String, upc: ID!): Product @join__field(graph: PRODUCTS)\n  createReview(body: String, id: ID!, upc: ID!): Review @join__field(graph: REVIEWS)\n}\n\ntype Product\n  @join__owner(graph: PRODUCTS)\n  @join__type(graph: PRODUCTS, key: \"upc\")\n  @join__type(graph: INVENTORY, key: \"upc\")\n  @join__type(graph: REVIEWS, key: \"upc\")\n{\n  inStock: Boolean @join__field(graph: INVENTORY)\n  name: String @join__field(graph: PRODUCTS)\n  price: Int @join__field(graph: PRODUCTS)\n  reviews: [Review] @join__field(graph: REVIEWS)\n  reviewsForAuthor(authorID: ID!): [Review] @join__field(graph: REVIEWS)\n  shippingEstimate: Int @join__field(graph: INVENTORY, requires: \"price weight\")\n  upc: String! @join__field(graph: PRODUCTS)\n  weight: Int @join__field(graph: PRODUCTS)\n}\n\ntype Query {\n  me: User @join__field(graph: ACCOUNTS)\n  topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)\n}\n\ntype Review\n  @join__owner(graph: REVIEWS)\n  @join__type(graph: REVIEWS, key: \"id\")\n{\n  author: User @join__field(graph: REVIEWS, provides: \"username\")\n  body: String @join__field(graph: REVIEWS)\n  id: ID! @join__field(graph: REVIEWS)\n  product: Product @join__field(graph: REVIEWS)\n}\n\ntype User\n  @join__owner(graph: ACCOUNTS)\n  @join__type(graph: ACCOUNTS, key: \"id\")\n  @join__type(graph: REVIEWS, key: \"id\")\n{\n  id: ID! @join__field(graph: ACCOUNTS)\n  name: String @join__field(graph: ACCOUNTS)\n  reviews: [Review] @join__field(graph: REVIEWS)\n  username: String @join__field(graph: ACCOUNTS)\n}\n"
                   }"##))
                  .unwrap())
+            })
         });
 
         let service = router_stage.as_service(
@@ -959,7 +962,9 @@ mod tests {
     }
 
     fn mock_with_callback(
-        callback: fn(hyper::Request<Body>) -> Result<hyper::Response<Body>, BoxError>,
+        callback: fn(
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
