@@ -162,7 +162,14 @@ where
                 .await;
         }
 
-        self.inner.lock().await.put(key, value);
+        let mut in_memory = self.inner.lock().await;
+        in_memory.put(key, value);
+        let size = in_memory.len() as u64;
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
