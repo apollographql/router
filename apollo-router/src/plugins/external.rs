@@ -550,6 +550,8 @@ impl SubgraphStage {
                     // Thirdly, we need to interpret the control flow which may have been
                     // updated by our co-processor and decide if we should proceed or stop.
 
+                    // TODO[igni]: assert stage and version
+
                     if matches!(co_processor_output.control, Control::Break(_)) {
                         // Ensure the code is a valid http status code
                         let code = co_processor_output.control.get_http_status()?;
@@ -657,6 +659,8 @@ impl SubgraphStage {
                     response.context.leave_active_request().await;
                     tracing::debug!(?co_processor_result, "co-processor returned");
                     let co_processor_output = co_processor_result?;
+
+                    // TODO[igni]: assert stage and version
 
                     // Third, process our reply and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming response with the updated bits if they
@@ -811,6 +815,9 @@ mod tests {
 
         mock_router_service.expect_call().returning(|req| {
             // Let's assert that the router request has been transformed as it should have.
+
+            // I can change anything except the sdl
+
             let router_response = router::Response::builder()
                 .data(json!({ "test": 1234_u32 }))
                 .context(req.context)
@@ -819,14 +826,14 @@ mod tests {
             Ok(router_response)
         });
 
-        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| async {
-            let deserialized_request: Externalizable<String> =
-                serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
-                    .unwrap();
-            dbg!(&deserialized_request);
-            let deserialized_body: graphql::Request =
-                serde_json::from_str(&deserialized_request.body.unwrap()).unwrap();
-            dbg!(&deserialized_body);
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| /* async */ {
+            // let deserialized_request: Externalizable<String> =
+            //     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+            //         .unwrap();
+            // dbg!(&deserialized_request);
+            // let deserialized_body: graphql::Request =
+            //     serde_json::from_str(&deserialized_request.body.unwrap()).unwrap();
+            // dbg!(&deserialized_body);
 
             Ok(hyper::Response::builder()
                  .body(Body::from(r##"{
