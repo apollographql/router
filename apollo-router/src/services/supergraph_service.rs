@@ -23,6 +23,7 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
+use crate::_private::TelemetryPlugin;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -316,13 +317,6 @@ impl PluggableSupergraphServiceBuilder {
     }
 
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
-        // Note: The plugins are always applied in reverse, so that the
-        // fold is applied in the correct sequence. We could reverse
-        // the list of plugins, but we want them back in the original
-        // order at the end of this function. Instead, we reverse the
-        // various iterators that we create for folding and leave
-        // the plugins in their original order.
-
         let configuration = self.configuration.unwrap_or_default();
 
         let introspection = if configuration.supergraph.introspection {
@@ -343,7 +337,16 @@ impl PluggableSupergraphServiceBuilder {
         )
         .await;
 
-        let plugins = Arc::new(self.plugins);
+        let mut plugins = self.plugins;
+        // Activate the telemetry plugin.
+        // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
+        for (_, plugin) in plugins.iter_mut() {
+            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<TelemetryPlugin>() {
+                telemetry.activate();
+            }
+        }
+
+        let plugins = Arc::new(plugins);
 
         let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
@@ -1770,7 +1773,7 @@ mod tests {
             ("products", MockSubgraph::builder()
                 .with_json(
                     serde_json::json! {{
-                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{price}}}",
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{__typename price}}}",
                         "variables": {"representations":[{"__typename":"Product","id":"1"},{"__typename":"Product","id":"2"}]}
                     }},
                     serde_json::json! {{

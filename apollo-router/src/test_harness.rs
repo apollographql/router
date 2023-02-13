@@ -14,6 +14,7 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
 use crate::services::router;
@@ -84,6 +85,20 @@ impl<'a> TestHarness<'a> {
             extra_plugins: Vec::new(),
             subgraph_network_requests: false,
         }
+    }
+
+    /// Specifies the logging level. Note that this function may not be called more than once.
+    /// log_level is in RUST_LOG format.
+    pub fn log_level(self, log_level: &'a str) -> Self {
+        init_telemetry(log_level).expect("failed to setup logging");
+        self
+    }
+
+    /// Specifies the logging level. Note that this function will silently fail if called more than once.
+    /// log_level is in RUST_LOG format.
+    pub fn try_log_level(self, log_level: &'a str) -> Self {
+        let _ = init_telemetry(log_level);
+        self
     }
 
     /// Specifies the (static) supergraph schema definition.

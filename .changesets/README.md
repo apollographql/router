@@ -31,7 +31,7 @@ The convention used in this directory and obeyed by the `cargo xtask changeset c
    - **Maintenance**: `maint_`
    - **Documentation**: `docs_`
    - **Experimental**: `exp_`
-4. The pattern proceeding the prefix can be anything that matches `[a-z_]+` (i.e., any number of lowercased `a-z` and `_`).  Again, `.md` must be on the end as the extension.  For example, `feat_flying_forest_foxes.md`.
+4. The pattern following the prefix can be anything that matches `[a-z_]+` (i.e., any number of lowercased `a-z` and `_`).  Again, `.md` must be on the end as the extension.  For example, `feat_flying_forest_foxes.md`.
 5. Other files not matching the above convention will be ignored, including this `README.md`.
 6. The files must use the following format:
 

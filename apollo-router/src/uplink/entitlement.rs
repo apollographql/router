@@ -347,13 +347,13 @@ mod test {
     }
 
     #[test]
-    fn test_oss_commercial_features_via_config() {
+    fn test_oss_restricted_features_via_config() {
         let report = check(
             Entitlement {
                 claims: None,
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -364,13 +364,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_warning() {
+    fn test_restricted_features_via_config_warning() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(-1, 1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -381,13 +381,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_halt() {
+    fn test_restricted_features_via_config_halt() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(-1, -1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -398,13 +398,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_ok() {
+    fn test_restricted_features_via_config_ok() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(1, 1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 

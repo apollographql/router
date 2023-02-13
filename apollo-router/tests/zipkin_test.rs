@@ -1,9 +1,8 @@
 mod common;
-use std::path::Path;
 
 use tower::BoxError;
 
-use crate::common::TracingTest;
+use crate::common::IntegrationTest;
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tracing() -> Result<(), BoxError> {
@@ -11,11 +10,15 @@ async fn test_tracing() -> Result<(), BoxError> {
         .with_service_name("my_app")
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let router = TracingTest::new(
+    let mut router = IntegrationTest::new(
         tracer,
         opentelemetry_zipkin::Propagator::new(),
-        Path::new("zipkin.router.yaml"),
-    );
+        include_str!("fixtures/zipkin.router.yaml"),
+    )
+    .await;
+    router.start().await;
+    router.assert_started().await;
+
     let (_, response) = router.run_query().await;
     assert!(response.headers().get("apollo-trace-id").is_none());
 
