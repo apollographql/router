@@ -1349,12 +1349,17 @@ expression: "&schema"
           "properties": {
             "display_filename": {
               "description": "Display the filename in the logs",
-              "default": true,
+              "default": false,
               "type": "boolean"
             },
             "display_line_number": {
               "description": "Display the line number in the logs",
-              "default": true,
+              "default": false,
+              "type": "boolean"
+            },
+            "display_target": {
+              "description": "Display the target in the logs",
+              "default": false,
               "type": "boolean"
             },
             "format": {
@@ -1443,8 +1448,7 @@ expression: "&schema"
               }
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "metrics": {
           "description": "Metrics configuration",

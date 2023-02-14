@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.10.2"
+version = "1.10.3"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://www.apollographql.com/docs/router/"
@@ -42,7 +42,6 @@ access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
 apollo-compiler = "0.6.0"
-apollo-encoder = "0.4.0"
 apollo-parser = "0.4.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
@@ -53,7 +52,7 @@ async-compression = { version = "0.3.15", features = [
 ] }
 async-trait = "0.1.64"
 atty = "0.2.14"
-axum = { version = "0.6.4", features = ["headers", "json", "original-uri"] }
+axum = { version = "0.6.6", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.67"
 base64 = "0.20.0"
 buildstructor = "0.5.1"
@@ -67,7 +66,7 @@ clap = { version = "4.1.4", default-features = false, features = [
 console-subscriber = { version = "0.1.8", optional = true }
 ci_info = {version="0.14.9", features=["serde-1"] }
 dashmap = { version = "5.4.0", features = ["serde"] }
-deduplicate = "0.3.5"
+deduplicate = "0.3.6"
 derivative = "2.2.0"
 derive_more = { version = "0.99.17", default-features = false, features = [
     "from",
@@ -159,7 +158,7 @@ reqwest = { version = "0.11.14", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.15+v2.3.1"
+router-bridge = "0.1.16+v2.3.2"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
@@ -178,7 +177,7 @@ sys-info = "0.9.1"
 thiserror = "1.0.38"
 tokio = { version = "1.25.0", features = ["full"] }
 tokio-stream = { version = "0.1.11", features = ["sync", "net"] }
-tokio-util = { version = "0.7.4", features = ["net", "codec", "time"] }
+tokio-util = { version = "0.7.7", features = ["net", "codec", "time"] }
 tonic = { version = "0.8.3", features = ["transport", "tls", "tls-roots", "gzip"] }
 tower = { version = "0.4.13", features = ["full"] }
 tower-http = { version = "0.3.5", features = [
@@ -224,6 +223,7 @@ reqwest = { version = "0.11.14", default-features = false, features = [
 ] }
 similar-asserts = "1.4.2"
 tempfile = "3.3.0"
+test-binary = "2.0.0"
 test-log = { version = "0.2.11", default-features = false, features = [
     "trace",
 ] }
@@ -239,6 +239,10 @@ tracing-subscriber = { version = "0.3", default-features = false, features = [
 tracing-test = "0.2.2"
 walkdir = "2.3.2"
 wiremock = "0.5.17"
+
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+rstack = { version = "0.3.3", features = ["dw"], default-features = false }
+
 
 [build-dependencies]
 tonic-build = "0.8.4"

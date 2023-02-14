@@ -27,6 +27,7 @@ pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 pub(crate) mod jaeger;
 pub(crate) mod otlp;
+pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {

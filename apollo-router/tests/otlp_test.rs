@@ -1,11 +1,10 @@
 mod common;
-use std::path::Path;
 use std::result::Result;
 
 use opentelemetry::sdk::propagation::TraceContextPropagator;
 use tower::BoxError;
 
-use crate::common::TracingTest;
+use crate::common::IntegrationTest;
 
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
@@ -15,11 +14,14 @@ async fn test_otlp_tracing() -> Result<(), BoxError> {
         .with_exporter(opentelemetry_otlp::new_exporter().http())
         .install_batch(opentelemetry::runtime::Tokio)?;
 
-    let router = TracingTest::new(
+    let mut router = IntegrationTest::new(
         tracer,
         TraceContextPropagator::new(),
-        Path::new("otlp.router.yaml"),
-    );
+        include_str!("fixtures/otlp.router.yaml"),
+    )
+    .await;
+    router.start().await;
+    router.assert_started().await;
     router.run_query().await;
     Ok(())
 }

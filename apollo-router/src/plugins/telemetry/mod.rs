@@ -3,19 +3,13 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::AtomicU8;
-use std::sync::atomic::Ordering;
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
 use ::tracing::field;
 use ::tracing::info_span;
-#[cfg(not(feature = "console"))]
-use ::tracing::subscriber::set_global_default;
 use ::tracing::Span;
-use ::tracing::Subscriber;
 use axum::headers::HeaderName;
 use futures::future::ready;
 use futures::future::BoxFuture;
@@ -27,7 +21,6 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
-use once_cell::sync::OnceCell;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -43,47 +36,45 @@ use opentelemetry::trace::TracerProvider;
 use opentelemetry::KeyValue;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
+use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-#[cfg(not(feature = "console"))]
 use tracing_subscriber::fmt::format::JsonFields;
-use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
-use tracing_subscriber::registry::LookupSpan;
-#[cfg(not(feature = "console"))]
-use tracing_subscriber::EnvFilter;
-use tracing_subscriber::Registry;
+use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
 use self::apollo::SingleReport;
+use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::formatters::text::TextFormatter;
+use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
-#[cfg(not(feature = "console"))]
-use crate::executable::GLOBAL_ENV_FILTER;
+use self::reload::reload_fmt;
+use self::reload::reload_metrics;
+use self::reload::OPENTELEMETRY_TRACER_HANDLE;
+use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
-#[cfg(not(feature = "console"))]
-use crate::plugins::telemetry::config::default_display_filename;
-#[cfg(not(feature = "console"))]
-use crate::plugins::telemetry::config::default_display_line_number;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
-#[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::formatters::filter_metric_events;
-#[cfg(not(feature = "console"))]
-use crate::plugins::telemetry::formatters::text::TextFormatter;
-#[cfg(not(feature = "console"))]
 use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
+use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleStatsReport;
@@ -92,6 +83,7 @@ use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::USAGE_REPORTING;
@@ -111,13 +103,15 @@ use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
+
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
 pub(crate) mod config;
 pub(crate) mod formatters;
-mod metrics;
+pub(crate) mod metrics;
 mod otlp;
-mod tracing;
+pub(crate) mod reload;
+pub(crate) mod tracing;
 // Tracing consts
 pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
 pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
@@ -127,15 +121,13 @@ const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
+const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
-
-static TELEMETRY_LOADED: OnceCell<bool> = OnceCell::new();
-static TELEMETRY_REFCOUNT: AtomicU8 = AtomicU8::new(0);
 
 #[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
@@ -148,6 +140,9 @@ pub struct Telemetry {
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
+
+    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
+    meter_provider: AggregateMeterProvider,
 }
 
 #[derive(Debug)]
@@ -183,33 +178,16 @@ fn setup_metrics_exporter<T: MetricsConfigurator>(
     Ok(builder)
 }
 
-fn run_with_timeout<F, T>(f: F, timeout: Duration) -> Result<T, mpsc::RecvTimeoutError>
-where
-    F: FnOnce() -> T + Send + 'static,
-    T: Send + 'static,
-{
-    let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || tx.send(f()));
-
-    rx.recv_timeout(timeout)
-}
-
-const TRACER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
-
 impl Drop for Telemetry {
     fn drop(&mut self) {
-        ::tracing::debug!("dropping telemetry...");
-        let count = TELEMETRY_REFCOUNT.fetch_sub(1, Ordering::Relaxed);
-        if count < 2 {
-            // We don't want telemetry to drop until the shutdown completes,
-            // but we also don't want to wait forever. Let's allow 5 seconds
-            // for now.
-            // We log errors as warnings
-            if let Err(e) = run_with_timeout(
-                opentelemetry::global::shutdown_tracer_provider,
-                TRACER_SHUTDOWN_TIMEOUT,
-            ) {
-                ::tracing::warn!("tracer shutdown failed: {:?}", e);
+        // If for some reason we didn't use the trace provider then safely discard it e.g. some other plugin failed `new`
+        // To ensure we don't hang tracing providers are dropped in a blocking task.
+        // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+        // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
+        if let Some(tracer_provider) = self.tracer_provider.take() {
+            // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
+            if Handle::try_current().is_ok() {
+                tokio::task::spawn_blocking(move || drop(tracer_provider));
             }
         }
     }
@@ -220,7 +198,23 @@ impl Plugin for Telemetry {
     type Config = config::Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        Self::new_common::<Registry>(init.config, None).await
+        let config = init.config;
+        config.logging.validate()?;
+
+        let field_level_instrumentation_ratio =
+            config.calculate_field_level_instrumentation_ratio()?;
+        let mut metrics_builder = Self::create_metrics_builder(&config)?;
+        let meter_provider = metrics_builder.meter_provider();
+        Ok(Telemetry {
+            custom_endpoints: metrics_builder.custom_endpoints(),
+            _metrics_exporters: metrics_builder.exporters(),
+            metrics: BasicMetrics::new(&meter_provider),
+            apollo_metrics_sender: metrics_builder.apollo_metrics_provider(),
+            field_level_instrumentation_ratio,
+            tracer_provider: Some(Self::create_tracer_provider(&config)?),
+            meter_provider,
+            config: Arc::new(config),
+        })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -304,6 +298,7 @@ impl Plugin for Telemetry {
         let config = self.config.clone();
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         ServiceBuilder::new()
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
@@ -369,7 +364,7 @@ impl Plugin for Telemetry {
                         )
                         .await;
                         Self::update_metrics_on_last_response(
-                            &ctx, config, metrics, sender, start, result,
+                            &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
                         )
                     }
                 },
@@ -392,6 +387,7 @@ impl Plugin for Telemetry {
         let subgraph_attribute = KeyValue::new("subgraph", name.to_string());
         let subgraph_metrics_conf_req = self.create_subgraph_metrics_conf(name);
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
+        let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
         let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
@@ -419,7 +415,7 @@ impl Plugin for Telemetry {
                 )
             })
             .map_request(move |req| apollo_handler.request_ftv1(req))
-            .map_response(move |resp| apollo_handler.store_ftv1(resp))
+            .map_response(move |resp| apollo_handler.store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
                     Self::store_subgraph_request_attributes(
@@ -458,163 +454,39 @@ impl Plugin for Telemetry {
 }
 
 impl Telemetry {
-    /// This method can be used instead of `Plugin::new` to override the subscriber
-    pub async fn new_with_subscriber<S>(
-        config: serde_json::Value,
-        subscriber: S,
-    ) -> Result<Self, BoxError>
-    where
-        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
-    {
-        Self::new_common(serde_json::from_value(config)?, Some(subscriber)).await
-    }
-
-    /// This method can be used instead of `Plugin::new` to override the subscriber
-    async fn new_common<S>(
-        config: <Self as Plugin>::Config,
-        #[cfg_attr(feature = "console", allow(unused_variables))] subscriber: Option<S>,
-    ) -> Result<Self, BoxError>
-    where
-        S: Subscriber + Send + Sync + for<'span> LookupSpan<'span>,
-    {
-        if let Some(logging_conf) = &config.logging {
-            logging_conf.validate()?;
-        }
-        // Setup metrics
-        // The act of setting up metrics will overwrite a global meter. However it is essential that
-        // we use the aggregate meter provider that is created below. It enables us to support
-        // sending metrics to multiple providers at once, of which hopefully Apollo Studio is one.
-        let mut builder = Self::create_metrics_exporters(&config)?;
-
-        // the global tracer and subscriber initialization step must be performed only once
-        TELEMETRY_LOADED.get_or_try_init::<_, BoxError>(|| {
-            #[cfg(not(feature = "console"))]
-            use anyhow::Context;
-            let tracer_provider = Self::create_tracer_provider(&config)?;
+    pub(crate) fn activate(&mut self) {
+        // Only apply things if we were executing in the context of a vanilla the Apollo executable.
+        // Users that are rolling their own routers will need to set up telemetry themselves.
+        if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            // The reason that this has to happen here is that we are interacting with global state.
+            // If we do this logic during plugin init then if a subsequent plugin fails to init then we
+            // will already have set the new tracer provider and we will be in an inconsistent state.
+            // activate is infallible, so if we get here we know the new pipeline is ready to go.
+            let tracer_provider = self
+                .tracer_provider
+                .take()
+                .expect("must have new tracer_provider");
 
             let tracer = tracer_provider.versioned_tracer(
                 GLOBAL_TRACER_NAME,
                 Some(env!("CARGO_PKG_VERSION")),
                 None,
             );
+            hot_tracer.reload(tracer);
 
-            opentelemetry::global::set_tracer_provider(tracer_provider);
+            let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
+            // To ensure we don't hang tracing providers are dropped in a blocking task.
+            // https://github.com/open-telemetry/opentelemetry-rust/issues/868#issuecomment-1250387989
+            // We don't have to worry about timeouts as every exporter is batched, which has a timeout on it already.
+            tokio::task::spawn_blocking(move || drop(last_provider));
             opentelemetry::global::set_error_handler(handle_error)
                 .expect("otel error handler lock poisoned, fatal");
-            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&config));
-            // Set the meter provider
-            opentelemetry::global::set_meter_provider(builder.meter_provider());
 
-            #[cfg(feature = "console")]
-            {
-                use tracing_subscriber::util::SubscriberInitExt;
-                let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                tracing_subscriber::registry()
-                    .with(console_subscriber::spawn())
-                    .with(tracing_subscriber::fmt::layer())
-                    .with(telemetry)
-                    .init();
-            }
+            opentelemetry::global::set_text_map_propagator(Self::create_propagator(&self.config));
+        }
 
-            #[cfg(not(feature = "console"))]
-            {
-                // let otel_metrics = builder.layers();
-                let otel_metrics = MetricsLayer::default();
-                let log_level = GLOBAL_ENV_FILTER
-                    .get()
-                    .map(|s| s.as_str())
-                    .unwrap_or("info");
-
-                let sub_builder = tracing_subscriber::fmt::fmt()
-                    .with_env_filter(
-                        EnvFilter::try_new(log_level)
-                            .context("could not parse log configuration")?,
-                    )
-                    .with_file(
-                        config
-                            .logging
-                            .as_ref()
-                            .map(|l| l.display_filename)
-                            .unwrap_or(default_display_filename()),
-                    )
-                    .with_line_number(
-                        config
-                            .logging
-                            .as_ref()
-                            .map(|l| l.display_line_number)
-                            .unwrap_or(default_display_line_number()),
-                    );
-
-                if let Some(sub) = subscriber {
-                    let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-                    let subscriber = sub.with(telemetry).with(otel_metrics);
-                    if let Err(e) = set_global_default(subscriber) {
-                        ::tracing::error!("cannot set global subscriber: {:?}", e);
-                    }
-                } else {
-                    match config
-                        .logging
-                        .as_ref()
-                        .map(|l| l.format)
-                        .unwrap_or_default()
-                    {
-                        config::LoggingFormat::Pretty => {
-                            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-                            let subscriber = sub_builder
-                                .event_format(FilteringFormatter::new(
-                                    TextFormatter::new(),
-                                    filter_metric_events,
-                                ))
-                                .finish()
-                                .with(telemetry)
-                                .with(otel_metrics);
-                            if let Err(e) = set_global_default(subscriber) {
-                                ::tracing::error!("cannot set global subscriber: {:?}", e);
-                            }
-                        }
-                        config::LoggingFormat::Json => {
-                            let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
-
-                            let subscriber = sub_builder
-                                .map_event_format(|e| {
-                                    FilteringFormatter::new(
-                                        e.json()
-                                            .with_current_span(true)
-                                            .with_span_list(true)
-                                            .flatten_event(true),
-                                        filter_metric_events,
-                                    )
-                                })
-                                .map_fmt_fields(|_f| JsonFields::default())
-                                .finish()
-                                .with(telemetry)
-                                .with(otel_metrics);
-                            if let Err(e) = set_global_default(subscriber) {
-                                ::tracing::error!("cannot set global subscriber: {:?}", e);
-                            }
-                        }
-                    };
-                }
-            }
-
-            Ok(true)
-        })?;
-
-        let field_level_instrumentation_ratio =
-            config.calculate_field_level_instrumentation_ratio()?;
-
-        let plugin = Ok(Telemetry {
-            custom_endpoints: builder.custom_endpoints(),
-            _metrics_exporters: builder.exporters(),
-            metrics: BasicMetrics::default(),
-            apollo_metrics_sender: builder.apollo_metrics_provider(),
-            field_level_instrumentation_ratio,
-            config: Arc::new(config),
-        });
-
-        let _ = TELEMETRY_REFCOUNT.fetch_add(1, Ordering::Relaxed);
-        plugin
+        reload_metrics(MetricsLayer::new(&self.meter_provider));
+        reload_fmt(Self::create_fmt_layer(&self.config));
     }
 
     fn create_propagator(config: &config::Conf) -> TextMapCompositePropagator {
@@ -675,7 +547,7 @@ impl Telemetry {
         Ok(tracer_provider)
     }
 
-    fn create_metrics_exporters(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
+    fn create_metrics_builder(config: &config::Conf) -> Result<MetricsBuilder, BoxError> {
         let metrics_config = config.metrics.clone().unwrap_or_default();
         let metrics_common_config = &mut metrics_config.common.unwrap_or_default();
         // Set default service name for metrics
@@ -709,6 +581,52 @@ impl Telemetry {
             setup_metrics_exporter(builder, &metrics_config.prometheus, metrics_common_config)?;
         builder = setup_metrics_exporter(builder, &metrics_config.otlp, metrics_common_config)?;
         Ok(builder)
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn create_fmt_layer(
+        config: &config::Conf,
+    ) -> Box<
+        dyn Layer<
+                ::tracing_subscriber::layer::Layered<
+                    OpenTelemetryLayer<
+                        ::tracing_subscriber::Registry,
+                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
+                    >,
+                    ::tracing_subscriber::Registry,
+                >,
+            > + Send
+            + Sync,
+    > {
+        let logging = &config.logging;
+        let fmt = match logging.format {
+            config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
+                .event_format(FilteringFormatter::new(
+                    TextFormatter::new()
+                        .with_filename(logging.display_filename)
+                        .with_line(logging.display_line_number)
+                        .with_target(logging.display_target),
+                    filter_metric_events,
+                ))
+                .boxed(),
+            config::LoggingFormat::Json => tracing_subscriber::fmt::layer()
+                .json()
+                .with_file(logging.display_filename)
+                .with_line_number(logging.display_line_number)
+                .with_target(logging.display_target)
+                .map_event_format(|e| {
+                    FilteringFormatter::new(
+                        e.json()
+                            .with_current_span(true)
+                            .with_span_list(true)
+                            .flatten_event(true),
+                        filter_metric_events,
+                    )
+                })
+                .map_fmt_fields(|_f| JsonFields::default())
+                .boxed(),
+        };
+        fmt
     }
 
     fn supergraph_service_span(
@@ -840,7 +758,11 @@ impl Telemetry {
 
                 Ok(SupergraphResponse { context, response })
             }
-            Err(err) => Err(err),
+            Err(err) => {
+                metric_attrs.push(KeyValue::new("status", "500"));
+
+                Err(err)
+            }
         };
 
         // http_requests_total - the total number of HTTP requests received
@@ -884,11 +806,7 @@ impl Telemetry {
                 .unwrap_or_default()
                 .to_string(),
         );
-        let (should_log_headers, should_log_body) = config
-            .logging
-            .as_ref()
-            .map(|cfg| cfg.should_log(req))
-            .unwrap_or_default();
+        let (should_log_headers, should_log_body) = config.logging.should_log(req);
         if should_log_headers {
             ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
 
@@ -927,7 +845,7 @@ impl Telemetry {
     fn apollo_handler(&self) -> ApolloFtv1Handler {
         let mut rng = rand::thread_rng();
 
-        if rng.gen_ratio((self.field_level_instrumentation_ratio * 100.0) as u32, 100) {
+        if rng.gen_bool(self.field_level_instrumentation_ratio) {
             ApolloFtv1Handler::Enabled
         } else {
             ApolloFtv1Handler::Disabled
@@ -1077,6 +995,7 @@ impl Telemetry {
                 );
             }
             Err(err) => {
+                metric_attrs.push(KeyValue::new("status", "500"));
                 // Fill attributes from error
                 if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
                     metric_attrs.extend(
@@ -1105,6 +1024,7 @@ impl Telemetry {
     fn update_metrics_on_last_response(
         ctx: &Context,
         config: Arc<Conf>,
+        field_level_instrumentation_ratio: f64,
         metrics: BasicMetrics,
         sender: Sender,
         start: Instant,
@@ -1113,7 +1033,13 @@ impl Telemetry {
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
-                    Self::update_apollo_metrics(ctx, sender, true, start.elapsed());
+                    Self::update_apollo_metrics(
+                        ctx,
+                        field_level_instrumentation_ratio,
+                        sender,
+                        true,
+                        start.elapsed(),
+                    );
                 }
                 let mut metric_attrs = Vec::new();
                 // Fill attributes from error
@@ -1157,6 +1083,7 @@ impl Telemetry {
                             {
                                 Self::update_apollo_metrics(
                                     &ctx,
+                                    field_level_instrumentation_ratio,
                                     sender.clone(),
                                     has_errors,
                                     start.elapsed(),
@@ -1172,6 +1099,7 @@ impl Telemetry {
 
     fn update_apollo_metrics(
         context: &Context,
+        field_level_instrumentation_ratio: f64,
         sender: Sender,
         has_errors: bool,
         duration: Duration,
@@ -1195,6 +1123,9 @@ impl Telemetry {
                     ..Default::default()
                 }
             } else {
+                let traces = Self::subgraph_ftv1_traces(context);
+                let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
+                let root_error_stats = Self::per_path_error_stats(&traces);
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1223,9 +1154,10 @@ impl Telemetry {
                                     latency: duration,
                                     has_errors,
                                     persisted_query_hit,
+                                    root_error_stats,
                                     ..Default::default()
                                 },
-                                ..Default::default()
+                                per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
@@ -1244,6 +1176,129 @@ impl Telemetry {
             }
         };
         sender.send(SingleReport::Stats(metrics));
+    }
+
+    /// Returns `[(subgraph_name, trace), …]`
+    fn subgraph_ftv1_traces(context: &Context) -> Vec<(ByteString, proto::reports::Trace)> {
+        if let Some(Value::Array(array)) = context.get_json_value(SUBGRAPH_FTV1) {
+            array
+                .iter()
+                .filter_map(|value| match value.as_array()?.as_slice() {
+                    [Value::String(subgraph_name), trace] => {
+                        Some((subgraph_name.clone(), decode_ftv1_trace(trace.as_str()?)?))
+                    }
+                    _ => None,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    // https://github.com/apollographql/apollo-server/blob/6ff88e87c52/packages/server/src/plugin/usageReporting/stats.ts#L283
+    fn per_type_stat(
+        traces: &[(ByteString, proto::reports::Trace)],
+        field_level_instrumentation_ratio: f64,
+    ) -> HashMap<String, SingleTypeStat> {
+        fn recur(
+            per_type: &mut HashMap<String, SingleTypeStat>,
+            field_execution_weight: f64,
+            node: &proto::reports::trace::Node,
+        ) {
+            for child in &node.child {
+                recur(per_type, field_execution_weight, child)
+            }
+            let response_name = if let Some(ResponseName(response_name)) = &node.id {
+                response_name
+            } else {
+                return;
+            };
+            let field_name = if node.original_field_name.is_empty() {
+                response_name
+            } else {
+                &node.original_field_name
+            };
+            if field_name.is_empty()
+                || node.parent_type.is_empty()
+                || node.r#type.is_empty()
+                || node.start_time == 0
+                || node.end_time == 0
+            {
+                return;
+            }
+            let field_stat = per_type
+                .entry(node.parent_type.clone())
+                .or_default()
+                .per_field_stat
+                .entry(field_name.clone())
+                .or_insert_with(|| metrics::apollo::studio::SingleFieldStat {
+                    return_type: node.r#type.clone(), // not `Default::default()`’s empty string
+                    errors_count: 0,
+                    latency: Default::default(),
+                    observed_execution_count: 0,
+                    requests_with_errors_count: 0,
+                });
+            let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
+            field_stat
+                .latency
+                .increment_duration(Some(latency), field_execution_weight);
+            field_stat.observed_execution_count += 1;
+            field_stat.errors_count += node.error.len() as u64;
+            if !node.error.is_empty() {
+                field_stat.requests_with_errors_count += 1;
+            }
+        }
+
+        // For example, `field_level_instrumentation_ratio == 0.03` means we send a
+        // `apollo-federation-include-trace: ftv1` header with 3% of subgraph requests.
+        // To compensate, assume that each trace we recieve is representative of 33.3… requests.
+        // Metrics that recieve this treatment are kept as floating point values in memory,
+        // and converted to integers after aggregating values for a number of requests.
+        let field_execution_weight = 1.0 / field_level_instrumentation_ratio;
+
+        let mut per_type = HashMap::new();
+        for (_subgraph_name, trace) in traces {
+            if let Some(node) = &trace.root {
+                recur(&mut per_type, field_execution_weight, node)
+            }
+        }
+        per_type
+    }
+
+    fn per_path_error_stats(
+        traces: &[(ByteString, proto::reports::Trace)],
+    ) -> SinglePathErrorStats {
+        fn recur<'node>(
+            stats_root: &mut SinglePathErrorStats,
+            path: &mut Vec<&'node String>,
+            node: &'node proto::reports::trace::Node,
+        ) {
+            if let Some(ResponseName(name)) = &node.id {
+                path.push(name)
+            }
+            if !node.error.is_empty() {
+                let mut stats = &mut *stats_root;
+                for &name in &*path {
+                    stats = stats.children.entry(name.clone()).or_default();
+                }
+                stats.errors_count += node.error.len() as u64;
+                stats.requests_with_errors_count += 1;
+            }
+            for child in &node.child {
+                recur(stats_root, path, child)
+            }
+            if let Some(ResponseName(_)) = &node.id {
+                path.pop();
+            }
+        }
+        let mut root = Default::default();
+        for (subgraph_name, trace) in traces {
+            if let Some(node) = &trace.root {
+                let path = format!("service:{}", subgraph_name.as_str());
+                recur(&mut root, &mut vec![&path], node)
+            }
+        }
+        root
     }
 }
 
@@ -1341,7 +1396,7 @@ impl ApolloFtv1Handler {
         req
     }
 
-    fn store_ftv1(&self, resp: SubgraphResponse) -> SubgraphResponse {
+    fn store_ftv1(&self, subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphResponse {
         // Stash the FTV1 data
         if let ApolloFtv1Handler::Enabled = self {
             if let Some(serde_json_bytes::Value::String(ftv1)) =
@@ -1349,6 +1404,16 @@ impl ApolloFtv1Handler {
             {
                 // Record the ftv1 trace for processing later
                 Span::current().record("apollo_private.ftv1", ftv1.as_str());
+                resp.context
+                    .upsert_json_value(SUBGRAPH_FTV1, |value: Value| {
+                        let mut vec = match value {
+                            Value::Array(array) => array,
+                            Value::Null => Vec::new(),
+                            _ => panic!("unexpected JSON value kind"),
+                        };
+                        vec.push(json!([subgraph_name.clone(), ftv1.clone()]));
+                        Value::Array(vec)
+                    })
             }
         }
         resp
@@ -1374,11 +1439,6 @@ impl CustomTraceIdPropagator {
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
         let trace_id = extractor.get(&self.header_name)?;
 
-        opentelemetry::global::tracer_provider().versioned_tracer(
-            GLOBAL_TRACER_NAME,
-            Some(env!("CARGO_PKG_VERSION")),
-            None,
-        );
         // extract trace id
         let trace_id = match opentelemetry::trace::TraceId::from_hex(trace_id) {
             Ok(trace_id) => trace_id,

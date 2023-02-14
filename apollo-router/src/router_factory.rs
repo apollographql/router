@@ -194,7 +194,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service.
+        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
         let mut supergraph_creator = builder.build().await?;
 
         if let Some(router) = previous_router {
