@@ -824,6 +824,13 @@ mod tests {
                     .unwrap(),
                 42
             );
+
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.supergraph_request.into_body().query.unwrap()
+            );
+
             Ok(supergraph::Response::builder()
                 .data(json!({ "test": 1234_u32 }))
                 .context(req.context)
@@ -905,6 +912,134 @@ mod tests {
         let request = supergraph::Request::canned_builder().build().unwrap();
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_response() {
+        let router_stage = RouterStage {
+            response: Some(RouterConf {
+                headers: true,
+                /// Send the context
+                context: true,
+                /// Send the body
+                body: true,
+                /// Send the SDL
+                sdl: true,
+            }),
+            request: None,
+        };
+
+        let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_callback(move |res: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_response: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                assert_eq!(
+                    PipelineStep::RouterResponse.to_string(),
+                    deserialized_response.stage
+                );
+
+                assert_eq!(
+                    json!({ "data": { "test": 1234_u32 } }),
+                    deserialized_response.body.unwrap()
+                );
+
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                    "version": 1,
+                    "stage": "RouterResponse",
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "headers": {
+                      "cookie": [
+                        "tasty_cookie=strawberry"
+                      ],
+                      "content-type": [
+                        "application/json"
+                      ],
+                      "host": [
+                        "127.0.0.1:4000"
+                      ],
+                      "apollo-federation-include-trace": [
+                        "ftv1"
+                      ],
+                      "apollographql-client-name": [
+                        "manual"
+                      ],
+                      "accept": [
+                        "*/*"
+                      ],
+                      "user-agent": [
+                        "curl/7.79.1"
+                      ],
+                      "content-length": [
+                        "46"
+                      ]
+                    },
+                    "body": {
+                      "data": { "test": 42 }
+                    },
+                    "context": {
+                      "entries": {
+                        "accepts-json": false,
+                        "accepts-wildcard": true,
+                        "accepts-multipart": false,
+                        "this-is-a-test-context": 42
+                      }
+                    },
+                    "sdl": "the sdl shouldnt change"
+                  }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        let res = service.oneshot(request.try_into().unwrap()).await.unwrap();
+
+        // Let's assert that the router request has been transformed as it should have.
+        assert_eq!(
+            res.response.headers().get("cookie").unwrap(),
+            "tasty_cookie=strawberry"
+        );
+
+        assert_eq!(
+            res.context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            42
+        );
+
+        // the body should have changed:
+        assert_eq!(
+            json!({ "data": { "test": 42_u32 } }),
+            serde_json::from_slice::<serde_json::Value>(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap()
+            )
+            .unwrap()
+        );
     }
 
     #[test]
