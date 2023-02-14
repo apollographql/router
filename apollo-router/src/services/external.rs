@@ -63,6 +63,7 @@ impl Control {
     }
 }
 
+// TODO: Builder
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
@@ -74,6 +75,7 @@ pub(crate) struct Externalizable<T> {
     pub(crate) context: Option<Context>,
     pub(crate) sdl: Option<String>,
     pub(crate) uri: Option<String>,
+    pub(crate) service_name: Option<String>,
 }
 
 impl<T> Externalizable<T>

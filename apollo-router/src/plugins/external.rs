@@ -178,7 +178,7 @@ where
         service
     }
 
-    fn subgraph_service(&self, _name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
+    fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
         if let Some(subgraph_stage) = self
             .configuration
             .stages
@@ -189,6 +189,7 @@ where
                 self.http_client.clone(),
                 service,
                 self.configuration.url.clone(),
+                name.to_string(),
             )
         } else {
             service
@@ -221,8 +222,12 @@ struct SubgraphConf {
     body: bool,
     /// Send the service name
     service: bool,
-    /// Send the subgraph URL
-    url: bool,
+    /// Send the subgraph URI
+    /// TODO: This might not make sense at the response layer,
+    /// we're not sending it at the moment.
+    uri: bool,
+    /// Send the service name
+    service_name: bool,
 }
 
 /// The stages request/response configuration
@@ -315,6 +320,7 @@ impl RouterStage {
                         context: context_to_send,
                         sdl,
                         uri: None,
+                        service_name: None,
                     };
 
                     tracing::debug!(?payload, "externalized output");
@@ -421,6 +427,7 @@ impl RouterStage {
                         context: context_to_send,
                         sdl,
                         uri: None,
+                        service_name: None,
                     };
 
                     // Second, call our co-processor and get a reply.
@@ -498,6 +505,7 @@ impl SubgraphStage {
         service: subgraph::BoxService,
         // TODO: put it where relevant
         coprocessor_url: String,
+        service_name: String,
     ) -> subgraph::BoxService
     where
         C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -510,9 +518,11 @@ impl SubgraphStage {
         let request_layer = self.request.clone().map(|request_config| {
             let http_client = http_client.clone();
             let coprocessor_url = coprocessor_url.clone();
+            let service_name = service_name.clone();
             AsyncCheckpointLayer::new(move |mut request: subgraph::Request| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
+                let service_name = service_name.clone();
 
                 async move {
                     // Call into our out of process processor with a body of our body
@@ -531,7 +541,8 @@ impl SubgraphStage {
                         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
                         .transpose()?;
                     let context_to_send = request_config.context.then(|| request.context.clone());
-                    let uri = request_config.url.then(|| parts.uri.to_string());
+                    let uri = request_config.uri.then(|| parts.uri.to_string());
+                    let service_name = request_config.service_name.then(|| service_name);
 
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
@@ -542,6 +553,7 @@ impl SubgraphStage {
                         body: body_to_send,
                         context: context_to_send,
                         sdl: None,
+                        service_name,
                         uri,
                     };
 
@@ -624,10 +636,13 @@ impl SubgraphStage {
 
         let response_layer = self.response.clone().map(|response_config| {
             let http_client = http_client.clone();
+            let service_name = service_name.clone();
+
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let response_config = response_config.clone();
+                let service_name = service_name.clone();
 
                 async move {
                     let mut response: subgraph::Response = fut.await?;
@@ -649,6 +664,7 @@ impl SubgraphStage {
                         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
                         .transpose()?;
                     let context_to_send = response_config.context.then(|| response.context.clone());
+                    let service_name = response_config.service_name.then(|| service_name);
 
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
@@ -660,6 +676,7 @@ impl SubgraphStage {
                         context: context_to_send,
                         sdl: None,
                         uri: None,
+                        service_name,
                     };
 
                     tracing::debug!(?payload, "externalized output");

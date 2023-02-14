@@ -41,11 +41,12 @@ impl Plugin for EchoCoProcessor {
     }
 
     // This dummy endpoint will listen to the port defined in the yml,
-    // dump the received payload and return it as is
-    // In real life, the coprossor will be on an other web server
-    // written in the language you're comfortable with.
+    // and do basic edits to the request and the response.
+    // In real life, the coprocessor will be on an other web server
+    // written in a language you're comfortable with.
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
-        let web_endpoint = Endpoint::from_router_service("/".to_string(), EchoServer {}.boxed());
+        let web_endpoint =
+            Endpoint::from_router_service("/".to_string(), SimpleEndpoint {}.boxed());
 
         let mut endpoints = MultiMap::new();
         let socket_addr: SocketAddr = format!("127.0.0.1:{}", self.configuration.port)
@@ -57,11 +58,11 @@ impl Plugin for EchoCoProcessor {
     }
 }
 
-// This is a dummy echo server, that will dump the payload and return it.
+// This is a simple server, that will do a couple of transforms to payloads and return it.
 // In real life you will implement this outside the router, in your favorite language.
-struct EchoServer {}
+struct SimpleEndpoint {}
 
-impl Service<router::Request> for EchoServer {
+impl Service<router::Request> for SimpleEndpoint {
     type Response = router::Response;
 
     type Error = BoxError;
@@ -130,10 +131,14 @@ impl Service<router::Request> for EchoServer {
                 });
             };
 
-            // let's mess with the uri
-            // json_body
-            //     .as_object_mut()
-            //     .map(|body| body.insert("uri".to_string(), json! { "http://localhost:4001"}));
+            // let's mess with the uri, but only if we are about to call the reviews service
+            if json_body.get("service_name")
+                == Some(&serde_json::Value::String("reviews".to_string()))
+            {
+                json_body
+                    .as_object_mut()
+                    .map(|body| body.insert("uri".to_string(), json! { "http://localhost:4002"}));
+            }
 
             tracing::info!("modified payload:");
             tracing::info!("{}", serde_json::to_string_pretty(&json_body).unwrap());
