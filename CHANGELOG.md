@@ -4,6 +4,131 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.10.3] - 2023-02-10
+
+## 🐛 Fixes
+
+### Per-type metrics based on FTV1 from subgraphs ([Issue #2551](https://github.com/apollographql/router/issues/2551))
+
+[Since version 1.7.0](https://github.com/apollographql/router/blob/dev/CHANGELOG.md#traces-wont-cause-missing-field-stats-issue-2267), Apollo Router generates metrics directly instead of deriving them from traces being sent to Apollo Studio. However, these metrics were incomplete. This adds, based on data reported by subgraphs, the following:
+
+- Statistics about each field of each type of the GraphQL type system
+- Statistics about errors at each path location of GraphQL responses
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2541
+
+## 🛠 Maintenance
+
+### Run `rustfmt` on `xtask/`, too ([Issue #2557](https://github.com/apollographql/router/issues/2557))
+
+Our `xtask` runs `cargo fmt --all` which reformats of Rust code in all crates of the workspace. However, the code of xtask itself is a separate workspace. In order for it to be formatted with the same configuration, running a second `cargo` command is required. This adds that second command, and applies the corresponding formatting.
+
+Fixes https://github.com/apollographql/router/issues/2557
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2561
+
+## 🧪 Experimental
+
+### Add support to JWT Authentication for JWK without specified `alg`
+
+Prior to this change, the router would only make use of a JWK for JWT verification if the key had an `alg` property.
+
+Now, the router searches through the set of configured JWKS (JSON Web Key Sets) to find the best matching JWK according to the following criteria:
+
+ - a matching `kid` and `alg`; or
+ - a matching `kid` and _algorithm family_ (`kty`, per the [RFC 7517](https://www.rfc-editor.org/rfc/rfc7517); or
+ - a matching _algorithm family_ (`kty`)
+
+The algorithm family is used when the JWKS contain a JWK for which no `alg` is specified.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2540
+
+# [1.10.2] - 2023-02-08
+
+## 🐛 Fixes
+
+### Resolve incorrect nullification when using `@interfaceObject` with particular response objects ([PR #2530](https://github.com/apollographql/router/pull/2530))
+
+> Note: This follows up on the v1.10.1 release which also attempted to fix this, but inadvertently excluded a required part of the fix due to an administrative oversight.
+
+The Federation 2.3.x `@interfaceObject` feature implies that an interface type in the supergraph may be locally handled as an object type by some specific subgraphs.  Therefore, such subgraphs may return objects whose `__typename` is the interface type in their response. In some cases, those `__typename` were leading the Router to unexpectedly and incorrectly nullify the underlying objects.  This was not caught in the initial integration of Federation 2.3.
+
+By [@pcmanus](https://github.com/pcmanus) in https://github.com/apollographql/router/pull/2530
+
+## 🛠 Maintenance
+
+### Refactor Uplink implementation ([Issue #2547](https://github.com/apollographql/router/issues/2547))
+
+The Apollo Uplink implementation within Apollo Router, which is used for fetching data _from_ Apollo GraphOS, has been decomposed into a reusable component so that it can be used more generically for fetching artifacts.  This generally improved code quality and resulted in several new tests being added.
+
+Additionally, our round-robin fetching behaviour is now more durable. Previously, on failure, there would be a delay before trying the next round-robin URL. Now, all URLs will be tried in sequence until exhausted. If ultimately all URLs fail, then the usual delay is applied before trying again.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2537
+
+### Improve Changelog management through conventions and tooling ([PR #2545](https://github.com/apollographql/router/pull/2545), [PR #2534](https://github.com/apollographql/router/pull/2534))
+
+New tooling and conventions adjust our "incoming changelog in the next release" mechanism to no longer rely on a single file, but instead leverage a "file per feature" pattern in conjunction with tooling to create that file.
+
+This stubbing takes place through the use of a new command:
+
+    cargo xtask changeset create
+
+For more information on the process, read the [README in the `./.changesets` directory](https://github.com/apollographql/router/blob/HEAD/.changesets/README.md) or consult the referenced Pull Requests below.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2545 and https://github.com/apollographql/router/pull/2534
+
+# [1.10.1] - 2023-02-07
+
+## 🐛 Fixes
+
+### Federation v2.3.1 ([Issue #2556](https://github.com/apollographql/router/issues/2556))
+
+Update to [Federation v2.3.1](https://github.com/apollographql/federation/blob/main/query-planner-js/CHANGELOG.md#231) to fix subtle bug in `@interfaceObject`.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2554
+
+## 🛠 Maintenance
+
+### Redis integration tests ([Issue #2174](https://github.com/apollographql/router/issues/2174))
+
+We now have integration tests for Redis usage with Automatic Persisted Queries and query planning.
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2179
+
+### CI: Enable compliance checks _except_ `licenses.html` update ([Issue #2514](https://github.com/apollographql/router/issues/2514))
+
+In [#1573](https://github.com/apollographql/router/pull/1573), we removed the compliance checks for non-release CI pipelines, because `cargo-about` output would change ever so slightly on each run.
+
+While many of the checks provided by the compliance check are license related, some checks prevent us from inadvertently downgrading libraries and needing to open, e.g., [Issue #2512](https://github.com/apollographql/router/pull/2512).
+
+This set of changes includes the following:
+- Introduce `cargo xtask licenses` to update licenses.html.
+- Separate compliance (`cargo-deny`, which includes license checks) and licenses generation (`cargo-about`) in `xtask`
+- Enable compliance as part of our CI checks for each open PR
+- Update `cargo xtask all` so it runs tests, checks compliance and updates `licenses.html`
+- Introduce `cargo xtask dev` so it checks compliance and runs tests
+
+Going forward, when developing on the Router source:
+
+- Use `cargo xtask all`  to make sure everything is up to date before a release.
+- Use `cargo xtask dev` before a PR.
+
+As a last note, updating `licenses.html` is now driven by `cargo xtask licenses`, which is part of the release checklist and automated through our release tooling in `xtask`.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2520
+
+### Fix flaky tracing integration test ([Issue #2548](https://github.com/apollographql/router/issues/2548))
+
+Disable federated-tracing (FTV1) in tests by lowering the sampling rate to zero so that consistent results are generated in test snapshots.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2549
+
+### Update to Rust 1.67
+
+We've updated the Minimum Supported Rust Version (MSRV) version to v1.67.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2496 and https://github.com/apollographql/router/pull/2499
+
 # [1.10.0] - 2023-02-01
 
 ## 🚀 Features

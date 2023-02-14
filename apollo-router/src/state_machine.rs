@@ -4,10 +4,12 @@ use futures::prelude::*;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
+use Event::HaltEntitlement;
 use Event::NoMoreConfiguration;
 use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
 use Event::Shutdown;
+use Event::WarnEntitlement;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -83,6 +85,14 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
+    pub(crate) async fn warn_entitlement(self) -> Self {
+        self
+    }
+
+    pub(crate) async fn halt_entitlement(self) -> Self {
+        self
+    }
+
     async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
@@ -131,13 +141,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 router_service_factory,
                 ..
             } => {
-                if let Some(new_configuration) = &new_configuration {
-                    if let Err(e) = configuration.is_compatible(new_configuration) {
-                        tracing::info!("reload not possible; {}", e);
-                        return self;
-                    }
-                }
-
                 tracing::info!("reloading");
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
                 new_state = match Self::try_start(
@@ -339,6 +342,8 @@ where
                         .update_inputs(&mut self, None, None, Some(Arc::new(entitlement)))
                         .await
                 }
+                WarnEntitlement => state.warn_entitlement().await,
+                HaltEntitlement => state.halt_entitlement().await,
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };

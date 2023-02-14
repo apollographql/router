@@ -51,9 +51,11 @@ use crate::services::router;
 use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
-use crate::uplink::entitlement::stream_entitlement;
 use crate::uplink::entitlement::Entitlement;
-use crate::uplink::schema::stream_supergraph;
+use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::schema_stream::SupergraphSdlQuery;
+use crate::uplink::stream_from_uplink;
+use crate::uplink::Endpoints;
 
 // For now this is unused:
 // TODO: Check with simon once the refactor is complete
@@ -239,17 +241,23 @@ impl SchemaSource {
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval, timeout)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
-                        })
+                stream_from_uplink::<SupergraphSdlQuery, String>(
+                    apollo_key,
+                    apollo_graph_ref,
+                    urls.map(Endpoints::round_robin),
+                    poll_interval,
+                    timeout,
+                )
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema) => Some(UpdateSchema(schema)),
+                        Err(e) => {
+                            tracing::error!("{}", e);
+                            None
+                        }
                     })
-                    .boxed()
+                })
+                .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
@@ -493,17 +501,23 @@ impl EntitlementSource {
                 urls,
                 poll_interval,
                 timeout,
-            } => stream_entitlement(apollo_key, apollo_graph_ref, urls, poll_interval, timeout)
-                .filter_map(|res| {
-                    future::ready(match res {
-                        Ok(entitlement) => Some(UpdateEntitlement(entitlement)),
-                        Err(e) => {
-                            tracing::error!("{}", e);
-                            None
-                        }
-                    })
+            } => stream_from_uplink::<EntitlementRequest, Entitlement>(
+                apollo_key,
+                apollo_graph_ref,
+                urls.map(Endpoints::round_robin),
+                poll_interval,
+                timeout,
+            )
+            .filter_map(|res| {
+                future::ready(match res {
+                    Ok(entitlement) => Some(UpdateEntitlement(entitlement)),
+                    Err(e) => {
+                        tracing::error!("{}", e);
+                        None
+                    }
                 })
-                .boxed(),
+            })
+            .boxed(),
             EntitlementSource::Env => {
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
@@ -767,6 +781,12 @@ pub(crate) enum Event {
 
     /// Update entitlement.
     UpdateEntitlement(Entitlement),
+
+    /// The entitlement has entered warn_at has passed.
+    WarnEntitlement,
+
+    /// The entitlement has halt_at has passed.
+    HaltEntitlement,
 
     /// There were no more updates to entitlement.
     NoMoreEntitlement,

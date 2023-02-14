@@ -24,7 +24,7 @@ telemetry:
       path: /metrics
 ```
 
-## Using in a containers environment
+### Using in a containers environment
 
 The prometheus endpoint listens to 127.0.0.1 by default, which won't allow connections issued from a network.
 While this is a safe default, _other containers won't be able to access the prometheus endpoint_, which will disable metric scraping.
@@ -56,6 +56,7 @@ apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 
 > Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
 
+### Currently available metrics
 The following metrics are available using Prometheus:
 
 - HTTP router request duration: `apollo_router_http_request_duration_seconds_bucket`

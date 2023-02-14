@@ -55,8 +55,8 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
     /// Logging configuration
-    #[serde(rename = "experimental_logging")]
-    pub(crate) logging: Option<Logging>,
+    #[serde(rename = "experimental_logging", default)]
+    pub(crate) logging: Logging,
     /// Metrics configuration
     pub(crate) metrics: Option<Metrics>,
     /// Tracing configuration
@@ -115,36 +115,19 @@ pub(crate) struct Tracing {
     pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Log format
     pub(crate) format: LoggingFormat,
+    /// Display the target in the logs
+    pub(crate) display_target: bool,
     /// Display the filename in the logs
     pub(crate) display_filename: bool,
     /// Display the line number in the logs
     pub(crate) display_line_number: bool,
     /// Log configuration to log request and response for subgraphs and supergraph
     pub(crate) when_header: Vec<HeaderLoggingCondition>,
-}
-
-impl Default for Logging {
-    fn default() -> Self {
-        Self {
-            format: Default::default(),
-            display_filename: default_display_filename(),
-            display_line_number: default_display_line_number(),
-            when_header: Default::default(),
-        }
-    }
-}
-
-pub(crate) const fn default_display_filename() -> bool {
-    true
-}
-
-pub(crate) const fn default_display_line_number() -> bool {
-    true
 }
 
 impl Logging {
@@ -607,6 +590,7 @@ mod tests {
     fn test_logging_conf_validation() {
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
@@ -621,6 +605,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
@@ -640,6 +625,7 @@ mod tests {
     fn test_logging_conf_should_log() {
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Matching {
@@ -657,6 +643,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
@@ -670,6 +657,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![
@@ -691,6 +679,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Matching {

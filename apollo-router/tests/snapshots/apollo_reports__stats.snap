@@ -34,7 +34,71 @@ traces_per_query:
           registered_operation_count: 0
           forbidden_operation_count: 0
           requests_without_field_instrumentation: 0
-        per_type_stat: {}
+        per_type_stat:
+          Product:
+            per_field_stat:
+              name:
+                return_type: String
+                errors_count: 0
+                observed_execution_count: 3
+                estimated_execution_count: 3
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              reviews:
+                return_type: "[Review]"
+                errors_count: 0
+                observed_execution_count: 3
+                estimated_execution_count: 3
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              upc:
+                return_type: String!
+                errors_count: 0
+                observed_execution_count: 3
+                estimated_execution_count: 3
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+          Query:
+            per_field_stat:
+              _entities:
+                return_type: "[_Entity]!"
+                errors_count: 0
+                observed_execution_count: 2
+                estimated_execution_count: 2
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              topProducts:
+                return_type: "[Product]"
+                errors_count: 0
+                observed_execution_count: 1
+                estimated_execution_count: 1
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+          Review:
+            per_field_stat:
+              author:
+                return_type: User
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+          User:
+            per_field_stat:
+              id:
+                return_type: ID!
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              name:
+                return_type: String
+                errors_count: 0
+                observed_execution_count: 2
+                estimated_execution_count: 2
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
     referenced_fields_by_type:
       Product:
         field_names:

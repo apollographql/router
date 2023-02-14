@@ -1,6 +1,8 @@
-- Fix #issue_number
+*Description here*
 
-*description here*
+Fixes #issue_number
+
+<!-- start metadata -->
 
 **Checklist**
 

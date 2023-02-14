@@ -1,13 +1,17 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
+
+// tonic does not derive `Eq` for the gRPC message types, which causes a warning from Clippy. The
+// current suggestion is to explicitly allow the lint in the module that imports the protos.
+// Read more: https://github.com/hyperium/tonic/issues/1056
+#![allow(clippy::derive_partial_eq_without_eq)]
+
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::str::FromStr;
-use std::time::Duration;
 use std::time::SystemTime;
 
 use buildstructor::Builder;
 use displaydoc::Display;
-use futures::Stream;
 use itertools::Itertools;
 use jsonwebtoken::decode;
 use jsonwebtoken::jwk::JwkSet;
@@ -19,7 +23,6 @@ use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
-use url::Url;
 
 use crate::spec::Schema;
 use crate::Configuration;
@@ -36,13 +39,13 @@ pub enum Error {
 }
 
 #[derive(Eq, PartialEq)]
-enum RouterState {
+pub(crate) enum RouterState {
     Startup,
     Running,
 }
 
 #[derive(Debug, Eq, PartialEq)]
-enum EntitlementState {
+pub(crate) enum EntitlementState {
     Oss,
     Entitled,
     Warning,
@@ -50,7 +53,7 @@ enum EntitlementState {
 }
 
 #[derive(Eq, PartialEq)]
-enum Action {
+pub(crate) enum Action {
     PreventStartup,
     PreventReload,
     Warn,
@@ -59,27 +62,27 @@ enum Action {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-enum Audience {
+pub(crate) enum Audience {
     SelfHosted,
     Cloud,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 #[serde(untagged)]
-enum OneOrMany<T> {
+pub(crate) enum OneOrMany<T> {
     One(T),
     Many(Vec<T>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
-struct Claims {
-    iss: String,
-    sub: String,
-    aud: OneOrMany<Audience>,
+pub(crate) struct Claims {
+    pub(crate) iss: String,
+    pub(crate) sub: String,
+    pub(crate) aud: OneOrMany<Audience>,
     #[serde(with = "serde_millis", rename = "warnAt")]
-    warn_at: SystemTime,
+    pub(crate) warn_at: SystemTime,
     #[serde(with = "serde_millis", rename = "haltAt")]
-    halt_at: SystemTime,
+    pub(crate) halt_at: SystemTime,
 }
 
 impl Claims {
@@ -133,11 +136,25 @@ impl EntitlementReport {
 
 /// Entitlement controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
-#[allow(dead_code)]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Entitlement {
-    claims: Option<Claims>,
-    configuration_restrictions: Vec<ConfigurationRestriction>,
+    pub(crate) claims: Option<Claims>,
+    pub(crate) configuration_restrictions: Vec<ConfigurationRestriction>,
+}
+
+impl Display for Entitlement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        if let Some(claims) = &self.claims {
+            write!(
+                f,
+                "{}",
+                serde_json::to_string(claims)
+                    .unwrap_or_else(|_| "claim serialization error".to_string())
+            )
+        } else {
+            write!(f, "no entitlement")
+        }
+    }
 }
 
 impl FromStr for Entitlement {
@@ -177,20 +194,9 @@ impl FromStr for Entitlement {
     }
 }
 
-pub(crate) fn stream_entitlement(
-    _api_key: String,
-    _graph_ref: String,
-    _urls: Option<Vec<Url>>,
-    mut _interval: Duration,
-    _timeout: Duration,
-) -> impl Stream<Item = Result<Entitlement, String>> {
-    // TODO This will be tackled as a separate PR
-    futures::stream::empty()
-}
-
 /// An individual check for the router.yaml.
 #[derive(Builder, Clone, Debug, Serialize, Deserialize)]
-struct ConfigurationRestriction {
+pub(crate) struct ConfigurationRestriction {
     name: String,
     path: String,
     value: Value,
@@ -341,13 +347,13 @@ mod test {
     }
 
     #[test]
-    fn test_oss_commercial_features_via_config() {
+    fn test_oss_restricted_features_via_config() {
         let report = check(
             Entitlement {
                 claims: None,
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -358,13 +364,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_warning() {
+    fn test_restricted_features_via_config_warning() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(-1, 1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -375,13 +381,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_halt() {
+    fn test_restricted_features_via_config_halt() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(-1, -1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 
@@ -392,13 +398,13 @@ mod test {
     }
 
     #[test]
-    fn test_commercial_features_via_config_ok() {
+    fn test_restricted_features_via_config_ok() {
         let report = check(
             Entitlement {
                 claims: Some(test_claim(1, 1)),
                 configuration_restrictions: configuration_restrictions(),
             },
-            include_str!("testdata/commercial.router.yaml"),
+            include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
 

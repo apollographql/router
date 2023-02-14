@@ -3,11 +3,11 @@
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;
+use std::fmt::Debug;
 use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use anyhow::Context;
 use anyhow::Result;
 use clap::ArgAction;
 use clap::Args;
@@ -15,11 +15,6 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
 use directories::ProjectDirs;
-use once_cell::sync::OnceCell;
-use tracing::dispatcher::with_default;
-use tracing::dispatcher::Dispatch;
-use tracing::instrument::WithSubscriber;
-use tracing_subscriber::EnvFilter;
 use url::ParseError;
 use url::Url;
 
@@ -27,6 +22,7 @@ use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::ConfigurationError;
+use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
@@ -45,7 +41,6 @@ pub(crate) static mut DHAT_HEAP_PROFILER: OnceCell<dhat::Profiler> = OnceCell::n
 #[cfg(feature = "dhat-ad-hoc")]
 pub(crate) static mut DHAT_AD_HOC_PROFILER: OnceCell<dhat::Profiler> = OnceCell::new();
 
-pub(crate) static GLOBAL_ENV_FILTER: OnceCell<String> = OnceCell::new();
 pub(crate) const APOLLO_ROUTER_DEV_ENV: &str = "APOLLO_ROUTER_DEV";
 
 // Note: Constructor/Destructor functions may not play nicely with tracing, since they run after
@@ -340,24 +335,8 @@ impl Executable {
         }
 
         copy_args_to_env();
-
-        let builder = tracing_subscriber::fmt::fmt().with_env_filter(
-            EnvFilter::try_new(&opt.log_level).context("could not parse log configuration")?,
-        );
-
-        let dispatcher = if atty::is(atty::Stream::Stdout) {
-            Dispatch::new(
-                builder
-                    .with_target(!opt.log_level.eq_ignore_ascii_case("info"))
-                    .finish(),
-            )
-        } else {
-            Dispatch::new(builder.json().finish())
-        };
-
-        GLOBAL_ENV_FILTER.set(opt.log_level.clone()).expect(
-            "failed setting the global env filter. The start() function should only be called once",
-        );
+        init_telemetry(&opt.log_level)?;
+        setup_panic_handler();
 
         if opt.schema {
             eprintln!("`router --schema` is deprecated. Use `router config schema`");
@@ -366,7 +345,7 @@ impl Executable {
             return Ok(());
         }
 
-        match opt.command.as_ref() {
+        let result = match opt.command.as_ref() {
             Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Schema,
             })) => {
@@ -388,15 +367,12 @@ impl Executable {
                 configuration::print_all_experimental_conf();
                 Ok(())
             }
-            None => {
-                // The dispatcher we created is passed explicitly here to make sure we display the logs
-                // in the initialization phase and in the state machine code, before a global subscriber
-                // is set using the configuration file
-                Self::inner_start(shutdown, schema, config, opt, dispatcher.clone())
-                    .with_subscriber(dispatcher)
-                    .await
-            }
-        }
+            None => Self::inner_start(shutdown, schema, config, opt).await,
+        };
+
+        //We should be good to shutdown the tracer provider now as the router should have finished everything.
+        opentelemetry::global::shutdown_tracer_provider();
+        result
     }
 
     async fn inner_start(
@@ -404,7 +380,6 @@ impl Executable {
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
         mut opt: Opt,
-        dispatcher: Dispatch,
     ) -> Result<()> {
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
@@ -452,8 +427,6 @@ impl Executable {
             (_, Some(supergraph_path), _) => {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
-
-                setup_panic_handler(dispatcher.clone());
 
                 let supergraph_path = if supergraph_path.is_relative() {
                     current_directory.join(supergraph_path)
@@ -543,7 +516,7 @@ impl Executable {
     }
 }
 
-fn setup_panic_handler(dispatcher: Dispatch) {
+fn setup_panic_handler() {
     // Redirect panics to the logs.
     let backtrace_env = std::env::var("RUST_BACKTRACE");
     let show_backtraces =
@@ -552,17 +525,15 @@ fn setup_panic_handler(dispatcher: Dispatch) {
         tracing::warn!("RUST_BACKTRACE={} detected. This is useful for diagnostics but will have a performance impact and may leak sensitive information", backtrace_env.as_ref().unwrap());
     }
     std::panic::set_hook(Box::new(move |e| {
-        with_default(&dispatcher, || {
-            if show_backtraces {
-                let backtrace = backtrace::Backtrace::new();
-                tracing::error!("{}\n{:?}", e, backtrace)
-            } else {
-                tracing::error!("{}", e)
-            }
-            // Once we've panicked the behaviour of the router is non-deterministic
-            // We've logged out the panic details. Terminate with an error code
-            std::process::exit(1);
-        });
+        if show_backtraces {
+            let backtrace = std::backtrace::Backtrace::capture();
+            tracing::error!("{}\n{:?}", e, backtrace)
+        } else {
+            tracing::error!("{}", e)
+        }
+        // Once we've panic'ed the behaviour of the router is non-deterministic
+        // We've logged out the panic details. Terminate with an error code
+        std::process::exit(1);
     }));
 }
 
