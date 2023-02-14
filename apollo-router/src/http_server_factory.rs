@@ -6,6 +6,7 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use itertools::Itertools;
 use multimap::MultiMap;
+use tokio::sync::mpsc;
 
 use super::router::ApolloRouterError;
 use crate::configuration::Configuration;
@@ -27,6 +28,7 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory;
@@ -56,6 +58,9 @@ pub(crate) struct HttpServerHandle {
     /// The listen addresses that the graphql server is actually listening on.
     /// If a socket address specified port zero the OS will assign a random free port.
     graphql_listen_address: Option<ListenAddr>,
+
+    /// copied into every client session, to track if there are still running sessions when shutting down
+    all_connections_stopped_sender: mpsc::Sender<()>,
 }
 
 impl HttpServerHandle {
@@ -66,12 +71,14 @@ impl HttpServerHandle {
         >,
         graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
+        all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self {
         Self {
             shutdown_sender,
             server_future,
             graphql_listen_address,
             listen_addresses,
+            all_connections_stopped_sender,
         }
     }
 
@@ -121,6 +128,7 @@ impl HttpServerHandle {
                 Some(main_listener),
                 extra_listeners,
                 web_endpoints,
+                self.all_connections_stopped_sender.clone(),
             )
             .await?;
         tracing::debug!(
@@ -201,12 +209,15 @@ mod tests {
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Tcp(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap());
+        let (all_connections_stopped_sender, all_connections_stopped_signal) =
+            mpsc::channel::<()>(1);
 
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok((listener, vec![]))).boxed(),
             Some(SocketAddr::from_str("127.0.0.1:0").unwrap().into()),
             Default::default(),
+            all_connections_stopped_sender,
         )
         .shutdown()
         .await
@@ -225,12 +236,15 @@ mod tests {
         let sock = temp_dir.as_ref().join("sock");
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Unix(tokio::net::UnixListener::bind(&sock).unwrap());
+        let (all_connections_stopped_sender, all_connections_stopped_signal) =
+            mpsc::channel::<()>(1);
 
         HttpServerHandle::new(
             shutdown_sender,
             futures::future::ready(Ok((listener, vec![]))).boxed(),
             Some(ListenAddr::UnixSocket(sock)),
             Default::default(),
+            all_connections_stopped_sender,
         )
         .shutdown()
         .await

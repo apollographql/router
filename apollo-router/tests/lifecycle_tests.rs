@@ -203,7 +203,7 @@ include_subgraph_errors:
             .await
     });
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
     println!("started router");
 
     let client = reqwest::Client::new();

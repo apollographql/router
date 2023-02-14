@@ -20,6 +20,7 @@ use serde::Serialize;
 use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
+use tokio::sync::mpsc;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -146,6 +147,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory,
@@ -202,6 +204,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 main_listener,
                 actual_main_listen_address.clone(),
                 all_routers.main.1,
+                all_connections_stopped_sender.clone(),
             );
 
             tracing::info!(
@@ -235,8 +238,12 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 listeners_and_routers
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
-                        let (server, shutdown_sender) =
-                            serve_router_on_listen_addr(listener, listen_addr.clone(), router);
+                        let (server, shutdown_sender) = serve_router_on_listen_addr(
+                            listener,
+                            listen_addr.clone(),
+                            router,
+                            all_connections_stopped_sender.clone(),
+                        );
                         (
                             server.map(|listener| (listen_addr, listener)),
                             shutdown_sender,
@@ -268,6 +275,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 server_future,
                 Some(actual_main_listen_address),
                 actual_extra_listen_adresses,
+                all_connections_stopped_sender,
             ))
         })
     }
