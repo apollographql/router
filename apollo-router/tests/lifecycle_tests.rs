@@ -131,7 +131,7 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
 
     tokio::task::spawn(async move {
         if let Err(e) = server.await {
-            eprintln!("server error: {}", e);
+            eprintln!("server error: {e}");
         }
     });
 
@@ -194,7 +194,7 @@ include_subgraph_errors:
         let _: Result<(), _> = shutdown_receiver.await;
     };
 
-    let router_handle = tokio::task::spawn(async move {
+    let _router_handle = tokio::task::spawn(async move {
         Executable::builder()
             .shutdown(ShutdownSource::Custom(Box::pin(f)))
             .schema(SchemaSource::Static { schema_sdl })
