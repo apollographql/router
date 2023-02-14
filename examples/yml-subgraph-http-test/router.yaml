@@ -23,4 +23,3 @@ plugins:
           headers: true # All of these data content attributes are optional and false by default.
           context: true
           body: true
-          sdl: false
