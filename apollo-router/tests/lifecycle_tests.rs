@@ -1,22 +1,24 @@
-use std::{
-    convert::Infallible,
-    net::{Shutdown, SocketAddr},
-    time::Duration,
-};
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::time::Duration;
 
-use apollo_router::{
-    graphql, Configuration, ConfigurationSource, Executable, SchemaSource, ShutdownSource,
-};
-use bytes::Bytes;
-use http::{header::CONTENT_TYPE, HeaderValue, Request, Response};
-use http_body::Full;
-use hyper::{
-    service::{make_service_fn, service_fn},
-    Body, Server,
-};
+use apollo_router::graphql;
+use apollo_router::Configuration;
+use apollo_router::ConfigurationSource;
+use apollo_router::Executable;
+use apollo_router::SchemaSource;
+use apollo_router::ShutdownSource;
+use http::header::CONTENT_TYPE;
+use http::HeaderValue;
+use http::Request;
+use http::Response;
+use hyper::service::make_service_fn;
+use hyper::service::service_fn;
+use hyper::Body;
+use hyper::Server;
 use mime::APPLICATION_JSON;
 use serde_json::json;
-use tokio::{net::TcpListener, sync::oneshot};
+use tokio::sync::oneshot;
 use tower::BoxError;
 
 use crate::common::IntegrationTest;
@@ -98,7 +100,6 @@ async fn create_router(config: &str) -> Result<IntegrationTest, BoxError> {
 
     Ok(IntegrationTest::new(tracer, opentelemetry_jaeger::Propagator::new(), config).await)
 }
-
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_graceful_shutdown() -> Result<(), BoxError> {
