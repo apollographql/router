@@ -729,7 +729,7 @@ mod tests {
             main_listener: Option<Listener>,
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
-            all_connections_stopped_sender: mpsc::Sender<()>,
+            _all_connections_stopped_sender: mpsc::Sender<()>,
         ) -> Self::Future
         where
             RF: RouterFactory,
@@ -781,8 +781,7 @@ mod tests {
                         Ok((main_listener, vec![]))
                     };
 
-                    let (all_connections_stopped_sender, all_connections_stopped_signal) =
-                        mpsc::channel::<()>(1);
+                    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
                     Ok(HttpServerHandle::new(
                         shutdown_sender,

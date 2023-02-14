@@ -209,8 +209,7 @@ mod tests {
     async fn sanity() {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Tcp(tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap());
-        let (all_connections_stopped_sender, all_connections_stopped_signal) =
-            mpsc::channel::<()>(1);
+        let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
         HttpServerHandle::new(
             shutdown_sender,
@@ -236,8 +235,7 @@ mod tests {
         let sock = temp_dir.as_ref().join("sock");
         let (shutdown_sender, shutdown_receiver) = oneshot::channel();
         let listener = Listener::Unix(tokio::net::UnixListener::bind(&sock).unwrap());
-        let (all_connections_stopped_sender, all_connections_stopped_signal) =
-            mpsc::channel::<()>(1);
+        let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
         HttpServerHandle::new(
             shutdown_sender,
