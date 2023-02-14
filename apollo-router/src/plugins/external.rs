@@ -297,8 +297,7 @@ impl RouterStage {
                         .headers
                         .then(|| externalize_header_map(&parts.headers))
                         .transpose()?;
-                    // TODO: why is it a serde_json::Value here ?
-                    // is it because the request and the response should be the same?
+
                     let body_to_send = request_config
                         .body
                         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
@@ -309,7 +308,7 @@ impl RouterStage {
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
                         stage: PipelineStep::RouterRequest.to_string(),
-                        control: Control::default(),
+                        control: Some(Control::default()),
                         id: TraceId::maybe_new().map(|id| id.to_string()),
                         headers: headers_to_send,
                         body: body_to_send,
@@ -325,12 +324,16 @@ impl RouterStage {
                     tracing::debug!(?co_processor_result, "co-processor returned");
                     let co_processor_output = co_processor_result?;
 
+                    validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
+                    // unwrap is safe here because validate_coprocessor_output made sure control is available
+                    let control = co_processor_output.control.unwrap();
+
                     // Thirdly, we need to interpret the control flow which may have been
                     // updated by our co-processor and decide if we should proceed or stop.
 
-                    if matches!(co_processor_output.control, Control::Break(_)) {
+                    if matches!(control, Control::Break(_)) {
                         // Ensure the code is a valid http status code
-                        let code = co_processor_output.control.get_http_status()?;
+                        let code = control.get_http_status()?;
 
                         let res = if !code.is_success() {
                             router::Response::error_builder()
@@ -408,12 +411,10 @@ impl RouterStage {
                     let context_to_send = response_config.context.then(|| response.context.clone());
                     let sdl = response_config.sdl.then(|| sdl.clone().to_string());
 
-                    // TODO: why is it a serde_json::Value here ?
-                    // is it because the request and the response should be the same?
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
                         stage: PipelineStep::RouterResponse.to_string(),
-                        control: Control::default(),
+                        control: None,
                         id: TraceId::maybe_new().map(|id| id.to_string()),
                         headers: headers_to_send,
                         body: body_to_send,
@@ -429,6 +430,11 @@ impl RouterStage {
                     response.context.leave_active_request().await;
                     tracing::debug!(?co_processor_result, "co-processor returned");
                     let co_processor_output = co_processor_result?;
+
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::RouterResponse,
+                    )?;
 
                     // Third, process our reply and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming response with the updated bits if they
@@ -519,8 +525,7 @@ impl SubgraphStage {
                         .headers
                         .then(|| externalize_header_map(&parts.headers))
                         .transpose()?;
-                    // TODO: why is it a serde_json::Value here ?
-                    // is it because the request and the response should be the same?
+
                     let body_to_send = request_config
                         .body
                         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
@@ -531,7 +536,7 @@ impl SubgraphStage {
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
                         stage: PipelineStep::SubgraphRequest.to_string(),
-                        control: Control::default(),
+                        control: Some(Control::default()),
                         id: TraceId::maybe_new().map(|id| id.to_string()),
                         headers: headers_to_send,
                         body: body_to_send,
@@ -547,14 +552,19 @@ impl SubgraphStage {
                     tracing::debug!(?co_processor_result, "co-processor returned");
                     let co_processor_output = co_processor_result?;
 
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::SubgraphRequest,
+                    )?;
+                    // unwrap is safe here because validate_coprocessor_output made sure control is available
+                    let control = co_processor_output.control.unwrap();
+
                     // Thirdly, we need to interpret the control flow which may have been
                     // updated by our co-processor and decide if we should proceed or stop.
 
-                    // TODO[igni]: assert stage and version
-
-                    if matches!(co_processor_output.control, Control::Break(_)) {
+                    if matches!(control, Control::Break(_)) {
                         // Ensure the code is a valid http status code
-                        let code = co_processor_output.control.get_http_status()?;
+                        let code = control.get_http_status()?;
 
                         let res = if !code.is_success() {
                             subgraph::Response::error_builder()
@@ -633,8 +643,7 @@ impl SubgraphStage {
                         .headers
                         .then(|| externalize_header_map(&parts.headers))
                         .transpose()?;
-                    // TODO: why is it a serde_json::Value here ?
-                    // is it because the request and the response should be the same?
+
                     let body_to_send = response_config
                         .body
                         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
@@ -644,7 +653,7 @@ impl SubgraphStage {
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
                         stage: PipelineStep::SubgraphResponse.to_string(),
-                        control: Control::default(),
+                        control: None,
                         id: TraceId::maybe_new().map(|id| id.to_string()),
                         headers: headers_to_send,
                         body: body_to_send,
@@ -660,7 +669,10 @@ impl SubgraphStage {
                     tracing::debug!(?co_processor_result, "co-processor returned");
                     let co_processor_output = co_processor_result?;
 
-                    // TODO[igni]: assert stage and version
+                    validate_coprocessor_output(
+                        &co_processor_output,
+                        PipelineStep::SubgraphResponse,
+                    )?;
 
                     // Third, process our reply and act on the contents. Our processing logic is
                     // that we replace "bits" of our incoming response with the updated bits if they
@@ -709,6 +721,31 @@ impl SubgraphStage {
 
 // -----------------------------------------------------------------------------------------------------
 
+fn validate_coprocessor_output(
+    co_processor_output: &Externalizable<serde_json::Value>,
+    expected_step: PipelineStep,
+) -> Result<(), BoxError> {
+    if co_processor_output.version != EXTERNALIZABLE_VERSION {
+        return Err(BoxError::from(format!(
+            "Coprocessor returned the wrong version: expected `{}` found `{}`",
+            EXTERNALIZABLE_VERSION, co_processor_output.version,
+        )));
+    }
+    if co_processor_output.stage != expected_step.to_string() {
+        return Err(BoxError::from(format!(
+            "Coprocessor returned the wrong stage: expected `{}` found `{}`",
+            expected_step, co_processor_output.stage,
+        )));
+    }
+    if co_processor_output.control.is_none() && co_processor_output.stage.ends_with("Request") {
+        return Err(BoxError::from(format!(
+            "Coprocessor response is missing the `control` parameter in the `{}` stage. You must specify \"control\": \"Continue\" or \"control\": \"Break\"",
+            co_processor_output.stage,
+        )));
+    }
+    Ok(())
+}
+
 /// Convert a HeaderMap into a HashMap
 fn externalize_header_map(
     input: &HeaderMap<HeaderValue>,
@@ -750,6 +787,7 @@ mod tests {
 
     use super::*;
     use crate::plugin::test::MockHttpClientService;
+    use crate::plugin::test::MockRouterService;
     use crate::services::router_service;
 
     #[tokio::test]
@@ -793,6 +831,185 @@ mod tests {
             .build_router()
             .await
             .is_err());
+    }
+
+    #[tokio::test]
+    async fn coprocessor_returning_the_wrong_version_should_fail() {
+        let router_stage = RouterStage {
+            request: Some(RouterConf {
+                headers: true,
+                /// Send the context
+                context: true,
+                /// Send the body
+                body: true,
+                /// Send the SDL
+                sdl: true,
+            }),
+            response: None,
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mock_router_service = MockRouterService::new();
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                // Wrong version!
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                    "version": 2,
+                    "stage": "RouterRequest",
+                    "control": "Continue",
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "body": {
+                      "query": "query Long {\n  me {\n  name\n}\n}"
+                    },
+                    "context": {
+                        "entries": {}
+                    },
+                    "sdl": "the sdl shouldnt change"
+                  }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        assert_eq!(
+            "Coprocessor returned the wrong version: expected `1` found `2`",
+            service
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn coprocessor_returning_the_wrong_stage_should_fail() {
+        let router_stage = RouterStage {
+            request: Some(RouterConf {
+                headers: true,
+                /// Send the context
+                context: true,
+                /// Send the body
+                body: true,
+                /// Send the SDL
+                sdl: true,
+            }),
+            response: None,
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mock_router_service = MockRouterService::new();
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                // Wrong stage!
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                            "version": 1,
+                            "stage": "RouterResponse",
+                            "control": "Continue",
+                            "id": "1b19c05fdafc521016df33148ad63c1b",
+                            "body": {
+                            "query": "query Long {\n  me {\n  name\n}\n}"
+                            },
+                            "context": {
+                                "entries": {}
+                            },
+                            "sdl": "the sdl shouldnt change"
+                        }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        assert_eq!(
+            "Coprocessor returned the wrong stage: expected `RouterRequest` found `RouterResponse`",
+            service
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn coprocessor_missing_request_control_should_fail() {
+        let router_stage = RouterStage {
+            request: Some(RouterConf {
+                headers: true,
+                /// Send the context
+                context: true,
+                /// Send the body
+                body: true,
+                /// Send the SDL
+                sdl: true,
+            }),
+            response: None,
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mock_router_service = MockRouterService::new();
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                // Wrong stage!
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "id": "1b19c05fdafc521016df33148ad63c1b",
+                            "body": {
+                            "query": "query Long {\n  me {\n  name\n}\n}"
+                            },
+                            "context": {
+                                "entries": {}
+                            },
+                            "sdl": "the sdl shouldnt change"
+                        }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        assert_eq!(
+            "Coprocessor response is missing the `control` parameter in the `RouterRequest` stage. You must specify \"control\": \"Continue\" or \"control\": \"Break\"",
+            service
+                .oneshot(request.try_into().unwrap())
+                .await
+                .unwrap_err()
+                .to_string()
+        );
     }
 
     #[tokio::test]

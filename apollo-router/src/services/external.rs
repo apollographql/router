@@ -67,7 +67,7 @@ impl Control {
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
-    pub(crate) control: Control,
+    pub(crate) control: Option<Control>,
     pub(crate) id: Option<String>,
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
     pub(crate) body: Option<T>,
