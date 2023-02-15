@@ -77,7 +77,7 @@ impl Service<router::Request> for SimpleEndpoint {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        tracing::info!("received request");
+        tracing::info!("📞 received request");
         tracing::info!("JSON context:");
         tracing::info!("{}", serde_json::to_string_pretty(&req.context).unwrap());
 
@@ -87,7 +87,7 @@ impl Service<router::Request> for SimpleEndpoint {
             let body = hyper::body::to_bytes(body).await.unwrap();
 
             let mut json_body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            tracing::info!("got payload:");
+            tracing::info!("✉️ got payload:");
             tracing::info!("{}", serde_json::to_string_pretty(&json_body).unwrap());
 
             // let's add an arbitrary header to the request
