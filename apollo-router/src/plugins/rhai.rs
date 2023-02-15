@@ -1610,6 +1610,7 @@ impl Rhai {
             .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{x:?}")
             })
+            .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
             .register_fn("uuid", || -> String {
                 Uuid::new_v4().to_string()
             })
@@ -1619,7 +1620,6 @@ impl Rhai {
                     Err(_)=>0
                 }
             })
-            .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
             // Add query plan getter to execution request
             .register_get(
                 "query_plan",
