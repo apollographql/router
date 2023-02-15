@@ -716,9 +716,6 @@ fn test_configuration_validate_and_sanitize() {
 
 #[test]
 fn load_tls() {
-    let certificate = include_str!("testdata/server.crt");
-    let key = include_str!("testdata/server.key");
-
     let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     cert_path.push("src");
     cert_path.push("configuration");
