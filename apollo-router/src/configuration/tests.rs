@@ -713,3 +713,30 @@ fn test_configuration_validate_and_sanitize() {
         .build()
         .is_err());
 }
+
+#[test]
+fn load_tls() {
+    let certificate = include_str!("testdata/server.crt");
+    let key = include_str!("testdata/server.key");
+
+    let cfg = validate_yaml_configuration(
+        &format!(
+            r#"
+tls:
+  supergraph:
+    certificate: {certificate}
+    key: {key}
+    certificate_chain: {certificate}
+        "#,
+        ),
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    let error = cfg
+        .cors
+        .into_layer()
+        .expect_err("should have resulted in an error");
+    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
+    cfg.tls.supergraph.unwrap().tls_config().unwrap();
+}

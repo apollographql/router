@@ -129,6 +129,9 @@ pub enum ApolloRouterError {
 
     /// tried to register two endpoints on `{0}:{1}{2}`
     SameRouteUsedTwice(IpAddr, u16, String),
+
+    /// TLS configuration error: {0}
+    Rustls(rustls::Error),
 }
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
@@ -740,6 +743,7 @@ impl RouterHttpServer {
             .await
             .graphql_listen_address
             .clone()
+            .map(Into::into)
     }
 
     /// Returns the extra listen addresses the router can receive requests to.
@@ -752,7 +756,10 @@ impl RouterHttpServer {
             .read()
             .await
             .extra_listen_addresses
-            .clone()
+            .iter()
+            .cloned()
+            .map(Into::into)
+            .collect()
     }
 
     /// Trigger and wait for graceful shutdown
