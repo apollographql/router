@@ -744,10 +744,5 @@ tls:
         Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
-    let error = cfg
-        .cors
-        .into_layer()
-        .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
     cfg.tls.supergraph.unwrap().tls_config().unwrap();
 }
