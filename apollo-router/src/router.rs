@@ -2,7 +2,8 @@
 #![allow(missing_docs)] // FIXME
 #![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
@@ -826,7 +827,7 @@ impl Display for Event {
             NoMoreEntitlement => "NoMoreEntitlement",
             Shutdown => "Shutdown",
         };
-        write!(f, "{}", name)
+        write!(f, "{name}")
     }
 }
 

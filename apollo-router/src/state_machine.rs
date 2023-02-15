@@ -188,6 +188,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn try_start<S>(
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
@@ -419,7 +420,10 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
-    use crate::uplink::entitlement::{Audience, Claims, ConfigurationRestriction, OneOrMany};
+    use crate::uplink::entitlement::Audience;
+    use crate::uplink::entitlement::Claims;
+    use crate::uplink::entitlement::ConfigurationRestriction;
+    use crate::uplink::entitlement::OneOrMany;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
