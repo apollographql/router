@@ -41,9 +41,7 @@ pub(super) fn ensure_endpoints_consistency(
     endpoints: &MultiMap<ListenAddr, Endpoint>,
 ) -> Result<(), ApolloRouterError> {
     // check the main endpoint
-    if let Some(supergraph_listen_endpoint) =
-        endpoints.get_vec(&configuration.supergraph.listen.clone())
-    {
+    if let Some(supergraph_listen_endpoint) = endpoints.get_vec(&configuration.supergraph.listen) {
         if supergraph_listen_endpoint
             .iter()
             .any(|e| e.path == configuration.supergraph.path)
@@ -82,7 +80,7 @@ pub(super) fn extra_endpoints(
     let mut mm: MultiMap<ListenAddr, axum::Router> = Default::default();
     mm.extend(endpoints.into_iter().map(|(listen_addr, e)| {
         (
-            listen_addr.into(),
+            listen_addr,
             e.into_iter().map(|e| e.into_router()).collect::<Vec<_>>(),
         )
     }));

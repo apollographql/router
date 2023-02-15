@@ -743,7 +743,6 @@ impl RouterHttpServer {
             .await
             .graphql_listen_address
             .clone()
-            .map(Into::into)
     }
 
     /// Returns the extra listen addresses the router can receive requests to.
@@ -756,10 +755,7 @@ impl RouterHttpServer {
             .read()
             .await
             .extra_listen_addresses
-            .iter()
-            .cloned()
-            .map(Into::into)
-            .collect()
+            .clone()
     }
 
     /// Trigger and wait for graceful shutdown

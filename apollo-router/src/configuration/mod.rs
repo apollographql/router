@@ -750,17 +750,17 @@ fn load_keys(data: &str) -> io::Result<PrivateKey> {
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))?;
 
     if keys.len() > 1 {
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "expected exactly one private key",
-        ));
+        ))
     } else if let Some(key) = keys.pop() {
-        return Ok(PrivateKey(key));
+        Ok(PrivateKey(key))
     } else {
-        return Err(io::Error::new(
+        Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "expected exactly one private key",
-        ));
+        ))
     }
 }
 
