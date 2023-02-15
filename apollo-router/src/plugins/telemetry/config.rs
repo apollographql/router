@@ -11,7 +11,8 @@ use opentelemetry::KeyValue;
 use opentelemetry::Value;
 use regex::Regex;
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
@@ -632,8 +633,9 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
+
+    use super::*;
 
     #[test]
     fn test_logging_conf_validation() {
