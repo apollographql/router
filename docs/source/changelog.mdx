@@ -1,0 +1,60 @@
+---
+title: Apollo Router feature changelog
+description: For recent releases
+---
+
+> For a _complete_ Apollo Router changelog that includes details on bug fixes, additional features, and individual _patch_ releases, see [this page](https://github.com/apollographql/router/blob/main/CHANGELOG.md).
+
+This changelog highlights features added in recent major- and minor-version releases of the Apollo Router, along with the version of Apollo Federation that each router release is compiled against.
+
+We strongly recommend regularly updating your router to the latest version to take advantage of these features.
+
+## 1.10.x
+
+> ⚠️ **Use version 1.10.3 or later!** Previous 1.10.x versions include bugs related to the [entity interface feature](/federation/federated-types/interfaces) introduced in Federation 2.3.
+
+**First released:** 2023-02-01
+
+**Federation version:** 2.3.x ✨
+
+#### Highlighted features
+
+- ✨ First release compiled against Apollo Federation 2.3.x
+- Enables use of [entity interfaces](/federation/federated-types/interfaces) (Federation 2.3 feature)
+- Adds support for `max_age` [CORS header](./configuration/cors#all-cors-options)
+- Expands wildcard support for [GraphQL endpoint path](/configuration/overview#endpoint-path)
+
+## 1.9.x
+
+**First released:** 2023-01-20
+
+**Federation version:** 2.2.x
+
+#### Highlighted features
+
+- Adds support for [specifying certificate authorities](./configuration/overview/#tls) used for TLS connections to subgraphs
+- Expands support for [automated persisted queries (APQ)](./configuration/overview#automatic-persisted-queries-apq), including using APQ for subgraph queries
+- Adds [anonymous usage telemetry reporting](./privacy/) to help guide router development
+
+
+## 1.8.x
+
+**First released:** 2023-01-11
+
+**Federation version:** 2.2.x
+
+#### Highlighted features
+
+- Adds generally available support for [the `@defer` directive](./executing-operations/defer-support/)
+
+## 1.7.x
+
+**First released:** 2023-02-01
+
+**Federation version:** 2.2.x
+
+#### Highlighted features
+
+## Earlier versions
+
+See the [complete changelog](https://github.com/apollographql/router/blob/main/CHANGELOG.md).

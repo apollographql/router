@@ -8,6 +8,7 @@
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
     "Federation version support": "/federation-version-support",
+    "Changelog": "/changelog",
     "Configuring the Router": {
       "Overview": "/configuration/overview",
       "Caching": "/configuration/caching",
