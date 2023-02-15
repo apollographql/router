@@ -1613,7 +1613,7 @@ impl Rhai {
             .register_fn("uuid", || -> String {
                 Uuid::new_v4().to_string()
             })
-            .register_fn("now", ||-> u64 {
+            .register_fn("unix_now", ||-> u64 {
                 match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
                     Ok(v)=> v.as_secs(),
                     Err(_)=>0

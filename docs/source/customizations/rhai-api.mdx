@@ -196,6 +196,26 @@ If you wish to get multiple values for a header key, then you must use the `valu
 
 Look at the examples to see how this works in practice.
 
+## Unix timestamp
+
+Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_now();
+}
+```
+
+## Unique IDs (UUID)
+
+Your Rhai customization can use the function `uuid()` to obtain a UUIDv4 ID.
+ 
+```rhai
+fn supergraph_service(service) {
+    let id = uuid();
+}
+```
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
