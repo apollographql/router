@@ -151,7 +151,7 @@ impl FromStr for Entitlement {
                 validation.set_audience(&["CLOUD", "SELF_HOSTED"]);
 
                 decode::<Claims>(
-                    jwt,
+                    jwt.trim(),
                     &DecodingKey::from_jwk(jwk).expect("router.jwks.json must be valid"),
                     &validation,
                 )
@@ -333,6 +333,21 @@ mod test {
     #[test]
     fn test_entitlement_parse() {
         let entitlement = Entitlement::from_str("eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw").expect("must be able to decode JWT");
+        assert_eq!(
+            entitlement.claims,
+            Some(Claims {
+                iss: "https://www.apollographql.com/".to_string(),
+                sub: "apollo".to_string(),
+                aud: OneOrMany::One(Audience::SelfHosted),
+                warn_at: UNIX_EPOCH + Duration::from_secs(1676808000),
+                halt_at: UNIX_EPOCH + Duration::from_secs(1678017600),
+            }),
+        );
+    }
+
+    #[test]
+    fn test_entitlement_parse_with_whitespace() {
+        let entitlement = Entitlement::from_str("   eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw\n ").expect("must be able to decode JWT");
         assert_eq!(
             entitlement.claims,
             Some(Claims {
