@@ -661,13 +661,15 @@ impl TlsSupergraph {
     pub(crate) fn tls_config(&self) -> Result<Arc<rustls::ServerConfig>, ApolloRouterError> {
         let mut certificates = vec![self.certificate.clone()];
         certificates.extend(self.certificate_chain.iter().cloned());
-        Ok(Arc::new(
-            ServerConfig::builder()
-                .with_safe_defaults()
-                .with_no_client_auth()
-                .with_single_cert(certificates, self.key.clone())
-                .map_err(ApolloRouterError::Rustls)?,
-        ))
+
+        let mut config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certificates, self.key.clone())
+            .map_err(ApolloRouterError::Rustls)?;
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+        Ok(Arc::new(config))
     }
 }
 

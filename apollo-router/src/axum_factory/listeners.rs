@@ -277,9 +277,14 @@ pub(super) fn serve_router_on_listen_addr(
                                             .expect(
                                                 "this should not fail unless the socket is invalid",
                                             );
+
+                                            let protocol = stream.get_ref().1.alpn_protocol();
+                                            let http2 = protocol == Some(&b"h2"[..]);
+
                                             let connection = Http::new()
                                             .http1_keep_alive(true)
                                             .http1_header_read_timeout(Duration::from_secs(10))
+                                            .http2_only(http2)
                                             .serve_connection(stream, app);
 
                                         tokio::pin!(connection);
