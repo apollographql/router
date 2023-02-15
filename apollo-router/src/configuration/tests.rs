@@ -719,17 +719,31 @@ fn load_tls() {
     let certificate = include_str!("testdata/server.crt");
     let key = include_str!("testdata/server.key");
 
+    let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    cert_path.push("src");
+    cert_path.push("configuration");
+    cert_path.push("testdata");
+    cert_path.push("server.crt");
+    let cert_path = cert_path.to_string_lossy();
+
+    let mut key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    key_path.push("src");
+    key_path.push("configuration");
+    key_path.push("testdata");
+    key_path.push("server.key");
+    let key_path = key_path.to_string_lossy();
+
     let cfg = validate_yaml_configuration(
         &format!(
             r#"
 tls:
   supergraph:
-    certificate: {certificate}
-    key: {key}
-    certificate_chain: {certificate}
-        "#,
+    certificate: ${{file.{cert_path}}}
+    certificate_chain: ${{file.{cert_path}}}
+    key: ${{file.{key_path}}}
+"#,
         ),
-        Expansion::default().unwrap(),
+        Expansion::builder().supported_mode("file").build(),
         Mode::NoUpgrade,
     )
     .expect("should not have resulted in an error");
