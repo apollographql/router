@@ -375,7 +375,7 @@ fn default_max_attributes_per_link() -> u32 {
     SpanLimits::default().max_attributes_per_link
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeValue {
     /// bool values
@@ -450,7 +450,7 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeArray {
     /// Array of bools
@@ -633,6 +633,7 @@ impl Conf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_logging_conf_validation() {
@@ -738,5 +739,52 @@ mod tests {
             }],
         };
         assert_eq!(logging_conf.should_log(&req), (false, false));
+    }
+
+    #[test]
+    fn test_attribute_value_from_json() {
+        assert_eq!(
+            AttributeValue::try_from(json!("foo")),
+            Ok(AttributeValue::String("foo".to_string()))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(1)),
+            Ok(AttributeValue::I64(1))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(1.1)),
+            Ok(AttributeValue::F64(1.1))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(true)),
+            Ok(AttributeValue::Bool(true))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(["foo", "bar"])),
+            Ok(AttributeValue::Array(AttributeArray::String(vec![
+                "foo".to_string(),
+                "bar".to_string()
+            ])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([1, 2])),
+            Ok(AttributeValue::Array(AttributeArray::I64(vec![1, 2])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([1.1, 1.5])),
+            Ok(AttributeValue::Array(AttributeArray::F64(vec![1.1, 1.5])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([true, false])),
+            Ok(AttributeValue::Array(AttributeArray::Bool(vec![
+                true, false
+            ])))
+        );
+
+        // Mixed array conversions
+        AttributeValue::try_from(json!(["foo", true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
     }
 }
