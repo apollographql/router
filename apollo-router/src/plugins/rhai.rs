@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use std::time::SystemTime;
 
 use arc_swap::ArcSwap;
 use futures::future::ready;
@@ -52,6 +53,7 @@ use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use crate::error::Error;
 use crate::graphql::Request;
@@ -1607,6 +1609,15 @@ impl Rhai {
             })
             .register_fn("to_string", |x: &mut Value| -> String {
                 format!("{x:?}")
+            })
+            .register_fn("uuid", || -> String {
+                Uuid::new_v4().to_string()
+            })
+            .register_fn("now", ||-> u64 {
+                match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                    Ok(v)=> v.as_secs(),
+                    Err(_)=>0
+                }
             })
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
             // Add query plan getter to execution request
