@@ -522,13 +522,6 @@ impl Executable {
                 &opt.apollo_graph_ref,
             ) {
                 (Some(_entitlement), _, _, _) => EntitlementSource::Env,
-                (_, _, Some(apollo_key), Some(apollo_graph_ref)) => EntitlementSource::Registry {
-                    apollo_key: apollo_key.to_string(),
-                    apollo_graph_ref: apollo_graph_ref.to_string(),
-                    urls: uplink_endpoints.clone(),
-                    poll_interval: opt.apollo_uplink_poll_interval,
-                    timeout: opt.apollo_uplink_timeout,
-                },
                 (_, Some(entitlement_path), _, _) => {
                     let entitlement_path = if entitlement_path.is_relative() {
                         current_directory.join(entitlement_path)
@@ -540,6 +533,13 @@ impl Executable {
                         watch: opt.hot_reload,
                     }
                 }
+                (_, _, Some(apollo_key), Some(apollo_graph_ref)) => EntitlementSource::Registry {
+                    apollo_key: apollo_key.to_string(),
+                    apollo_graph_ref: apollo_graph_ref.to_string(),
+                    urls: uplink_endpoints.clone(),
+                    poll_interval: opt.apollo_uplink_poll_interval,
+                    timeout: opt.apollo_uplink_timeout,
+                },
 
                 _ => EntitlementSource::default(),
             }

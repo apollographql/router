@@ -481,9 +481,28 @@ impl EntitlementSource {
                             if watch {
                                 crate::files::watch(&path)
                                     .filter_map(move |_| {
-                                        future::ready(std::fs::read_to_string(&path).ok())
+                                        let path = path.clone();
+                                        async move {
+                                            let result = tokio::fs::read_to_string(&path).await;
+                                            if let Err(e) = &result {
+                                                tracing::error!(
+                                                    "failed to read entitlement file, {}",
+                                                    e
+                                                );
+                                            }
+                                            result.ok()
+                                        }
                                     })
-                                    .filter_map(|e| async move { e.parse().ok() })
+                                    .filter_map(|e| async move {
+                                        let result = e.parse();
+                                        if let Err(e) = &result {
+                                            tracing::error!(
+                                                "failed to parse entitlement file, {}",
+                                                e
+                                            );
+                                        }
+                                        result.ok()
+                                    })
                                     .map(UpdateEntitlement)
                                     .boxed()
                             } else {
