@@ -223,8 +223,6 @@ struct SubgraphConf {
     /// Send the service name
     service: bool,
     /// Send the subgraph URI
-    /// TODO: This might not make sense at the response layer,
-    /// we're not sending it at the moment.
     uri: bool,
     /// Send the service name
     service_name: bool,
