@@ -1726,6 +1726,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0206175f82b8d6bf6652ff7d71a1e27fd2e4efde587fd368662814d6ec1d9ce0"
 
 [[package]]
+name = "external-subgraph"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "async-trait",
+ "futures",
+ "http",
+ "hyper",
+ "multimap",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "fancy-regex"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6547,26 +6567,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
 dependencies = [
  "linked-hash-map",
-]
-
-[[package]]
-name = "yml-subgraph-http-test"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "apollo-router",
- "async-trait",
- "futures",
- "http",
- "hyper",
- "multimap",
- "reqwest",
- "schemars",
- "serde",
- "serde_json",
- "tokio",
- "tower",
- "tracing",
 ]
 
 [[package]]

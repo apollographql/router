@@ -1,5 +1,5 @@
 [package]
-name = "yml-subgraph-http-test"
+name = "external-subgraph"
 version = "0.1.0"
 edition = "2021"
 

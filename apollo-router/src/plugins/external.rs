@@ -542,7 +542,7 @@ impl SubgraphStage {
                         .transpose()?;
                     let context_to_send = request_config.context.then(|| request.context.clone());
                     let uri = request_config.uri.then(|| parts.uri.to_string());
-                    let service_name = request_config.service_name.then(|| service_name);
+                    let service_name = request_config.service_name.then_some(service_name);
 
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,
@@ -664,7 +664,7 @@ impl SubgraphStage {
                         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
                         .transpose()?;
                     let context_to_send = response_config.context.then(|| response.context.clone());
-                    let service_name = response_config.service_name.then(|| service_name);
+                    let service_name = response_config.service_name.then_some(service_name);
 
                     let payload = Externalizable {
                         version: EXTERNALIZABLE_VERSION,

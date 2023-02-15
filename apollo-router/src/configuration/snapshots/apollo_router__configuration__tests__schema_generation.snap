@@ -749,8 +749,13 @@ expression: "&schema"
                           "default": false,
                           "type": "boolean"
                         },
-                        "url": {
-                          "description": "Send the subgraph URL",
+                        "service_name": {
+                          "description": "Send the service name",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "uri": {
+                          "description": "Send the subgraph URI TODO: This might not make sense at the response layer, we're not sending it at the moment.",
                           "default": false,
                           "type": "boolean"
                         }
@@ -782,8 +787,13 @@ expression: "&schema"
                           "default": false,
                           "type": "boolean"
                         },
-                        "url": {
-                          "description": "Send the subgraph URL",
+                        "service_name": {
+                          "description": "Send the service name",
+                          "default": false,
+                          "type": "boolean"
+                        },
+                        "uri": {
+                          "description": "Send the subgraph URI TODO: This might not make sense at the response layer, we're not sending it at the moment.",
                           "default": false,
                           "type": "boolean"
                         }
