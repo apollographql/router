@@ -216,7 +216,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
         match entitlement {
             EntitlementState::Entitled => {
-                tracing::info!("A valid Apollo license has been detected.");
+                tracing::debug!("A valid Apollo license has been detected.");
             }
             EntitlementState::EntitledWarn if report.uses_restricted_features() => {
                 tracing::error!("Your Apollo license has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
@@ -237,7 +237,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 }
             }
             _ => {
-                tracing::debug!("A valid Apollo license was not detected, however no restricted features are in use.");
+                tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
             }
         }
 
