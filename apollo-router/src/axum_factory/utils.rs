@@ -1,8 +1,6 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 //! Utilities used for [`super::AxumHttpServerFactory`]
 
-use std::sync::Arc;
-
 use async_compression::tokio::write::BrotliDecoder;
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::ZlibDecoder;
@@ -19,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 use tower_http::trace::MakeSpan;
 use tracing::Span;
 
-use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
@@ -98,7 +96,7 @@ pub(super) async fn decompress_request_body(
 
 #[derive(Clone, Default)]
 pub(crate) struct PropagatingMakeSpan {
-    pub(crate) entitlement: Arc<Entitlement>,
+    pub(crate) entitlement: EntitlementState,
 }
 
 impl<B> MakeSpan<B> for PropagatingMakeSpan {
@@ -127,7 +125,10 @@ impl<B> MakeSpan<B> for PropagatingMakeSpan {
 
 impl PropagatingMakeSpan {
     fn create_span<B>(&mut self, request: &Request<B>) -> Span {
-        if self.entitlement.warn || self.entitlement.halt {
+        if matches!(
+            self.entitlement,
+            EntitlementState::EntitledWarn | EntitlementState::EntitledHalt
+        ) {
             tracing::error_span!(
                 REQUEST_SPAN_NAME,
                 "http.method" = %request.method(),

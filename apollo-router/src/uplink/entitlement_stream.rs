@@ -22,6 +22,7 @@ use tokio_util::time::DelayQueue;
 use crate::router::Event;
 use crate::uplink::entitlement::Entitlement;
 use crate::uplink::entitlement::EntitlementReport;
+use crate::uplink::entitlement::EntitlementState;
 use crate::uplink::entitlement_stream::entitlement_request::EntitlementRequestRouterEntitlements;
 use crate::uplink::entitlement_stream::entitlement_request::FetchErrorCode;
 use crate::uplink::UplinkRequest;
@@ -111,7 +112,7 @@ pin_project! {
     /// This means that the state machine can be kept clean, and not have to deal with setting it's own timers and also avoids lots of racy scenarios as entitlement checks are guaranteed to happen after an entitlement update even if they were in the past.
     pub(crate) struct EntitlementExpander<Upstream>
     where
-        Upstream: Stream<Item = Event>,
+        Upstream: Stream<Item = Entitlement>,
     {
         #[pin]
         checks: DelayQueue<Event>,
@@ -122,7 +123,7 @@ pin_project! {
 
 impl<Upstream> Stream for EntitlementExpander<Upstream>
 where
-    Upstream: Stream<Item = Event>,
+    Upstream: Stream<Item = Entitlement>,
 {
     type Item = Event;
 
@@ -138,50 +139,45 @@ where
                 let mut next = this.upstream.poll_next(cx);
                 match (&mut next, active_checks) {
                     // Upstream has a new event with a claim
-                    (Poll::Ready(Some(Event::UpdateEntitlement(entitlement))), _)
-                        if entitlement.claims.is_some() =>
-                    {
+                    (Poll::Ready(Some(entitlement)), _) if entitlement.claims.is_some() => {
                         // We got a new claim, so clear the previous checks.
                         this.checks.clear();
                         let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
                         let halt_at = to_positive_instant(claims.halt_at);
                         let warn_at = to_positive_instant(claims.warn_at);
                         let now = Instant::now();
-                        // Insert the new checks. If any of the boundaries are in the past then just update the entitlement in place
+                        // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
                         if halt_at > now {
                             // Only add halt if it isn't immediately going to be triggered.
                             this.checks.insert_at(
-                                Event::UpdateEntitlement(Entitlement {
-                                    halt: true,
-                                    warn: true,
-                                    ..entitlement.clone()
-                                }),
+                                Event::UpdateEntitlement(EntitlementState::EntitledHalt),
                                 (halt_at).into(),
                             );
                         } else {
-                            entitlement.halt = true;
+                            return Poll::Ready(Some(Event::UpdateEntitlement(
+                                EntitlementState::EntitledHalt,
+                            )));
                         }
-                        if warn_at > now && !entitlement.halt {
+                        if warn_at > now {
                             // Only add warn if it isn't immediately going to be triggered and halt is not already set.
                             // Something that is halted is by definition also warn.
                             this.checks.insert_at(
-                                Event::UpdateEntitlement(Entitlement {
-                                    warn: true,
-                                    ..entitlement.clone()
-                                }),
+                                Event::UpdateEntitlement(EntitlementState::EntitledWarn),
                                 (warn_at).into(),
                             );
                         } else {
-                            entitlement.warn = true;
+                            return Poll::Ready(Some(Event::UpdateEntitlement(
+                                EntitlementState::EntitledWarn,
+                            )));
                         }
 
-                        next
+                        Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
                     }
                     // Upstream has a new event with no claim
                     (Poll::Ready(Some(_)), _) => {
                         // As we have no claim clear the checks
                         this.checks.clear();
-                        next
+                        Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
                     }
                     // There were still active checks, so go for pending
                     (Poll::Ready(None), true) => Poll::Pending,
@@ -212,7 +208,7 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     }
 }
 
-pub(crate) trait EventStreamExt: Stream<Item = Event> {
+pub(crate) trait EntitlementStreamExt: Stream<Item = Entitlement> {
     fn expand_entitlements(self) -> EntitlementExpander<Self>
     where
         Self: Sized,
@@ -224,7 +220,7 @@ pub(crate) trait EventStreamExt: Stream<Item = Event> {
     }
 }
 
-impl<T: Stream<Item = Event>> EventStreamExt for T {}
+impl<T: Stream<Item = Entitlement>> EntitlementStreamExt for T {}
 
 #[cfg(test)]
 mod test {
@@ -240,10 +236,11 @@ mod test {
     use crate::uplink::entitlement::Audience;
     use crate::uplink::entitlement::Claims;
     use crate::uplink::entitlement::Entitlement;
+    use crate::uplink::entitlement::EntitlementState;
     use crate::uplink::entitlement::OneOrMany;
     use crate::uplink::entitlement_stream::to_positive_instant;
     use crate::uplink::entitlement_stream::EntitlementRequest;
-    use crate::uplink::entitlement_stream::EventStreamExt;
+    use crate::uplink::entitlement_stream::EntitlementStreamExt;
     use crate::uplink::stream_from_uplink;
 
     #[tokio::test]
@@ -403,9 +400,9 @@ mod test {
         );
     }
 
-    fn entitlement_with_claim(warn_delta: u64, halt_delta: u64) -> Event {
+    fn entitlement_with_claim(warn_delta: u64, halt_delta: u64) -> Entitlement {
         let now = SystemTime::now();
-        Event::UpdateEntitlement(Entitlement {
+        Entitlement {
             claims: Some(Claims {
                 iss: "".to_string(),
                 sub: "".to_string(),
@@ -413,17 +410,11 @@ mod test {
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
             }),
-            warn: false,
-            halt: false,
-        })
+        }
     }
 
-    fn entitlement_with_no_claim() -> Event {
-        Event::UpdateEntitlement(Entitlement {
-            claims: None,
-            warn: false,
-            halt: false,
-        })
+    fn entitlement_with_no_claim() -> Entitlement {
+        Entitlement { claims: None }
     }
 
     #[derive(Eq, PartialEq, Debug)]
@@ -446,8 +437,12 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
-                Event::UpdateEntitlement(e) if e.halt => SimpleEvent::HaltEntitlement,
-                Event::UpdateEntitlement(e) if e.warn => SimpleEvent::WarnEntitlement,
+                Event::UpdateEntitlement(EntitlementState::EntitledHalt) => {
+                    SimpleEvent::HaltEntitlement
+                }
+                Event::UpdateEntitlement(EntitlementState::EntitledWarn) => {
+                    SimpleEvent::WarnEntitlement
+                }
                 Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
                 Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
                 Event::Shutdown => SimpleEvent::Shutdown,

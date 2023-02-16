@@ -30,6 +30,7 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
 use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
 use crate::ApolloRouterError::NoEntitlement;
 
 #[derive(Default, Clone)]
@@ -44,13 +45,13 @@ enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
         schema: Option<Arc<String>>,
-        entitlement: Option<Arc<Entitlement>>,
+        entitlement: Option<EntitlementState>,
         listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
     Running {
         configuration: Arc<Configuration>,
         schema: Arc<String>,
-        entitlement: Arc<Entitlement>,
+        entitlement: EntitlementState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
     },
@@ -90,7 +91,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         state_machine: &mut StateMachine<S, FA>,
         new_schema: Option<Arc<String>>,
         new_configuration: Option<Arc<Configuration>>,
-        new_entitlement: Option<Arc<Entitlement>>,
+        new_entitlement: Option<EntitlementState>,
     ) -> Self
     where
         S: HttpServerFactory,
@@ -115,11 +116,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             state_machine,
                             &mut None,
                             None,
-                            None,
                             configuration.clone(),
                             schema.clone(),
-                            entitlement.clone(),
+                            *entitlement,
                             listen_addresses_guard,
+                            false,
                         )
                         .map_ok_or_else(Errored, |f| f)
                         .await,
@@ -139,11 +140,12 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     state_machine,
                     server_handle,
                     Some(router_service_factory),
-                    Some(entitlement.clone()),
                     new_configuration.unwrap_or_else(|| configuration.clone()),
                     new_schema.unwrap_or_else(|| schema.clone()),
-                    new_entitlement.unwrap_or_else(|| entitlement.clone()),
+                    new_entitlement.unwrap_or(*entitlement),
                     &mut guard,
+                    new_entitlement == Some(EntitlementState::Unentitled)
+                        && *entitlement == EntitlementState::Entitled,
                 )
                 .await
                 {
@@ -193,11 +195,11 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         state_machine: &mut StateMachine<S, FA>,
         server_handle: &mut Option<HttpServerHandle>,
         previous_router_service_factory: Option<&FA::RouterFactory>,
-        previous_entitlement: Option<Arc<Entitlement>>,
         configuration: Arc<Configuration>,
         schema: Arc<String>,
-        mut entitlement: Arc<Entitlement>,
+        entitlement: EntitlementState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
+        force_reload: bool,
     ) -> Result<State<FA>, ApolloRouterError>
     where
         S: HttpServerFactory,
@@ -209,15 +211,17 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         );
 
         // Check the entitlements
-        let report = entitlement.check(&configuration, &parsed_schema);
+        let report = Entitlement::check(&configuration, &parsed_schema);
         if report.uses_restricted_features() {
-            if entitlement.claims.is_none() {
-                if previous_entitlement.unwrap_or_default().claims.is_some() {
-                    // We've somehow gone from a state of entitlement to no claims,
-                    // This shouldn't be possible, but if this happens then force a shutdown as we can't guarantee
-                    tracing::error!("You no longer have an Apollo license, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
-                    entitlement = Arc::new(entitlement.halted());
-                } else {
+            match entitlement {
+                EntitlementState::Entitled => {}
+                EntitlementState::EntitledWarn => {
+                    tracing::error!("Your Apollo license has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
+                }
+                EntitlementState::EntitledHalt => {
+                    tracing::error!("Your Apollo license has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
+                }
+                EntitlementState::Unentitled => {
                     // This is OSS, so fail to reload or start.
                     if std::env::var("APOLLO_KEY").is_ok()
                         && std::env::var("APOLLO_GRAPH_REF").is_ok()
@@ -226,17 +230,19 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     } else {
                         tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nSee http://router.apollographql.com for more information.", report);
                     }
-                    return Err(ApolloRouterError::EntitlementViolation);
+                    if !force_reload {
+                        return Err(ApolloRouterError::EntitlementViolation);
+                    }
                 }
-            } else if entitlement.halt {
-                tracing::error!("Your Apollo license has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
-            } else if entitlement.warn {
-                tracing::error!("Your Apollo license has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo license:\n\n{}\n\nSee http://todo.router.apollographql.com for more information.", report);
             }
-        } else {
-            // If restricted features are not in use then it doesn't matter if the license has expired, so give them the default entitlement which doesn't have warn/halt set.
-            entitlement = Arc::new(Entitlement::default())
         }
+
+        // If there are no restricted featured in use then the effective entitlement is Entitled as we don't need warn or halt behavior.
+        let effective_entitlement = if report.uses_restricted_features() {
+            entitlement
+        } else {
+            EntitlementState::Entitled
+        };
 
         let router_service_factory = state_machine
             .router_configurator
@@ -262,7 +268,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         Default::default(),
                         Default::default(),
                         web_endpoints,
-                        entitlement.clone(),
+                        effective_entitlement,
                     )
                     .await?
             }
@@ -273,7 +279,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         router_service_factory.clone(),
                         configuration.clone(),
                         web_endpoints,
-                        entitlement.clone(),
+                        effective_entitlement,
                     )
                     .await?
             }
@@ -367,7 +373,7 @@ where
                 NoMoreSchema => state.no_more_schema().await,
                 UpdateEntitlement(entitlement) => {
                     state
-                        .update_inputs(&mut self, None, None, Some(Arc::new(entitlement)))
+                        .update_inputs(&mut self, None, None, Some(entitlement))
                         .await
                 }
                 NoMoreEntitlement => state.no_more_entitlement().await,
@@ -399,7 +405,6 @@ mod tests {
     use std::sync::Mutex;
     use std::task::Context;
     use std::task::Poll;
-    use std::time::SystemTime;
 
     use futures::channel::oneshot;
     use futures::future::BoxFuture;
@@ -420,9 +425,6 @@ mod tests {
     use crate::services::new_service::ServiceFactory;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
-    use crate::uplink::entitlement::Audience;
-    use crate::uplink::entitlement::Claims;
-    use crate::uplink::entitlement::OneOrMany;
 
     fn example_schema() -> String {
         include_str!("testdata/supergraph.graphql").to_owned()
@@ -467,26 +469,10 @@ mod tests {
             Err(NoEntitlement)
         );
     }
-
-    fn test_claims() -> Claims {
-        let now = SystemTime::now();
-        Claims {
-            iss: "".to_string(),
-            sub: "".to_string(),
-            aud: OneOrMany::One(Audience::Cloud),
-            warn_at: now,
-            halt_at: now,
-        }
-    }
-
     fn test_config_restricted() -> Configuration {
         let mut config = Configuration::builder().build().unwrap();
         config.validated_yaml = Some(json!({"homepage": {"enabled":true} }));
         config
-    }
-
-    fn test_entitlement(claims: Option<Claims>, halt: bool, warn: bool) -> Entitlement {
-        Entitlement { claims, halt, warn }
     }
 
     #[test(tokio::test)]
@@ -501,7 +487,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(test_entitlement(Some(test_claims()), false, false)),
+                    UpdateEntitlement(EntitlementState::Entitled),
                     Shutdown
                 ],
             )
@@ -523,7 +509,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(test_entitlement(Some(test_claims()), true, true)),
+                    UpdateEntitlement(EntitlementState::EntitledHalt),
                     Shutdown
                 ],
             )
@@ -545,7 +531,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(test_entitlement(Some(test_claims()), true, false)),
+                    UpdateEntitlement(EntitlementState::EntitledWarn),
                     Shutdown
                 ],
             )
@@ -567,8 +553,8 @@ mod tests {
                 vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(test_entitlement(Some(test_claims()), false, false)),
-                    UpdateEntitlement(test_entitlement(None, false, false)),
+                    UpdateEntitlement(EntitlementState::Entitled),
+                    UpdateEntitlement(EntitlementState::Unentitled),
                     Shutdown
                 ],
             )
@@ -590,7 +576,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(test_entitlement(None, false, false)),
+                    UpdateEntitlement(EntitlementState::Unentitled),
                     Shutdown
                 ],
             )
@@ -630,7 +616,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                     Shutdown
                 ],
             )
@@ -652,7 +638,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -675,8 +661,8 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
-                    UpdateEntitlement(Entitlement::default()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                     Shutdown
                 ],
             )
@@ -698,7 +684,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .supergraph(
@@ -730,7 +716,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                     Shutdown
                 ],
             )
@@ -757,7 +743,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                 ],
             )
             .await,
@@ -795,7 +781,7 @@ mod tests {
                 vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
-                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(EntitlementState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -889,7 +875,7 @@ mod tests {
             main_listener: Option<Listener>,
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
-            _entitlment: Arc<Entitlement>,
+            _entitlment: EntitlementState,
         ) -> Self::Future
         where
             RF: RouterFactory,

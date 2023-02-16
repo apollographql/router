@@ -13,7 +13,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
-use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
 
 /// Factory for creating the http server component.
 ///
@@ -29,7 +29,7 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: Arc<Entitlement>,
+        entitlement: EntitlementState,
     ) -> Self::Future
     where
         RF: RouterFactory;
@@ -99,7 +99,7 @@ impl HttpServerHandle {
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: Arc<Entitlement>,
+        entitlement: EntitlementState,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,

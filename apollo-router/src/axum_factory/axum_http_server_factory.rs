@@ -57,7 +57,7 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
-use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -87,7 +87,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    entitlement: &Arc<Entitlement>,
+    entitlement: EntitlementState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -157,7 +157,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
-        entitlement: Arc<Entitlement>,
+        entitlement: EntitlementState,
     ) -> Self::Future
     where
         RF: RouterFactory,
@@ -167,7 +167,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 service_factory,
                 &configuration,
                 extra_endpoints,
-                &entitlement,
+                entitlement,
             )?;
 
             // serve main router
@@ -294,7 +294,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    entitlement: &Arc<Entitlement>,
+    entitlement: EntitlementState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -306,18 +306,10 @@ where
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
         .layer(middleware::from_fn_with_state(
-            (
-                entitlement.clone(),
-                Instant::now(),
-                Arc::new(AtomicU64::new(0)),
-            ),
+            (entitlement, Instant::now(), Arc::new(AtomicU64::new(0))),
             entitlement_handler,
         ))
-        .layer(
-            TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan {
-                entitlement: entitlement.clone(),
-            }),
-        )
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { entitlement }))
         .layer(Extension(service_factory))
         .layer(cors)
         // Compress the response body, except for multipart responses such as with `@defer`.
@@ -335,11 +327,14 @@ where
 }
 
 async fn entitlement_handler<B>(
-    State((entitlement, start, delta)): State<(Arc<Entitlement>, Instant, Arc<AtomicU64>)>,
+    State((entitlement, start, delta)): State<(EntitlementState, Instant, Arc<AtomicU64>)>,
     request: Request<B>,
     next: Next<B>,
 ) -> Response {
-    if entitlement.warn || entitlement.halt {
+    if matches!(
+        entitlement,
+        EntitlementState::EntitledHalt | EntitlementState::EntitledWarn
+    ) {
         ::tracing::error!(
            monotonic_counter.apollo_router_http_requests_total = 1u64,
            status = %500u16,
@@ -366,7 +361,7 @@ async fn entitlement_handler<B>(
         }
     }
 
-    if entitlement.halt {
+    if matches!(entitlement, EntitlementState::EntitledHalt) {
         http::Response::builder()
             .status(StatusCode::INTERNAL_SERVER_ERROR)
             .body(UnsyncBoxBody::default())

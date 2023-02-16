@@ -54,8 +54,9 @@ use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
 use crate::uplink::entitlement_stream::EntitlementRequest;
-use crate::uplink::entitlement_stream::EventStreamExt;
+use crate::uplink::entitlement_stream::EntitlementStreamExt;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
 use crate::uplink::Endpoints;
@@ -70,14 +71,14 @@ async fn make_router_service<RF>(
     schema: &str,
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-    entitlement: Arc<Entitlement>,
+    entitlement: EntitlementState,
 ) -> Result<router::BoxCloneService, BoxError> {
     let schema = Arc::new(Schema::parse(schema, &configuration)?);
     let service_factory = YamlRouterFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints, &entitlement)?;
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
     let ListenAddrAndRouter(_listener, router) = routers.main;
 
     Ok(router
@@ -464,9 +465,9 @@ impl EntitlementSource {
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             EntitlementSource::Static { entitlement } => {
-                stream::once(future::ready(UpdateEntitlement(entitlement))).boxed()
+                stream::once(future::ready(entitlement)).boxed()
             }
-            EntitlementSource::Stream(stream) => stream.map(UpdateEntitlement).boxed(),
+            EntitlementSource::Stream(stream) => stream.boxed(),
             EntitlementSource::File { path, watch } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -504,10 +505,9 @@ impl EntitlementSource {
                                         }
                                         result.ok()
                                     })
-                                    .map(UpdateEntitlement)
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateEntitlement(entitlement))).boxed()
+                                stream::once(future::ready(entitlement)).boxed()
                             }
                         }
                         Ok(Err(err)) => {
@@ -536,7 +536,7 @@ impl EntitlementSource {
             )
             .filter_map(|res| {
                 future::ready(match res {
-                    Ok(entitlement) => Some(UpdateEntitlement(entitlement)),
+                    Ok(entitlement) => Some(entitlement),
                     Err(e) => {
                         tracing::error!("{}", e);
                         None
@@ -547,22 +547,17 @@ impl EntitlementSource {
             EntitlementSource::Env => {
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
-                    Ok(Ok(entitlement)) => {
-                        stream::once(future::ready(UpdateEntitlement(entitlement))).boxed()
-                    }
+                    Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),
                     Ok(Err(err)) => {
                         tracing::error!("Failed to parse entitlement: {}", err);
                         stream::empty().boxed()
                     }
-                    Err(_) => {
-                        stream::once(future::ready(UpdateEntitlement(Entitlement::default())))
-                            .boxed()
-                    }
+                    Err(_) => stream::once(future::ready(Entitlement::default())).boxed(),
                 }
             }
         }
-        .chain(stream::iter(vec![NoMoreEntitlement]))
         .expand_entitlements()
+        .chain(stream::iter(vec![NoMoreEntitlement]))
     }
 }
 
@@ -806,8 +801,8 @@ pub(crate) enum Event {
     /// There are no more updates to the schema
     NoMoreSchema,
 
-    /// Update entitlement.
-    UpdateEntitlement(Entitlement),
+    /// Update entitlement
+    UpdateEntitlement(EntitlementState),
 
     /// There were no more updates to entitlement.
     NoMoreEntitlement,

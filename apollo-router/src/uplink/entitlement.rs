@@ -99,8 +99,21 @@ impl Display for EntitlementReport {
 #[derive(Debug, Clone, Default)]
 pub struct Entitlement {
     pub(crate) claims: Option<Claims>,
-    pub(crate) warn: bool,
-    pub(crate) halt: bool,
+}
+
+/// Entitlements are converted into a stream of entitlement states by the expander
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub(crate) enum EntitlementState {
+    Entitled,
+    EntitledWarn,
+    EntitledHalt,
+    Unentitled,
+}
+
+impl Default for EntitlementState {
+    fn default() -> Self {
+        EntitlementState::Unentitled
+    }
 }
 
 impl Display for Entitlement {
@@ -146,8 +159,6 @@ impl FromStr for Entitlement {
                 .map_err(Error::InvalidEntitlement)
                 .map(|r| Entitlement {
                     claims: Some(r.claims),
-                    warn: false,
-                    halt: false,
                 })
             })
             .find_or_last(|r| r.is_ok())
@@ -165,7 +176,7 @@ pub(crate) struct ConfigurationRestriction {
 }
 
 impl Entitlement {
-    pub fn jwks() -> &'static JwkSet {
+    pub(crate) fn jwks() -> &'static JwkSet {
         JWKS.get_or_init(|| {
             // Strip the comments from the top of the file.
             let re = Regex::new("(?m)^//.*$").expect("regex must be valid");
@@ -174,26 +185,16 @@ impl Entitlement {
         })
     }
 
-    pub(crate) fn halted(&self) -> Self {
-        let mut clone = self.clone();
-        clone.warn = true;
-        clone.halt = true;
-        clone
-    }
-
-    pub(crate) fn check(
-        &self,
-        configuration: &Configuration,
-        _schema: &Schema,
-    ) -> EntitlementReport {
+    pub(crate) fn check(configuration: &Configuration, _schema: &Schema) -> EntitlementReport {
         EntitlementReport {
-            restricted_config_in_use: self
-                .validate_configuration(configuration, &Self::configuration_restrictions()),
+            restricted_config_in_use: Self::validate_configuration(
+                configuration,
+                &Self::configuration_restrictions(),
+            ),
         }
     }
 
     fn validate_configuration(
-        &self,
         configuration: &Configuration,
         configuration_restrictions: &Vec<ConfigurationRestriction>,
     ) -> Vec<ConfigurationRestriction> {
@@ -284,26 +285,17 @@ mod test {
         }
     }
 
-    fn check(
-        entitlement: Entitlement,
-        router_yaml: &str,
-        supergraph_schema: &str,
-    ) -> EntitlementReport {
+    fn check(router_yaml: &str, supergraph_schema: &str) -> EntitlementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
 
-        entitlement.check(&config, &schema)
+        Entitlement::check(&config, &schema)
     }
 
     #[test]
     fn test_oss() {
         let report = check(
-            Entitlement {
-                claims: None,
-                warn: false,
-                halt: false,
-            },
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
@@ -317,11 +309,6 @@ mod test {
     #[test]
     fn test_restricted_features_via_config() {
         let report = check(
-            Entitlement {
-                claims: None,
-                warn: false,
-                halt: false,
-            },
             include_str!("testdata/restricted.router.yaml"),
             include_str!("testdata/oss.graphql"),
         );
