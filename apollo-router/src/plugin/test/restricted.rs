@@ -1,9 +1,11 @@
-use crate::plugin::{Plugin, PluginInit};
-use crate::register_plugin;
 use async_trait::async_trait;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
+
+use crate::plugin::Plugin;
+use crate::plugin::PluginInit;
+use crate::register_plugin;
 
 /// Restricted plugin (for testing purposes only)
 #[derive(Deserialize, JsonSchema)]
