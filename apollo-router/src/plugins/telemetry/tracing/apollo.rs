@@ -1,5 +1,7 @@
 //! Tracing configuration for apollo telemetry.
 // With regards to ELv2 licensing, this entire file is license key functionality
+use std::env;
+
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use serde::Serialize;
@@ -25,6 +27,11 @@ impl TracingConfigurator for Config {
                 batch_processor,
                 ..
             } => {
+                if env::var("APOLLO_TELEMETRY_TRACING_DISABLED").unwrap_or_default() == "true" {
+                    tracing::info!("Apollo Studio tracing reporting is disabled.");
+                    return Ok(builder);
+                }
+
                 tracing::debug!("configuring exporter to Studio");
 
                 let exporter = apollo_telemetry::Exporter::builder()

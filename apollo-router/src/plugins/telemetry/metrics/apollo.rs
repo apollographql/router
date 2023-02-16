@@ -1,5 +1,6 @@
 //! Apollo metrics
 // With regards to ELv2 licensing, this entire file is license key functionality
+use std::env;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
@@ -31,6 +32,12 @@ impl MetricsConfigurator for Config {
                 batch_processor,
                 ..
             } => {
+                if env::var("APOLLO_TELEMETRY_METRICS_DISABLED").unwrap_or_default() == "true" {
+                    ENABLED.swap(false, Ordering::Relaxed);
+                    tracing::info!("Apollo Studio metrics reporting is disabled.");
+                    return Ok(builder);
+                }
+
                 if !ENABLED.swap(true, Ordering::Relaxed) {
                     tracing::info!("Apollo Studio usage reporting is enabled. See https://go.apollo.dev/o/data for details");
                 }
