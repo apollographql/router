@@ -208,7 +208,11 @@ impl FromStr for Entitlement {
             })
             .find_or_last(|r| r.is_ok())
             .transpose()
-            .map(|e| e.unwrap_or_default())
+            .map(|e| {
+                let e = e.unwrap_or_default();
+                tracing::debug!("decoded entitlement {jwt}->{e}");
+                e
+            })
     }
 }
 
