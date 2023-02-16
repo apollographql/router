@@ -146,7 +146,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     new_entitlement.unwrap_or(*entitlement),
                     &mut guard,
                     new_entitlement == Some(EntitlementState::Unentitled)
-                        && *entitlement == EntitlementState::Entitled,
+                        && *entitlement != EntitlementState::Unentitled,
                 )
                 .await
                 {
@@ -200,7 +200,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         schema: Arc<String>,
         entitlement: EntitlementState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
-        force_reload: bool,
+        entitlement_loss: bool,
     ) -> Result<State<FA>, ApolloRouterError>
     where
         S: HttpServerFactory,
@@ -224,6 +224,13 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             EntitlementState::EntitledHalt if report.uses_restricted_features() => {
                 tracing::error!("Your Apollo license has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
             }
+            EntitlementState::Unentitled
+                if report.uses_restricted_features() && entitlement_loss =>
+            {
+                tracing::error!("Your Apollo license has been revoked, and the Router will shut down. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                server_handle.take();
+                return Err(ApolloRouterError::EntitlementViolation);
+            }
             EntitlementState::Unentitled if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
                 if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
@@ -232,9 +239,8 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 } else {
                     tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
                 }
-                if !force_reload {
-                    return Err(ApolloRouterError::EntitlementViolation);
-                }
+
+                return Err(ApolloRouterError::EntitlementViolation);
             }
             _ => {
                 tracing::debug!("A valid Apollo license was not detected. However, no restricted features are in use.");
@@ -548,8 +554,8 @@ mod tests {
 
     #[test(tokio::test)]
     async fn restricted_entitled_unentitled() {
-        let router_factory = create_mock_router_configurator(2);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let router_factory = create_mock_router_configurator(1);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
 
         assert_matches!(
             execute(
@@ -560,13 +566,12 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     UpdateEntitlement(EntitlementState::Unentitled),
-                    Shutdown
                 ],
             )
             .await,
-            Ok(())
+            Err(ApolloRouterError::EntitlementViolation)
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
     }
 
     #[test(tokio::test)]
