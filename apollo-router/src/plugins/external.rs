@@ -53,7 +53,7 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init.config.stages.is_some() {
+        if init.config.stages != Default::default() {
             apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
         }
 
@@ -76,11 +76,7 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
             .wrap_connector(http_connector);
 
         let http_client = ServiceBuilder::new()
-            .layer(TimeoutLayer::new(
-                init.config
-                    .timeout
-                    .unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT),
-            ))
+            .layer(TimeoutLayer::new(init.config.timeout))
             .service(hyper::Client::builder().build(connector));
 
         ExternalPlugin::new(http_client, init.config, init.supergraph_sdl)
@@ -153,21 +149,12 @@ where
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        if let Some(router_stage) = self
-            .configuration
-            .stages
-            .as_ref()
-            .and_then(|stages| stages.router.as_ref())
-        {
-            router_stage.as_service(
-                self.http_client.clone(),
-                service,
-                self.configuration.url.clone(),
-                self.sdl.clone(),
-            )
-        } else {
-            service
-        }
+        self.configuration.stages.router.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            self.sdl.clone(),
+        )
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
@@ -179,26 +166,17 @@ where
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        if let Some(subgraph_stage) = self
-            .configuration
-            .stages
-            .as_ref()
-            .and_then(|stages| stages.subgraph.as_ref())
-        {
-            subgraph_stage.as_service(
-                self.http_client.clone(),
-                service,
-                self.configuration.url.clone(),
-                name.to_string(),
-            )
-        } else {
-            service
-        }
+        self.configuration.stages.subgraph.as_service(
+            self.http_client.clone(),
+            service,
+            self.configuration.url.clone(),
+            name.to_string(),
+        )
     }
 }
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct RouterConf {
     /// Send the headers
     headers: bool,
@@ -212,7 +190,7 @@ struct RouterConf {
 
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct SubgraphConf {
     /// Send the headers
     headers: bool,
@@ -230,35 +208,41 @@ struct SubgraphConf {
 
 /// The stages request/response configuration
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct Stages {
     /// The router stage
-    router: Option<RouterStage>,
+    router: RouterStage,
     /// The subgraph stage
-    subgraph: Option<SubgraphStage>,
+    subgraph: SubgraphStage,
 }
 
 /// Configures the externalization plugin
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 struct Conf {
     /// The url you'd like to offload processing to
     url: String,
     /// The timeout for external requests
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "String", default)]
-    timeout: Option<Duration>,
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String", default = "default_timeout")]
+    #[serde(default = "default_timeout")]
+    timeout: Duration,
     /// The stages request/response configuration
     #[serde(default)]
-    stages: Option<Stages>,
+    stages: Stages,
+}
+
+fn default_timeout() -> Duration {
+    DEFAULT_EXTERNALIZATION_TIMEOUT
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default)]
 struct RouterStage {
     /// The request configuration
-    request: Option<RouterConf>,
+    request: RouterConf,
     /// The response configuration
-    response: Option<RouterConf>,
+    response: RouterConf,
 }
 
 impl RouterStage {
@@ -278,7 +262,8 @@ impl RouterStage {
             + 'static,
         <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
     {
-        let request_layer = self.request.clone().map(|request_config| {
+        let request_layer = (self.request != Default::default()).then_some({
+            let request_config = self.request.clone();
             let coprocessor_url = coprocessor_url.clone();
             let http_client = http_client.clone();
             let sdl = sdl.clone();
@@ -330,7 +315,7 @@ impl RouterStage {
 
                     validate_coprocessor_output(&co_processor_output, PipelineStep::RouterRequest)?;
                     // unwrap is safe here because validate_coprocessor_output made sure control is available
-                    let control = co_processor_output.control.unwrap();
+                    let control = co_processor_output.control.expect("validated above; qed");
 
                     // Thirdly, we need to interpret the control flow which may have been
                     // updated by our co-processor and decide if we should proceed or stop.
@@ -390,7 +375,8 @@ impl RouterStage {
             })
         });
 
-        let response_layer = self.response.clone().map(|response_config| {
+        let response_layer = (self.response != Default::default()).then_some({
+            let response_config = self.response.clone();
             MapFutureLayer::new(move |fut| {
                 let sdl = sdl.clone();
                 let coprocessor_url = coprocessor_url.clone();
@@ -491,9 +477,9 @@ impl RouterStage {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 struct SubgraphStage {
     #[serde(default)]
-    request: Option<SubgraphConf>,
+    request: SubgraphConf,
     #[serde(default)]
-    response: Option<SubgraphConf>,
+    response: SubgraphConf,
 }
 
 impl SubgraphStage {
@@ -513,7 +499,8 @@ impl SubgraphStage {
             + 'static,
         <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
     {
-        let request_layer = self.request.clone().map(|request_config| {
+        let request_layer = (self.request != Default::default()).then_some({
+            let request_config = self.request.clone();
             let http_client = http_client.clone();
             let coprocessor_url = coprocessor_url.clone();
             let service_name = service_name.clone();
@@ -567,7 +554,7 @@ impl SubgraphStage {
                         PipelineStep::SubgraphRequest,
                     )?;
                     // unwrap is safe here because validate_coprocessor_output made sure control is available
-                    let control = co_processor_output.control.unwrap();
+                    let control = co_processor_output.control.expect("validated above; qed");
 
                     // Thirdly, we need to interpret the control flow which may have been
                     // updated by our co-processor and decide if we should proceed or stop.
@@ -593,7 +580,15 @@ impl SubgraphStage {
                                 serde_json::from_value(
                                     co_processor_output.body.unwrap_or(serde_json::Value::Null),
                                 )
-                                .unwrap(); //todo
+                                .unwrap_or_else(|error| {
+                                    tracing::error!("external plugin: couldn't deserialize coprocessor output: {:?}", error);
+                                    crate::graphql::Response::builder()
+                                        .errors(vec![Error {
+                                            message: "external plugin: couldn't deserialize coprocessor output"
+                                                .to_string(),
+                                            ..Default::default()
+                                        }]).build()
+                                });
                             subgraph::Response {
                                 response: http::Response::builder()
                                     .status(code)
@@ -632,9 +627,8 @@ impl SubgraphStage {
             })
         });
 
-        let response_layer = self.response.clone().map(|response_config| {
-            let http_client = http_client.clone();
-            let service_name = service_name.clone();
+        let response_layer = (self.response != Default::default()).then_some({
+            let response_config = self.response.clone();
 
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
@@ -826,13 +820,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn unknown_fields_are_denied() {
+        let config = serde_json::json!({
+            "plugins": {
+                "experimental.external": {
+                    "url": "http://127.0.0.1:8081",
+                    "thisFieldDoesntExist": true
+                }
+            }
+        });
+        // Build a test harness. Usually we'd use this and send requests to
+        // it, but in this case it's enough to build the harness to see our
+        // output when our service registers.
+        assert!(crate::TestHarness::builder()
+            .configuration_json(config)
+            .unwrap()
+            .build_router()
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
     async fn external_plugin_with_stages_wont_load_without_graph_ref() {
         let config = serde_json::json!({
             "plugins": {
                 "experimental.external": {
                     "url": "http://127.0.0.1:8081",
                     "stages": {
-                        "router": {}
+                        "subgraph": {
+                            "request": {
+                                "uri": true
+                            }
+                        }
                     },
                 }
             }
@@ -851,16 +870,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_returning_the_wrong_version_should_fail() {
         let router_stage = RouterStage {
-            request: Some(RouterConf {
+            request: RouterConf {
                 headers: true,
-                /// Send the context
                 context: true,
-                /// Send the body
                 body: true,
-                /// Send the SDL
                 sdl: true,
-            }),
-            response: None,
+            },
+            response: Default::default(),
         };
 
         // This will never be called because we will fail at the coprocessor.
@@ -911,16 +927,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_returning_the_wrong_stage_should_fail() {
         let router_stage = RouterStage {
-            request: Some(RouterConf {
+            request: RouterConf {
                 headers: true,
-                /// Send the context
                 context: true,
-                /// Send the body
                 body: true,
-                /// Send the SDL
                 sdl: true,
-            }),
-            response: None,
+            },
+            response: Default::default(),
         };
 
         // This will never be called because we will fail at the coprocessor.
@@ -971,16 +984,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_missing_request_control_should_fail() {
         let router_stage = RouterStage {
-            request: Some(RouterConf {
+            request: RouterConf {
                 headers: true,
-                /// Send the context
                 context: true,
-                /// Send the body
                 body: true,
-                /// Send the SDL
                 sdl: true,
-            }),
-            response: None,
+            },
+            response: Default::default(),
         };
 
         // This will never be called because we will fail at the coprocessor.
@@ -1030,16 +1040,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
-            request: Some(RouterConf {
+            request: RouterConf {
                 headers: true,
-                /// Send the context
                 context: true,
-                /// Send the body
                 body: true,
-                /// Send the SDL
                 sdl: true,
-            }),
-            response: None,
+            },
+            response: Default::default(),
         };
 
         let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
@@ -1149,16 +1156,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
-            response: Some(RouterConf {
+            response: RouterConf {
                 headers: true,
-                /// Send the context
                 context: true,
-                /// Send the body
                 body: true,
-                /// Send the SDL
                 sdl: true,
-            }),
-            request: None,
+            },
+            request: Default::default(),
         };
 
         let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
