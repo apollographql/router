@@ -29,7 +29,7 @@ use crate::router::Event::UpdateEntitlement;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
-use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementReport;
 use crate::uplink::entitlement::EntitlementState;
 use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_URL;
 use crate::ApolloRouterError::NoEntitlement;
@@ -212,7 +212,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         );
 
         // Check the entitlements
-        let report = Entitlement::check(&configuration, &parsed_schema);
+        let report = EntitlementReport::build(&configuration, &parsed_schema);
 
         match entitlement {
             EntitlementState::Entitled => {

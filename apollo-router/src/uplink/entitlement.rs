@@ -84,6 +84,59 @@ impl EntitlementReport {
     pub(crate) fn uses_restricted_features(&self) -> bool {
         !self.restricted_config_in_use.is_empty()
     }
+
+    pub(crate) fn build(configuration: &Configuration, _schema: &Schema) -> EntitlementReport {
+        EntitlementReport {
+            restricted_config_in_use: Self::validate_configuration(
+                configuration,
+                &Self::configuration_restrictions(),
+            ),
+        }
+    }
+
+    fn validate_configuration(
+        configuration: &Configuration,
+        configuration_restrictions: &Vec<ConfigurationRestriction>,
+    ) -> Vec<ConfigurationRestriction> {
+        let mut selector = jsonpath_lib::selector(
+            configuration
+                .validated_yaml
+                .as_ref()
+                .unwrap_or(&Value::Null),
+        );
+        let mut configuration_violations = Vec::new();
+        for restriction in configuration_restrictions {
+            if let Some(value) = selector(&restriction.path)
+                .expect("path on restriction was not valid")
+                .first()
+            {
+                if **value == restriction.value {
+                    configuration_violations.push(restriction.clone());
+                }
+            }
+        }
+        configuration_violations
+    }
+
+    #[cfg(not(test))]
+    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
+        vec![]
+    }
+    #[cfg(test)]
+    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
+        vec![
+            ConfigurationRestriction::builder()
+                .path("$.health_check.enabled")
+                .value(true)
+                .name("Health check")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.homepage.enabled")
+                .value(true)
+                .name("Homepage")
+                .build(),
+        ]
+    }
 }
 
 impl Display for EntitlementReport {
@@ -188,59 +241,6 @@ impl Entitlement {
             serde_json::from_str::<JwkSet>(&jwks).expect("router jwks must be valid")
         })
     }
-
-    pub(crate) fn check(configuration: &Configuration, _schema: &Schema) -> EntitlementReport {
-        EntitlementReport {
-            restricted_config_in_use: Self::validate_configuration(
-                configuration,
-                &Self::configuration_restrictions(),
-            ),
-        }
-    }
-
-    fn validate_configuration(
-        configuration: &Configuration,
-        configuration_restrictions: &Vec<ConfigurationRestriction>,
-    ) -> Vec<ConfigurationRestriction> {
-        let mut selector = jsonpath_lib::selector(
-            configuration
-                .validated_yaml
-                .as_ref()
-                .unwrap_or(&Value::Null),
-        );
-        let mut configuration_violations = Vec::new();
-        for restriction in configuration_restrictions {
-            if let Some(value) = selector(&restriction.path)
-                .expect("path on restriction was not valid")
-                .first()
-            {
-                if **value == restriction.value {
-                    configuration_violations.push(restriction.clone());
-                }
-            }
-        }
-        configuration_violations
-    }
-
-    #[cfg(not(test))]
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![]
-    }
-    #[cfg(test)]
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![
-            ConfigurationRestriction::builder()
-                .path("$.health_check.enabled")
-                .value(true)
-                .name("Health check")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.homepage.enabled")
-                .value(true)
-                .name("Homepage")
-                .build(),
-        ]
-    }
 }
 
 #[cfg(test)]
@@ -294,7 +294,7 @@ mod test {
         let schema =
             Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
 
-        Entitlement::check(&config, &schema)
+        EntitlementReport::build(&config, &schema)
     }
 
     #[test]
