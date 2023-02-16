@@ -213,36 +213,39 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
 
         // Check the entitlements
         let report = Entitlement::check(&configuration, &parsed_schema);
-        if report.uses_restricted_features() {
-            match entitlement {
-                EntitlementState::Entitled => {}
-                EntitlementState::EntitledWarn => {
-                    tracing::error!("Your Apollo license has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+
+        match entitlement {
+            EntitlementState::Entitled => {
+                tracing::info!("A valid Apollo license has been detected.");
+            }
+            EntitlementState::EntitledWarn if report.uses_restricted_features() => {
+                tracing::error!("Your Apollo license has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+            }
+            EntitlementState::EntitledHalt if report.uses_restricted_features() => {
+                tracing::error!("Your Apollo license has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+            }
+            EntitlementState::Unentitled if report.uses_restricted_features() => {
+                // This is OSS, so fail to reload or start.
+                if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
+                {
+                    tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nIf you have a license then set APOLLO_KEY and APOLLO_GRAPH_REF environment variables and you’re good to go!\n\nAlternatively, if you manually manage your entitlement token then set the APOLLO_ROUTER_ENTITLEMENT env variable.\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                } else {
+                    tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
                 }
-                EntitlementState::EntitledHalt => {
-                    tracing::error!("Your Apollo license has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo license:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                if !force_reload {
+                    return Err(ApolloRouterError::EntitlementViolation);
                 }
-                EntitlementState::Unentitled => {
-                    // This is OSS, so fail to reload or start.
-                    if std::env::var("APOLLO_KEY").is_ok()
-                        && std::env::var("APOLLO_GRAPH_REF").is_ok()
-                    {
-                        tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nIf you have a license then set APOLLO_KEY and APOLLO_GRAPH_REF environment variables and you’re good to go!\n\nAlternatively, if you manually manage your entitlement token then set the APOLLO_ROUTER_ENTITLEMENT env variable.\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
-                    } else {
-                        tracing::error!("An Apollo license is required to benefit from certain features of the Router:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
-                    }
-                    if !force_reload {
-                        return Err(ApolloRouterError::EntitlementViolation);
-                    }
-                }
+            }
+            _ => {
+                tracing::debug!("A valid Apollo license was not detected, however no restricted features are in use.");
             }
         }
 
         // If there are no restricted featured in use then the effective entitlement is Entitled as we don't need warn or halt behavior.
-        let effective_entitlement = if report.uses_restricted_features() {
-            entitlement
-        } else {
+        let effective_entitlement = if !report.uses_restricted_features() {
             EntitlementState::Entitled
+        } else {
+            entitlement
         };
 
         let router_service_factory = state_machine
