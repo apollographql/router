@@ -3,7 +3,7 @@ source: apollo-router/src/uplink/entitlement.rs
 expression: report.to_string()
 ---
 Configuration yaml:
-* Healthcheck
+* Health check
   .health_check.enabled
 
 * Homepage

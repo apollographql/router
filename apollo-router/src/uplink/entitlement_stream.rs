@@ -413,7 +413,6 @@ mod test {
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
             }),
-            configuration_restrictions: vec![],
             warn: false,
             halt: false,
         })
@@ -422,7 +421,6 @@ mod test {
     fn entitlement_with_no_claim() -> Event {
         Event::UpdateEntitlement(Entitlement {
             claims: None,
-            configuration_restrictions: vec![],
             warn: false,
             halt: false,
         })

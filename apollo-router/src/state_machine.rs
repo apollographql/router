@@ -422,7 +422,6 @@ mod tests {
     use crate::services::RouterResponse;
     use crate::uplink::entitlement::Audience;
     use crate::uplink::entitlement::Claims;
-    use crate::uplink::entitlement::ConfigurationRestriction;
     use crate::uplink::entitlement::OneOrMany;
 
     fn example_schema() -> String {
@@ -482,21 +481,12 @@ mod tests {
 
     fn test_config_restricted() -> Configuration {
         let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"restricted": true}));
+        config.validated_yaml = Some(json!({"homepage": {"enabled":true} }));
         config
     }
 
     fn test_entitlement(claims: Option<Claims>, halt: bool, warn: bool) -> Entitlement {
-        Entitlement {
-            claims,
-            halt,
-            warn,
-            configuration_restrictions: vec![ConfigurationRestriction::builder()
-                .path("$.restricted")
-                .value(true)
-                .name("Test")
-                .build()],
-        }
+        Entitlement { claims, halt, warn }
     }
 
     #[test(tokio::test)]

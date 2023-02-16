@@ -96,23 +96,11 @@ impl Display for EntitlementReport {
 
 /// Entitlement controls availability of certain features of the Router. It must be constructed from a base64 encoded JWT
 /// This API experimental and is subject to change outside of semver.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Entitlement {
     pub(crate) claims: Option<Claims>,
-    pub(crate) configuration_restrictions: Vec<ConfigurationRestriction>,
     pub(crate) warn: bool,
     pub(crate) halt: bool,
-}
-
-impl Default for Entitlement {
-    fn default() -> Self {
-        Self {
-            claims: None,
-            configuration_restrictions: Self::configuration_restrictions(),
-            warn: false,
-            halt: false,
-        }
-    }
 }
 
 impl Display for Entitlement {
@@ -158,7 +146,6 @@ impl FromStr for Entitlement {
                 .map_err(Error::InvalidEntitlement)
                 .map(|r| Entitlement {
                     claims: Some(r.claims),
-                    configuration_restrictions: Self::configuration_restrictions(),
                     warn: false,
                     halt: false,
                 })
@@ -200,13 +187,15 @@ impl Entitlement {
         _schema: &Schema,
     ) -> EntitlementReport {
         EntitlementReport {
-            restricted_config_in_use: self.validate_configuration(configuration),
+            restricted_config_in_use: self
+                .validate_configuration(configuration, &Self::configuration_restrictions()),
         }
     }
 
     fn validate_configuration(
         &self,
         configuration: &Configuration,
+        configuration_restrictions: &Vec<ConfigurationRestriction>,
     ) -> Vec<ConfigurationRestriction> {
         let mut selector = jsonpath_lib::selector(
             configuration
@@ -215,7 +204,7 @@ impl Entitlement {
                 .unwrap_or(&Value::Null),
         );
         let mut configuration_violations = Vec::new();
-        for restriction in &self.configuration_restrictions {
+        for restriction in configuration_restrictions {
             if let Some(value) = selector(&restriction.path)
                 .expect("path on restriction was not valid")
                 .first()
@@ -228,8 +217,24 @@ impl Entitlement {
         configuration_violations
     }
 
+    #[cfg(not(test))]
     fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
         vec![]
+    }
+    #[cfg(test)]
+    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
+        vec![
+            ConfigurationRestriction::builder()
+                .path("$.health_check.enabled")
+                .value(true)
+                .name("Health check")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.homepage.enabled")
+                .value(true)
+                .name("Homepage")
+                .build(),
+        ]
     }
 }
 
@@ -296,7 +301,6 @@ mod test {
         let report = check(
             Entitlement {
                 claims: None,
-                configuration_restrictions: configuration_restrictions(),
                 warn: false,
                 halt: false,
             },
@@ -315,7 +319,6 @@ mod test {
         let report = check(
             Entitlement {
                 claims: None,
-                configuration_restrictions: configuration_restrictions(),
                 warn: false,
                 halt: false,
             },
