@@ -1611,7 +1611,7 @@ impl Rhai {
                 format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
-            .register_fn("uuid", || -> String {
+            .register_fn("uuid_v4", || -> String {
                 Uuid::new_v4().to_string()
             })
             .register_fn("unix_now", ||-> u64 {
