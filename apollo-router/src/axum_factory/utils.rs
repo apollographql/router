@@ -18,6 +18,7 @@ use tower_http::trace::MakeSpan;
 use tracing::Span;
 
 use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
 
 pub(crate) const REQUEST_SPAN_NAME: &str = "request";
 
@@ -136,7 +137,7 @@ impl PropagatingMakeSpan {
                 "http.flavor" = ?request.version(),
                 "http.status" = 500, // This prevents setting later
                 "otel.kind" = "SERVER",
-                "apollo_router.entitlement" = "Expired: http://todo.router.apollographql.com"
+                "apollo_router.entitlement" = ENTITLEMENT_EXPIRED_SHORT_MESSAGE
             )
         } else {
             tracing::info_span!(

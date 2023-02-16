@@ -58,6 +58,7 @@ use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
 use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -338,7 +339,7 @@ async fn entitlement_handler<B>(
         ::tracing::error!(
            monotonic_counter.apollo_router_http_requests_total = 1u64,
            status = %500u16,
-           error = "Apollo entitlement expired: http://todo.router.apollographql.com",
+           error = "Apollo entitlement expired: {ENTITLEMENT_EXPIRED_URL}",
         );
 
         // This will rate limit logs about entitlement to 1 a second.
@@ -357,7 +358,7 @@ async fn entitlement_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!("Apollo entitlement expired: http://todo.router.apollographql.com");
+            ::tracing::error!(ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
         }
     }
 
