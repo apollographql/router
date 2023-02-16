@@ -475,7 +475,8 @@ mod tests {
     }
     fn test_config_restricted() -> Configuration {
         let mut config = Configuration::builder().build().unwrap();
-        config.validated_yaml = Some(json!({"homepage": {"enabled":true} }));
+        config.validated_yaml =
+            Some(json!({"plugins":{"experimental.restricted":{"enabled":true}}}));
         config
     }
 

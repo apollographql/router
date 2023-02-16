@@ -118,24 +118,12 @@ impl EntitlementReport {
         configuration_violations
     }
 
-    #[cfg(not(test))]
     fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![]
-    }
-    #[cfg(test)]
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![
-            ConfigurationRestriction::builder()
-                .path("$.health_check.enabled")
-                .value(true)
-                .name("Health check")
-                .build(),
-            ConfigurationRestriction::builder()
-                .path("$.homepage.enabled")
-                .value(true)
-                .name("Homepage")
-                .build(),
-        ]
+        vec![ConfigurationRestriction::builder()
+            .path("$.plugins.['experimental.restricted'].enabled")
+            .value(true)
+            .name("Restricted")
+            .build()]
     }
 }
 

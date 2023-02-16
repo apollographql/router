@@ -732,6 +732,19 @@ expression: "&schema"
               "type": "string"
             }
           }
+        },
+        "experimental.restricted": {
+          "description": "Restricted plugin (for testing purposes only)",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the restricted plugin (for testing purposes only)",
+              "type": "boolean"
+            }
+          }
         }
       },
       "additionalProperties": false
