@@ -514,6 +514,10 @@ impl Executable {
             }
         };
 
+        // Order of precidence:
+        // 1. explicit path from cli
+        // 2. env APOLLO_ROUTER_ENTITLEMENT
+        // 3. uplink
         let entitlement = entitlement.unwrap_or_else(|| {
             match (
                 &opt.apollo_router_entitlement,
@@ -521,7 +525,6 @@ impl Executable {
                 &opt.apollo_key,
                 &opt.apollo_graph_ref,
             ) {
-                (Some(_entitlement), _, _, _) => EntitlementSource::Env,
                 (_, Some(entitlement_path), _, _) => {
                     let entitlement_path = if entitlement_path.is_relative() {
                         current_directory.join(entitlement_path)
@@ -533,6 +536,7 @@ impl Executable {
                         watch: opt.hot_reload,
                     }
                 }
+                (Some(_entitlement), _, _, _) => EntitlementSource::Env,
                 (_, _, Some(apollo_key), Some(apollo_graph_ref)) => EntitlementSource::Registry {
                     apollo_key: apollo_key.to_string(),
                     apollo_graph_ref: apollo_graph_ref.to_string(),
