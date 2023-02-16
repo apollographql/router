@@ -580,15 +580,7 @@ impl SubgraphStage {
                                 serde_json::from_value(
                                     co_processor_output.body.unwrap_or(serde_json::Value::Null),
                                 )
-                                .unwrap_or_else(|error| {
-                                    tracing::error!("external plugin: couldn't deserialize coprocessor output: {:?}", error);
-                                    crate::graphql::Response::builder()
-                                        .errors(vec![Error {
-                                            message: "external plugin: couldn't deserialize coprocessor output"
-                                                .to_string(),
-                                            ..Default::default()
-                                        }]).build()
-                                });
+                                .expect("the body is a serde_json::Value; qed");
                             subgraph::Response {
                                 response: http::Response::builder()
                                     .status(code)
