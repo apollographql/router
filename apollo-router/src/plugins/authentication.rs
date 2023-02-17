@@ -11,12 +11,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use deduplicate::Deduplicate;
+use displaydoc::Display;
 use futures::future::BoxFuture;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
+use jsonwebtoken::errors::Error as JWTError;
 use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::EllipticCurve;
 use jsonwebtoken::jwk::Jwk;
@@ -54,6 +56,48 @@ type SharedDeduplicate =
     Arc<Deduplicate<fn(Url) -> BoxFuture<'static, Option<JwkSet>>, Url, JwkSet>>;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
+
+#[derive(Debug, Display, Error)]
+enum AuthenticationError<'a> {
+    /// Missing {0} header
+    MissingHeader(&'a str),
+
+    /// Configured header is not convertible to a string
+    CannotConvertToString,
+
+    /// Header Value: '{0}' is not correctly formatted. prefix should be '{1}'
+    InvalidPrefix(&'a str, &'a str),
+
+    /// Header Value: '{0}' is not correctly formatted. Missing JWT
+    MissingJWT(&'a str),
+
+    /// '{0}' is not a valid JWT header: {1}
+    InvalidHeader(&'a str, JWTError),
+
+    /// Cannot retrieve JWKS: {0}
+    CannotRetrieveJWKS(BoxError),
+
+    /// Cannot retrieve JWKS: router cooling down
+    CannotRetrieveJWKSDueToCooldown,
+
+    /// Cannot create decoding key: {0}
+    CannotCreateDecodingKey(JWTError),
+
+    /// JWK does not contain an algorithm
+    JWKHasNoAlgorithm,
+
+    /// Cannot decode JWT: {0}
+    CannotDecodeJWT(JWTError),
+
+    /// Cannot insert claims into context: {0}
+    CannotInsertClaimsIntoContext(BoxError),
+
+    /// Cannot find kid: '{0:?}' in JWKS list
+    CannotFindKID(Option<String>),
+
+    /// Cannot find a suitable key for: alg: '{0:?}', kid: '{1:?}' in JWKS list
+    CannotFindSuitableKey(Algorithm, Option<String>),
+}
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -414,7 +458,7 @@ impl Plugin for AuthenticationPlugin {
                     // to help reduce repetition
                     fn failure_message(
                         context: Context,
-                        msg: String,
+                        error: AuthenticationError,
                         status: StatusCode,
                     ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
                     {
@@ -423,11 +467,11 @@ impl Plugin for AuthenticationPlugin {
                             monotonic_counter.apollo_authentication_failure_count = 1u64,
                             kind = %AUTHENTICATION_KIND
                         );
-                        tracing::info!(message = %msg, "jwt authentication failure");
+                        tracing::info!(message = %error, "jwt authentication failure");
                         let response = router::Response::error_builder()
                             .error(
                                 graphql::Error::builder()
-                                    .message(msg)
+                                    .message(error.to_string())
                                     .extension_code("AUTH_ERROR")
                                     .build(),
                             )
@@ -445,7 +489,7 @@ impl Plugin for AuthenticationPlugin {
                             None => {
                                 return failure_message(
                                     request.context,
-                                    format!("Missing {} header", &my_config.header_name),
+                                    AuthenticationError::MissingHeader(&my_config.header_name),
                                     StatusCode::UNAUTHORIZED,
                                 );
                             }
@@ -457,7 +501,7 @@ impl Plugin for AuthenticationPlugin {
                         Err(_not_a_string_error) => {
                             return failure_message(
                                 request.context,
-                                "configured header is not convertible to a string".to_string(),
+                                AuthenticationError::CannotConvertToString,
                                 StatusCode::BAD_REQUEST,
                             );
                         }
@@ -477,10 +521,7 @@ impl Plugin for AuthenticationPlugin {
                     {
                         return failure_message(
                             request.context,
-                            format!(
-                                "Header Value: '{jwt_value_untrimmed}' is not correctly formatted. prefix should be '{}'",
-                                my_config.header_value_prefix
-                            ),
+                            AuthenticationError::InvalidPrefix(jwt_value_untrimmed, &my_config.header_value_prefix),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -490,7 +531,7 @@ impl Plugin for AuthenticationPlugin {
                     if jwt_parts.len() != 2 {
                         return failure_message(
                             request.context,
-                            format!("Header Value: '{jwt_value}' is not correctly formatted. Missing JWT"),
+                            AuthenticationError::MissingJWT(jwt_value),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -504,7 +545,7 @@ impl Plugin for AuthenticationPlugin {
                         Err(e) => {
                             return failure_message(
                                 request.context,
-                                format!("'{jwt}' is not a valid JWT header: {e}"),
+                                AuthenticationError::InvalidHeader(jwt, e),
                                 StatusCode::BAD_REQUEST,
                             );
                         }
@@ -516,7 +557,7 @@ impl Plugin for AuthenticationPlugin {
                         alg: jwt_header.alg,
                     };
 
-                    // Search our set of JWKS to find the kid and process it
+                    // Search our list of JWKS to find the kid and process it
                     // Note: This will search through JWKS in the order in which they are defined
                     // in configuration.
 
@@ -525,7 +566,7 @@ impl Plugin for AuthenticationPlugin {
                         Err(e) => {
                             return failure_message(
                                 request.context,
-                                format!("Could not retrieve JWKS set: {e}"),
+                                AuthenticationError::CannotRetrieveJWKS(e),
                                 StatusCode::INTERNAL_SERVER_ERROR,
                             );
                         }
@@ -537,7 +578,7 @@ impl Plugin for AuthenticationPlugin {
                             Err(e) => {
                                 return failure_message(
                                     request.context,
-                                    format!("Could not create decoding key: {e}"),
+                                    AuthenticationError::CannotCreateDecodingKey(e),
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
@@ -548,7 +589,7 @@ impl Plugin for AuthenticationPlugin {
                             None => {
                                 return failure_message(
                                     request.context,
-                                    "Jwk does not contain an algorithm".to_string(),
+                                    AuthenticationError::JWKHasNoAlgorithm,
                                     StatusCode::INTERNAL_SERVER_ERROR,
                                 );
                             }
@@ -565,7 +606,7 @@ impl Plugin for AuthenticationPlugin {
                             Err(e) => {
                                 return failure_message(
                                     request.context,
-                                    format!("Could not create decode JWT: {e}"),
+                                    AuthenticationError::CannotDecodeJWT(e),
                                     StatusCode::UNAUTHORIZED,
                                 );
                             }
@@ -577,7 +618,7 @@ impl Plugin for AuthenticationPlugin {
                         {
                             return failure_message(
                                 request.context,
-                                format!("Could not insert claims into context: {e}"),
+                                AuthenticationError::CannotInsertClaimsIntoContext(e),
                                 StatusCode::INTERNAL_SERVER_ERROR,
                             );
                         }
@@ -606,7 +647,7 @@ impl Plugin for AuthenticationPlugin {
                                 .error(
                                     graphql::Error::builder()
                                         .message(
-                                            "Could not retrieve JWKS set: router cooling down",
+                                            AuthenticationError::CannotRetrieveJWKSDueToCooldown.to_string(),
                                         )
                                         .extension_code("AUTH_ERROR")
                                         .build(),
@@ -644,14 +685,14 @@ impl Plugin for AuthenticationPlugin {
                             }
                             failure_message(
                                 request.context,
-                                format!("Could not find kid: '{:?}' in JWKS sets", criteria.kid),
+                                AuthenticationError::CannotFindKID(criteria.kid),
                                 StatusCode::UNAUTHORIZED,
                             )
                         }
                     } else {
                         failure_message(
                             request.context,
-                            format!("Could not find a suitable key for: alg: '{:?}', kid: '{:?}' in JWKS sets", criteria.alg, criteria.kid),
+                            AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
                             StatusCode::UNAUTHORIZED,
                         )
                     }
@@ -1006,7 +1047,7 @@ mod tests {
         .unwrap();
 
         let expected_error = graphql::Error::builder()
-            .message("Could not create decode JWT: InvalidSignature")
+            .message("Cannot decode JWT: InvalidSignature")
             .extension_code("AUTH_ERROR")
             .build();
 
