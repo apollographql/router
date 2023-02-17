@@ -10,7 +10,7 @@ fn supergraph_service(service) {
 //
 // We can take actions based on the evaluation of those claims.
 //
-// In this example we return UNAUTHROISED if there are no claims
+// In this example we return UNAUTHORISED if there are no claims
 // or "iss" claim
 // is either:
 //  - not present
@@ -18,7 +18,7 @@ fn supergraph_service(service) {
 //
 fn process_request(request) {
     try {
-        let claims = request.context[APOLLO_AUTHENTICATION_JWT_CLAIMS];
+        let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
         if claims == () {
             throw #{
                 status: 401,

@@ -95,16 +95,16 @@ Returning a `200` "error" is not currently supported. If encountered, it will be
 
 ## Timing execution
 
-Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
+Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         // highlight-start
-        let start = apollo_start.elapsed;
+        let start = Router.APOLLO_START.elapsed;
         // Do some processing here...
-        let duration = apollo_start.elapsed - start;
+        let duration = Router.APOLLO_START.elapsed - start;
         print(`response processing took: ${duration}`);
         // highlight-end
 
@@ -118,11 +118,11 @@ fn supergraph_service(service) {
 
 ## Accessing the SDL
 
-Your Rhai customization can use the global `apollo_sdl` constant to examine the supergraph.
+Your Rhai customization can use the global `Router.APOLLO_SDL` constant to examine the supergraph.
 
 ```rhai
 fn supergraph_service(service) {
-    print(`${apollo_sdl}`);
+    print(`${Router.APOLLO_SDL}`);
 }
 ```
 
