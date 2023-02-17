@@ -30,9 +30,9 @@ use thiserror::Error;
 use crate::spec::Schema;
 use crate::Configuration;
 
-pub(crate) const ENTITLEMENT_EXPIRED_URL: &str = "https://todo.router.apollographql.com";
+pub(crate) const ENTITLEMENT_EXPIRED_URL: &str = "https://go.apollo.dev/o/entitlements";
 pub(crate) const ENTITLEMENT_EXPIRED_SHORT_MESSAGE: &str =
-    "Apollo entitlement expired https://todo.router.apollographql.com";
+    "Apollo entitlement expired https://go.apollo.dev/o/entitlements";
 
 static JWKS: OnceCell<JwkSet> = OnceCell::new();
 
