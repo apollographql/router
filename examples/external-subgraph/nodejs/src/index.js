@@ -26,7 +26,7 @@ app.post("/", (req, res) => {
   request.context = context;
 
   // let's mess with the uri, but only if we are about to call the reviews service
-  if (request.service_name === "reviews") {
+  if (request.serviceName === "reviews") {
     request.uri = "http://localhost:4042";
   }
 

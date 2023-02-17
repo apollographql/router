@@ -65,6 +65,7 @@ impl Control {
 
 // TODO: Builder
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
@@ -100,7 +101,6 @@ where
             .body(serde_json::to_vec(&self)?.into())?;
 
         let response = client.call(request).await?;
-        // TODO: refactor once it compiles
         hyper::body::to_bytes(response.into_body())
             .await
             .map_err(BoxError::from)

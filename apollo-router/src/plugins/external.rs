@@ -497,7 +497,7 @@ impl SubgraphStage {
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -548,7 +548,6 @@ impl SubgraphStage {
                     request.context.leave_active_request().await;
                     tracing::debug!(?co_processor_result, "co-processor returned");
                     let co_processor_output = co_processor_result?;
-
                     validate_coprocessor_output(
                         &co_processor_output,
                         PipelineStep::SubgraphRequest,
@@ -580,7 +579,10 @@ impl SubgraphStage {
                                 serde_json::from_value(
                                     co_processor_output.body.unwrap_or(serde_json::Value::Null),
                                 )
-                                .expect("the body is a serde_json::Value; qed");
+                                .unwrap_or_else(|error| crate::graphql::Response::builder().errors(vec![Error {
+                                    message: format!("couldn't deserialize coprocessor output body: {error}"),
+                                  ..Default::default()
+                                }]).build());
                             subgraph::Response {
                                 response: http::Response::builder()
                                     .status(code)
@@ -789,6 +791,7 @@ mod tests {
     use super::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
+    use crate::plugin::test::MockSubgraphService;
     use crate::services::router_service;
 
     #[tokio::test]
@@ -1026,6 +1029,309 @@ mod tests {
                 .await
                 .unwrap_err()
                 .to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn coprocessor_subgraph_with_invalid_response_body_should_fail() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphConf {
+                headers: false,
+                context: false,
+                body: true,
+                uri: false,
+                service: false,
+                service_name: false,
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mock_subgraph_service = MockSubgraphService::new();
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": {
+                                    "Break": 200
+                                },
+                                "id": "3a67e2dd75e8777804e4a8f42b971df7",
+                                "body": {
+                                    "errors": [{
+                                        "body": "Errors need a message, this will fail to deserialize"
+                                    }]
+                                }
+                            }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        assert_eq!(
+            "couldn't deserialize coprocessor output body: missing field `message`",
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .errors[0]
+                .message
+                .to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_request() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphConf {
+                headers: false,
+                context: false,
+                body: true,
+                uri: false,
+                service: false,
+                service_name: false,
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                // Let's assert that the subgraph request has been transformed as it should have.
+                assert_eq!(
+                    req.subgraph_request.headers().get("cookie").unwrap(),
+                    "tasty_cookie=strawberry"
+                );
+
+                assert_eq!(
+                    req.context
+                        .get::<&str, u8>("this-is-a-test-context")
+                        .unwrap()
+                        .unwrap(),
+                    42
+                );
+
+                // The subgraph uri should have changed
+                assert_eq!(
+                    "http://thisurihaschanged/",
+                    req.subgraph_request.uri().to_string()
+                );
+
+                // The query should have changed
+                assert_eq!(
+                    "query Long {\n  me {\n  name\n}\n}",
+                    req.subgraph_request.into_body().query.unwrap()
+                );
+
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": "Continue",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "query": "query Long {\n  me {\n  name\n}\n}"
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "accepts-json": false,
+                                      "accepts-wildcard": true,
+                                      "accepts-multipart": false,
+                                      "this-is-a-test-context": 42
+                                    }
+                                  },
+                                  "serviceName": "service name shouldn't change",
+                                  "uri": "http://thisurihaschanged"
+                            }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 1234_u32 }),
+            service
+                .oneshot(request)
+                .await
+                .unwrap()
+                .response
+                .into_body()
+                .data
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_subgraph_response() {
+        let subgraph_stage = SubgraphStage {
+            request: Default::default(),
+            response: SubgraphConf {
+                headers: false,
+                context: false,
+                body: true,
+                uri: false,
+                service: false,
+                service_name: false,
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_subgraph_service = MockSubgraphService::new();
+
+        mock_subgraph_service
+            .expect_call()
+            .returning(|req: subgraph::Request| {
+                Ok(subgraph::Response::builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .errors(Vec::new())
+                    .extensions(crate::json_ext::Object::new())
+                    .context(req.context)
+                    .build())
+            });
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                                "version": 1,
+                                "stage": "SubgraphResponse",
+                                "headers": {
+                                    "cookie": [
+                                      "tasty_cookie=strawberry"
+                                    ],
+                                    "content-type": [
+                                      "application/json"
+                                    ],
+                                    "host": [
+                                      "127.0.0.1:4000"
+                                    ],
+                                    "apollo-federation-include-trace": [
+                                      "ftv1"
+                                    ],
+                                    "apollographql-client-name": [
+                                      "manual"
+                                    ],
+                                    "accept": [
+                                      "*/*"
+                                    ],
+                                    "user-agent": [
+                                      "curl/7.79.1"
+                                    ],
+                                    "content-length": [
+                                      "46"
+                                    ]
+                                  },
+                                  "body": {
+                                    "data": {
+                                        "test": 5678
+                                    }
+                                  },
+                                  "context": {
+                                    "entries": {
+                                      "accepts-json": false,
+                                      "accepts-wildcard": true,
+                                      "accepts-multipart": false,
+                                      "this-is-a-test-context": 42
+                                    }
+                                  },
+                            }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        let response = service.oneshot(request).await.unwrap();
+
+        // Let's assert that the subgraph response has been transformed as it should have.
+        assert_eq!(
+            response.response.headers().get("cookie").unwrap(),
+            "tasty_cookie=strawberry"
+        );
+
+        assert_eq!(
+            response
+                .context
+                .get::<&str, u8>("this-is-a-test-context")
+                .unwrap()
+                .unwrap(),
+            42
+        );
+
+        assert_eq!(
+            serde_json_bytes::json!({ "test": 5678_u32 }),
+            response.response.into_body().data.unwrap()
         );
     }
 

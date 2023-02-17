@@ -132,7 +132,7 @@ impl Service<router::Request> for SimpleEndpoint {
             };
 
             // let's mess with the uri, but only if we are about to call the reviews service
-            if json_body.get("service_name")
+            if json_body.get("serviceName")
                 == Some(&serde_json::Value::String("reviews".to_string()))
             {
                 json_body
