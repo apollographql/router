@@ -112,6 +112,8 @@ pub(crate) enum Error {
 pin_project! {
     /// This stream wrapper will cause check the current entitlement at the point of warn_at or halt_at.
     /// This means that the state machine can be kept clean, and not have to deal with setting it's own timers and also avoids lots of racy scenarios as entitlement checks are guaranteed to happen after an entitlement update even if they were in the past.
+    #[must_use = "streams do nothing unless polled"]
+    #[project = EntitlementExpanderProj]
     pub(crate) struct EntitlementExpander<Upstream>
     where
         Upstream: Stream<Item = Entitlement>,
@@ -132,67 +134,63 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         let checks = this.checks.poll_expired(cx);
-        match checks {
-            // We have an expired claim that needs checking
-            Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_inner())),
-            // No expired claim is ready so go for upstream
-            Poll::Pending | Poll::Ready(None) => {
-                // Poll upstream. Note that it is OK for this to be called again after it has finished as the stream is fused and if it is exhausted it will return Poll::Ready(None).
-                let mut next = this.upstream.poll_next(cx);
-                match (checks, &mut next) {
-                    // Upstream has a new event with a claim
-                    (_, Poll::Ready(Some(entitlement))) if entitlement.claims.is_some() => {
-                        // We got a new claim, so clear the previous checks.
-                        this.checks.clear();
-                        let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
-                        let halt_at = to_positive_instant(claims.halt_at);
-                        let warn_at = to_positive_instant(claims.warn_at);
-                        let now = Instant::now();
-                        // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
-                        if halt_at > now {
-                            // Only add halt if it isn't immediately going to be triggered.
-                            this.checks.insert_at(
-                                Event::UpdateEntitlement(EntitlementState::EntitledHalt),
-                                (halt_at).into(),
-                            );
-                        } else {
-                            return Poll::Ready(Some(Event::UpdateEntitlement(
-                                EntitlementState::EntitledHalt,
-                            )));
-                        }
-                        if warn_at > now {
-                            // Only add warn if it isn't immediately going to be triggered and halt is not already set.
-                            // Something that is halted is by definition also warn.
-                            this.checks.insert_at(
-                                Event::UpdateEntitlement(EntitlementState::EntitledWarn),
-                                (warn_at).into(),
-                            );
-                        } else {
-                            return Poll::Ready(Some(Event::UpdateEntitlement(
-                                EntitlementState::EntitledWarn,
-                            )));
-                        }
+        // Only check downstream if checks was not Some
+        let next = if matches!(checks, Poll::Ready(Some(_))) {
+            // It doesn't matter what we set this to. The first match arm below will match.
+            Poll::Ready(None)
+        } else {
+            // Poll upstream. Note that it is OK for this to be called again after it has finished as the stream is fused and if it is exhausted it will return Poll::Ready(None).
+            this.upstream.poll_next(cx)
+        };
 
-                        Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
-                    }
-                    // Upstream has a new event with no claim
-                    (_, Poll::Ready(Some(_))) => {
-                        // As we have no claim clear the checks
-                        this.checks.clear();
-                        Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
-                    }
-                    // There were still active checks. Waiter was scheduled at this.checks.poll_expired(cx)
-                    (Poll::Pending, Poll::Ready(None)) => Poll::Pending,
-                    // There were no checks left and upstream is exhausted.
-                    (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
-                    // Upstream not exhausted. Waiter was scheduled at this.upstream.poll_next() and maybe also at this.checks.poll_expired(cx)
-                    (_, Poll::Pending) => Poll::Pending,
-                    // This can't happen as we already handled `match checks`. Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_inner())),
-                    (Poll::Ready(Some(_)), Poll::Ready(None)) => {
-                        unreachable!("logic error in entitlement stream")
-                    }
+        match (checks, next) {
+            // Checks has an expired claim that needs checking
+            (Poll::Ready(Some(item)), _) => Poll::Ready(Some(item.into_inner())),
+            // Upstream has a new entitlement with a claim
+            (_, Poll::Ready(Some(entitlement))) if entitlement.claims.is_some() => {
+                // We got a new claim, so clear the previous checks.
+                this.checks.clear();
+                let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
+                let halt_at = to_positive_instant(claims.halt_at);
+                let warn_at = to_positive_instant(claims.warn_at);
+                let now = Instant::now();
+                // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
+                if halt_at > now {
+                    // Only add halt if it isn't immediately going to be triggered.
+                    this.checks.insert_at(
+                        Event::UpdateEntitlement(EntitlementState::EntitledHalt),
+                        (halt_at).into(),
+                    );
+                } else {
+                    return Poll::Ready(Some(Event::UpdateEntitlement(
+                        EntitlementState::EntitledHalt,
+                    )));
                 }
+                if warn_at > now {
+                    // Only add warn if it isn't immediately going to be triggered and halt is not already set.
+                    // Something that is halted is by definition also warn.
+                    this.checks.insert_at(
+                        Event::UpdateEntitlement(EntitlementState::EntitledWarn),
+                        (warn_at).into(),
+                    );
+                } else {
+                    return Poll::Ready(Some(Event::UpdateEntitlement(
+                        EntitlementState::EntitledWarn,
+                    )));
+                }
+
+                Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
             }
+            // Upstream has a new entitlement with no claim
+            (_, Poll::Ready(Some(_))) => {
+                // As we have no claim clear the checks
+                this.checks.clear();
+                Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
+            }
+            // If either checks or upstream returned pending then we need to return pending.
+            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
+            // If both stream are exhausted then return none.
+            (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
         }
     }
 }
