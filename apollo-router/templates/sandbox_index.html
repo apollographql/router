@@ -58,7 +58,10 @@
             target: '#embeddableSandbox',
             initialEndpoint,
             initialRequestQueryPlan: true,
-            includeCookies: true,
+            initialState: {
+                includeCookies: true,
+            },
+            hideCookieToggle: false,
         });
         </script>
     </body>
