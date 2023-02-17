@@ -198,6 +198,7 @@ dependencies = [
  "displaydoc",
  "flate2",
  "futures",
+ "futures-test",
  "graphql_client",
  "heck 0.4.1",
  "hex",
@@ -1994,6 +1995,23 @@ name = "futures-task"
 version = "0.3.26"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf79a1bf610b10f42aea489289c5a2c478a786509693b80cd39c44ccd936366"
+
+[[package]]
+name = "futures-test"
+version = "0.3.26"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "247a763336996e90f355708bf9ae8b78ab5ae8810b9e7bd731cce65fd7fe6d5d"
+dependencies = [
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-macro",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+ "pin-project",
+ "pin-utils",
+]
 
 [[package]]
 name = "futures-timer"

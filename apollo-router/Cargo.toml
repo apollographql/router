@@ -210,6 +210,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
+futures-test = "0.3.21"
 insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.0"
 maplit = "1.0.2"

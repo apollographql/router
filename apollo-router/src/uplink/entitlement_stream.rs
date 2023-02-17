@@ -240,6 +240,7 @@ mod test {
 
     use futures::SinkExt;
     use futures::StreamExt;
+    use futures_test::stream::StreamTestExt;
 
     use crate::router::Event;
     use crate::uplink::entitlement::Audience;
@@ -315,6 +316,7 @@ mod test {
     #[tokio::test]
     async fn entitlement_expander_warn_now() {
         let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 15)])
+            .interleave_pending()
             .expand_entitlements()
             .map(SimpleEvent::from);
 
@@ -328,6 +330,7 @@ mod test {
     #[tokio::test]
     async fn entitlement_expander_halt_now() {
         let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 0)])
+            .interleave_pending()
             .expand_entitlements()
             .map(SimpleEvent::from);
 
@@ -338,6 +341,7 @@ mod test {
     #[tokio::test]
     async fn entitlement_expander_no_claim() {
         let events_stream = futures::stream::iter(vec![entitlement_with_no_claim()])
+            .interleave_pending()
             .expand_entitlements()
             .map(SimpleEvent::from);
 
@@ -351,6 +355,7 @@ mod test {
             entitlement_with_claim(10, 10),
             entitlement_with_no_claim(),
         ])
+        .interleave_pending()
         .expand_entitlements()
         .map(SimpleEvent::from);
 
@@ -370,6 +375,7 @@ mod test {
             entitlement_with_no_claim(),
             entitlement_with_claim(15, 30),
         ])
+        .interleave_pending()
         .expand_entitlements()
         .map(SimpleEvent::from);
 
@@ -385,7 +391,7 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn entitlement_expander_claim_pause_claim() {
         let (mut tx, rx) = futures::channel::mpsc::channel(10);
         let events_stream = rx.expand_entitlements().map(SimpleEvent::from);
