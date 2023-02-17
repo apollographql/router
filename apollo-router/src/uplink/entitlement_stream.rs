@@ -191,9 +191,9 @@ where
                     (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
                     // Upstream not exhausted. Waiter was scheduled at this.upstream.poll_next()
                     (Poll::Pending, _) => Poll::Pending,
-                    // This can't happen as we already handled this case above
+                    // This can't happen as we already handled `match checks`
                     (Poll::Ready(None), Poll::Ready(Some(_))) => {
-                        panic!("logic error in entitlement stream")
+                        unreachable!("logic error in entitlement stream")
                     }
                 }
             }
