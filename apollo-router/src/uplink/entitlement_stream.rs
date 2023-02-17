@@ -13,7 +13,10 @@ use std::time::Instant;
 use std::time::SystemTime;
 
 use displaydoc::Display;
+use futures::stream::Fuse;
+use futures::stream::FusedStream;
 use futures::Stream;
+use futures::StreamExt;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
 use thiserror::Error;
@@ -117,7 +120,7 @@ pin_project! {
         #[pin]
         checks: DelayQueue<Event>,
         #[pin]
-        upstream: Upstream,
+        upstream: Fuse<Upstream>,
     }
 }
 
@@ -129,15 +132,18 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-        let active_checks = !this.checks.is_empty();
-        match this.checks.poll_expired(cx) {
+        let checks = this.checks.poll_expired(cx);
+        let upstream_terminated = this.upstream.is_terminated();
+        match checks {
             // We have an expired claim that needs checking
             Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_inner())),
-
+            Poll::Ready(None) if upstream_terminated => Poll::Ready(None),
+            // No more upstream, Waiter scheduled in this.checks.poll_expired(cx);
+            Poll::Pending if upstream_terminated => Poll::Pending,
             // No expired claim is ready so go for upstream
             Poll::Pending | Poll::Ready(None) => {
                 let mut next = this.upstream.poll_next(cx);
-                match (&mut next, active_checks) {
+                match (&mut next, checks) {
                     // Upstream has a new event with a claim
                     (Poll::Ready(Some(entitlement)), _) if entitlement.claims.is_some() => {
                         // We got a new claim, so clear the previous checks.
@@ -179,12 +185,16 @@ where
                         this.checks.clear();
                         Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
                     }
-                    // There were still active checks, so go for pending
-                    (Poll::Ready(None), true) => Poll::Pending,
+                    // There were still active checks. Waiter was scheduled at this.checks.poll_expired(cx)
+                    (Poll::Ready(None), Poll::Pending) => Poll::Pending,
                     // Upstream is exhausted and there are no checks left
-                    (Poll::Ready(None), false) => Poll::Ready(None),
-                    // Upstream not exhausted
+                    (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
+                    // Upstream not exhausted. Waiter was scheduled at this.upstream.poll_next()
                     (Poll::Pending, _) => Poll::Pending,
+                    // This can't happen as we already handled this case above
+                    (Poll::Ready(None), Poll::Ready(Some(_))) => {
+                        panic!("logic error in entitlement stream")
+                    }
                 }
             }
         }
@@ -215,7 +225,7 @@ pub(crate) trait EntitlementStreamExt: Stream<Item = Entitlement> {
     {
         EntitlementExpander {
             checks: Default::default(),
-            upstream: self,
+            upstream: self.fuse(),
         }
     }
 }
@@ -224,7 +234,6 @@ impl<T: Stream<Item = Entitlement>> EntitlementStreamExt for T {}
 
 #[cfg(test)]
 mod test {
-
     use std::time::Duration;
     use std::time::Instant;
     use std::time::SystemTime;
