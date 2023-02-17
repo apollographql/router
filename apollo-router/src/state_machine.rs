@@ -1,5 +1,6 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
 use futures::prelude::*;
@@ -58,6 +59,25 @@ enum State<FA: RouterSuperServiceFactory> {
     },
     Stopped,
     Errored(ApolloRouterError),
+}
+
+impl<FA: RouterSuperServiceFactory> Debug for State<FA> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Startup { .. } => {
+                write!(f, "Startup")
+            }
+            Running { .. } => {
+                write!(f, "Running")
+            }
+            Stopped => {
+                write!(f, "Stopped")
+            }
+            Errored(_) => {
+                write!(f, "Errored")
+            }
+        }
+    }
 }
 
 impl<FA: RouterSuperServiceFactory> State<FA> {
@@ -367,7 +387,8 @@ where
 
         // Process all the events in turn until we get to error state or we run out of events.
         while let Some(event) = messages.next().await {
-            tracing::debug!("got event {}", event);
+            let event_name = format!("{event:?}");
+            let last_state = format!("{state:?}");
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
@@ -389,6 +410,9 @@ where
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
+            tracing::debug!(
+                "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
+            );
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {

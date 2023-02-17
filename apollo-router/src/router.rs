@@ -2,8 +2,7 @@
 #![allow(missing_docs)] // FIXME
 #![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
-use std::fmt::Display;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
@@ -44,8 +43,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterRouterSuperServiceFactory;
 use crate::plugin::DynPlugin;
-use crate::router::Event::NoMoreEntitlement;
-use crate::router::Event::UpdateEntitlement;
+use crate::router::Event::{NoMoreEntitlement, UpdateEntitlement};
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
@@ -787,7 +785,6 @@ impl RouterHttpServer {
 }
 
 /// Messages that are broadcast across the app.
-#[derive(Debug)]
 pub(crate) enum Event {
     /// The configuration was updated.
     UpdateConfiguration(Configuration),
@@ -801,7 +798,7 @@ pub(crate) enum Event {
     /// There are no more updates to the schema
     NoMoreSchema,
 
-    /// Update entitlement
+    /// Update entitlement {}
     UpdateEntitlement(EntitlementState),
 
     /// There were no more updates to entitlement.
@@ -811,18 +808,31 @@ pub(crate) enum Event {
     Shutdown,
 }
 
-impl Display for Event {
+impl Debug for Event {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let name = match self {
-            UpdateConfiguration(_) => "UpdateConfiguration",
-            NoMoreConfiguration => "NoConfiguration",
-            UpdateSchema(_) => "UpdateSchema",
-            NoMoreSchema => "NoMoreSchema",
-            UpdateEntitlement(_) => "UpdateEntitlement",
-            NoMoreEntitlement => "NoMoreEntitlement",
-            Shutdown => "Shutdown",
-        };
-        write!(f, "{name}")
+        match self {
+            UpdateConfiguration(_) => {
+                write!(f, "UpdateConfiguration(<redacted>)")
+            }
+            NoMoreConfiguration => {
+                write!(f, "NoMoreConfiguration")
+            }
+            UpdateSchema(_) => {
+                write!(f, "UpdateSchema(<redacted>)")
+            }
+            NoMoreSchema => {
+                write!(f, "NoMoreSchema")
+            }
+            UpdateEntitlement(e) => {
+                write!(f, "UpdateEntitlement({e:?})")
+            }
+            NoMoreEntitlement => {
+                write!(f, "NoMoreEntitlement")
+            }
+            Shutdown => {
+                write!(f, "Shutdown")
+            }
+        }
     }
 }
 
