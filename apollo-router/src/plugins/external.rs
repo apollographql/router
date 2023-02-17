@@ -1296,7 +1296,7 @@ mod tests {
                                       "accepts-multipart": false,
                                       "this-is-a-test-context": 42
                                     }
-                                  },
+                                  }
                             }"##,
                     ))
                     .unwrap())
