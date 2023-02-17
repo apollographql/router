@@ -514,7 +514,7 @@ impl Executable {
             }
         };
 
-        // Order of precidence:
+        // Order of precedence:
         // 1. explicit path from cli
         // 2. env APOLLO_ROUTER_ENTITLEMENT
         // 3. uplink
