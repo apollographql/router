@@ -1,6 +1,7 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;

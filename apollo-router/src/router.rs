@@ -2,7 +2,8 @@
 #![allow(missing_docs)] // FIXME
 #![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
@@ -43,7 +44,8 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::orbiter::OrbiterRouterSuperServiceFactory;
 use crate::plugin::DynPlugin;
-use crate::router::Event::{NoMoreEntitlement, UpdateEntitlement};
+use crate::router::Event::NoMoreEntitlement;
+use crate::router::Event::UpdateEntitlement;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
