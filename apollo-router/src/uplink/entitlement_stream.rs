@@ -14,7 +14,6 @@ use std::time::SystemTime;
 
 use displaydoc::Display;
 use futures::stream::Fuse;
-use futures::stream::FusedStream;
 use futures::Stream;
 use futures::StreamExt;
 use graphql_client::GraphQLQuery;
@@ -133,19 +132,16 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
         let checks = this.checks.poll_expired(cx);
-        let upstream_terminated = this.upstream.is_terminated();
         match checks {
             // We have an expired claim that needs checking
             Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_inner())),
-            Poll::Ready(None) if upstream_terminated => Poll::Ready(None),
-            // No more upstream, Waiter scheduled in this.checks.poll_expired(cx);
-            Poll::Pending if upstream_terminated => Poll::Pending,
             // No expired claim is ready so go for upstream
             Poll::Pending | Poll::Ready(None) => {
+                // Poll upstream. Note that it is OK for this to be called again after it has finished as the stream is fused and if it is exhausted it will return Poll::Ready(None).
                 let mut next = this.upstream.poll_next(cx);
-                match (&mut next, checks) {
+                match (checks, &mut next) {
                     // Upstream has a new event with a claim
-                    (Poll::Ready(Some(entitlement)), _) if entitlement.claims.is_some() => {
+                    (_, Poll::Ready(Some(entitlement))) if entitlement.claims.is_some() => {
                         // We got a new claim, so clear the previous checks.
                         this.checks.clear();
                         let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
@@ -180,19 +176,19 @@ where
                         Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
                     }
                     // Upstream has a new event with no claim
-                    (Poll::Ready(Some(_)), _) => {
+                    (_, Poll::Ready(Some(_))) => {
                         // As we have no claim clear the checks
                         this.checks.clear();
                         Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
                     }
                     // There were still active checks. Waiter was scheduled at this.checks.poll_expired(cx)
-                    (Poll::Ready(None), Poll::Pending) => Poll::Pending,
-                    // Upstream is exhausted and there are no checks left
+                    (Poll::Pending, Poll::Ready(None)) => Poll::Pending,
+                    // There were no checks left and upstream is exhausted.
                     (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
-                    // Upstream not exhausted. Waiter was scheduled at this.upstream.poll_next()
-                    (Poll::Pending, _) => Poll::Pending,
-                    // This can't happen as we already handled `match checks`
-                    (Poll::Ready(None), Poll::Ready(Some(_))) => {
+                    // Upstream not exhausted. Waiter was scheduled at this.upstream.poll_next() and maybe also at this.checks.poll_expired(cx)
+                    (_, Poll::Pending) => Poll::Pending,
+                    // This can't happen as we already handled `match checks`. Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_inner())),
+                    (Poll::Ready(Some(_)), Poll::Ready(None)) => {
                         unreachable!("logic error in entitlement stream")
                     }
                 }
