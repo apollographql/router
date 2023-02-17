@@ -50,6 +50,10 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
 
+mod client;
+#[cfg(test)]
+mod tests;
+
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
 const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
@@ -315,6 +319,7 @@ async fn call_http(
     });
     let cloned_service_name = service_name.clone();
     let cloned_context = context.clone();
+    println!("will send request:{request:#?}");
     let (parts, body) = async move {
         cloned_context.enter_active_request().await;
         let response = match client
@@ -521,6 +526,3 @@ where
         self.clone().boxed()
     }
 }
-
-#[cfg(test)]
-mod tests;
