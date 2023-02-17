@@ -346,15 +346,15 @@ async fn entitlement_handler<B>(
         // The way it works is storing the delta in seconds from a starting instant.
         // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
         // If not successful some other thread will have logged.
-        let last_elapsed_seconds = delta.load(Ordering::Relaxed);
+        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
         let elapsed_seconds = start.elapsed().as_secs();
         if elapsed_seconds > last_elapsed_seconds
             && delta
                 .compare_exchange(
                     last_elapsed_seconds,
                     elapsed_seconds,
-                    Ordering::Relaxed,
-                    Ordering::Relaxed,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
                 )
                 .is_ok()
         {
