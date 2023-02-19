@@ -137,6 +137,7 @@ where
         // Only check downstream if checks was not Some
         let next = if matches!(checks, Poll::Ready(Some(_))) {
             // It doesn't matter what we set this to. The first match arm below will match.
+            // Wrapping this in an Option makes readability worse.
             Poll::Ready(None)
         } else {
             // Poll upstream. Note that it is OK for this to be called again after it has finished as the stream is fused and if it is exhausted it will return Poll::Ready(None).
@@ -144,42 +145,13 @@ where
         };
 
         match (checks, next) {
-            // Checks has an expired claim that needs checking
+            // Checks has an expired claim that needs checking.
+            // This is the ONLY arm where upstream.poll_next has not been called, and this is OK because we are not returning pending.
             (Poll::Ready(Some(item)), _) => Poll::Ready(Some(item.into_inner())),
             // Upstream has a new entitlement with a claim
             (_, Poll::Ready(Some(entitlement))) if entitlement.claims.is_some() => {
-                // We got a new claim, so clear the previous checks.
-                this.checks.clear();
-                let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
-                let halt_at = to_positive_instant(claims.halt_at);
-                let warn_at = to_positive_instant(claims.warn_at);
-                let now = Instant::now();
-                // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
-                if halt_at > now {
-                    // Only add halt if it isn't immediately going to be triggered.
-                    this.checks.insert_at(
-                        Event::UpdateEntitlement(EntitlementState::EntitledHalt),
-                        (halt_at).into(),
-                    );
-                } else {
-                    return Poll::Ready(Some(Event::UpdateEntitlement(
-                        EntitlementState::EntitledHalt,
-                    )));
-                }
-                if warn_at > now {
-                    // Only add warn if it isn't immediately going to be triggered and halt is not already set.
-                    // Something that is halted is by definition also warn.
-                    this.checks.insert_at(
-                        Event::UpdateEntitlement(EntitlementState::EntitledWarn),
-                        (warn_at).into(),
-                    );
-                } else {
-                    return Poll::Ready(Some(Event::UpdateEntitlement(
-                        EntitlementState::EntitledWarn,
-                    )));
-                }
-
-                Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
+                // If we got a new entitlement then we need to reset the stream of events and return the new entitlement event.
+                reset_checks_for_entitlement(&mut this.checks, entitlement)
             }
             // Upstream has a new entitlement with no claim
             (_, Poll::Ready(Some(_))) => {
@@ -188,11 +160,53 @@ where
                 Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
             }
             // If either checks or upstream returned pending then we need to return pending.
+            // It is the responsibility of upstream and checks to schedule wakup.
+            // If we have got to this line then checks.poll_expired and upstream.poll_next *will* have been called.
             (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
             // If both stream are exhausted then return none.
             (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
         }
     }
+}
+
+/// This function takes an entitlement and returns the appropriate event for that entitlement.
+/// If warn at or halt at are in the future it will register appropriate checks to trigger at such times.
+fn reset_checks_for_entitlement(
+    checks: &mut DelayQueue<Event>,
+    entitlement: Entitlement,
+) -> Poll<Option<Event>> {
+    // We got a new claim, so clear the previous checks.
+    checks.clear();
+    let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
+    let halt_at = to_positive_instant(claims.halt_at);
+    let warn_at = to_positive_instant(claims.warn_at);
+    let now = Instant::now();
+    // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
+    if halt_at > now {
+        // Only add halt if it isn't immediately going to be triggered.
+        checks.insert_at(
+            Event::UpdateEntitlement(EntitlementState::EntitledHalt),
+            (halt_at).into(),
+        );
+    } else {
+        return Poll::Ready(Some(Event::UpdateEntitlement(
+            EntitlementState::EntitledHalt,
+        )));
+    }
+    if warn_at > now {
+        // Only add warn if it isn't immediately going to be triggered and halt is not already set.
+        // Something that is halted is by definition also warn.
+        checks.insert_at(
+            Event::UpdateEntitlement(EntitlementState::EntitledWarn),
+            (warn_at).into(),
+        );
+    } else {
+        return Poll::Ready(Some(Event::UpdateEntitlement(
+            EntitlementState::EntitledWarn,
+        )));
+    }
+
+    Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
 }
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
