@@ -324,30 +324,33 @@ impl RouterStage {
                         // Ensure the code is a valid http status code
                         let code = control.get_http_status()?;
 
-                        let res = if !code.is_success() {
-                            router::Response::error_builder()
+                        let graphql_response: crate::graphql::Response = serde_json::from_value(
+                            co_processor_output.body.unwrap_or(serde_json::Value::Null),
+                        )
+                        .unwrap_or_else(|error| {
+                            crate::graphql::Response::builder()
                                 .errors(vec![Error {
-                                    message: co_processor_output
-                                        .body
-                                        .unwrap_or(serde_json::Value::Null)
-                                        .to_string(),
+                                    message: format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ),
                                     ..Default::default()
                                 }])
-                                .status_code(code)
-                                .context(request.context)
-                                .build()?
-                        } else {
-                            router::Response::builder()
-                                .data(
-                                    co_processor_output
-                                        .body
-                                        .unwrap_or(serde_json::Value::Null)
-                                        .to_string(),
-                                )
-                                .status_code(code)
-                                .context(request.context)
-                                .build()?
+                                .build()
+                        });
+
+                        let res = router::Response::builder()
+                            .errors(graphql_response.errors)
+                            .extensions(graphql_response.extensions)
+                            .status_code(code)
+                            .context(request.context);
+
+                        let res = match (graphql_response.label, graphql_response.data) {
+                            (Some(label), Some(data)) => res.label(label).data(data).build()?,
+                            (Some(label), None) => res.label(label).build()?,
+                            (None, Some(data)) => res.data(data).build()?,
+                            (None, None) => res.build()?,
                         };
+
                         return Ok(ControlFlow::Break(res));
                     }
 
@@ -562,27 +565,17 @@ impl SubgraphStage {
                         // Ensure the code is a valid http status code
                         let code = control.get_http_status()?;
 
-                        let res = if !code.is_success() {
-                            subgraph::Response::error_builder()
-                                .errors(vec![Error {
-                                    message: co_processor_output
-                                        .body
-                                        .unwrap_or(serde_json::Value::Null)
-                                        .to_string(),
+                        let res = {
+                            let graphql_response: crate::graphql::Response = serde_json::from_value(
+                                co_processor_output.body.unwrap_or(serde_json::Value::Null),
+                            )
+                            .unwrap_or_else(|error| {
+                                crate::graphql::Response::builder().errors(vec![Error {
+                                    message:format!("couldn't deserialize coprocessor output body: {error}"),
                                     ..Default::default()
-                                }])
-                                .status_code(code)
-                                .context(request.context)
-                                .build()?
-                        } else {
-                            let graphql_response: crate::graphql::Response =
-                                serde_json::from_value(
-                                    co_processor_output.body.unwrap_or(serde_json::Value::Null),
-                                )
-                                .unwrap_or_else(|error| crate::graphql::Response::builder().errors(vec![Error {
-                                    message: format!("couldn't deserialize coprocessor output body: {error}"),
-                                  ..Default::default()
-                                }]).build());
+                                }]).build()
+                            });
+
                             subgraph::Response {
                                 response: http::Response::builder()
                                     .status(code)
@@ -1224,6 +1217,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_subgraph_request_controlflow_break() {
+        let subgraph_stage = SubgraphStage {
+            request: SubgraphConf {
+                headers: false,
+                context: false,
+                body: true,
+                uri: false,
+                service: false,
+                service_name: false,
+            },
+            response: Default::default(),
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mock_subgraph_service = MockSubgraphService::new();
+
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+            Box::pin(async {
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                                "version": 1,
+                                "stage": "SubgraphRequest",
+                                "control": {
+                                    "Break": 200
+                                },
+                                "body": {
+                                    "errors": [{ "message": "my error message" }]
+                                }
+                            }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = subgraph_stage.as_service(
+            mock_http_client,
+            mock_subgraph_service.boxed(),
+            "http://test".to_string(),
+            "my_subgraph_service_name".to_string(),
+        );
+
+        let request = subgraph::Request::fake_builder().build();
+
+        assert_eq!(
+            serde_json::json!({ "errors": [{ "message": "my error message" }] }),
+            serde_json::to_value(service.oneshot(request).await.unwrap().response.into_body())
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
     async fn external_plugin_subgraph_response() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
@@ -1449,6 +1494,83 @@ mod tests {
         let request = supergraph::Request::canned_builder().build().unwrap();
 
         service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn external_plugin_router_request_controlflow_break() {
+        let router_stage = RouterStage {
+            request: RouterConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = MockRouterService::new();
+
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+                assert_eq!(
+                    PipelineStep::RouterRequest.to_string(),
+                    deserialized_request.stage
+                );
+
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "control": {
+                        "Break": 200
+                    },
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "body": {
+                      "errors": [{ "message": "my error message" }]
+                    }
+                  }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::canned_builder().build().unwrap();
+
+        let actual_response = serde_json::from_slice::<serde_json::Value>(
+            &hyper::body::to_bytes(
+                service
+                    .oneshot(request.try_into().unwrap())
+                    .await
+                    .unwrap()
+                    .response
+                    .into_body(),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::json!({
+                "errors": [{
+                   "message": "my error message"
+                }]
+            }),
+            actual_response
+        );
     }
 
     #[tokio::test]
