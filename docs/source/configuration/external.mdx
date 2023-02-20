@@ -314,7 +314,7 @@ Control field changes are ignored with the exception of the control field. The c
 
 If the value of the "control" field is "Continue", then processing will continue as normal through the router. If the value is a map with a key of "Break" and a numeric status code, then the router will stop processing and return a response to the client. The data returned to the client is the "body" of the co-processor response to the router.
 
-If the Break code is a "success" code (2xx), then the body of the co-processor response should be valid data that the client is expecting. If the Break code is a "failure" code, then the body of the co-processor response will be formatted into an error response for the client.
+Then the body of the co-processor response should be valid graphql data that the client is expecting. If the Break code is a "failure" code, then the body of the co-processor response should contain a GraphQL errors array as shown in the following code snippet.
 
 > In the case of an externalized response, the router is already returning to the client, so the flow isn't altered, but the status code may still be changed.
 
@@ -327,12 +327,14 @@ For example, if the co-processor updated a received request so that the control 
   "stage": "RouterRequest",
   "control": { "Break": 403 },
   "id": "1b19c05fdafc521016df33148ad63c1b",
-  "body": "You are not allowed to do this",
+  "body": {
+    "errors": [{ "message": "You are not allowed to do this" }]
+   },
   (etc...)
 }
 ```
 
-then the router would stop processing the request and return a response to the client with an HTTP status code of 403 and the error message "You are not allowed to do this" (read from the body).
+then the router would stop processing the request and return a response to the client with an HTTP status code of 403 and graphql response defined in the body.
 
 ### Data
 
