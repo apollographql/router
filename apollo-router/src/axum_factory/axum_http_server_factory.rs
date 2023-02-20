@@ -339,7 +339,7 @@ async fn entitlement_handler<B>(
         ::tracing::error!(
            monotonic_counter.apollo_router_http_requests_total = 1u64,
            status = %500u16,
-           error = "Apollo entitlement expired: {ENTITLEMENT_EXPIRED_URL}",
+           error = ENTITLEMENT_EXPIRED_SHORT_MESSAGE,
         );
 
         // This will rate limit logs about entitlement to 1 a second.
