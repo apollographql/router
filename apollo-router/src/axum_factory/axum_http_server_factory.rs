@@ -358,7 +358,7 @@ async fn entitlement_handler<B>(
                 )
                 .is_ok()
         {
-            ::tracing::error!(ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
+            ::tracing::error!("{}", ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
         }
     }
 
