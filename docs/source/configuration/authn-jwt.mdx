@@ -164,9 +164,9 @@ Below is an example Rhai script that forwards a JWT's claims to individual subgr
 ```rhai title="claims_forwarding.rhai"
 fn subgraph_service(service, subgraph) {
   let f = |request| {
-    // Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
+    // Note: Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
     // value `apollo_authentication::JWT::claims`
-    let claims = request.context[APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
     if claims ==() {
       throw #{
         status: 401
@@ -195,9 +195,9 @@ Below is an example Rhai script that throws distinct errors for different invali
 ```rhai title="claims_validation.rhai"
 fn process_request(request) {
     try {
-        // Note: APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
+        // Note: Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
         // value `apollo_authentication::JWT::claims`
-        let claims = request.context[APOLLO_AUTHENTICATION_JWT_CLAIMS];
+        let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
         if claims == () {
             throw #{
                 status: 401,
