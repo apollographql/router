@@ -166,14 +166,15 @@ Below is an example [Rhai script](../customizations/rhai/) that checks the detai
 
 ```rhai title="claims_validation.rhai"
 fn supergraph_service(service) {
-    const request_callback = Fn("process_request"); // Standard Rhai functionality for creating a function pointer
+    // Rhai mechanism for creating a function pointer
+    const request_callback = Fn("process_request");
     service.map_request(request_callback); // Register the callback
 }
 
 fn process_request(request) {
     try {
-        // Note: Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
-        // value `apollo_authentication::JWT::claims`
+        // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
+        // constant with value `apollo_authentication::JWT::claims`
         let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
         if claims == () {
             throw #{
@@ -218,9 +219,10 @@ Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's
 
 ```rhai title="claims_forwarding.rhai"
 fn subgraph_service(service, subgraph) {
+  // Rhai closure syntax
   let f = |request| {
-    // Note: Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope constant with
-    // value `apollo_authentication::JWT::claims`
+    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
+    // constant with value `apollo_authentication::JWT::claims`
     let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
     if claims ==() {
       throw #{
@@ -233,7 +235,7 @@ fn subgraph_service(service, subgraph) {
     }
   };
 
-  service.map_request(f);
+  service.map_request(f); // Register the callback
 }
 ```
 
