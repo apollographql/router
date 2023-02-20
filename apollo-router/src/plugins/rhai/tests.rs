@@ -6,6 +6,7 @@ use std::sync::Mutex;
 
 use http::HeaderMap;
 use http::StatusCode;
+use rhai::Engine;
 use rhai::EvalAltResult;
 use serde_json::Value;
 use tower::util::BoxService;
@@ -147,6 +148,12 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
     Ok(())
 }
 
+// A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
+// string.
+fn new_rhai_test_engine() -> Engine {
+    Rhai::new_rhai_engine(None, "".to_string())
+}
+
 // Some of these tests rely extensively on internal implementation details of the tracing_test crate.
 // These are unstable, so these test may break if the tracing_test crate is updated.
 //
@@ -160,7 +167,7 @@ fn it_logs_messages() {
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
-    let engine = Rhai::new_rhai_engine(None);
+    let engine = new_rhai_test_engine();
     let input_logs = vec![
         r#"log_trace("trace log")"#,
         r#"log_debug("debug log")"#,
@@ -200,7 +207,7 @@ fn it_prints_messages_to_log() {
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
-    let engine = Rhai::new_rhai_engine(None);
+    let engine = new_rhai_test_engine();
     engine
         .eval::<()>(r#"print("info log")"#)
         .expect("it logged a message");
@@ -242,7 +249,7 @@ async fn it_can_access_sdl_constant() {
 
 #[test]
 fn it_provides_helpful_headermap_errors() {
-    let mut engine = Rhai::new_rhai_engine(None);
+    let mut engine = new_rhai_test_engine();
     engine.register_fn("new_hm", HeaderMap::new);
 
     let result = engine.eval::<HeaderMap>(
@@ -455,7 +462,7 @@ async fn it_can_process_subgraph_response() {
 
 #[test]
 fn it_can_urlencode_string() {
-    let engine = Rhai::new_rhai_engine(None);
+    let engine = new_rhai_test_engine();
     let encoded: String = engine
         .eval(r#"urlencode("This has an ümlaut in it.")"#)
         .expect("can encode string");
@@ -464,7 +471,7 @@ fn it_can_urlencode_string() {
 
 #[test]
 fn it_can_urldecode_string() {
-    let engine = Rhai::new_rhai_engine(None);
+    let engine = new_rhai_test_engine();
     let decoded: String = engine
         .eval(r#"urldecode("This%20has%20an%20%C3%BCmlaut%20in%20it.")"#)
         .expect("can decode string");
@@ -473,7 +480,7 @@ fn it_can_urldecode_string() {
 
 #[test]
 fn it_can_base64encode_string() {
-    let engine = Rhai::new_rhai_engine(None);
+    let engine = new_rhai_test_engine();
     let encoded: String = engine
         .eval(r#"base64::encode("This has an ümlaut in it.")"#)
         .expect("can encode string");
@@ -482,7 +489,7 @@ fn it_can_base64encode_string() {
 
 #[test]
 fn it_can_base64decode_string() {
-    let engine = Rhai::new_rhai_engine(None);
+    let engine = new_rhai_test_engine();
     let decoded: String = engine
         .eval(r#"base64::decode("VGhpcyBoYXMgYW4gw7xtbGF1dCBpbiBpdC4=")"#)
         .expect("can decode string");

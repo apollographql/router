@@ -31,7 +31,6 @@ use notify::EventKind;
 use notify::PollWatcher;
 use notify::RecursiveMode;
 use notify::Watcher;
-use once_cell::sync::Lazy;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
 use rhai::serde::from_dynamic;
@@ -82,9 +81,6 @@ trait OptionDance<T> {
 type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
 pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
-
-static RHAI_GLOBAL_VARIABLES: Lazy<Arc<Mutex<Map>>> =
-    Lazy::new(|| Arc::new(Mutex::new(Map::new())));
 
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
@@ -391,7 +387,7 @@ impl EngineBlock {
         main: PathBuf,
         sdl: Arc<String>,
     ) -> Result<Self, BoxError> {
-        let engine = Arc::new(Rhai::new_rhai_engine(scripts));
+        let engine = Arc::new(Rhai::new_rhai_engine(scripts, sdl.to_string()));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
@@ -400,17 +396,6 @@ impl EngineBlock {
         // functionality in `new_rhai_engine`.
         scope.push_constant("apollo_sdl", sdl.to_string());
         scope.push_constant("apollo_start", Instant::now());
-
-        // Since constants in Rhai don't give us the behaviour we expect, let's create some global
-        // variables which we use in a variable resolver when we create our engine.
-        // Note: We keep the constants for now, since they are documented.
-        let mut constant_guard = RHAI_GLOBAL_VARIABLES.lock().unwrap();
-        constant_guard.insert("APOLLO_SDL".into(), sdl.to_string().into());
-        constant_guard.insert("APOLLO_START".into(), Instant::now().into());
-        constant_guard.insert(
-            "APOLLO_AUTHENTICATION_JWT_CLAIMS".into(),
-            "apollo_authentication::JWT::claims".to_string().into(),
-        );
 
         // Run the AST with our scope to put any global variables
         // defined in scripts into scope.
@@ -1251,7 +1236,7 @@ impl Rhai {
         Ok(())
     }
 
-    fn new_rhai_engine(path: Option<PathBuf>) -> Engine {
+    fn new_rhai_engine(path: Option<PathBuf>, sdl: String) -> Engine {
         let mut engine = Engine::new();
         // If we pass in a path, use it to configure our engine
         // with a FileModuleResolver which allows import to work
@@ -1656,13 +1641,27 @@ impl Rhai {
         // Add common getter/setters for different types
         register_rhai_interface!(engine, supergraph, execution, subgraph);
 
+        // Since constants in Rhai don't give us the behaviour we expect, let's create some global
+        // variables which we use in a variable resolver when we create our engine.
+        // Note: We keep the constants for now, since they are documented.
+        let mut global_variables = Map::new();
+        global_variables.insert("APOLLO_SDL".into(), sdl.into());
+        global_variables.insert("APOLLO_START".into(), Instant::now().into());
+        global_variables.insert(
+            "APOLLO_AUTHENTICATION_JWT_CLAIMS".into(),
+            "apollo_authentication::JWT::claims".to_string().into(),
+        );
+
+        let shared_globals = Arc::new(global_variables);
+
         // Register a variable resolver.
         // Note: This API is NOT deprecated, but it is considered volatile and may change in the future.
         #[allow(deprecated)]
-        engine.on_var(|name, _index, _context| {
+        engine.on_var(move |name, _index, _context| {
             match name {
                 // Intercept attempts to find "Router" variables and return our "global variables"
-                "Router" => Ok(Some(RHAI_GLOBAL_VARIABLES.lock().unwrap().clone().into())),
+                // Note: Wrapped in an Arc to lighten the load of cloning.
+                "Router" => Ok(Some((*shared_globals).clone().into())),
                 // Return Ok(None) to continue with the normal variable resolution process.
                 _ => Ok(None),
             }
