@@ -89,8 +89,8 @@ mod test {
 
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockSupergraphService;
-    use crate::SupergraphRequest;
-    use crate::SupergraphResponse;
+    use crate::services::SupergraphRequest;
+    use crate::services::SupergraphResponse;
 
     #[tokio::test]
     async fn test_layer() -> Result<(), BoxError> {

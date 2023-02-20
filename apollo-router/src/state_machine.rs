@@ -1,13 +1,15 @@
-use std::fmt::Display;
-use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
+use ApolloRouterError::ServiceCreationError;
+use Event::HaltEntitlement;
 use Event::NoMoreConfiguration;
+use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
 use Event::Shutdown;
+use Event::WarnEntitlement;
 
 use super::http_server_factory::HttpServerFactory;
 use super::http_server_factory::HttpServerHandle;
@@ -23,38 +25,244 @@ use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::router::Event::UpdateEntitlement;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
-use crate::Schema;
+use crate::spec::Schema;
+use crate::uplink::entitlement::Entitlement;
+use crate::ApolloRouterError::NoEntitlement;
+
+#[derive(Default, Clone)]
+pub(crate) struct ListenAddresses {
+    pub(crate) graphql_listen_address: Option<ListenAddr>,
+    pub(crate) extra_listen_addresses: Vec<ListenAddr>,
+}
 
 /// This state maintains private information that is not exposed to the user via state listener.
-#[derive(derivative::Derivative)]
-#[derivative(Debug)]
 #[allow(clippy::large_enum_variant)]
-enum State<RS> {
+enum State<FA: RouterSuperServiceFactory> {
     Startup {
-        configuration: Option<Configuration>,
-        schema: Option<String>,
+        configuration: Option<Arc<Configuration>>,
+        schema: Option<Arc<String>>,
+        entitlement: Option<Arc<Entitlement>>,
+        listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
     Running {
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
-        #[derivative(Debug = "ignore")]
-        router_service_factory: RS,
-        server_handle: HttpServerHandle,
+        schema: Arc<String>,
+        entitlement: Arc<Entitlement>,
+        server_handle: Option<HttpServerHandle>,
+        router_service_factory: FA::RouterFactory,
     },
     Stopped,
     Errored(ApolloRouterError),
 }
 
-impl<T> Display for State<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl<FA: RouterSuperServiceFactory> State<FA> {
+    async fn no_more_configuration(self) -> Self {
         match self {
-            Startup { .. } => write!(f, "startup"),
-            Running { .. } => write!(f, "running"),
-            Stopped => write!(f, "stopped"),
-            Errored { .. } => write!(f, "errored"),
+            Startup {
+                configuration: None,
+                ..
+            } => Errored(NoConfiguration),
+            _ => self,
         }
+    }
+
+    async fn no_more_schema(self) -> Self {
+        match self {
+            Startup { schema: None, .. } => Errored(NoSchema),
+            _ => self,
+        }
+    }
+
+    async fn no_more_entitlement(self) -> Self {
+        match self {
+            Startup {
+                entitlement: None, ..
+            } => Errored(NoEntitlement),
+            _ => self,
+        }
+    }
+
+    pub(crate) async fn warn_entitlement(self) -> Self {
+        self
+    }
+
+    pub(crate) async fn halt_entitlement(self) -> Self {
+        self
+    }
+
+    async fn update_inputs<S>(
+        mut self,
+        state_machine: &mut StateMachine<S, FA>,
+        new_schema: Option<Arc<String>>,
+        new_configuration: Option<Arc<Configuration>>,
+        new_entitlement: Option<Arc<Entitlement>>,
+    ) -> Self
+    where
+        S: HttpServerFactory,
+    {
+        let mut new_state = None;
+        match &mut self {
+            Startup {
+                schema,
+                configuration,
+                entitlement,
+                listen_addresses_guard,
+            } => {
+                *schema = new_schema.or_else(|| schema.take());
+                *configuration = new_configuration.or_else(|| configuration.take());
+                *entitlement = new_entitlement.or_else(|| entitlement.take());
+
+                if let (Some(schema), Some(configuration), Some(entitlement)) =
+                    (schema, configuration, entitlement)
+                {
+                    new_state = Some(
+                        Self::try_start(
+                            state_machine,
+                            &mut None,
+                            None,
+                            configuration.clone(),
+                            schema.clone(),
+                            entitlement.clone(),
+                            listen_addresses_guard,
+                        )
+                        .map_ok_or_else(Errored, |f| f)
+                        .await,
+                    );
+                }
+            }
+            Running {
+                schema,
+                configuration,
+                entitlement,
+                server_handle,
+                router_service_factory,
+                ..
+            } => {
+                tracing::info!("reloading");
+                let mut guard = state_machine.listen_addresses.clone().write_owned().await;
+                new_state = match Self::try_start(
+                    state_machine,
+                    server_handle,
+                    Some(router_service_factory),
+                    new_configuration.unwrap_or_else(|| configuration.clone()),
+                    new_schema.unwrap_or_else(|| schema.clone()),
+                    new_entitlement.unwrap_or_else(|| entitlement.clone()),
+                    &mut guard,
+                )
+                .await
+                {
+                    Ok(new_state) => {
+                        tracing::info!("reload complete");
+                        Some(new_state)
+                    }
+                    Err(e) => {
+                        // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
+                        match server_handle {
+                            None => {
+                                tracing::info!("fatal error while trying to reload; {}", e);
+                                Some(Errored(e))
+                            }
+                            Some(_) => {
+                                tracing::info!("error while reloading, continuing with previous configuration; {}", e);
+                                None
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        new_state.unwrap_or(self)
+    }
+
+    async fn shutdown(self) -> Self {
+        match self {
+            Running {
+                server_handle: Some(server_handle),
+                ..
+            } => {
+                tracing::info!("shutting down");
+                server_handle
+                    .shutdown()
+                    .map_ok_or_else(Errored, |_| Stopped)
+                    .await
+            }
+            _ => Stopped,
+        }
+    }
+
+    async fn try_start<S>(
+        state_machine: &mut StateMachine<S, FA>,
+        server_handle: &mut Option<HttpServerHandle>,
+        previous_router_service_factory: Option<&FA::RouterFactory>,
+        configuration: Arc<Configuration>,
+        schema: Arc<String>,
+        entitlement: Arc<Entitlement>,
+        listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
+    ) -> Result<State<FA>, ApolloRouterError>
+    where
+        S: HttpServerFactory,
+        FA: RouterSuperServiceFactory,
+    {
+        let parsed_schema = Arc::new(
+            Schema::parse(&schema, &configuration)
+                .map_err(|e| ServiceCreationError(e.to_string().into()))?,
+        );
+
+        let router_service_factory = state_machine
+            .router_configurator
+            .create(
+                configuration.clone(),
+                parsed_schema,
+                previous_router_service_factory,
+                None,
+            )
+            .await
+            .map_err(ServiceCreationError)?;
+
+        let web_endpoints = router_service_factory.web_endpoints();
+
+        // The point of no return. We take the previous server handle.
+        let server_handle = match server_handle.take() {
+            None => {
+                state_machine
+                    .http_server_factory
+                    .create(
+                        router_service_factory.clone(),
+                        configuration.clone(),
+                        Default::default(),
+                        Default::default(),
+                        web_endpoints,
+                    )
+                    .await?
+            }
+            Some(server_handle) => {
+                server_handle
+                    .restart(
+                        &state_machine.http_server_factory,
+                        router_service_factory.clone(),
+                        configuration.clone(),
+                        web_endpoints,
+                    )
+                    .await?
+            }
+        };
+
+        listen_addresses_guard.extra_listen_addresses = server_handle.listen_addresses().to_vec();
+        listen_addresses_guard.graphql_listen_address =
+            server_handle.graphql_listen_address().clone();
+
+        Ok(Running {
+            configuration,
+            schema,
+            entitlement,
+            server_handle: Some(server_handle),
+            router_service_factory,
+        })
     }
 }
 
@@ -71,12 +279,8 @@ where
 {
     http_server_factory: S,
     router_configurator: FA,
-
-    // The reason we have extra_listen_adresses and extra_listen_addresses_guard is that on startup we want ensure that we update the listen_addresses before users can read the value.
-    pub(crate) graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
-    pub(crate) extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
-    extra_listen_addresses_guard: Option<OwnedRwLockWriteGuard<Vec<ListenAddr>>>,
-    graphql_listen_address_guard: Option<OwnedRwLockWriteGuard<Option<ListenAddr>>>,
+    pub(crate) listen_addresses: Arc<RwLock<ListenAddresses>>,
+    listen_addresses_guard: Option<OwnedRwLockWriteGuard<ListenAddresses>>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -86,17 +290,19 @@ where
     FA::RouterFactory: RouterFactory,
 {
     pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
-        let graphql_ready = Arc::new(RwLock::new(None));
-        let graphql_ready_guard = graphql_ready.clone().try_write_owned().expect("owned lock");
-        let extra_ready = Arc::new(RwLock::new(Vec::new()));
-        let extra_ready_guard = extra_ready.clone().try_write_owned().expect("owned lock");
+        // Listen address is created locked so that if a consumer tries to examine the listen address before the state machine has reached running state they are blocked.
+        let listen_addresses: Arc<RwLock<ListenAddresses>> = Default::default();
+        let listen_addresses_guard = Some(
+            listen_addresses
+                .clone()
+                .try_write_owned()
+                .expect("lock just created, qed"),
+        );
         Self {
             http_server_factory,
             router_configurator: router_factory,
-            graphql_listen_address: graphql_ready,
-            graphql_listen_address_guard: Some(graphql_ready_guard),
-            extra_listen_adresses: extra_ready,
-            extra_listen_addresses_guard: Some(extra_ready_guard),
+            listen_addresses,
+            listen_addresses_guard,
         }
     }
 
@@ -105,139 +311,42 @@ where
         mut messages: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), ApolloRouterError> {
         tracing::debug!("starting");
-        let mut state = Startup {
+        // The listen address guard is transferred to the startup state. It will get consumed when moving to running.
+        let mut state: State<FA> = Startup {
             configuration: None,
             schema: None,
+            entitlement: None,
+            listen_addresses_guard: self
+                .listen_addresses_guard
+                .take()
+                .expect("must have listen address guard"),
         };
-        while let Some(message) = messages.next().await {
-            let new_state = match (state, message) {
-                // Startup: Handle configuration updates, maybe transition to running.
-                (Startup { configuration, .. }, UpdateSchema(new_schema)) => self
-                    .maybe_transition_to_running(Startup {
-                        configuration,
-                        schema: Some(new_schema),
-                    })
-                    .await
-                    .into_ok_or_err2(),
 
-                // Startup: Handle schema updates, maybe transition to running.
-                (Startup { schema, .. }, UpdateConfiguration(new_configuration)) => self
-                    .maybe_transition_to_running(Startup {
-                        configuration: Some(*new_configuration),
-                        schema,
-                    })
-                    .await
-                    .into_ok_or_err2(),
-
-                // Startup: Missing configuration.
-                (
-                    Startup {
-                        configuration: None,
-                        ..
-                    },
-                    NoMoreConfiguration,
-                ) => Errored(NoConfiguration),
-
-                // Startup: Missing schema.
-                (Startup { schema: None, .. }, NoMoreSchema) => Errored(NoSchema),
-
-                // Startup: Go straight for shutdown.
-                (Startup { .. }, Shutdown) => Stopped,
-
-                // Running: Handle shutdown.
-                (Running { server_handle, .. }, Shutdown) => {
-                    tracing::debug!("shutting down");
-                    match server_handle.shutdown().await {
-                        Ok(_) => Stopped,
-                        Err(err) => Errored(err),
-                    }
-                }
-
-                // Running: Handle schema updates
-                (
-                    Running {
-                        configuration,
-                        schema,
-                        router_service_factory,
-                        server_handle,
-                    },
-                    UpdateSchema(new_schema),
-                ) => {
-                    tracing::info!("reloading schema");
-                    match Schema::parse(&new_schema, &configuration) {
-                        Ok(new_schema) => self
-                            .reload_server(
-                                configuration,
-                                schema,
-                                router_service_factory,
-                                server_handle,
-                                None,
-                                Some(Arc::new(new_schema)),
-                            )
-                            .await
-                            .into_ok_or_err2(),
-                        Err(e) => {
-                            tracing::error!("could not parse schema: {:?}", e);
-                            Running {
-                                configuration,
-                                schema,
-                                router_service_factory,
-                                server_handle,
-                            }
-                        }
-                    }
-                }
-
-                // Running: Handle configuration updates
-                (
-                    Running {
-                        configuration,
-                        schema,
-                        router_service_factory,
-                        server_handle,
-                    },
-                    UpdateConfiguration(new_configuration),
-                ) => {
-                    tracing::info!("reloading configuration");
-                    if let Err(e) = configuration.is_compatible(&new_configuration) {
-                        tracing::error!("could not reload configuration: {e}");
-
-                        Running {
-                            configuration,
-                            schema,
-                            router_service_factory,
-                            server_handle,
-                        }
-                    } else {
-                        self.reload_server(
-                            configuration,
-                            schema,
-                            router_service_factory,
-                            server_handle,
-                            Some(Arc::new(*new_configuration)),
-                            None,
-                        )
-                        .await
-                        .map(|s| {
-                            tracing::info!("reloaded");
-                            s
-                        })
-                        .into_ok_or_err2()
-                    }
-                }
-
-                // Anything else we don't care about
-                (state, message) => {
-                    tracing::debug!("ignoring message transition {:?}", message);
+        // Process all the events in turn until we get to error state or we run out of events.
+        while let Some(event) = messages.next().await {
+            state = match event {
+                UpdateConfiguration(configuration) => {
                     state
+                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None)
+                        .await
                 }
+                NoMoreConfiguration => state.no_more_configuration().await,
+                UpdateSchema(schema) => {
+                    state
+                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None)
+                        .await
+                }
+                NoMoreSchema => state.no_more_schema().await,
+                UpdateEntitlement(entitlement) => {
+                    state
+                        .update_inputs(&mut self, None, None, Some(Arc::new(entitlement)))
+                        .await
+                }
+                WarnEntitlement => state.warn_entitlement().await,
+                HaltEntitlement => state.halt_entitlement().await,
+                NoMoreEntitlement => state.no_more_entitlement().await,
+                Shutdown => state.shutdown().await,
             };
-
-            tracing::trace!("transitioned to {}", &new_state);
-            state = new_state;
-
-            // If we're running then let those waiting proceed.
-            self.maybe_update_listen_addresses(&mut state).await;
 
             // If we've errored then exit even if there are potentially more messages
             if matches!(&state, Errored(_)) {
@@ -246,180 +355,12 @@ where
         }
         tracing::debug!("stopped");
 
-        // If the listen_address_guard has not been taken,
-        // take it so that anything waiting on listen_address will proceed.
-        self.extra_listen_addresses_guard.take();
-        self.graphql_listen_address_guard.take();
-
         match state {
             Stopped => Ok(()),
             Errored(err) => Err(err),
             _ => {
                 panic!("must finish on stopped or errored state")
             }
-        }
-    }
-
-    async fn maybe_update_listen_addresses(
-        &mut self,
-        state: &mut State<<FA as RouterSuperServiceFactory>::RouterFactory>,
-    ) {
-        let (graphql_listen_address, extra_listen_addresses) =
-            if let Running { server_handle, .. } = &state {
-                let listen_addresses = server_handle.listen_addresses().to_vec();
-                let graphql_listen_address = server_handle.graphql_listen_address().clone();
-                (graphql_listen_address, listen_addresses)
-            } else {
-                return;
-            };
-
-        if let Some(mut listen_address_guard) = self.graphql_listen_address_guard.take() {
-            *listen_address_guard = graphql_listen_address;
-        } else {
-            *self.graphql_listen_address.write().await = graphql_listen_address;
-        }
-
-        if let Some(mut extra_listen_addresses_guard) = self.extra_listen_addresses_guard.take() {
-            *extra_listen_addresses_guard = extra_listen_addresses;
-        } else {
-            *self.extra_listen_adresses.write().await = extra_listen_addresses;
-        }
-    }
-
-    async fn maybe_transition_to_running(
-        &mut self,
-        state: State<<FA as RouterSuperServiceFactory>::RouterFactory>,
-    ) -> Result<
-        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
-        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
-    > {
-        if let Startup {
-            configuration: Some(configuration),
-            schema: Some(schema),
-        } = state
-        {
-            let schema = match Schema::parse(&schema, &configuration) {
-                Ok(schema) => schema,
-                Err(e) => {
-                    tracing::error!("could not parse schema: {:?}", e);
-                    return Ok(Startup {
-                        configuration: Some(configuration),
-                        schema: None,
-                    });
-                }
-            };
-            tracing::debug!("starting http");
-            let configuration = Arc::new(configuration);
-            let schema = Arc::new(schema);
-
-            let router_factory = self
-                .router_configurator
-                .create(configuration.clone(), schema.clone(), None, None)
-                .await
-                .map_err(|err| Errored(ApolloRouterError::ServiceCreationError(err)))?;
-
-            let web_endpoints = router_factory.web_endpoints();
-
-            let server_handle = self
-                .http_server_factory
-                .create(
-                    router_factory.clone(),
-                    configuration.clone(),
-                    Default::default(),
-                    Default::default(),
-                    web_endpoints,
-                )
-                .await
-                .map_err(|err| {
-                    tracing::error!("cannot start the router: {}", err);
-                    Errored(err)
-                })?;
-
-            Ok(Running {
-                configuration,
-                schema,
-                router_service_factory: router_factory,
-                server_handle,
-            })
-        } else {
-            Ok(state)
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn reload_server(
-        &mut self,
-        configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
-        router_service: <FA as RouterSuperServiceFactory>::RouterFactory,
-        server_handle: HttpServerHandle,
-        new_configuration: Option<Arc<Configuration>>,
-        new_schema: Option<Arc<Schema>>,
-    ) -> Result<
-        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
-        State<<FA as RouterSuperServiceFactory>::RouterFactory>,
-    > {
-        let new_schema = new_schema.unwrap_or_else(|| schema.clone());
-        let new_configuration = new_configuration.unwrap_or_else(|| configuration.clone());
-
-        match self
-            .router_configurator
-            .create(
-                new_configuration.clone(),
-                new_schema.clone(),
-                Some(&router_service),
-                None,
-            )
-            .await
-        {
-            Ok(new_router_service) => {
-                let web_endpoints = new_router_service.web_endpoints();
-
-                let server_handle = server_handle
-                    .restart(
-                        &self.http_server_factory,
-                        new_router_service.clone(),
-                        new_configuration.clone(),
-                        web_endpoints,
-                    )
-                    .await
-                    .map_err(|err| {
-                        tracing::error!("cannot start the router: {}", err);
-                        Errored(err)
-                    })?;
-                Ok(Running {
-                    configuration: new_configuration,
-                    schema: new_schema,
-                    router_service_factory: new_router_service,
-                    server_handle,
-                })
-            }
-            Err(err) => {
-                tracing::error!(
-                    "cannot create new router, keeping previous configuration: {}",
-                    err
-                );
-                Err(Running {
-                    configuration,
-                    schema,
-                    router_service_factory: router_service,
-                    server_handle,
-                })
-            }
-        }
-    }
-}
-
-trait ResultExt<T> {
-    // Unstable method can be deleted in future
-    fn into_ok_or_err2(self) -> T;
-}
-
-impl<T> ResultExt<T> for Result<T, T> {
-    fn into_ok_or_err2(self) -> T {
-        match self {
-            Ok(v) => v,
-            Err(v) => v,
         }
     }
 }
@@ -477,6 +418,24 @@ mod tests {
     }
 
     #[test(tokio::test)]
+    async fn no_entitlement() {
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, _) = create_mock_server_factory(0);
+        assert!(matches!(
+            execute(server_factory, router_factory, vec![NoMoreEntitlement],).await,
+            Err(NoEntitlement),
+        ));
+    }
+
+    #[test(tokio::test)]
+    async fn listen_addresses_are_locked() {
+        let router_factory = create_mock_router_configurator(0);
+        let (server_factory, _) = create_mock_server_factory(0);
+        let state_machine = StateMachine::new(server_factory, router_factory);
+        assert!(state_machine.listen_addresses.try_read().is_err());
+    }
+
+    #[test(tokio::test)]
     async fn shutdown_during_startup() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
@@ -496,8 +455,9 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
+                    UpdateEntitlement(Entitlement::default()),
                     Shutdown
                 ],
             )
@@ -517,9 +477,33 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
+                    UpdateEntitlement(Entitlement::default()),
                     UpdateSchema(example_schema()),
+                    Shutdown
+                ],
+            )
+            .await,
+            Ok(()),
+        ));
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
+    }
+
+    #[test(tokio::test)]
+    async fn startup_reload_entitlement() {
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
+        let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
+        assert!(matches!(
+            execute(
+                server_factory,
+                router_factory,
+                vec![
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
+                    UpdateSchema(minimal_schema.to_owned()),
+                    UpdateEntitlement(Entitlement::default()),
+                    UpdateEntitlement(Entitlement::default()),
                     Shutdown
                 ],
             )
@@ -539,8 +523,9 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
+                    UpdateEntitlement(Entitlement::default()),
                     UpdateConfiguration(
                         Configuration::builder()
                             .supergraph(
@@ -550,7 +535,6 @@ mod tests {
                             )
                             .build()
                             .unwrap()
-                            .boxed()
                     ),
                     Shutdown
                 ],
@@ -571,8 +555,9 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
+                    UpdateEntitlement(Entitlement::default()),
                     Shutdown
                 ],
             )
@@ -597,8 +582,9 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
+                    UpdateEntitlement(Entitlement::default()),
                 ],
             )
             .await,
@@ -634,8 +620,9 @@ mod tests {
                 server_factory,
                 router_factory,
                 vec![
-                    UpdateConfiguration(Configuration::builder().build().unwrap().boxed()),
+                    UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
+                    UpdateEntitlement(Entitlement::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
                 ],
@@ -657,8 +644,8 @@ mod tests {
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
-                schema: Arc<crate::Schema>,
-                previous_router: Option<&'a MockMyRouterFactory>,
+                schema: Arc<Schema>,
+                previous_router_service_factory: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
@@ -796,13 +783,39 @@ mod tests {
 
         router_factory
             .expect_create()
-            .times(expect_times_called)
+            .times(if expect_times_called > 1 {
+                1
+            } else {
+                expect_times_called
+            })
             .returning(move |_, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
                 Ok(router)
             });
+
+        // verify reloads have the last previous_router_service_factory parameter
+        if expect_times_called > 0 {
+            router_factory
+                .expect_create()
+                .times(expect_times_called - 1)
+                .withf(
+                    move |_configuration: &Arc<Configuration>,
+                          _schema: &Arc<Schema>,
+                          previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
+                        previous_router_service_factory.is_some()
+                    },
+                )
+                .returning(move |_, _, _, _| {
+                    let mut router = MockMyRouterFactory::new();
+                    router.expect_clone().return_once(MockMyRouterFactory::new);
+                    router.expect_web_endpoints().returning(MultiMap::new);
+                    Ok(router)
+                });
+        }
+
         router_factory
     }
 }

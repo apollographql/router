@@ -1,0 +1,7 @@
+---
+source: apollo-router/src/uplink/mod.rs
+expression: "results.into_iter().map(to_friendly).collect::<Vec<_>>()"
+---
+- Err: "uplink error: code=RETRY_LATER message=error message"
+- Ok: response
+

@@ -100,11 +100,11 @@ spec:
           livenessProbe:
             httpGet:
               path: "/health"
-              port: {{ splitList ":" ((index .Values.router.configuration "health-check").listen | default ":8088") | last }}
+              port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
           readinessProbe:
             httpGet:
               path: "/health"
-              port: {{ (splitList ":"  ((index .Values.router.configuration "health-check").listen | default ":8088")) | last }}
+              port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- if or .Values.router.configuration  .Values.extraVolumeMounts }}
@@ -140,4 +140,10 @@ spec:
       {{- with .Values.tolerations }}
       tolerations:
         {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- if .Values.terminationGracePeriodSeconds }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- end }}

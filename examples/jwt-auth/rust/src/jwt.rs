@@ -28,8 +28,8 @@
 //! key: hex encoded key
 //!
 //! There are also two optional parameters
-//! time_tolerance: <u64>
-//! max_token_life: <u64>
+//! time_tolerance: `u64`
+//! max_token_life: `u64`
 //!
 //! Both of these parameters are in units of seconds. Both default to 15 mins if
 //! not specified
@@ -251,7 +251,7 @@ impl Plugin for JwtAuth {
                     Some(value) => value.to_str(),
                     None =>
                         // Prepare an HTTP 401 response with a GraphQL error message
-                        return failure_message(req.context, format!("Missing '{}' header", AUTHORIZATION), StatusCode::UNAUTHORIZED),
+                        return failure_message(req.context, format!("Missing '{AUTHORIZATION}' header"), StatusCode::UNAUTHORIZED),
                 };
 
                 // If we find the header, but can't convert it to a string, let the client know
@@ -339,7 +339,7 @@ impl Plugin for JwtAuth {
                                 Ok(_v) => Ok(ControlFlow::Continue(req)),
                                 Err(err) => {
                                     failure_message(req.context,
-                                                           format!("couldn't store JWT claims in context: {}", err),
+                                                           format!("couldn't store JWT claims in context: {err}"),
                                         StatusCode::INTERNAL_SERVER_ERROR,
                                     )
                                 }
@@ -348,7 +348,7 @@ impl Plugin for JwtAuth {
                         Err(err) => {
                             // Prepare an HTTP 403 response with a GraphQL error message
                             failure_message(req.context,
-                                                   format!("{jwt} is not authorized: {}", err),
+                                                   format!("{jwt} is not authorized: {err}"),
                                 StatusCode::FORBIDDEN,
                             )
                         }

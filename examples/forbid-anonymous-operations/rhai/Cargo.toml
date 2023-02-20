@@ -1,5 +1,5 @@
 [package]
-name = "forbid_anonymous_oeprations_rhai"
+name = "forbid_anonymous_operations_rhai"
 version = "0.1.0"
 edition = "2021"
 
@@ -7,7 +7,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1"
 apollo-router = { path = "../../../apollo-router" }
-futures = "0.3"
 http = "0.2"
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }

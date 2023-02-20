@@ -17,13 +17,16 @@ use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
-use super::QueryPlanOptions;
-use super::TYPENAME;
 use crate::error::QueryPlannerError;
+use crate::graphql;
 use crate::introspection::Introspection;
-use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
-use crate::*;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::spec::query::TYPENAME;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
@@ -36,7 +39,6 @@ pub(crate) struct BridgeQueryPlanner {
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
-    deduplicate_variables: bool,
 }
 
 impl BridgeQueryPlanner {
@@ -45,16 +47,13 @@ impl BridgeQueryPlanner {
         introspection: Option<Arc<Introspection>>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
-        // FIXME: The variables deduplication parameter lives in the traffic_shaping section of the config
-        let deduplicate_variables =
-            TrafficShaping::get_configuration_deduplicate_variables(&configuration);
         Ok(Self {
             planner: Arc::new(
                 Planner::new(
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.supergraph.preview_defer_support),
+                            enable_defer: Some(configuration.supergraph.defer_support),
                         }),
                     },
                 )
@@ -63,7 +62,6 @@ impl BridgeQueryPlanner {
             schema,
             introspection,
             configuration,
-            deduplicate_variables,
         })
     }
 
@@ -124,14 +122,11 @@ impl BridgeQueryPlanner {
                 let subselections = node.parse_subselections(&self.schema)?;
                 selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
-                    plan: Arc::new(query_planner::QueryPlan {
+                    plan: Arc::new(super::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
-                        options: QueryPlanOptions {
-                            enable_deduplicate_variables: self.deduplicate_variables,
-                        },
                     }),
                 })
             }
@@ -361,7 +356,7 @@ mod tests {
                 });
             }
             e => {
-                panic!("empty plan should have returned an EmptyPlanError: {:?}", e);
+                panic!("empty plan should have returned an EmptyPlanError: {e:?}");
             }
         }
     }

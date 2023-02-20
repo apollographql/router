@@ -3,7 +3,7 @@ version: 2.1
 # These "CircleCI Orbs" are reusable bits of configuration that can be shared
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
-  gh: circleci/github-cli@2.1.1
+  gh: circleci/github-cli@2.2.0
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -13,6 +13,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
+      - image: cimg/redis:6.2.6
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
@@ -51,7 +52,7 @@ parameters:
   cache_version:
     type: string
     # increment this to invalidate all the caches
-    default: v11.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
+    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
   jaeger_version:
     type: string
     # update this as new versions of jaeger become available
@@ -59,6 +60,9 @@ parameters:
   protoc_version:
     type: string
     default: "21.8"
+  nightly:
+    type: boolean
+    default: false
 
 # These are common environment variables that we want to set on on all jobs.
 # While these could conceivably be set on the CircleCI project settings'
@@ -77,7 +81,7 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
-            sudo apt-get install -y libssl-dev cmake
+            sudo apt-get install -y libssl-dev libdw-dev cmake
       - install_minimal_rust
   linux_amd_install_baseline:
     steps:
@@ -199,26 +203,48 @@ commands:
       - restore_cache:
           keys:
             - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-      - run:
-          name: Install cargo deny if not present
-          command: |
-            set -e -o pipefail
-            cargo deny --version || cargo install cargo-deny
-      - run:
-          name: Install cargo about if not present
-          command: |
-            set -e -o pipefail
-            cargo about --version || cargo install cargo-about
-      - run:
-          name: Install cargo edit if not present
-          command: |
-            set -e -o pipefail
-            cargo edit --version || cargo install cargo-edit
-      - save_cache:
-          key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-          paths:
-            - ~/.cargo/bin/cargo-deny
-            - ~/.cargo/bin/cargo-about
+
+      - when:
+          condition:
+            equal: [windows, << parameters.os >>]
+          steps:
+            - run:
+                name: Install cargo deny, about, edit
+                command: |
+                  cargo install --locked cargo-deny cargo-about cargo-edit
+            - save_cache:
+                name: Save .cargo
+                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                paths:
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-about.exe
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-deny.exe
+                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-edit.exe
+      - when:
+          condition:
+            and:
+              - not:
+                  equal: [windows, << parameters.os >>]
+          steps:
+            - run:
+                name: Install cargo deny if not present
+                command: |
+                  set -e -o pipefail
+                  cargo deny --version || cargo install cargo-deny
+            - run:
+                name: Install cargo about if not present
+                command: |
+                  set -e -o pipefail
+                  cargo about --version || cargo install cargo-about
+            - run:
+                name: Install cargo edit if not present
+                command: |
+                  set -e -o pipefail
+                  cargo edit --version || cargo install cargo-edit
+            - save_cache:
+                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
+                paths:
+                  - ~/.cargo/bin/cargo-deny
+                  - ~/.cargo/bin/cargo-about
 
   xtask_lint:
     parameters:
@@ -228,9 +254,19 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
-      - run: cargo xtask lint
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+      - run:
+          name: Install xtask
+          command: |
+              set -e -o pipefail
+              xtask help || { cd xtask && cargo install --path . && cd ..; }
+      - run: xtask lint
+      - save_cache:
+          name: Save .cargo
+          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+          paths:
+            - ~/.cargo
 
   xtask_check_compliance:
     parameters:
@@ -240,8 +276,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-build-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
       - install_extra_tools:
           os: << parameters.os >>
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
@@ -273,6 +309,10 @@ commands:
       cargo_test_args:
         type: string
         default: "--"
+      # additional cache key to have a cache for test_updated
+      cache_key:
+        type: string
+        default: ""
     steps:
       - run:
           name: Start jaeger
@@ -281,8 +321,8 @@ commands:
       - restore_cache:
           name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
+            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
 
       # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
       - when:
@@ -340,6 +380,7 @@ jobs:
             - linux_amd_install_baseline
             - xtask_check_compliance:
                 os: linux_amd
+
   test:
     environment:
       <<: *common_job_environment
@@ -386,10 +427,8 @@ jobs:
       - checkout
       - linux_amd_install_baseline
       - run:
-          name: Use latest Rust Nightly and update all Rust dependencies
+          name: Update all Rust dependencies
           command: |
-            sed -i '/channel/d' rust-toolchain.toml
-            echo 'channel = "nightly"' >> rust-toolchain.toml
             rm Cargo.lock
             cargo fetch
       - test_workspace:
@@ -397,11 +436,15 @@ jobs:
           # schema_generation test skipped because schemars changed its representation of enums:
           # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
           cargo_test_args: --no-fail-fast -- --skip schema_generation
+          cache_key: .test_updated
 
   build_release:
     parameters:
       platform:
         type: executor
+      nightly:
+        type: boolean
+        default: false
     executor: << parameters.platform >>
     environment:
       <<: *common_job_environment
@@ -411,15 +454,19 @@ jobs:
       MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
-      - run:
-          name: Initialize submodules
-          command: git submodule update --recursive --init
       - when:
           condition:
             equal: [*macos_build_executor, << parameters.platform >>]
           steps:
             - install_minimal_rust
             - macos_install_baseline
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: macos
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -448,6 +495,14 @@ jobs:
                   sudo apt-get update
             - install_minimal_rust
             - linux_amd_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: linux_amd
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -468,6 +523,14 @@ jobs:
                   sudo apt-get update
             - install_minimal_rust
             - linux_arm_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: linux_arm
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -502,6 +565,14 @@ jobs:
                   git-fetch-with-cli = true
                   "@
             - windows_install_baseline
+            # This will set the version to inlude current date and commit hash
+            - when:
+                condition:
+                  equal: [true, << parameters.nightly >>]
+                steps:
+                  - install_extra_tools:
+                      os: windows
+                  - run: cargo xtask release prepare nightly
             - run:
                 command: >
                   cargo xtask dist
@@ -515,6 +586,8 @@ jobs:
           root: artifacts
           paths:
             - "*"
+      - store_artifacts:
+          path: artifacts/
 
   publish_github_release:
     docker:
@@ -539,7 +612,7 @@ jobs:
             cd artifacts && sha1sum *.tar.gz > sha1sums.txt
       - run:
           command: >
-            gh release create $VERSION --notes-file NEXT_CHANGELOG.md --title $VERSION artifacts/*
+            gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/*
       - setup_remote_docker:
           version: 20.10.11
           docker_layer_caching: true
@@ -591,21 +664,18 @@ jobs:
 
 workflows:
   ci_checks:
+    when:
+      not: << pipeline.parameters.nightly >>
     jobs:
       - lint:
           matrix:
             parameters:
               platform: [amd_linux_build]
 
-      # check-compliance is disabled for now because it is flaky
-      # `cargo about` seems to be non-deterministic and sometimes
-      # produces a different licenses.html file even though dependencies haven’t changed.
-      # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
-
-      # - check_compliance:
-      #     matrix:
-      #       parameters:
-      #         platform: [linux]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [amd_linux_build]
 
       - test_updated:
           requires:
@@ -657,7 +727,19 @@ workflows:
           requires:
             - prepare_patch_release_approval
 
+  nightly:
+    when: << pipeline.parameters.nightly >>
+    jobs:
+      - build_release:
+          nightly: true
+          matrix:
+            parameters:
+              platform:
+                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+
   release:
+    when:
+      not: << pipeline.parameters.nightly >>
     jobs:
       - build_release:
           matrix:

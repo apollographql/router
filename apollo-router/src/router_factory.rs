@@ -1,3 +1,4 @@
+use std::io;
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::sync::Arc;
 
@@ -5,6 +6,7 @@ use axum::response::IntoResponse;
 use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::Lazy;
+use rustls::RootCertStore;
 use serde_json::Map;
 use serde_json::Value;
 use tower::service_fn;
@@ -16,6 +18,7 @@ use tower_service::Service;
 
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
+use crate::configuration::TlsSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
@@ -25,11 +28,11 @@ use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::transport;
+use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
+use crate::spec::Schema;
 use crate::ListenAddr;
-use crate::PluggableSupergraphServiceBuilder;
-use crate::Schema;
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -83,7 +86,7 @@ impl Endpoint {
                     .into_response())
             }
         };
-        axum::Router::new().route(self.path.as_str(), service_fn(handler))
+        axum::Router::new().route_service(self.path.as_str(), service_fn(handler))
     }
 }
 /// Factory for creating a RouterService
@@ -115,7 +118,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<crate::Schema>,
+        schema: Arc<Schema>,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError>;
@@ -133,25 +136,56 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         &'a mut self,
         configuration: Arc<Configuration>,
         schema: Arc<Schema>,
-        _previous_router: Option<&'a Self::RouterFactory>,
+        previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
+        let tls_root_store: Option<RootCertStore> = configuration
+            .tls
+            .subgraph
+            .all
+            .create_certificate_store()
+            .transpose()?;
+
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
         builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
+            let subgraph_root_store = configuration
+                .tls
+                .subgraph
+                .subgraphs
+                .get(name)
+                .as_ref()
+                .and_then(|subgraph| subgraph.create_certificate_store())
+                .transpose()?
+                .or_else(|| tls_root_store.clone());
+
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
-                }
-                None => Either::B(SubgraphService::new(name)),
+                Some(shaping) => Either::A(
+                    shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(
+                            name,
+                            configuration
+                                .supergraph
+                                .apq
+                                .subgraph
+                                .subgraphs
+                                .get(name)
+                                .map(|apq| apq.enabled)
+                                .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
+                            subgraph_root_store,
+                        ),
+                    ),
+                ),
+                None => Either::B(SubgraphService::new(name, false, subgraph_root_store)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -160,13 +194,27 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service.
-        let supergraph_creator = builder.build().await?;
+        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
+        let mut supergraph_creator = builder.build().await?;
 
-        Ok(Self::RouterFactory::new(
-            Arc::new(supergraph_creator),
-            &configuration,
-        ))
+        if let Some(router) = previous_router {
+            if configuration.supergraph.query_planning.warmed_up_queries > 0 {
+                let cache_keys = router
+                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
+                    .await;
+
+                if !cache_keys.is_empty() {
+                    tracing::info!(
+                        "warming up the query plan cache with {} queries, this might take a while",
+                        cache_keys.len()
+                    );
+
+                    supergraph_creator.warm_up_query_planner(cache_keys).await;
+                }
+            }
+        }
+
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), &configuration).await)
     }
 }
 
@@ -181,19 +229,50 @@ impl YamlRouterFactory {
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
+        let tls_root_store = configuration
+            .tls
+            .subgraph
+            .all
+            .create_certificate_store()
+            .transpose()?;
+
         let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
-        builder = builder.with_configuration(configuration);
+        builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
+            let subgraph_root_store = configuration
+                .tls
+                .subgraph
+                .subgraphs
+                .get(name)
+                .as_ref()
+                .and_then(|subgraph| subgraph.create_certificate_store())
+                .transpose()?
+                .or_else(|| tls_root_store.clone());
+
             let subgraph_service = match plugins
                 .iter()
                 .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
                 .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
             {
-                Some(shaping) => {
-                    Either::A(shaping.subgraph_service_internal(name, SubgraphService::new(name)))
-                }
-                None => Either::B(SubgraphService::new(name)),
+                Some(shaping) => Either::A(
+                    shaping.subgraph_service_internal(
+                        name,
+                        SubgraphService::new(
+                            name,
+                            configuration
+                                .supergraph
+                                .apq
+                                .subgraph
+                                .subgraphs
+                                .get(name)
+                                .map(|apq| apq.enabled)
+                                .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
+                            subgraph_root_store,
+                        ),
+                    ),
+                ),
+                None => Either::B(SubgraphService::new(name, false, subgraph_root_store)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -204,6 +283,52 @@ impl YamlRouterFactory {
 
         builder.build().await.map_err(BoxError::from)
     }
+}
+
+impl TlsSubgraph {
+    fn create_certificate_store(&self) -> Option<Result<RootCertStore, ConfigurationError>> {
+        self.certificate_authorities
+            .as_deref()
+            .map(create_certificate_store)
+    }
+}
+
+fn create_certificate_store(
+    certificate_authorities: &str,
+) -> Result<RootCertStore, ConfigurationError> {
+    let mut store = RootCertStore::empty();
+    let certificates = load_certs(certificate_authorities).map_err(|e| {
+        ConfigurationError::CertificateAuthorities {
+            error: format!("could not parse the certificate list: {e}"),
+        }
+    })?;
+    for certificate in certificates {
+        store
+            .add(&certificate)
+            .map_err(|e| ConfigurationError::CertificateAuthorities {
+                error: format!("could not add certificate to root store: {e}"),
+            })?;
+    }
+    if store.is_empty() {
+        Err(ConfigurationError::CertificateAuthorities {
+            error: "the certificate list is empty".to_string(),
+        })
+    } else {
+        Ok(store)
+    }
+}
+
+fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
+    tracing::debug!("loading root certificates");
+
+    // Load and return certificate.
+    let certs = rustls_pemfile::certs(&mut certificates.as_bytes()).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::Other,
+            "failed to load certificate".to_string(),
+        )
+    })?;
+    Ok(certs.into_iter().map(rustls::Certificate).collect())
 }
 
 /// test only helper method to create a router factory in integration tests
@@ -398,7 +523,7 @@ mod test {
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
-    use crate::Schema;
+    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -416,8 +541,10 @@ mod test {
     #[derive(Debug)]
     struct AlwaysStartsAndStopsPlugin {}
 
+    /// Configuration for the test plugin
     #[derive(Debug, Default, Deserialize, JsonSchema)]
     struct Conf {
+        /// The name of the test
         name: String,
     }
 

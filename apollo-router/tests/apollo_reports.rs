@@ -7,10 +7,10 @@ use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
+use axum::body::Bytes;
 use axum::routing::post;
 use axum::Extension;
 use axum::Json;
-use bytes::Bytes;
 use flate2::read::GzDecoder;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
@@ -49,22 +49,23 @@ async fn get_router_service() -> BoxCloneService {
             serde_yaml::from_str(include_str!("fixtures/apollo_reports.router.yaml"))
                 .expect("apollo_reports.router.yaml was invalid");
         config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.endpoint", &mut |_| {
-            Some(serde_json::Value::String(format!("http://{}", addr)))
+            Some(serde_json::Value::String(format!("http://{addr}")))
         })
         .expect("Could not sub in endpoint");
 
-        let _ = ROUTER_SERVICE_RUNTIME.spawn(async move {
+        drop(ROUTER_SERVICE_RUNTIME.spawn(async move {
             axum::Server::from_tcp(listener)
                 .expect("mut be able to crete report receiver")
                 .serve(app.into_make_service())
                 .await
                 .expect("could not start axum server")
-        });
+        }));
 
         *router_service = Some(
             ROUTER_SERVICE_RUNTIME
                 .spawn(async {
                     TestHarness::builder()
+                        .log_level("INFO")
                         .configuration_json(config)
                         .expect("test harness had config errors")
                         .schema(include_str!("fixtures/supergraph.graphql"))
@@ -97,7 +98,11 @@ macro_rules! assert_report {
                         ".**.child[].end_time" => "[end_time]",
                         ".**.trace_id.value[]" => "[trace_id]",
                         ".**.sent_time_offset" => "[sent_time_offset]",
-                        ".**.my_trace_id" => "[my_trace_id]"
+                        ".**.my_trace_id" => "[my_trace_id]",
+                        ".**.latency_count" => "[latency_count]",
+                        ".**.cache_latency_count" => "[cache_latency_count]",
+                        ".**.public_cache_ttl_count" => "[public_cache_ttl_count]",
+                        ".**.private_cache_ttl_count" => "[private_cache_ttl_count]",
                     });
                 });
         }
@@ -138,21 +143,51 @@ pub(crate) mod proto {
 }
 
 async fn report(
-    bytes: Bytes,
     Extension(state): Extension<Arc<Mutex<Vec<Report>>>>,
+    bytes: Bytes,
 ) -> Result<Json<()>, http::StatusCode> {
     let mut gz = GzDecoder::new(&*bytes);
     let mut buf = Vec::new();
     gz.read_to_end(&mut buf)
         .expect("could not decompress bytes");
     let report = Report::decode(&*buf).expect("could not deserialize report");
+
     state.lock().await.push(report);
     Ok(Json(()))
 }
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
+    get_report(request, |r| {
+        let r = !r
+            .traces_per_query
+            .values()
+            .next()
+            .expect("traces and stats required")
+            .trace
+            .is_empty();
+        r
+    })
+    .await
+}
+
+async fn get_metrics_report(request: supergraph::Request) -> Report {
+    get_report(request, |r| {
+        !r.traces_per_query
+            .values()
+            .next()
+            .expect("traces and stats required")
+            .stats_with_context
+            .is_empty()
+    })
+    .await
+}
+
+async fn get_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
+    request: supergraph::Request,
+    filter: T,
+) -> Report {
     ROUTER_SERVICE_RUNTIME
-        .spawn(async {
+        .spawn(async move {
             let mut found_report;
             {
                 let _test_guard = TEST.lock().await;
@@ -177,7 +212,7 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
                 {
                     Ok(Ok(response)) => {
                         if response.contains("errors") {
-                            eprintln!("response had errors {}", response);
+                            eprintln!("response had errors {response}");
                         }
                         Ok(None)
                     }
@@ -187,7 +222,7 @@ async fn get_trace_report(request: supergraph::Request) -> Report {
                 // We must always try to find the report regardless of if the response had failures
                 for _ in 0..10 {
                     let reports = REPORTS.lock().await;
-                    let report = reports.iter().find(|r| !r.traces_per_query.is_empty());
+                    let report = reports.iter().find(filter);
                     if report.is_some() {
                         if matches!(found_report, Ok(None)) {
                             found_report = Ok(report.cloned());
@@ -293,5 +328,15 @@ async fn test_send_variable_value() {
         .build()
         .unwrap();
     let report = get_trace_report(request).await;
+    assert_report!(report);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let report = get_metrics_report(request).await;
     assert_report!(report);
 }

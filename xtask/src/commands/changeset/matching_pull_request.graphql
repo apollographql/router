@@ -1,0 +1,39 @@
+# This operation is used to generate Rust code which lives in a file directly
+# next to this with the same name but a `.rs` extension.  For instructions on
+# how to generate the code, see the top of `./mod.rs`.
+fragment PrInfo on PullRequest {
+  url
+  number
+  author {
+    __typename
+    login
+  }
+  title
+  closingIssuesReferences(last: 4) {
+    nodes {
+      url
+      number
+      repository {
+        nameWithOwner
+      }
+    }
+  }
+  body
+}
+fragment PrSearchResult on SearchResultItemConnection {
+  issueCount
+  nodes {
+    __typename
+    ...PrInfo
+  }
+ }
+
+query MatchingPullRequest($search: String!) {
+  search(
+    type: ISSUE
+    query: $search
+    first: 1
+  ) {
+    ...PrSearchResult
+  }
+}

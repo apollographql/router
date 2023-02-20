@@ -15,17 +15,17 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::supergraph;
-use crate::SupergraphResponse;
+use crate::services::SupergraphResponse;
 
 /// CSRF Configuration.
 #[derive(Deserialize, Debug, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[serde(default)]
 pub(crate) struct CSRFConfig {
     /// The CSRF plugin is enabled by default;
     /// set unsafe_disabled = true to disable the plugin behavior
     /// Note that setting this to true is deemed unsafe.
     /// See <https://developer.mozilla.org/en-US/docs/Glossary/CSRF>.
-    #[serde(default)]
     unsafe_disabled: bool,
     /// Override the headers to check for by setting
     /// custom_headers
@@ -35,7 +35,6 @@ pub(crate) struct CSRFConfig {
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
     /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
-    #[serde(default = "apollo_custom_preflight_headers")]
     required_headers: Vec<String>,
 }
 

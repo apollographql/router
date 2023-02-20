@@ -11,5 +11,5 @@ Possible operations are:
 ## Usage
 
 ```bash
-cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
+cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
 ```

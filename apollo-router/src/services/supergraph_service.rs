@@ -16,17 +16,14 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
-use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
 use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
-use super::layers::ensure_query_presence::EnsureQueryPresence;
 use super::new_service::ServiceFactory;
 use super::subgraph_service::MakeSubgraphService;
-use super::subgraph_service::SubgraphCreator;
-use super::ExecutionCreator;
+use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::cache::DeduplicatingCache;
+use crate::_private::TelemetryPlugin;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -39,18 +36,18 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
-use crate::supergraph;
+use crate::services::supergraph;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
+use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
 use crate::Endpoint;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
 use crate::ListenAddr;
-use crate::QueryPlannerRequest;
-use crate::QueryPlannerResponse;
-use crate::Schema;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 
@@ -59,18 +56,18 @@ pub(crate) type Plugins = IndexMap<String, Box<dyn DynPlugin>>;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
-pub(crate) struct SupergraphService<ExecutionFactory> {
-    execution_service_factory: ExecutionFactory,
+pub(crate) struct SupergraphService {
+    execution_service_factory: ExecutionServiceFactory,
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
     schema: Arc<Schema>,
 }
 
 #[buildstructor::buildstructor]
-impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
+impl SupergraphService {
     #[builder]
     pub(crate) fn new(
         query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-        execution_service_factory: ExecutionFactory,
+        execution_service_factory: ExecutionServiceFactory,
         schema: Arc<Schema>,
     ) -> Self {
         SupergraphService {
@@ -81,10 +78,7 @@ impl<ExecutionFactory> SupergraphService<ExecutionFactory> {
     }
 }
 
-impl<ExecutionFactory> Service<SupergraphRequest> for SupergraphService<ExecutionFactory>
-where
-    ExecutionFactory: ExecutionServiceFactory,
-{
+impl Service<SupergraphRequest> for SupergraphService {
     type Response = SupergraphResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -214,11 +208,13 @@ where
             } else {
                 let execution_response = execution
                     .oneshot(
-                        ExecutionRequest::builder()
+                        ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
+                            .schema(&schema)
                             .context(context)
-                            .build(),
+                            .build()
+                            .await,
                     )
                     .await?;
 
@@ -321,13 +317,6 @@ impl PluggableSupergraphServiceBuilder {
     }
 
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
-        // Note: The plugins are always applied in reverse, so that the
-        // fold is applied in the correct sequence. We could reverse
-        // the list of plugins, but we want them back in the original
-        // order at the end of this function. Instead, we reverse the
-        // various iterators that we create for folding and leave
-        // the plugins in their original order.
-
         let configuration = self.configuration.unwrap_or_default();
 
         let introspection = if configuration.supergraph.introspection {
@@ -348,25 +337,25 @@ impl PluggableSupergraphServiceBuilder {
         )
         .await;
 
-        let plugins = Arc::new(self.plugins);
+        let mut plugins = self.plugins;
+        // Activate the telemetry plugin.
+        // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
+        for (_, plugin) in plugins.iter_mut() {
+            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<TelemetryPlugin>() {
+                telemetry.activate();
+            }
+        }
 
-        let subgraph_creator = Arc::new(SubgraphCreator::new(
+        let plugins = Arc::new(plugins);
+
+        let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(
             self.subgraph_services,
             plugins.clone(),
         ));
 
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
-            )
-            .await,
-        );
-
         Ok(SupergraphCreator {
             query_planner_service,
-            subgraph_creator,
-            apq_layer,
+            subgraph_service_factory,
             schema: self.schema,
             plugins,
         })
@@ -399,8 +388,7 @@ pub(crate) trait SupergraphFactory:
 #[derive(Clone)]
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlanner>,
-    subgraph_creator: Arc<SubgraphCreator>,
-    apq_layer: APQLayer,
+    subgraph_service_factory: Arc<SubgraphServiceFactory>,
     schema: Arc<Schema>,
     plugins: Arc<Plugins>,
 }
@@ -433,10 +421,10 @@ impl SupergraphCreator {
     > + Send {
         let supergraph_service = SupergraphService::builder()
             .query_planner_service(self.query_planner_service.clone())
-            .execution_service_factory(ExecutionCreator {
+            .execution_service_factory(ExecutionServiceFactory {
                 schema: self.schema.clone(),
                 plugins: self.plugins.clone(),
-                subgraph_creator: self.subgraph_creator.clone(),
+                subgraph_service_factory: self.subgraph_service_factory.clone(),
             })
             .schema(self.schema.clone())
             .build();
@@ -452,9 +440,7 @@ impl SupergraphCreator {
         };
 
         ServiceBuilder::new()
-            .layer(self.apq_layer.clone())
             .layer(content_negociation::SupergraphLayer::default())
-            .layer(EnsureQueryPresence::default())
             .service(
                 self.plugins
                     .iter()
@@ -463,6 +449,16 @@ impl SupergraphCreator {
                         e.supergraph_service(acc)
                     }),
             )
+    }
+
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.query_planner_service.cache_keys(count).await
+    }
+    pub(crate) async fn warm_up_query_planner(
+        &mut self,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
+        self.query_planner_service.warm_up(cache_keys).await
     }
 
     /// Create a test service.
@@ -1042,6 +1038,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn root_typename_with_defer_and_empty_first_response() {
+        let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": { "__typename": "Organization", "id": "0" } }}}}
+            ).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{suborga{__typename id}}}}",
+                "variables": {
+                    "representations":[{"__typename": "Organization", "id":"0"}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [{ "suborga": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2"},
+                    { "__typename": "Organization", "id": "3"},
+                    ] }]
+                },
+                }}
+        )
+        .with_json(
+            serde_json::json!{{
+                "query":"query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{name}}}",
+                "variables": {
+                    "representations":[
+                        {"__typename": "Organization", "id":"1"},
+                        {"__typename": "Organization", "id":"2"},
+                        {"__typename": "Organization", "id":"3"}
+
+                        ]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                    "_entities": [
+                    { "__typename": "Organization", "id": "1"},
+                    { "__typename": "Organization", "id": "2", "name": "A"},
+                    { "__typename": "Organization", "id": "3"},
+                    ]
+                }
+                }}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(SCHEMA)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(
+                "query { __typename ... @defer { currentUser { activeOrganization { id  suborga { id name } } } } }",
+            )
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let res = stream.next_response().await.unwrap();
+        assert_eq!(
+            res.data.as_ref().unwrap().get("__typename"),
+            Some(&serde_json_bytes::Value::String("Query".into()))
+        );
+
+        // Must have 2 chunks
+        let _ = stream.next_response().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn root_typename_with_defer_in_defer() {
         let subgraphs = MockedSubgraphs([
         ("user", MockSubgraph::builder().with_json(
@@ -1474,5 +1546,683 @@ mod tests {
         let context = Context::new();
         context.insert(ACCEPTS_MULTIPART_CONTEXT_KEY, true).unwrap();
         context
+    }
+
+    #[tokio::test]
+    async fn interface_object_typename_rewrites() {
+        let schema = r#"
+            schema
+              @link(url: "https://specs.apollo.dev/link/v1.0")
+              @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+            {
+              query: Query
+            }
+
+            directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+            directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+            directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+            directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+            directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+            directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+            directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+            type A implements I
+              @join__implements(graph: S1, interface: "I")
+              @join__type(graph: S1, key: "id")
+            {
+              id: ID!
+              x: Int
+              z: Int
+              y: Int @join__field
+            }
+
+            type B implements I
+              @join__implements(graph: S1, interface: "I")
+              @join__type(graph: S1, key: "id")
+            {
+              id: ID!
+              x: Int
+              w: Int
+              y: Int @join__field
+            }
+
+            interface I
+              @join__type(graph: S1, key: "id")
+              @join__type(graph: S2, key: "id", isInterfaceObject: true)
+            {
+              id: ID!
+              x: Int @join__field(graph: S1)
+              y: Int @join__field(graph: S2)
+            }
+
+            scalar join__FieldSet
+
+            enum join__Graph {
+              S1 @join__graph(name: "S1", url: "s1")
+              S2 @join__graph(name: "S2", url: "s2")
+            }
+
+            scalar link__Import
+
+            enum link__Purpose {
+              SECURITY
+              EXECUTION
+            }
+
+            type Query
+              @join__type(graph: S1)
+              @join__type(graph: S2)
+            {
+              iFromS1: I @join__field(graph: S1)
+              iFromS2: I @join__field(graph: S2)
+            }
+        "#;
+
+        let query = r#"
+          {
+            iFromS1 {
+              ... on A {
+                y
+              }
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs([
+            ("S1", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "{iFromS1{__typename ...on A{__typename id}}}",
+                    }},
+                    serde_json::json! {{
+                        "data": {"iFromS1":{"__typename":"A","id":"idA"}}
+                    }},
+                )
+                .build()),
+            ("S2", MockSubgraph::builder()
+                // Note that this query below will only match if the input rewrite in the query plan is handled
+                // correctly. Otherwise, the `representations` in the variables will have `__typename = A`
+                // instead of `__typename = I`.
+                .with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on I{y}}}",
+                        "variables":{"representations":[{"__typename":"I","id":"idA"}]}
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities":[{"y":42}]}
+                    }},
+                )
+                .build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&response.data).unwrap(),
+            serde_json::json!({ "iFromS1": { "y": 42 } }),
+        );
+    }
+
+    #[tokio::test]
+    async fn interface_object_response_processing() {
+        let schema = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          {
+            query: Query
+          }
+
+          directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+          directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+          directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+          type Book implements Product
+            @join__implements(graph: PRODUCTS, interface: "Product")
+            @join__type(graph: PRODUCTS, key: "id")
+          {
+            id: ID!
+            description: String
+            price: Float
+            pages: Int
+            reviews: [Review!]! @join__field
+          }
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            PRODUCTS @join__graph(name: "products", url: "products")
+            REVIEWS @join__graph(name: "reviews", url: "reviews")
+          }
+
+          scalar link__Import
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          type Movie implements Product
+            @join__implements(graph: PRODUCTS, interface: "Product")
+            @join__type(graph: PRODUCTS, key: "id")
+          {
+            id: ID!
+            description: String
+            price: Float
+            duration: Int
+            reviews: [Review!]! @join__field
+          }
+
+          interface Product
+            @join__type(graph: PRODUCTS, key: "id")
+            @join__type(graph: REVIEWS, key: "id", isInterfaceObject: true)
+          {
+            id: ID!
+            description: String @join__field(graph: PRODUCTS)
+            price: Float @join__field(graph: PRODUCTS)
+            reviews: [Review!]! @join__field(graph: REVIEWS)
+          }
+
+          type Query
+            @join__type(graph: PRODUCTS)
+            @join__type(graph: REVIEWS)
+          {
+            products: [Product!]! @join__field(graph: PRODUCTS)
+            allReviewedProducts: [Product!]! @join__field(graph: REVIEWS)
+            bestRatedProducts(limit: Int): [Product!]! @join__field(graph: REVIEWS)
+          }
+
+          type Review
+            @join__type(graph: REVIEWS)
+          {
+            author: String
+            text: String
+            rating: Int
+          }
+        "#;
+
+        let query = r#"
+          {
+            allReviewedProducts {
+              id
+              price
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs([
+            ("products", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{__typename price}}}",
+                        "variables": {"representations":[{"__typename":"Product","id":"1"},{"__typename":"Product","id":"2"}]}
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities":[{"price":12.99},{"price":14.99}]}
+                    }},
+                )
+                .build()),
+            ("reviews", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "{allReviewedProducts{__typename id}}"
+                    }},
+                    serde_json::json! {{
+                        "data": {"allReviewedProducts":[{"__typename":"Product","id":"1"},{"__typename":"Product","id":"2"}]}
+                    }},
+                )
+                .build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+        println!("{response:?}");
+
+        assert_eq!(
+            serde_json::to_value(&response.data).unwrap(),
+            serde_json::json!({ "allReviewedProducts": [ {"id": "1", "price": 12.99}, {"id": "2", "price": 14.99} ]}),
+        );
+    }
+
+    #[tokio::test]
+    async fn only_query_interface_object_subgraph() {
+        // This test has 2 subgraphs, one with an interface and another with that interface
+        // declared as an @interfaceObject. It then sends a query that can be entirely
+        // fulfilled by the @interfaceObject subgraph (in particular, it doesn't request
+        // __typename; if it did, it would force a query on the other subgraph to obtain
+        // the actual implementation type).
+        // The specificity here is that the final in-memory result will not have a __typename
+        // _despite_ being the parent type of that result being an interface. Which is fine
+        // since __typename is not requested, and so there is no need to known the actual
+        // __typename, but this is something that never happen outside of @interfaceObject
+        // (usually, results whose parent type is an abstract type (say an interface) are always
+        // queried internally with their __typename). And so this test make sure that the
+        // post-processing done by the router on the result handle this correctly.
+
+        let schema = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          {
+            query: Query
+          }
+
+          directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+          directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+          directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+          type A implements I
+            @join__implements(graph: S1, interface: "I")
+            @join__type(graph: S1, key: "id")
+          {
+            id: ID!
+            x: Int
+            z: Int
+            y: Int @join__field
+          }
+
+          type B implements I
+            @join__implements(graph: S1, interface: "I")
+            @join__type(graph: S1, key: "id")
+          {
+            id: ID!
+            x: Int
+            w: Int
+            y: Int @join__field
+          }
+
+          interface I
+            @join__type(graph: S1, key: "id")
+            @join__type(graph: S2, key: "id", isInterfaceObject: true)
+          {
+            id: ID!
+            x: Int @join__field(graph: S1)
+            y: Int @join__field(graph: S2)
+          }
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            S1 @join__graph(name: "S1", url: "S1")
+            S2 @join__graph(name: "S2", url: "S2")
+          }
+
+          scalar link__Import
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          type Query
+            @join__type(graph: S1)
+            @join__type(graph: S2)
+          {
+            iFromS1: I @join__field(graph: S1)
+            iFromS2: I @join__field(graph: S2)
+          }
+        "#;
+
+        let query = r#"
+          {
+            iFromS2 {
+              y
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs(
+            [
+                (
+                    "S1",
+                    MockSubgraph::builder()
+                        // This test makes no queries to S1, only to S2
+                        .build(),
+                ),
+                (
+                    "S2",
+                    MockSubgraph::builder()
+                        .with_json(
+                            serde_json::json! {{
+                                "query": "{iFromS2{y}}",
+                            }},
+                            serde_json::json! {{
+                                "data": {"iFromS2":{"y":20}}
+                            }},
+                        )
+                        .build(),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&response.data).unwrap(),
+            serde_json::json!({ "iFromS2": { "y": 20 } }),
+        );
+    }
+
+    #[tokio::test]
+    async fn aliased_subgraph_data_rewrites_on_root_fetch() {
+        let schema = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          {
+            query: Query
+          }
+
+          directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+          directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+          directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+          type A implements U
+            @join__implements(graph: S1, interface: "U")
+            @join__type(graph: S1, key: "g")
+            @join__type(graph: S2, key: "g")
+          {
+            f: String @join__field(graph: S1, external: true) @join__field(graph: S2)
+            g: String
+          }
+
+          type B implements U
+            @join__implements(graph: S1, interface: "U")
+            @join__type(graph: S1, key: "g")
+            @join__type(graph: S2, key: "g")
+          {
+            f: String @join__field(graph: S1, external: true) @join__field(graph: S2)
+            g: Int
+          }
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            S1 @join__graph(name: "S1", url: "s1")
+            S2 @join__graph(name: "S2", url: "s2")
+          }
+
+          scalar link__Import
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          type Query
+            @join__type(graph: S1)
+            @join__type(graph: S2)
+          {
+            us: [U] @join__field(graph: S1)
+          }
+
+          interface U
+            @join__type(graph: S1)
+          {
+            f: String
+          }
+        "#;
+
+        let query = r#"
+          {
+            us {
+              f
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs([
+            ("S1", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "{us{__typename ...on A{__typename g}...on B{__typename g__alias_0:g}}}",
+                    }},
+                    serde_json::json! {{
+                        "data": {"us":[{"__typename":"A","g":"foo"},{"__typename":"B","g__alias_0":1}]},
+                    }},
+                )
+                .build()),
+            ("S2", MockSubgraph::builder()
+                .with_json(
+                    // Note that the query below will only match if the output rewrite in the query plan is handled
+                    // correctly. Otherwise, the `representations` in the variables will not be able to find the
+                    // field `g` for the `B` object, since it was returned as `g__alias_0` on the initial subgraph
+                    // query above.
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on A{f}...on B{f}}}",
+                        "variables":{"representations":[{"__typename":"A","g":"foo"},{"__typename":"B","g":1}]}
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities":[{"f":"fA"},{"f":"fB"}]}
+                    }},
+                )
+                .build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&response.data).unwrap(),
+            serde_json::json!({"us": [{"f": "fA"}, {"f": "fB"}]}),
+        );
+    }
+
+    #[tokio::test]
+    async fn aliased_subgraph_data_rewrites_on_non_root_fetch() {
+        let schema = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          {
+            query: Query
+          }
+
+          directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+          directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+          directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+          type A implements U
+            @join__implements(graph: S1, interface: "U")
+            @join__type(graph: S1, key: "g")
+            @join__type(graph: S2, key: "g")
+          {
+            f: String @join__field(graph: S1, external: true) @join__field(graph: S2)
+            g: String
+          }
+
+          type B implements U
+            @join__implements(graph: S1, interface: "U")
+            @join__type(graph: S1, key: "g")
+            @join__type(graph: S2, key: "g")
+          {
+            f: String @join__field(graph: S1, external: true) @join__field(graph: S2)
+            g: Int
+          }
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            S1 @join__graph(name: "S1", url: "s1")
+            S2 @join__graph(name: "S2", url: "s2")
+          }
+
+          scalar link__Import
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          type Query
+            @join__type(graph: S1)
+            @join__type(graph: S2)
+          {
+            t: T @join__field(graph: S2)
+          }
+
+          type T
+            @join__type(graph: S1, key: "id")
+            @join__type(graph: S2, key: "id")
+          {
+            id: ID!
+            us: [U] @join__field(graph: S1)
+          }
+
+          interface U
+            @join__type(graph: S1)
+          {
+            f: String
+          }
+        "#;
+
+        let query = r#"
+          {
+            t {
+              us {
+                f
+              }
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs([
+            ("S1", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on T{us{__typename ...on A{__typename g}...on B{__typename g__alias_0:g}}}}}",
+                        "variables":{"representations":[{"__typename":"T","id":"0"}]}
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities":[{"us":[{"__typename":"A","g":"foo"},{"__typename":"B","g__alias_0":1}]}]},
+                    }},
+                )
+                .build()),
+            ("S2", MockSubgraph::builder()
+                .with_json(
+                    serde_json::json! {{
+                        "query": "{t{__typename id}}",
+                    }},
+                    serde_json::json! {{
+                        "data": {"t":{"__typename":"T","id":"0"}},
+                    }},
+                )
+                // Note that this query will only match if the output rewrite in the query plan is handled correctly. Otherwise,
+                // the `representations` in the variables will not be able to find the field `g` for the `B` object, since it was
+                // returned as `g__alias_0` on the (non-root) S1 query above.
+                .with_json(
+                    serde_json::json! {{
+                        "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on A{f}...on B{f}}}",
+                        "variables":{"representations":[{"__typename":"A","g":"foo"},{"__typename":"B","g":1}]}
+                    }},
+                    serde_json::json! {{
+                        "data": {"_entities":[{"f":"fA"},{"f":"fB"}]}
+                    }},
+                )
+                .build()),
+        ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+        let response = stream.next_response().await.unwrap();
+
+        assert_eq!(
+            serde_json::to_value(&response.data).unwrap(),
+            serde_json::json!({"t": {"us": [{"f": "fA"}, {"f": "fB"}]}}),
+        );
     }
 }

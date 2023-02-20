@@ -27,7 +27,7 @@ impl Introspection {
     ) -> Self {
         Self {
             cache: CacheStorage::new(capacity, None, "introspection").await,
-            defer_support: configuration.supergraph.preview_defer_support,
+            defer_support: configuration.supergraph.defer_support,
         }
     }
 
@@ -69,7 +69,7 @@ impl Introspection {
             },
         )
         .map_err(|err| IntrospectionError {
-            message: format!("Deno runtime error: {:?}", err).into(),
+            message: format!("Deno runtime error: {err:?}").into(),
         })??;
         let introspection_result = response
             .pop()

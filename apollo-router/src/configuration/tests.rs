@@ -53,7 +53,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::Schema::parse(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -105,16 +105,13 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::Schema::parse(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
         assert_eq!(subgraph, "reviews");
     } else {
-        panic!(
-            "expected missing subgraph URL for 'reviews', got: {:?}",
-            schema_error
-        );
+        panic!("expected missing subgraph URL for 'reviews', got: {schema_error:?}");
     }
 }
 
@@ -170,7 +167,22 @@ subgraphs:
         Mode::NoUpgrade,
     )
     .expect_err("should have resulted in an error");
-    assert_eq!(error.to_string(), String::from("unknown fields: additional properties are not allowed ('subgraphs' was/were unexpected)"));
+    assert_eq!(
+        error.to_string(),
+        String::from(
+            r#"configuration had errors: 
+1. at line 4
+
+  
+  supergraph:
+    path: /
+┌ subgraphs:
+|   account: true
+└-----> Additional properties are not allowed ('subgraphs' was unexpected)
+
+"#
+        )
+    );
 }
 
 #[test]
@@ -187,7 +199,15 @@ unknown:
     assert_eq!(
         error.to_string(),
         String::from(
-            "unknown fields: additional properties are not allowed ('unknown' was/were unexpected)"
+            r#"configuration had errors: 
+1. at line 2
+
+  
+┌ unknown:
+|   foo: true
+└-----> Additional properties are not allowed ('unknown' was unexpected)
+
+"#
         )
     );
 }
@@ -201,16 +221,6 @@ fn empty_config() {
         Mode::NoUpgrade,
     )
     .expect("should have been ok with an empty config");
-}
-
-#[test]
-fn bad_graphql_path_configuration_with_bad_ending_wildcard() {
-    let error = Configuration::fake_builder()
-        .supergraph(Supergraph::fake_builder().path("/test*").build())
-        .build()
-        .unwrap_err();
-
-    assert_eq!(error.to_string(), String::from("invalid 'server.graphql_path' configuration: '/test*' is invalid, you can only set a wildcard after a '/'"));
 }
 
 #[test]
@@ -357,7 +367,26 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
+    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+}
+
+#[test]
+fn it_doesnt_allow_origins_wildcard() {
+    let cfg = validate_yaml_configuration(
+        r#"
+cors:
+  origins:
+    - "*"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    let error = cfg
+        .cors
+        .into_layer()
+        .expect_err("should have resulted in an error");
+    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
 }
 
 #[test]
@@ -607,9 +636,99 @@ fn upgrade_old_configuration() {
                     });
                 }
                 Err(e) => {
-                    panic!("migrated configuration had validation errors:\n{}\n\noriginal configuration:\n{}\n\nmigrated configuration:\n{}", e, input, new_config)
+                    panic!("migrated configuration had validation errors:\n{e}\n\noriginal configuration:\n{input}\n\nmigrated configuration:\n{new_config}")
                 }
             }
         }
     }
+}
+
+#[test]
+fn all_properties_are_documented() {
+    let schema = serde_json::to_value(&generate_config_schema())
+        .expect("must be able to convert the schema to json");
+
+    let mut errors = Vec::new();
+    visit_schema("", &schema, &mut errors);
+    if !errors.is_empty() {
+        panic!(
+            "There were errors in the configuration schema: {}",
+            errors.join("\n")
+        )
+    }
+}
+
+#[test]
+fn default_config_has_defaults() {
+    insta::assert_yaml_snapshot!(Configuration::default().validated_yaml);
+}
+
+fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
+    match schema {
+        Value::Array(arr) => {
+            for element in arr {
+                visit_schema(path, element, errors)
+            }
+        }
+        Value::Object(o) => {
+            for (k, v) in o {
+                if k.as_str() == "properties" {
+                    let properties = v.as_object().expect("properties must be an object");
+                    for (k, v) in properties {
+                        let path = format!("{path}.{k}");
+                        if v.as_object().and_then(|o| o.get("description")).is_none() {
+                            errors.push(format!("{path} was missing a description"));
+                        }
+                        visit_schema(&path, v, errors)
+                    }
+                } else {
+                    visit_schema(path, v, errors)
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn test_configuration_validate_and_sanitize() {
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/g:supergraph_route");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/graphql/g*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(
+        &conf.supergraph.sanitized_path(),
+        "/graphql/g:supergraph_route"
+    );
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/*router_extra_path");
+
+    let conf = Configuration::builder()
+        .supergraph(Supergraph::builder().path("/test").build())
+        .build()
+        .unwrap()
+        .validate()
+        .unwrap();
+    assert_eq!(&conf.supergraph.sanitized_path(), "/test");
+
+    assert!(Configuration::builder()
+        .supergraph(Supergraph::builder().path("/*/whatever").build())
+        .build()
+        .is_err());
 }

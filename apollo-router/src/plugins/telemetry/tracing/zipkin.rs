@@ -19,11 +19,14 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The endpoint to send to
     #[schemars(with = "String", default = "default_agent_endpoint")]
     #[serde(deserialize_with = "deser_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
 
-    pub(crate) batch_processor: Option<BatchProcessorConfig>,
+    /// Batch processor configuration
+    #[serde(default)]
+    pub(crate) batch_processor: BatchProcessorConfig,
 }
 
 const fn default_agent_endpoint() -> &'static str {
@@ -43,7 +46,7 @@ where
     // support the case of 'collector:4317' where url parses 'collector'
     // as the scheme instead of the host
     if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-        s = format!("http://{}/api/v2/spans", s);
+        s = format!("http://{s}/api/v2/spans");
 
         url = Url::parse(&s).map_err(serde::de::Error::custom)?;
     }
@@ -52,10 +55,7 @@ where
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::info!(
-            "configuring Zipkin tracing: {}",
-            self.batch_processor.as_ref().cloned().unwrap_or_default()
-        );
+        tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
         let collector_endpoint = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(url) => Some(url),
@@ -63,21 +63,15 @@ impl TracingConfigurator for Config {
 
         let exporter = opentelemetry_zipkin::new_pipeline()
             .with_trace_config(trace_config.into())
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with(&collector_endpoint, |b, endpoint| {
-                b.with_collector_endpoint(&endpoint.to_string())
+                b.with_collector_endpoint(endpoint.to_string())
             })
             .init_exporter()?;
 
         Ok(builder.with_span_processor(
             BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_batch_config(
-                    self.batch_processor
-                        .as_ref()
-                        .cloned()
-                        .unwrap_or_default()
-                        .into(),
-                )
+                .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),
         ))

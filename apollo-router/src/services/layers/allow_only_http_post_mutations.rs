@@ -15,8 +15,8 @@ use tower::Service;
 use crate::graphql::Error;
 use crate::json_ext::Object;
 use crate::layers::sync_checkpoint::CheckpointService;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
 
 #[derive(Default)]
 pub(crate) struct AllowOnlyHttpPostMutationsLayer {}
@@ -192,7 +192,7 @@ mod forbid_http_get_mutations_tests {
         assert_eq!(&response.errors[0], expected_error);
     }
 
-    fn create_request(method: Method, operation_kind: OperationKind) -> crate::ExecutionRequest {
+    fn create_request(method: Method, operation_kind: OperationKind) -> ExecutionRequest {
         let root: PlanNode = if operation_kind == OperationKind::Mutation {
             serde_json::from_value(json!({
                 "kind": "Sequence",

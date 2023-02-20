@@ -30,15 +30,8 @@ use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
+use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-const DEFAULT_QUEUE_SIZE: usize = 65_536;
-// Do not set to 5 secs because it's also the default value for the BatchSpanProcesser of tracing.
-// It's less error prone to set a different value to let us compute traces and metrics
-pub(crate) const EXPORTER_TIMEOUT_DURATION: Duration = Duration::from_secs(6);
-// Set to 90 seconds to err on the side of caution. This + our backoffs and attemps
-// should be more than enough to make sure the reports are sent,
-// while preventing potential hangs.
-pub(crate) const HTTP_CLIENT_TIMEOUT_DURATION: Duration = Duration::from_secs(90);
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 
 #[derive(thiserror::Error, Debug)]
@@ -92,6 +85,7 @@ impl Default for Sender {
 /// Sending periodically (in the case of metrics).
 #[derive(Clone)]
 pub(crate) struct ApolloExporter {
+    batch_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
@@ -102,6 +96,7 @@ pub(crate) struct ApolloExporter {
 impl ApolloExporter {
     pub(crate) fn new(
         endpoint: &Url,
+        batch_config: &BatchProcessorConfig,
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
@@ -121,12 +116,12 @@ impl ApolloExporter {
         };
 
         tracing::debug!("creating apollo exporter {}", endpoint);
-
         Ok(ApolloExporter {
             endpoint: endpoint.clone(),
+            batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
             client: reqwest::Client::builder()
-                .timeout(HTTP_CLIENT_TIMEOUT_DURATION)
+                .timeout(batch_config.max_export_timeout)
                 .build()
                 .map_err(BoxError::from)?,
             header,
@@ -135,10 +130,9 @@ impl ApolloExporter {
     }
 
     pub(crate) fn start(self) -> Sender {
-        let (tx, mut rx) = mpsc::channel::<SingleReport>(DEFAULT_QUEUE_SIZE);
-        // This is the task that actually sends metrics
+        let (tx, mut rx) = mpsc::channel::<SingleReport>(self.batch_config.max_queue_size);
         tokio::spawn(async move {
-            let timeout = tokio::time::interval(EXPORTER_TIMEOUT_DURATION);
+            let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
 
             tokio::pin!(timeout);
@@ -169,7 +163,8 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        if report.operation_count == 0 {
+        // We may be sending traces but with no operation count
+        if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return Ok(());
         }
         tracing::debug!("submitting report: {:?}", report);
@@ -262,7 +257,7 @@ impl ApolloExporter {
                     }
                 }
                 Err(e) => {
-                    println!("Got {}", e);
+                    println!("Got {e}");
                     // TODO: Ultimately need more sophisticated handling here. For example
                     // a redirect should not be treated the same way as a connect or a
                     // type builder error...

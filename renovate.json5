@@ -26,7 +26,7 @@
     {
       "fileMatch": [
         "^\\.tool-versions$",
-        "^dockerfiles/diy/dockerfiles/Dockerfile\\.repo$",
+        "(^|/)Dockerfile[^/]*$",
         "^rust-toolchain\\.toml$",
         "^docs/.*?\\.mdx$"
       ],
@@ -38,6 +38,15 @@
     }
   ],
   "packageRules": [
+    // Don't do `rust` image updates on Dockerfiles since they'll we want them
+    // managed/grouped into the package rule directly after this one.  This
+    // prevents multiple PRs for the same bump, and puts all our Rust version
+    // bumps together.
+    {
+      "matchPackageNames": ["rust"],
+      "matchManagers": ["dockerfile"],
+      "enabled": false
+    },
     {
       // This "rust" name maps to the Docker Hub "rust" image above on account
       // of the `regexManagers[0]` defined above being `datasourceTemplate` = `docker`.
