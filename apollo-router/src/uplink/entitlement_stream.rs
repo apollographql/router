@@ -136,12 +136,10 @@ where
         let checks = this.checks.poll_expired(cx);
         // Only check downstream if checks was not Some
         let next = if matches!(checks, Poll::Ready(Some(_))) {
-            // It doesn't matter what we set this to. The first match arm below will match.
-            // Wrapping this in an Option makes readability worse.
-            Poll::Ready(None)
+            None
         } else {
             // Poll upstream. Note that it is OK for this to be called again after it has finished as the stream is fused and if it is exhausted it will return Poll::Ready(None).
-            this.upstream.poll_next(cx)
+            Some(this.upstream.poll_next(cx))
         };
 
         match (checks, next) {
@@ -149,22 +147,25 @@ where
             // This is the ONLY arm where upstream.poll_next has not been called, and this is OK because we are not returning pending.
             (Poll::Ready(Some(item)), _) => Poll::Ready(Some(item.into_inner())),
             // Upstream has a new entitlement with a claim
-            (_, Poll::Ready(Some(entitlement))) if entitlement.claims.is_some() => {
+            (_, Some(Poll::Ready(Some(entitlement)))) if entitlement.claims.is_some() => {
                 // If we got a new entitlement then we need to reset the stream of events and return the new entitlement event.
                 reset_checks_for_entitlement(&mut this.checks, entitlement)
             }
             // Upstream has a new entitlement with no claim
-            (_, Poll::Ready(Some(_))) => {
+            (_, Some(Poll::Ready(Some(_)))) => {
                 // As we have no claim clear the checks
                 this.checks.clear();
                 Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
             }
             // If either checks or upstream returned pending then we need to return pending.
-            // It is the responsibility of upstream and checks to schedule wakup.
+            // It is the responsibility of upstream and checks to schedule wakeup.
             // If we have got to this line then checks.poll_expired and upstream.poll_next *will* have been called.
-            (Poll::Pending, _) | (_, Poll::Pending) => Poll::Pending,
+            (Poll::Pending, _) | (_, Some(Poll::Pending)) => Poll::Pending,
             // If both stream are exhausted then return none.
-            (Poll::Ready(None), Poll::Ready(None)) => Poll::Ready(None),
+            (Poll::Ready(None), Some(Poll::Ready(None))) => Poll::Ready(None),
+            (Poll::Ready(None), None) => {
+                unreachable!("upstream will have been called as checks did not have a value")
+            }
         }
     }
 }
