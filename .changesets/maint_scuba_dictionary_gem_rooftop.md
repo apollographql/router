@@ -1,4 +1,4 @@
-### CORS: Give a more meaningful message for users who missconfigured allow_any_origin ([PR #2634](https://github.com/apollographql/router/pull/2634))
+### CORS: Give a more meaningful message for users who misconfigured allow_any_origin ([PR #2634](https://github.com/apollographql/router/pull/2634))
 
 Allowing any origins in the router configuration is done this way:
 ```yaml
