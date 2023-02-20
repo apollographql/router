@@ -9,6 +9,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use std::time::SystemTime;
 
 use arc_swap::ArcSwap;
 use futures::future::ready;
@@ -52,6 +53,7 @@ use tower::util::BoxService;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use uuid::Uuid;
 
 use crate::error::Error;
 use crate::graphql::Request;
@@ -1609,6 +1611,15 @@ impl Rhai {
                 format!("{x:?}")
             })
             .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
+            .register_fn("uuid_v4", || -> String {
+                Uuid::new_v4().to_string()
+            })
+            .register_fn("unix_now", ||-> u64 {
+                match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+                    Ok(v)=> v.as_secs(),
+                    Err(_)=>0
+                }
+            })
             // Add query plan getter to execution request
             .register_get(
                 "query_plan",
@@ -2225,5 +2236,30 @@ mod tests {
             // Test failed
             panic!("error processed incorrectly");
         }
+    }
+    #[test]
+    fn it_can_create_unix_now() {
+        let engine = Rhai::new_rhai_engine(None);
+        let st = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("can get system time")
+            .as_secs();
+        let unix_now: u64 = engine
+            .eval(r#"unix_now()"#)
+            .expect("can get unix_now() timestamp");
+        // Always difficult to do timing tests. unix_now() should execute within a second of st,
+        // so...
+        assert!(st <= unix_now && unix_now <= st + 1);
+    }
+
+    #[test]
+    fn it_can_generate_uuid() {
+        let engine = Rhai::new_rhai_engine(None);
+        let uuid_v4_rhai: String = engine.eval(r#"uuid_v4()"#).expect("can get uuid");
+        // attempt to parse back to UUID..
+        let uuid_parsed =
+            Uuid::parse_str(uuid_v4_rhai.as_str()).expect("can parse uuid from string");
+        // finally validate that parsed string equals the returned value
+        assert_eq!(uuid_v4_rhai, uuid_parsed.to_string());
     }
 }
