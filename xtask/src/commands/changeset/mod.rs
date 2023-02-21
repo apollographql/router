@@ -25,6 +25,8 @@ mod scalars;
 
 use std::fmt;
 use std::fs;
+use std::fs::remove_file;
+use std::fs::DirEntry;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -91,7 +93,7 @@ pub enum Command {
     Create(Create),
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord)]
 enum Classification {
     Breaking,
     Feature,
@@ -130,20 +132,42 @@ impl Classification {
     ];
 }
 
+impl std::cmp::PartialOrd for Classification {
+    fn partial_cmp(&self, other: &Classification) -> Option<std::cmp::Ordering> {
+        Self::ORDERED_ALL
+            .into_iter()
+            .position(|item| item == self)
+            .partial_cmp(&Self::ORDERED_ALL.into_iter().position(|item| item == other))
+    }
+}
+
 type ParseError = &'static str;
 impl FromStr for Classification {
     type Err = ParseError;
     fn from_str(classification: &str) -> Result<Self, Self::Err> {
-        match classification {
-            "break" => Ok(Classification::Breaking),
-            "feat" => Ok(Classification::Feature),
-            "fix" => Ok(Classification::Fix),
-            "config" => Ok(Classification::Configuration),
-            "maint" => Ok(Classification::Maintenance),
-            "docs" => Ok(Classification::Documentation),
-            "exp" => Ok(Classification::Experimental),
-            &_ => Err("unknown classification"),
+        if classification.starts_with("break") {
+            return Ok(Classification::Breaking);
         }
+        if classification.starts_with("feat") {
+            return Ok(Classification::Feature);
+        }
+        if classification.starts_with("fix") {
+            return Ok(Classification::Fix);
+        }
+        if classification.starts_with("config") {
+            return Ok(Classification::Configuration);
+        }
+        if classification.starts_with("maint") {
+            return Ok(Classification::Maintenance);
+        }
+        if classification.starts_with("docs") {
+            return Ok(Classification::Documentation);
+        }
+        if classification.starts_with("exp") {
+            return Ok(Classification::Experimental);
+        }
+
+        Err("unknown classification")
     }
 }
 
@@ -194,9 +218,13 @@ async fn github_graphql_post_request(
     Ok(response_body)
 }
 
+fn get_changesets_dir() -> camino::Utf8PathBuf {
+    PKG_PROJECT_ROOT.join(".changesets")
+}
+
 impl Create {
     pub fn run(&self) -> Result<()> {
-        let changesets_dir_path = PKG_PROJECT_ROOT.join(".changesets");
+        let changesets_dir_path = get_changesets_dir();
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -242,12 +270,6 @@ impl Create {
                         false
                     }
                 };
-
-                // TODO: Get existing files somewhere.  This does the trick.
-                // let changeset_files = fs::read_dir(&changesets_dir_path).unwrap();
-                // for path in changeset_files {
-                //     println!("Name: {}", path.unwrap().path().display())
-                // }
 
                 let use_branch_name = if self.with_branch_name {
                     true
@@ -494,4 +516,99 @@ fn pr_info_from_response(
             }
         }).collect()
     }).unwrap_or_default()
+}
+
+fn get_changeset_files() -> Vec<Changeset> {
+    fs::read_dir(get_changesets_dir())
+        .unwrap()
+        .into_iter()
+        .collect::<std::io::Result<Vec<_>>>()
+        .unwrap()
+        .iter()
+        .filter_map(|file_entry| file_entry.try_into().ok())
+        .collect::<Vec<Changeset>>()
+}
+
+fn generate_content_from_changeset_files(changelog_entries: &Vec<Changeset>) -> String {
+    let mut changelog_entries: Vec<Changeset> = changelog_entries.clone();
+    changelog_entries.sort();
+
+    let mut output: String = String::from("");
+
+    // We'll use this to track the classification, and print it one per change.
+    let mut last_kind = None;
+
+    for entry in changelog_entries {
+        // For each classification change, print the heading.
+        if last_kind.is_none() || Some(entry.classification) != last_kind {
+            // Extra line _between_ sections.
+            if last_kind.is_some() {
+                output = output + "\n\n";
+            }
+            let new_header = format!("{}\n\n", entry.classification);
+            output = output + &*new_header;
+        }
+        last_kind = Some(entry.classification);
+
+        // Add the entry's content to the block of text!
+        let entry = format!("{}", entry.content);
+        output = output + &*entry;
+    }
+    output
+}
+
+fn remove_changeset_files(changesets: &Vec<Changeset>) -> bool {
+    let mut failure: bool = false;
+    for changeset in changesets {
+        if remove_file(&changeset.path).is_ok() {
+            println!("Deleted {:?}", changeset.path);
+        } else {
+            eprintln!("Could not delete {:?}", changeset.path);
+            failure = true;
+        }
+    }
+    !failure
+}
+
+pub fn slurp_and_remove_changesets() -> String {
+    let changesets = get_changeset_files();
+    let content = generate_content_from_changeset_files(&changesets);
+    remove_changeset_files(&changesets);
+    content
+}
+
+#[derive(Clone, Debug, Eq, Ord)]
+struct Changeset {
+    classification: Classification,
+    content: String,
+    path: PathBuf,
+}
+
+impl std::cmp::PartialEq for Changeset {
+    fn eq(&self, other: &Self) -> bool {
+        self.classification == other.classification
+    }
+}
+
+impl std::cmp::PartialOrd for Changeset {
+    fn partial_cmp(&self, other: &Changeset) -> Option<std::cmp::Ordering> {
+        self.classification.partial_cmp(&other.classification)
+    }
+}
+
+impl TryFrom<&DirEntry> for Changeset {
+    type Error = String;
+    fn try_from(entry: &DirEntry) -> std::result::Result<Self, Self::Error> {
+        let path = entry.path();
+        let content = fs::read_to_string(&path).unwrap().trim().to_string();
+        Ok(Changeset {
+            classification: entry
+                .file_name()
+                .to_string_lossy()
+                .parse()
+                .map_err(|e: &str| e.to_string())?,
+            content,
+            path,
+        })
+    }
 }

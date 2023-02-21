@@ -26,7 +26,7 @@ use crate::common::IntegrationTest;
 mod common;
 
 const HAPPY_CONFIG: &str = include_str!("fixtures/jaeger.router.yaml");
-const BROKEN_PLUGIN_CONFIG: &str = include_str!("fixtures/broken_plugin.yaml");
+const BROKEN_PLUGIN_CONFIG: &str = include_str!("fixtures/broken_plugin.router.yaml");
 const INVALID_CONFIG: &str = "garbage: garbage";
 
 #[tokio::test(flavor = "multi_thread")]

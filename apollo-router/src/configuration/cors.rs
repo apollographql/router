@@ -105,7 +105,6 @@ impl Cors {
 impl Cors {
     pub(crate) fn into_layer(self) -> Result<CorsLayer, String> {
         // Ensure configuration is valid before creating CorsLayer
-
         self.ensure_usable_cors_rules()?;
 
         let allow_headers = if self.allow_headers.is_empty() {
@@ -187,6 +186,9 @@ impl Cors {
     // don't want the router to panic in such cases, so this function returns an error
     // with a message describing what the problem is.
     fn ensure_usable_cors_rules(&self) -> Result<(), &'static str> {
+        if self.origins.iter().any(|x| x == "*") {
+            return Err("Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
+        }
         if self.allow_credentials {
             if self.allow_headers.iter().any(|x| x == "*") {
                 return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
@@ -198,14 +200,9 @@ impl Cors {
                     with `Access-Control-Allow-Methods: *`");
             }
 
-            if self.origins.iter().any(|x| x == "*") {
-                return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Origin: *`");
-            }
-
             if self.allow_any_origin {
                 return Err("Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` \
-                    with `Access-Control-Allow-Origin: *`");
+                    with `allow_any_origin: true`");
             }
 
             if let Some(headers) = &self.expose_headers {

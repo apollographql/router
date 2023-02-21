@@ -1,10 +1,17 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Instant;
 
 use axum::extract::Extension;
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
+use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
@@ -13,6 +20,7 @@ use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
 use http::Request;
+use http_body::combinators::UnsyncBoxBody;
 use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
@@ -50,6 +58,8 @@ use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::router;
+use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -79,6 +89,7 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
+    entitlement: EntitlementState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -121,6 +132,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
+        entitlement,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -147,13 +159,19 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        entitlement: EntitlementState,
         all_connections_stopped_sender: mpsc::Sender<()>,
     ) -> Self::Future
     where
         RF: RouterFactory,
     {
         Box::pin(async move {
-            let all_routers = make_axum_router(service_factory, &configuration, extra_endpoints)?;
+            let all_routers = make_axum_router(
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                entitlement,
+            )?;
 
             // serve main router
 
@@ -285,6 +303,7 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
+    entitlement: EntitlementState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
     RF: RouterFactory,
@@ -295,7 +314,11 @@ where
 
     let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
-        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan::default()))
+        .layer(middleware::from_fn_with_state(
+            (entitlement, Instant::now(), Arc::new(AtomicU64::new(0))),
+            entitlement_handler,
+        ))
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { entitlement }))
         .layer(Extension(service_factory))
         .layer(cors)
         // Compress the response body, except for multipart responses such as with `@defer`.
@@ -310,6 +333,51 @@ where
 
     let listener = configuration.supergraph.listen.clone();
     Ok(ListenAddrAndRouter(listener, route))
+}
+
+async fn entitlement_handler<B>(
+    State((entitlement, start, delta)): State<(EntitlementState, Instant, Arc<AtomicU64>)>,
+    request: Request<B>,
+    next: Next<B>,
+) -> Response {
+    if matches!(
+        entitlement,
+        EntitlementState::EntitledHalt | EntitlementState::EntitledWarn
+    ) {
+        ::tracing::error!(
+           monotonic_counter.apollo_router_http_requests_total = 1u64,
+           status = %500u16,
+           error = ENTITLEMENT_EXPIRED_SHORT_MESSAGE,
+        );
+
+        // This will rate limit logs about entitlement to 1 a second.
+        // The way it works is storing the delta in seconds from a starting instant.
+        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+        // If not successful some other thread will have logged.
+        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
+        let elapsed_seconds = start.elapsed().as_secs();
+        if elapsed_seconds > last_elapsed_seconds
+            && delta
+                .compare_exchange(
+                    last_elapsed_seconds,
+                    elapsed_seconds,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+        {
+            ::tracing::error!("{}", ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
+        }
+    }
+
+    if matches!(entitlement, EntitlementState::EntitledHalt) {
+        http::Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(UnsyncBoxBody::default())
+            .expect("canned response must be valid")
+    } else {
+        next.run(request).await
+    }
 }
 
 pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router

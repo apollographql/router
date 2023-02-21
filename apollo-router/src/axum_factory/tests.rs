@@ -83,6 +83,7 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
+use crate::uplink::entitlement::EntitlementState;
 use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::Context;
@@ -214,6 +215,7 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::Unentitled,
             all_connections_stopped_sender,
         )
         .await
@@ -270,6 +272,7 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
+            EntitlementState::Unentitled,
             all_connections_stopped_sender,
         )
         .await?;
@@ -335,6 +338,7 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::Unentitled,
             all_connections_stopped_sender,
         )
         .await
@@ -1762,6 +1766,7 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::default(),
             all_connections_stopped_sender,
         )
         .await
@@ -1790,6 +1795,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
+            EntitlementState::default(),
         )
         .await
         .unwrap();
