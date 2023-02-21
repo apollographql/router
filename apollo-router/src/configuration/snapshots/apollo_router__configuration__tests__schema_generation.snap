@@ -639,6 +639,19 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.broken": {
+          "description": "This is a broken plugin for testing purposes only.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the broken plugin.",
+              "type": "boolean"
+            }
+          }
+        },
         "experimental.expose_query_plan": {
           "description": "Expose query plan",
           "type": "boolean"

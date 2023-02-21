@@ -3,6 +3,7 @@
 mod mock;
 #[macro_use]
 mod service;
+mod broken;
 mod restricted;
 
 pub use mock::subgraph::MockSubgraph;
