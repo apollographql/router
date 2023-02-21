@@ -68,6 +68,7 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
 use crate::plugins::telemetry::formatters::filter_metric_events;
@@ -820,9 +821,12 @@ impl Telemetry {
 
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
-            let mut attributes: HashMap<String, String> = HashMap::new();
+            let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
             if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-                attributes.insert("operation_name".to_string(), operation_name.clone());
+                attributes.insert(
+                    "operation_name".to_string(),
+                    AttributeValue::String(operation_name.clone()),
+                );
             }
 
             if let Some(router_attributes_conf) = metrics_conf

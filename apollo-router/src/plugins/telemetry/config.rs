@@ -12,6 +12,7 @@ use opentelemetry::Value;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
@@ -375,7 +376,7 @@ fn default_max_attributes_per_link() -> u32 {
     SpanLimits::default().max_attributes_per_link
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeValue {
     /// bool values
@@ -390,6 +391,54 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl TryFrom<serde_json::Value> for AttributeValue {
+    type Error = ();
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        match value {
+            serde_json::Value::Null => Err(()),
+            serde_json::Value::Bool(v) => Ok(AttributeValue::Bool(v)),
+            serde_json::Value::Number(v) if v.is_i64() => {
+                Ok(AttributeValue::I64(v.as_i64().expect("i64 checked")))
+            }
+            serde_json::Value::Number(v) if v.is_f64() => {
+                Ok(AttributeValue::F64(v.as_f64().expect("f64 checked")))
+            }
+            serde_json::Value::String(v) => Ok(AttributeValue::String(v)),
+            serde_json::Value::Array(v) => {
+                if v.iter().all(|v| v.is_boolean()) {
+                    Ok(AttributeValue::Array(AttributeArray::Bool(
+                        v.iter()
+                            .map(|v| v.as_bool().expect("all bools checked"))
+                            .collect(),
+                    )))
+                } else if v.iter().all(|v| v.is_f64()) {
+                    Ok(AttributeValue::Array(AttributeArray::F64(
+                        v.iter()
+                            .map(|v| v.as_f64().expect("all f64 checked"))
+                            .collect(),
+                    )))
+                } else if v.iter().all(|v| v.is_i64()) {
+                    Ok(AttributeValue::Array(AttributeArray::I64(
+                        v.iter()
+                            .map(|v| v.as_i64().expect("all i64 checked"))
+                            .collect(),
+                    )))
+                } else if v.iter().all(|v| v.is_string()) {
+                    Ok(AttributeValue::Array(AttributeArray::String(
+                        v.iter()
+                            .map(|v| v.as_str().expect("all strings checked").to_string())
+                            .collect(),
+                    )))
+                } else {
+                    Err(())
+                }
+            }
+            serde_json::Value::Object(_v) => Err(()),
+            _ => Err(()),
+        }
+    }
+}
+
 impl From<AttributeValue> for opentelemetry::Value {
     fn from(value: AttributeValue) -> Self {
         match value {
@@ -402,7 +451,7 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeArray {
     /// Array of bools
@@ -584,6 +633,8 @@ impl Conf {
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
@@ -690,5 +741,52 @@ mod tests {
             }],
         };
         assert_eq!(logging_conf.should_log(&req), (false, false));
+    }
+
+    #[test]
+    fn test_attribute_value_from_json() {
+        assert_eq!(
+            AttributeValue::try_from(json!("foo")),
+            Ok(AttributeValue::String("foo".to_string()))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(1)),
+            Ok(AttributeValue::I64(1))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(1.1)),
+            Ok(AttributeValue::F64(1.1))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(true)),
+            Ok(AttributeValue::Bool(true))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(["foo", "bar"])),
+            Ok(AttributeValue::Array(AttributeArray::String(vec![
+                "foo".to_string(),
+                "bar".to_string()
+            ])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([1, 2])),
+            Ok(AttributeValue::Array(AttributeArray::I64(vec![1, 2])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([1.1, 1.5])),
+            Ok(AttributeValue::Array(AttributeArray::F64(vec![1.1, 1.5])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([true, false])),
+            Ok(AttributeValue::Array(AttributeArray::Bool(vec![
+                true, false
+            ])))
+        );
+
+        // Mixed array conversions
+        AttributeValue::try_from(json!(["foo", true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
     }
 }
