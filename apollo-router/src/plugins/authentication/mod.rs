@@ -28,6 +28,7 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 use url::Url;
 
+use self::jwks::JwksManager;
 #[cfg(not(test))]
 use crate::error::LicenseError;
 use crate::graphql;
@@ -39,8 +40,6 @@ use crate::register_plugin;
 use crate::services::apollo_graph_reference;
 use crate::services::router;
 use crate::Context;
-
-use self::jwks::JwksManager;
 
 mod jwks;
 #[cfg(test)]

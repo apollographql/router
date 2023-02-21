@@ -1,5 +1,9 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use futures::future::join_all;
 use futures::future::select;
 use futures::future::Either;
@@ -14,17 +18,13 @@ use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
 use url::Url;
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::Mutex;
-
+use super::CLIENT;
+use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
 #[cfg(not(test))]
 use crate::error::LicenseError;
 use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
 #[cfg(not(test))]
 use crate::services::apollo_graph_reference;
-
-use super::{CLIENT, DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT};
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
@@ -56,10 +56,10 @@ impl JwksManager {
         }
     }
 
-    pub(super) fn iter_jwks<'a>(&'a self) -> impl Iterator<Item = JwkSet> + 'a {
+    pub(super) fn iter_jwks(&self) -> Iter {
         Iter {
             urls: self.urls.clone(),
-            manager: &self,
+            manager: self,
         }
     }
 }
@@ -169,7 +169,7 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
     Some(jwks)
 }
 
-struct Iter<'a> {
+pub(super) struct Iter<'a> {
     manager: &'a JwksManager,
     urls: Vec<Url>,
 }
