@@ -42,7 +42,7 @@ access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
 apollo-compiler = "0.6.0"
-apollo-parser = "0.4.1"
+apollo-parser = "0.5.0"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
     "tokio",
@@ -54,7 +54,7 @@ async-trait = "0.1.64"
 atty = "0.2.14"
 axum = { version = "0.6.7", features = ["headers", "json", "original-uri"] }
 backtrace = "0.3.67"
-base64 = "0.20.0"
+base64 = "0.21.0"
 buildstructor = "0.5.1"
 bytes = "1.2.1"
 clap = { version = "4.1.4", default-features = false, features = [
@@ -78,7 +78,7 @@ directories = "4.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.25"
 futures = { version = "0.3.26", features = ["thread-pool"] }
-graphql_client = "0.11.0"
+graphql_client = "0.12.0"
 hex = "0.4.3"
 http = "0.2.9"
 http-body = "0.4.5"
@@ -95,7 +95,7 @@ jsonwebtoken = "8.2.0"
 lazy_static = "1.4.0"
 libc = "0.2.139"
 linkme = "0.3.7"
-lru = "0.8.1"
+lru = "0.9.0"
 mediatype = "0.19.13"
 mockall = "0.11.3"
 miette = { version = "5.5.0", features = ["fancy"] }
@@ -150,7 +150,7 @@ prost-types = "0.11.6"
 proteus = "0.5.0"
 rand = "0.8.5"
 rhai = { version = "1.12.0", features = ["sync", "serde", "internals"] }
-redis = { version = "0.21.7", features = ["tokio-comp", "tls", "tokio-native-tls-comp"] }
+redis = { version = "0.22.3", features = ["tokio-comp", "tls", "tokio-native-tls-comp"] }
 redis_cluster_async = { version = "0.7.2", features = [ "tls" ] }
 regex = "1.6.0"
 reqwest = { version = "0.11.14", default-features = false, features = [
@@ -170,7 +170,7 @@ serde = { version = "1.0.149", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
 serde_urlencoded = "0.7.1"
-serde_yaml = "0.8.26"
+serde_yaml = "0.9.17"
 static_assertions = "1.1.0"
 strum_macros = "0.24.3"
 sys-info = "0.9.1"

@@ -167,6 +167,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bde1ede19cfd36f4ebdce836fd571a1791e08b634f6d63648203e885b8fba9f4"
+dependencies = [
+ "rowan",
+ "thiserror",
+]
+
+[[package]]
 name = "apollo-router"
 version = "1.11.0"
 dependencies = [
@@ -174,7 +184,7 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.4.1",
+ "apollo-parser 0.5.0",
  "arc-swap",
  "askama",
  "async-compression",
@@ -182,7 +192,7 @@ dependencies = [
  "atty",
  "axum",
  "backtrace",
- "base64 0.20.0",
+ "base64 0.21.0",
  "buildstructor 0.5.1",
  "bytes",
  "ci_info",
@@ -199,7 +209,7 @@ dependencies = [
  "flate2",
  "futures",
  "futures-test",
- "graphql_client",
+ "graphql_client 0.12.0",
  "heck 0.4.1",
  "hex",
  "http",
@@ -218,7 +228,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "linkme",
- "lru 0.8.1",
+ "lru",
  "maplit",
  "mediatype",
  "memchr",
@@ -244,7 +254,7 @@ dependencies = [
  "prost-types",
  "proteus",
  "rand 0.8.5",
- "redis",
+ "redis 0.22.3",
  "redis_cluster_async",
  "regex",
  "reqwest",
@@ -299,7 +309,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.11.0"
 dependencies = [
- "apollo-parser 0.4.1",
+ "apollo-parser 0.5.0",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -322,7 +332,7 @@ dependencies = [
  "regex",
  "str_inflector",
  "tempfile",
- "toml",
+ "toml 0.7.2",
 ]
 
 [[package]]
@@ -404,7 +414,7 @@ dependencies = [
  "quote",
  "serde",
  "syn",
- "toml",
+ "toml 0.5.11",
 ]
 
 [[package]]
@@ -598,12 +608,6 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.20.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
-
-[[package]]
-name = "base64"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
@@ -755,7 +759,7 @@ dependencies = [
  "serde",
  "shell-words",
  "structopt",
- "toml",
+ "toml 0.5.11",
  "walkdir 2.3.2",
 ]
 
@@ -1335,7 +1339,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd08820cc2265f86211e992f6ffa10bcc5ce25139893fa77f1f238a2c8c56217"
 dependencies = [
  "async-trait",
- "lru 0.9.0",
+ "lru",
  "thiserror",
  "tokio",
  "tracing",
@@ -2108,7 +2112,18 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7fc16d75d169fddb720d8f1c7aed6413e329e1584079b9734ff07266a193f5bc"
 dependencies = [
- "graphql_query_derive",
+ "graphql_query_derive 0.11.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "graphql_client"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa61bb9dc6d373a8b465a5da17b62809483e8527a34b0e9034dc0915b09e160a"
+dependencies = [
+ "graphql_query_derive 0.12.0",
  "serde",
  "serde_json",
 ]
@@ -2131,12 +2146,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphql_client_codegen"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e55df64cc702c4ad6647f8df13a799ad11688a3781fadf5045f7ba12733fa9b"
+dependencies = [
+ "graphql-introspection-query",
+ "graphql-parser",
+ "heck 0.4.1",
+ "lazy_static",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "serde_json",
+ "syn",
+]
+
+[[package]]
 name = "graphql_query_derive"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a755cc59cda2641ea3037b4f9f7ef40471c329f55c1fa2db6fa0bb7ae6c1f7ce"
 dependencies = [
- "graphql_client_codegen",
+ "graphql_client_codegen 0.11.0",
+ "proc-macro2",
+ "syn",
+]
+
+[[package]]
+name = "graphql_query_derive"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d52fc9cde811f44b15ec0692b31e56a3067f6f431c5ace712f286e47c1dacc98"
+dependencies = [
+ "graphql_client_codegen 0.12.0",
  "proc-macro2",
  "syn",
 ]
@@ -2581,7 +2624,7 @@ checksum = "b9360a9dd04f347bf40cbb128bf622d4ef524fb89aee8cff836b88471d4f14dd"
 dependencies = [
  "apollo-encoder 0.3.4",
  "backoff",
- "graphql_client",
+ "graphql_client 0.11.0",
  "hyper",
  "reqwest",
  "serde",
@@ -2955,15 +2998,6 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e8aaa3f231bb4bd57b84b2d5dc3ae7f350265df8aa96492e0bc394a1571909"
-dependencies = [
- "hashbrown 0.12.3",
-]
-
-[[package]]
-name = "lru"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71e7d46de488603ffdd5f30afbc64fbba2378214a2c3a2fb83abf3d33126df17"
@@ -3202,6 +3236,15 @@ checksum = "e5507769c4919c998e69e49c839d9dc6e693ede4cc4290d6ad8b41d4f09c548c"
 dependencies = [
  "memchr",
  "minimal-lexical",
+]
+
+[[package]]
+name = "nom8"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae01545c9c7fc4486ab7debaf2aad7003ac19431791868fb2e8066df97fad2f8"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
@@ -3977,7 +4020,7 @@ checksum = "eda0fc3b0fb7c975631757e14d9049da17374063edb6ebbcbc54d880d4fe94e9"
 dependencies = [
  "once_cell",
  "thiserror",
- "toml",
+ "toml 0.5.11",
 ]
 
 [[package]]
@@ -4249,6 +4292,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "redis"
+version = "0.22.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa8455fa3621f6b41c514946de66ea0531f57ca017b2e6c7cc368035ea5b46df"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "combine 4.6.6",
+ "futures-util",
+ "itoa",
+ "native-tls",
+ "percent-encoding",
+ "pin-project-lite",
+ "ryu",
+ "sha1_smol",
+ "tokio",
+ "tokio-native-tls",
+ "tokio-util",
+ "url",
+]
+
+[[package]]
 name = "redis_cluster_async"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4259,7 +4324,7 @@ dependencies = [
  "log",
  "pin-project-lite",
  "rand 0.8.5",
- "redis",
+ "redis 0.21.7",
  "tokio",
 ]
 
@@ -4513,7 +4578,7 @@ dependencies = [
 name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
- "apollo-parser 0.4.1",
+ "apollo-parser 0.5.0",
  "apollo-smith",
  "env_logger",
  "libfuzzer-sys",
@@ -4923,6 +4988,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_spanned"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0efd8caf556a6cebd3b285caf480045fcc1ac04f6bd786b09a6f11af30c4fcf4"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4950,14 +5024,15 @@ dependencies = [
 
 [[package]]
 name = "serde_yaml"
-version = "0.8.26"
+version = "0.9.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "578a7433b776b56a35785ed5ce9a7e777ac0598aac5a6dd1b4b18a307c7fc71b"
+checksum = "8fb06d4b6cdaef0e0c51fa881acb721bed3c924cfaa71d9c94a3b771dfdf6567"
 dependencies = [
  "indexmap",
+ "itoa",
  "ryu",
  "serde",
- "yaml-rust",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -5666,6 +5741,40 @@ dependencies = [
 ]
 
 [[package]]
+name = "toml"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7afcae9e3f0fe2c370fd4657108972cbb2fa9db1b9f84849cefd80741b01cb6"
+dependencies = [
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+ "toml_edit",
+]
+
+[[package]]
+name = "toml_datetime"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ab8ed2edee10b50132aed5f331333428b011c99402b5a534154ed15746f9622"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml_edit"
+version = "0.19.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e6a7712b49e1775fb9a7b998de6635b299237f48b404dde71704f2e0e7f37e5"
+dependencies = [
+ "indexmap",
+ "nom8",
+ "serde",
+ "serde_spanned",
+ "toml_datetime",
+]
+
+[[package]]
 name = "tonic"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6058,6 +6167,12 @@ checksum = "382810877fe448991dfc7f0dd6e3ae5d58088fd0ea5e35189655f84e6814fa56"
 dependencies = [
  "void",
 ]
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7ed8ba44ca06be78ea1ad2c3682a43349126c8818054231ee6f4748012aed2"
 
 [[package]]
 name = "untrusted"

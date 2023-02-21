@@ -83,9 +83,9 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "base64"
-version = "0.20.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ea22880d78093b0cbe17c89f64a7d457941e65759157ec6cb31a31d652b05e5"
+checksum = "a4a4ddaa51a5bc52a6948f74c06d20aaaddb71924eab79b8c97a8c556e942d6a"
 
 [[package]]
 name = "bitflags"
@@ -1010,9 +1010,9 @@ dependencies = [
 
 [[package]]
 name = "octorust"
-version = "0.2.2"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8026de41fd49716168781d4737b200d1e20aeda7ff96d5521ac0cafa4898defa"
+checksum = "732a48773f7ca838b9762fc84e85ba572d51e3abc8a3532bd7800861f4bec8c6"
 dependencies = [
  "anyhow",
  "async-recursion",
@@ -2431,7 +2431,7 @@ version = "1.5.0"
 dependencies = [
  "ansi_term",
  "anyhow",
- "base64 0.20.0",
+ "base64 0.21.0",
  "camino",
  "cargo_metadata",
  "chrono",

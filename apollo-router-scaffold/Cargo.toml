@@ -12,7 +12,7 @@ clap = { version = "4.1.4", features = ["derive"] }
 cargo-scaffold = { version = "0.8.7", default-features = false }
 regex = "1"
 str_inflector = "0.12.0"
-toml = "0.5.11"
+toml = "0.7.2"
 [dev-dependencies]
 tempfile = "3.3.0"
 copy_dir = "0.1.2"
