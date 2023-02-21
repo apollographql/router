@@ -20,7 +20,7 @@ By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/
 
 ### Show option to "Include Cookies" in Sandbox
 
-This adds default support for using the "Include Cookies" toggle when working with Embedded Sandbox.
+Adds default support when using the "Include Cookies" toggle in the Embedded Sandbox.
 
 By [@esilverm](https://github.com/esilverm) in https://github.com/apollographql/router/pull/2553
 
@@ -77,7 +77,7 @@ By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 ### Revisit Open Telemetry integration ([Issue #1812](https://github.com/apollographql/router/issues/1812), [Issue #2359](https://github.com/apollographql/router/issues/2359), [Issue #2338](https://github.com/apollographql/router/issues/2338), [Issue #2113](https://github.com/apollographql/router/issues/2113), [Issue #2113](https://github.com/apollographql/router/issues/2113))
 
-There were several issues with the existing OpenTelemetry integration in the router which we are happy to have resolved with this re-factoring:
+There were several issues with the existing OpenTelemetry integration in the Router which we are happy to have resolved with this re-factoring:
 
 - Metrics would stop working after a schema or config update.
 - Telemetry config could **not** be changed at runtime, instead requiring a full restart of the router.
@@ -90,7 +90,7 @@ There were several issues with the existing OpenTelemetry integration in the rou
 
 - And worst of all, it had a tendency to leak memory.
 
-We have corrected these by re-visiting the way we integrate with OpenTelemetry and the supporting tracing packages and brought our usage to align with new best-practices.
+We have corrected these by re-visiting the way we integrate with OpenTelemetry and the supporting tracing packages. The new implementation brings our usage in line with new best-practices.
 
 In addition, the testing coverage for telemetry in general has been significantly improved.  For more details of what changed and why take a look at https://github.com/apollographql/router/pull/2358.
 
@@ -129,7 +129,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 ### Add missing `status` attribute on some metrics ([PR #2593](https://github.com/apollographql/router/pull/2593))
 
-When we were labeling metrics, we were not consistently adding the `status` attribute for some status codes. Instead of having an empty `status` attribute on your metrics, you'll now have `status="500"`.
+When labeling metrics, the Router did not consistently add the `status` attribute, resulting in an empty `status`. You'll now have `status="500"` for Router errors.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2593
 
