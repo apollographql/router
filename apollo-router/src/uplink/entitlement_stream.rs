@@ -407,7 +407,7 @@ mod test {
 
         tokio::task::spawn(async move {
             // This simulates a new claim coming in before in between the warning and halt
-            let _ = tx.send(entitlement_with_claim(15, 45)).await;
+            let _ = tx.send(entitlement_with_claim(15, 120)).await;
             tokio::time::sleep(Duration::from_millis(20)).await;
             let _ = tx.send(entitlement_with_claim(15, 30)).await;
         });
