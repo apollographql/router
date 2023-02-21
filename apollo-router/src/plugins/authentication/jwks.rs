@@ -188,9 +188,8 @@ impl<'a> Iterator for Iter<'a> {
                 None => return None,
                 Some(url) => {
                     if let Ok(map) = self.manager.jwks_map.lock() {
-                        match map.get(&url) {
-                            Some(jwks) => return Some(jwks.clone()),
-                            None => {}
+                        if let Some(jwks) = map.get(&url) {
+                            return Some(jwks.clone());
                         }
                     } else {
                         return None;
