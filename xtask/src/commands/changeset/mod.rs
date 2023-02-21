@@ -541,17 +541,13 @@ fn generate_content_from_changeset_files(changelog_entries: &Vec<Changeset>) -> 
     for entry in changelog_entries {
         // For each classification change, print the heading.
         if last_kind.is_none() || Some(entry.classification) != last_kind {
-            // Extra line _between_ sections.
-            if last_kind.is_some() {
-                output = output + "\n\n";
-            }
-            let new_header = format!("{}\n\n", entry.classification);
+            let new_header = format!("## {}\n\n", entry.classification);
             output = output + &*new_header;
         }
         last_kind = Some(entry.classification);
 
         // Add the entry's content to the block of text!
-        let entry = format!("{}", entry.content);
+        let entry = format!("{}\n\n", entry.content);
         output = output + &*entry;
     }
     output
