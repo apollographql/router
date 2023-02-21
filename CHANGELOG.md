@@ -32,9 +32,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Add a rhai global variable resolver and populate it ([Issue #2628](https://github.com/apollographql/router/issues/2628))
 
-Rhai doesn't place _constants_ into the global scope, instead requiring that functions be pure. We only became aware of this limitation this week, mainly as a consequence of people having difficulties with the experimental `APOLLO_AUTHENTICATION_JWT_CLAIMS` constant.
+Rhai scripts cannot access Rust global constants by default, making cross plugin communication via `Context` difficult.
 
-Our fix is to introduce a new global [variable resolver](https://rhai.rs/book/engine/var.html) and populate it with a `Router` global constant. It currently has three members:
+This change introduces a new global [variable resolver](https://rhai.rs/book/engine/var.html) populates with a `Router` global constant. It currently has three members:
 
  - `APOLLO_START -> should be used in place of `apollo_start`
  - `APOLLO_SDL -> should be used in place of `apollo_sdl`
@@ -42,14 +42,13 @@ Our fix is to introduce a new global [variable resolver](https://rhai.rs/book/en
 
 You access a member of this variable as follows:
 
-```
-   let my_var = Router.APOLLO_SDL;
+```rust
+let my_var = Router.APOLLO_SDL;
 ```
 
 We are removing the _experimental_ `APOLLO_AUTHENTICATION_JWT_CLAIMS` constant, but we will **retain the existing non-experimental constants** for purposes of backwards compatibility.
 
-
-We recommend that you shift to the new global constants since we will remove them in a major breaking change release in the future.
+We recommend that you shift to the new global constants since we will remove the old ones in a major breaking change release in the future.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2627
 
@@ -63,7 +62,14 @@ By [@Geaal](https://github.com/Geal) in https://github.com/apollographql/router/
 
 The `terminationGracePeriodSeconds` property is now configurable on the `Deployment` object in the Helm chart.
 
-This can be useful when adjusting the default timeout values for the router, and should always be a value slightly bigger than the timeout in order to ensure no requests are closed prematurely on shutdown.
+This can be useful when adjusting the default timeout values for the Router, and should always be a value slightly bigger than the Router timeout in order to ensure no requests are closed prematurely on shutdown.
+
+The Router timeout is configured via `traffic_shaping`
+
+```yaml
+traffic_shaping: 
+  router: 
+    timeout: ...
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2582
 
