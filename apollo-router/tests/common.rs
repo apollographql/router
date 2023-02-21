@@ -20,7 +20,6 @@ use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use serde_json::json;
 use serde_json::Value;
-use test_binary::build_test_binary;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::io::BufReader;
@@ -120,9 +119,7 @@ impl IntegrationTest {
 
         fs::write(&test_config_location, config).expect("could not write config");
 
-        let router_location = build_test_binary("integration-test-router", "../test-binaries")
-            .expect("error building test binary")
-            .into();
+        let router_location = PathBuf::from(env!("CARGO_BIN_EXE_router"));
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
         Self {
             router: None,
