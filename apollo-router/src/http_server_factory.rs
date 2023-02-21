@@ -23,6 +23,7 @@ use crate::uplink::entitlement::EntitlementState;
 pub(crate) trait HttpServerFactory {
     type Future: Future<Output = Result<HttpServerHandle, ApolloRouterError>> + Send;
 
+    #[allow(clippy::too_many_arguments)]
     fn create<RF>(
         &self,
         service_factory: RF,
