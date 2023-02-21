@@ -23,12 +23,7 @@
       "Security": {
         "CORS": "/configuration/cors",
         "CSRF prevention": "/configuration/csrf",
-        "JWT Authentication": [
-          "/configuration/authn-jwt",
-          [
-            "experimental"
-          ]
-        ],
+        "JWT Authentication (experimental)": "/configuration/authn-jwt",
         "Privacy and data collection": "/privacy"
       }
     },
