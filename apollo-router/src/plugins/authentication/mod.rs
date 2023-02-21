@@ -1,20 +1,11 @@
 //! Authentication plugin
 // With regards to ELv2 licensing, this entire file is license key functionality
 
-use std::future::Future;
 use std::ops::ControlFlow;
-use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::time::Duration;
 
-use deduplicate::Deduplicate;
 use displaydoc::Display;
-use futures::future::BoxFuture;
-use http::header::ACCEPT;
-use http::header::CONTENT_TYPE;
 use http::StatusCode;
 use jsonwebtoken::decode;
 use jsonwebtoken::decode_header;
@@ -22,19 +13,16 @@ use jsonwebtoken::errors::Error as JWTError;
 use jsonwebtoken::jwk::AlgorithmParameters;
 use jsonwebtoken::jwk::EllipticCurve;
 use jsonwebtoken::jwk::Jwk;
-use jsonwebtoken::jwk::JwkSet;
 use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::DecodingKey;
 use jsonwebtoken::Validation;
-use mime::APPLICATION_JSON;
 use once_cell::sync::Lazy;
 use reqwest::Client;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use thiserror::Error;
-use tokio::fs::read_to_string;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -52,8 +40,11 @@ use crate::services::apollo_graph_reference;
 use crate::services::router;
 use crate::Context;
 
-type SharedDeduplicate =
-    Arc<Deduplicate<fn(Url) -> BoxFuture<'static, Option<JwkSet>>, Url, JwkSet>>;
+use self::jwks::JwksManager;
+
+mod jwks;
+#[cfg(test)]
+mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 
@@ -77,9 +68,6 @@ enum AuthenticationError<'a> {
     /// Cannot retrieve JWKS: {0}
     CannotRetrieveJWKS(BoxError),
 
-    /// Cannot retrieve JWKS: router cooling down
-    CannotRetrieveJWKSDueToCooldown,
-
     /// Cannot create decoding key: {0}
     CannotCreateDecodingKey(JWTError),
 
@@ -100,10 +88,7 @@ enum AuthenticationError<'a> {
 }
 
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
-
-const DEFAULT_AUTHENTICATION_COOLDOWN: Duration = Duration::from_secs(15);
-
-static COOLDOWN: Lazy<AtomicBool> = Lazy::new(|| AtomicBool::new(false));
+const DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL: Duration = Duration::from_secs(60);
 
 static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
     #[cfg(not(test))]
@@ -122,8 +107,7 @@ pub(crate) enum Error {
 
 struct AuthenticationPlugin {
     configuration: JWTConf,
-    jwks: SharedDeduplicate,
-    jwks_urls: Vec<Url>,
+    jwks_manager: JwksManager,
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
@@ -136,10 +120,6 @@ struct JWTConf {
     /// Header value prefix
     #[serde(default = "default_header_value_prefix")]
     header_value_prefix: String,
-    /// JWKS retrieval cooldown
-    #[serde(deserialize_with = "humantime_serde::deserialize", default)]
-    #[schemars(with = "String", default)]
-    cooldown: Option<Duration>,
 }
 
 impl Default for JWTConf {
@@ -148,7 +128,6 @@ impl Default for JWTConf {
             jwks_urls: Default::default(),
             header_name: default_header_name(),
             header_value_prefix: default_header_value_prefix(),
-            cooldown: Default::default(),
         }
     }
 }
@@ -179,76 +158,6 @@ fn default_header_value_prefix() -> String {
     "Bearer".to_string()
 }
 
-fn getter(url: Url) -> BoxFuture<'static, Option<JwkSet>> {
-    Box::pin(get_jwks(url))
-}
-
-// This function is expected to return an Optional value, but we'd like to let
-// users know the various failure conditions. Hence the various clumsy map_err()
-// scattered through the processing.
-async fn get_jwks(url: Url) -> Option<JwkSet> {
-    let data = if url.scheme() == "file" {
-        #[cfg(not(test))]
-        apollo_graph_reference()
-            .ok_or(LicenseError::MissingGraphReference)
-            .map_err(|e| {
-                tracing::error!(%e, "could not activate authentication feature");
-                e
-            })
-            .ok()?;
-        let path = url
-            .to_file_path()
-            .map_err(|e| {
-                tracing::error!("could not process url: {:?}", url);
-                e
-            })
-            .ok()?;
-        read_to_string(path)
-            .await
-            .map_err(|e| {
-                tracing::error!(%e, "could not read JWKS path");
-                e
-            })
-            .ok()?
-    } else {
-        let my_client = CLIENT
-            .as_ref()
-            .map_err(|e| {
-                tracing::error!(%e, "could not activate authentication feature");
-                e
-            })
-            .ok()?
-            .clone();
-
-        my_client
-            .get(url)
-            .header(ACCEPT, APPLICATION_JSON.essence_str())
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .timeout(DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT)
-            .send()
-            .await
-            .map_err(|e| {
-                tracing::error!(%e, "could not get url");
-                e
-            })
-            .ok()?
-            .text()
-            .await
-            .map_err(|e| {
-                tracing::error!(%e, "could not process url content");
-                e
-            })
-            .ok()?
-    };
-    let jwks: JwkSet = serde_json::from_str(&data)
-        .map_err(|e| {
-            tracing::error!(%e, "could not create JWKS from url content");
-            e
-        })
-        .ok()?;
-    Some(jwks)
-}
-
 #[derive(Debug, Default)]
 struct JWTCriteria {
     alg: Algorithm,
@@ -261,25 +170,12 @@ struct JWTCriteria {
 /// by the JWT header. The only mandatory parameter is "alg".
 /// Note: "none" is not implemented by jsonwebtoken, so it can't be part of the [`Algorithm`] enum.
 async fn search_jwks(
-    my_jwks: SharedDeduplicate,
+    jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-    jwks_urls: Vec<Url>,
-    context: &Context,
 ) -> Result<Option<Jwk>, BoxError> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
-    for jwks_url in jwks_urls {
-        context.enter_active_request().await;
-        // Get the JWKS here
-        let jwks_opt = match my_jwks.get(jwks_url).await {
-            Ok(k) => k,
-            Err(e) => {
-                context.leave_active_request().await;
-                return Err(e.into());
-            }
-        };
-        context.leave_active_request().await;
-        let jwks = jwks_opt.ok_or(Error::JwkSet)?;
+    for jwks in jwks_manager.iter_jwks() {
         // Try to figure out if our jwks contains a candidate key (i.e.: a key which matches our
         // criteria)
         for mut key in jwks.keys.into_iter().filter(|key| {
@@ -416,24 +312,19 @@ impl Plugin for AuthenticationPlugin {
             urls.push(url);
         }
 
-        // We have to help the compiler out a bit by casting our function item to be a function
-        // pointer.
-        let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
-        let deduplicator = Deduplicate::with_capacity(g_f, urls.len());
-
         tracing::info!(jwks_urls=?init.config.experimental.jwt.jwks_urls, "JWT authentication using JWKSets from these");
+
+        let jwks_manager = JwksManager::new(urls).await;
 
         Ok(AuthenticationPlugin {
             configuration: init.config.experimental.jwt,
-            jwks: Arc::new(deduplicator),
-            jwks_urls: urls,
+            jwks_manager,
         })
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let request_full_config = self.configuration.clone();
-        let request_jwks = self.jwks.clone();
-        let request_jwks_urls = self.jwks_urls.clone();
+        let jwks_manager = self.jwks_manager.clone();
 
         fn authentication_service_span() -> impl Fn(&router::Request) -> tracing::Span + Clone {
             move |_request: &router::Request| {
@@ -449,8 +340,7 @@ impl Plugin for AuthenticationPlugin {
             .instrument(authentication_service_span())
             .checkpoint_async(move |request: router::Request| {
                 let my_config = request_full_config.clone();
-                let my_jwks = request_jwks.clone();
-                let my_jwks_urls = request_jwks_urls.clone();
+                let jwks_manager = jwks_manager.clone();
                 const AUTHENTICATION_KIND: &str = "JWT";
 
                 async move {
@@ -515,13 +405,16 @@ impl Plugin for AuthenticationPlugin {
                     // case variations
                     //
                     let prefix_len = my_config.header_value_prefix.len();
-                    if jwt_value.len() < prefix_len ||
-                      !&jwt_value[..prefix_len]
-                        .eq_ignore_ascii_case(&my_config.header_value_prefix)
+                    if jwt_value.len() < prefix_len
+                        || !&jwt_value[..prefix_len]
+                            .eq_ignore_ascii_case(&my_config.header_value_prefix)
                     {
                         return failure_message(
                             request.context,
-                            AuthenticationError::InvalidPrefix(jwt_value_untrimmed, &my_config.header_value_prefix),
+                            AuthenticationError::InvalidPrefix(
+                                jwt_value_untrimmed,
+                                &my_config.header_value_prefix,
+                            ),
                             StatusCode::BAD_REQUEST,
                         );
                     }
@@ -561,7 +454,7 @@ impl Plugin for AuthenticationPlugin {
                     // Note: This will search through JWKS in the order in which they are defined
                     // in configuration.
 
-                    let jwk_opt = match search_jwks(my_jwks.clone(), &criteria, my_jwks_urls, &request.context).await {
+                    let jwk_opt = match search_jwks(&jwks_manager, &criteria).await {
                         Ok(j) => j,
                         Err(e) => {
                             return failure_message(
@@ -597,20 +490,17 @@ impl Plugin for AuthenticationPlugin {
 
                         let validation = Validation::new(algorithm);
 
-                        let token_data = match decode::<serde_json::Value>(
-                            jwt,
-                            &decoding_key,
-                            &validation,
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                return failure_message(
-                                    request.context,
-                                    AuthenticationError::CannotDecodeJWT(e),
-                                    StatusCode::UNAUTHORIZED,
-                                );
-                            }
-                        };
+                        let token_data =
+                            match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    return failure_message(
+                                        request.context,
+                                        AuthenticationError::CannotDecodeJWT(e),
+                                        StatusCode::UNAUTHORIZED,
+                                    );
+                                }
+                            };
 
                         if let Err(e) = request
                             .context
@@ -631,64 +521,12 @@ impl Plugin for AuthenticationPlugin {
                     }
 
                     // We can't find a key to process this JWT.
-                    //
-                    // Only perform a potential COOLDOWN if the JWT had a kid.
-                    //
-                    // We will observe the COOLDOWN, if one is set, to minimise the impact
-                    // of DOS attacks via this vector.
-                    //
-                    // If there is no COOLDOWN, we'll trigger a cache update and set a
-                    // COOLDOWN.
                     if criteria.kid.is_some() {
-                        if COOLDOWN.load(Ordering::SeqCst) {
-                            // This is a metric and will not appear in the logs
-                            tracing::info!(monotonic_counter.apollo_authentication_cooldown_count = 1u64, kind = %AUTHENTICATION_KIND);
-                            let response = router::Response::error_builder()
-                                .error(
-                                    graphql::Error::builder()
-                                        .message(
-                                            AuthenticationError::CannotRetrieveJWKSDueToCooldown.to_string(),
-                                        )
-                                        .extension_code("AUTH_ERROR")
-                                        .build(),
-                                )
-                                .header(
-                                    http::header::RETRY_AFTER,
-                                    my_config
-                                        .cooldown
-                                        .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN)
-                                        .as_secs()
-                                        .to_string(),
-                                )
-                                .status_code(StatusCode::SERVICE_UNAVAILABLE)
-                                .context(request.context)
-                                .build()?;
-                            Ok(ControlFlow::Break(response))
-                        } else {
-                            // We don't recognise this "kid". Clear our cache and impose a
-                            // COOLDOWN.
-                            // The COOLDOWN controls attempts to retrieve based on a new "kid".
-                            tracing::info!("Clearing cached JWKS");
-                            my_jwks.clear();
-                            // Only spawn 1 task to remove the cooldown
-                            if COOLDOWN
-                                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                                .is_ok()
-                            {
-                                tokio::spawn(async move {
-                                    let t = my_config
-                                        .cooldown
-                                        .unwrap_or(DEFAULT_AUTHENTICATION_COOLDOWN);
-                                    tokio::time::sleep(t).await;
-                                    COOLDOWN.store(false, Ordering::SeqCst);
-                                });
-                            }
-                            failure_message(
-                                request.context,
-                                AuthenticationError::CannotFindKID(criteria.kid),
-                                StatusCode::UNAUTHORIZED,
-                            )
-                        }
+                        failure_message(
+                            request.context,
+                            AuthenticationError::CannotFindKID(criteria.kid),
+                            StatusCode::UNAUTHORIZED,
+                        )
                     } else {
                         failure_message(
                             request.context,
@@ -700,7 +538,7 @@ impl Plugin for AuthenticationPlugin {
             })
             .buffered()
             .service(service)
-        .boxed()
+            .boxed()
     }
 }
 
@@ -710,6 +548,3 @@ impl Plugin for AuthenticationPlugin {
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
 register_plugin!("apollo", "authentication", AuthenticationPlugin);
-
-#[cfg(test)]
-mod tests;

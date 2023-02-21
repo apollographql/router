@@ -29,11 +29,6 @@ expression: "&schema"
                 "jwks_urls"
               ],
               "properties": {
-                "cooldown": {
-                  "description": "JWKS retrieval cooldown",
-                  "default": null,
-                  "type": "string"
-                },
                 "header_name": {
                   "description": "HTTP header expected to contain JWT",
                   "default": "authorization",

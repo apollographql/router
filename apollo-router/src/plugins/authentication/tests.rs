@@ -1,312 +1,309 @@
- use std::path::Path;
+use std::path::Path;
 
-    use super::*;
-    use crate::plugin::test;
-    use crate::services::supergraph;
+use super::*;
+use crate::plugin::test;
+use crate::services::supergraph;
 
-    fn create_an_url(filename: &str) -> String {
-        panic!();
-        let jwks_base = Path::new("tests");
+fn create_an_url(filename: &str) -> String {
+    let jwks_base = Path::new("tests");
 
-        let jwks_path = jwks_base.join("fixtures").join(filename);
-        #[cfg(target_os = "windows")]
-        let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
-        #[cfg(not(target_os = "windows"))]
-        let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
+    let jwks_path = jwks_base.join("fixtures").join(filename);
+    #[cfg(target_os = "windows")]
+    let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
+    #[cfg(not(target_os = "windows"))]
+    let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
 
-        #[cfg(target_os = "windows")]
-        {
-            // We need to manipulate our canonicalized file if we are on Windows.
-            // We replace windows path separators with posix path separators
-            // We also drop the first 3 characters from the path since they will be
-            // something like (drive letter may vary) '\\?\C:' and that isn't
-            // a valid URI
-            let mut file_string = jwks_file.display().to_string();
-            file_string = file_string.replace("\\", "/");
-            let len = file_string
-                .char_indices()
-                .nth(3)
-                .map_or(0, |(idx, _ch)| idx);
-            jwks_file = file_string[len..].into();
-        }
-
-        format!("file://{}", jwks_file.display())
+    #[cfg(target_os = "windows")]
+    {
+        // We need to manipulate our canonicalized file if we are on Windows.
+        // We replace windows path separators with posix path separators
+        // We also drop the first 3 characters from the path since they will be
+        // something like (drive letter may vary) '\\?\C:' and that isn't
+        // a valid URI
+        let mut file_string = jwks_file.display().to_string();
+        file_string = file_string.replace("\\", "/");
+        let len = file_string
+            .char_indices()
+            .nth(3)
+            .map_or(0, |(idx, _ch)| idx);
+        jwks_file = file_string[len..].into();
     }
 
-    async fn build_a_default_test_harness() -> router::BoxCloneService {
-        build_a_test_harness(None, None, false).await
-    }
+    format!("file://{}", jwks_file.display())
+}
 
-    async fn build_a_test_harness(
-        header_name: Option<String>,
-        header_value_prefix: Option<String>,
-        multiple_jwks: bool,
-    ) -> router::BoxCloneService {
-        // create a mock service we will use to test our plugin
+async fn build_a_default_test_harness() -> router::BoxCloneService {
+    build_a_test_harness(None, None, false).await
+}
+
+async fn build_a_test_harness(
+    header_name: Option<String>,
+    header_value_prefix: Option<String>,
+    multiple_jwks: bool,
+) -> router::BoxCloneService {
+    // create a mock service we will use to test our plugin
+    let mut mock_service = test::MockSupergraphService::new();
+
+    // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
+    let expected_mock_response_data = "response created within the mock";
+
+    // Let's set up our mock to make sure it will be called once
+    mock_service.expect_clone().return_once(move || {
         let mut mock_service = test::MockSupergraphService::new();
+        mock_service
+            .expect_call()
+            .once()
+            .returning(move |req: supergraph::Request| {
+                Ok(supergraph::Response::fake_builder()
+                    .data(expected_mock_response_data)
+                    .context(req.context)
+                    .build()
+                    .unwrap())
+            });
+        mock_service
+    });
 
-        // The expected reply is going to be JSON returned in the SupergraphResponse { data } section.
-        let expected_mock_response_data = "response created within the mock";
+    let jwks_url = create_an_url("jwks.json");
 
-        // Let's set up our mock to make sure it will be called once
-        mock_service.expect_clone().return_once(move || {
-            let mut mock_service = test::MockSupergraphService::new();
-            mock_service
-                .expect_call()
-                .once()
-                .returning(move |req: supergraph::Request| {
-                    Ok(supergraph::Response::fake_builder()
-                        .data(expected_mock_response_data)
-                        .context(req.context)
-                        .build()
-                        .unwrap())
-                });
-            mock_service
-        });
-
-        let jwks_url = create_an_url("jwks.json");
-
-        let mut config = if multiple_jwks {
-            serde_json::json!({
-                "authentication": {
-                    "experimental" : {
-                        "jwt" : {
-                            "jwks_urls": [&jwks_url, &jwks_url]
-                        }
+    let mut config = if multiple_jwks {
+        serde_json::json!({
+            "authentication": {
+                "experimental" : {
+                    "jwt" : {
+                        "jwks_urls": [&jwks_url, &jwks_url]
                     }
                 }
-            })
-        } else {
-            serde_json::json!({
-                "authentication": {
-                    "experimental" : {
-                        "jwt" : {
-                            "jwks_urls": [&jwks_url]
-                        }
+            }
+        })
+    } else {
+        serde_json::json!({
+            "authentication": {
+                "experimental" : {
+                    "jwt" : {
+                        "jwks_urls": [&jwks_url]
                     }
                 }
-            })
-        };
+            }
+        })
+    };
 
-        if let Some(hn) = header_name {
-            config["authentication"]["experimental"]["jwt"]["header_name"] =
-                serde_json::Value::String(hn);
-        }
+    if let Some(hn) = header_name {
+        config["authentication"]["experimental"]["jwt"]["header_name"] =
+            serde_json::Value::String(hn);
+    }
 
-        if let Some(hp) = header_value_prefix {
-            config["authentication"]["experimental"]["jwt"]["header_value_prefix"] =
-                serde_json::Value::String(hp);
-        }
+    if let Some(hp) = header_value_prefix {
+        config["authentication"]["experimental"]["jwt"]["header_value_prefix"] =
+            serde_json::Value::String(hp);
+    }
 
-        crate::TestHarness::builder()
-            .configuration_json(config)
+    crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn load_plugin() {
+    let _test_harness = build_a_default_test_harness().await;
+}
+
+#[tokio::test]
+async fn it_rejects_when_there_is_no_auth_header() {
+    let test_harness = build_a_default_test_harness().await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
             .unwrap()
-            .supergraph_hook(move |_| mock_service.clone().boxed())
-            .build_router()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    let expected_error = graphql::Error::builder()
+        .message("Missing authorization header")
+        .extension_code("AUTH_ERROR")
+        .build();
+
+    assert_eq!(response.errors, vec![expected_error]);
+
+    assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+}
+
+#[tokio::test]
+async fn it_rejects_when_auth_prefix_is_missing() {
+    let test_harness = build_a_default_test_harness().await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, "invalid")
+        .build()
+        .unwrap();
+
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
             .await
             .unwrap()
-    }
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
-    #[tokio::test]
-    async fn load_plugin() {
-        let _test_harness = build_a_default_test_harness().await;
-    }
+    let expected_error = graphql::Error::builder()
+        .message("Header Value: 'invalid' is not correctly formatted. prefix should be 'Bearer'")
+        .extension_code("AUTH_ERROR")
+        .build();
 
-    #[tokio::test]
-    async fn it_rejects_when_there_is_no_auth_header() {
-        let test_harness = build_a_default_test_harness().await;
+    assert_eq!(response.errors, vec![expected_error]);
 
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
-            .build()
-            .unwrap();
+    assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+}
 
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+#[tokio::test]
+async fn it_rejects_when_auth_prefix_has_no_jwt() {
+    let test_harness = build_a_default_test_harness().await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, "Bearer")
+        .build()
         .unwrap();
 
-        let expected_error = graphql::Error::builder()
-            .message("Missing authorization header")
-            .extension_code("AUTH_ERROR")
-            .build();
-
-        assert_eq!(response.errors, vec![expected_error]);
-
-        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
-    }
-
-    #[tokio::test]
-    async fn it_rejects_when_auth_prefix_is_missing() {
-        let test_harness = build_a_default_test_harness().await;
-
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
-            .header(http::header::AUTHORIZATION, "invalid")
-            .build()
-            .unwrap();
-
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
             .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    let expected_error = graphql::Error::builder()
+        .message("Header Value: 'Bearer' is not correctly formatted. Missing JWT")
+        .extension_code("AUTH_ERROR")
+        .build();
+
+    assert_eq!(response.errors, vec![expected_error]);
+
+    assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+}
+
+#[tokio::test]
+async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
+    let test_harness = build_a_default_test_harness().await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, "Bearer header.payload")
+        .build()
         .unwrap();
 
-        let expected_error = graphql::Error::builder()
-            .message(
-                "Header Value: 'invalid' is not correctly formatted. prefix should be 'Bearer'",
-            )
-            .extension_code("AUTH_ERROR")
-            .build();
-
-        assert_eq!(response.errors, vec![expected_error]);
-
-        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
-    }
-
-    #[tokio::test]
-    async fn it_rejects_when_auth_prefix_has_no_jwt() {
-        let test_harness = build_a_default_test_harness().await;
-
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
-            .header(http::header::AUTHORIZATION, "Bearer")
-            .build()
-            .unwrap();
-
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
+        .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
             .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    let expected_error = graphql::Error::builder()
+        .message("'header.payload' is not a valid JWT header: InvalidToken")
+        .extension_code("AUTH_ERROR")
+        .build();
+
+    assert_eq!(response.errors, vec![expected_error]);
+
+    assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+}
+
+#[tokio::test]
+async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
+    let test_harness = build_a_default_test_harness().await;
+
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(
+            http::header::AUTHORIZATION,
+            "Bearer header.payload.signature",
         )
+        .build()
         .unwrap();
 
-        let expected_error = graphql::Error::builder()
-            .message("Header Value: 'Bearer' is not correctly formatted. Missing JWT")
-            .extension_code("AUTH_ERROR")
-            .build();
-
-        assert_eq!(response.errors, vec![expected_error]);
-
-        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
-    }
-
-    #[tokio::test]
-    async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
-        let test_harness = build_a_default_test_harness().await;
-
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
-            .header(http::header::AUTHORIZATION, "Bearer header.payload")
-            .build()
-            .unwrap();
-
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
         .unwrap();
-
-        let expected_error = graphql::Error::builder()
-            .message("'header.payload' is not a valid JWT header: InvalidToken")
-            .extension_code("AUTH_ERROR")
-            .build();
-
-        assert_eq!(response.errors, vec![expected_error]);
-
-        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
-    }
-
-    #[tokio::test]
-    async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
-        let test_harness = build_a_default_test_harness().await;
-
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
-            .operation_name("me".to_string())
-            .header(
-                http::header::AUTHORIZATION,
-                "Bearer header.payload.signature",
-            )
-            .build()
-            .unwrap();
-
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
             .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
-        .unwrap();
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
-        let expected_error = graphql::Error::builder()
+    let expected_error = graphql::Error::builder()
             .message("'header.payload.signature' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
             .extension_code("AUTH_ERROR")
             .build();
 
-        assert_eq!(response.errors, vec![expected_error]);
+    assert_eq!(response.errors, vec![expected_error]);
 
-        assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
-    }
+    assert_eq!(StatusCode::BAD_REQUEST, service_response.response.status());
+}
 
-    #[tokio::test]
-    async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
-        let test_harness = build_a_default_test_harness().await;
+#[tokio::test]
+async fn it_rejects_when_auth_prefix_has_correct_format_and_invalid_jwt() {
+    let test_harness = build_a_default_test_harness().await;
 
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
             .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
@@ -315,38 +312,38 @@
             .build()
             .unwrap();
 
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
         .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
-        let expected_error = graphql::Error::builder()
-            .message("Cannot decode JWT: InvalidSignature")
-            .extension_code("AUTH_ERROR")
-            .build();
+    let expected_error = graphql::Error::builder()
+        .message("Cannot decode JWT: InvalidSignature")
+        .extension_code("AUTH_ERROR")
+        .build();
 
-        assert_eq!(response.errors, vec![expected_error]);
+    assert_eq!(response.errors, vec![expected_error]);
 
-        assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
-    }
+    assert_eq!(StatusCode::UNAUTHORIZED, service_response.response.status());
+}
 
-    #[tokio::test]
-    async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
-        let test_harness = build_a_default_test_harness().await;
+#[tokio::test]
+async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt() {
+    let test_harness = build_a_default_test_harness().await;
 
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
             .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
@@ -355,37 +352,37 @@
             .build()
             .unwrap();
 
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
         .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
-        assert_eq!(response.errors, vec![]);
+    assert_eq!(response.errors, vec![]);
 
-        assert_eq!(StatusCode::OK, service_response.response.status());
+    assert_eq!(StatusCode::OK, service_response.response.status());
 
-        let expected_mock_response_data = "response created within the mock";
-        // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-    }
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
 
-    #[tokio::test]
-    async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
-        let test_harness = build_a_test_harness(None, None, true).await;
+#[tokio::test]
+async fn it_accepts_when_auth_prefix_has_correct_format_multiple_jwks_and_valid_jwt() {
+    let test_harness = build_a_test_harness(None, None, true).await;
 
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
             .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
@@ -394,37 +391,37 @@
             .build()
             .unwrap();
 
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
         .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
-        assert_eq!(response.errors, vec![]);
+    assert_eq!(response.errors, vec![]);
 
-        assert_eq!(StatusCode::OK, service_response.response.status());
+    assert_eq!(StatusCode::OK, service_response.response.status());
 
-        let expected_mock_response_data = "response created within the mock";
-        // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-    }
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
 
-    #[tokio::test]
-    async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
-        let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None, false).await;
+#[tokio::test]
+async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_auth() {
+    let test_harness = build_a_test_harness(Some("SOMETHING".to_string()), None, false).await;
 
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
             .operation_name("me".to_string())
             .header(
                 "SOMETHING",
@@ -433,37 +430,37 @@
             .build()
             .unwrap();
 
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
         .unwrap();
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
 
-        assert_eq!(response.errors, vec![]);
+    assert_eq!(response.errors, vec![]);
 
-        assert_eq!(StatusCode::OK, service_response.response.status());
+    assert_eq!(StatusCode::OK, service_response.response.status());
 
-        let expected_mock_response_data = "response created within the mock";
-        // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-    }
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
 
-    #[tokio::test]
-    async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
-        let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string()), false).await;
+#[tokio::test]
+async fn it_accepts_when_auth_prefix_has_correct_format_and_valid_jwt_custom_prefix() {
+    let test_harness = build_a_test_harness(None, Some("SOMETHING".to_string()), false).await;
 
-        // Let's create a request with our operation name
-        let request_with_appropriate_name = supergraph::Request::canned_builder()
+    // Let's create a request with our operation name
+    let request_with_appropriate_name = supergraph::Request::canned_builder()
             .operation_name("me".to_string())
             .header(
                 http::header::AUTHORIZATION,
@@ -472,153 +469,144 @@
             .build()
             .unwrap();
 
-        // ...And call our service stack with it
-        let mut service_response = test_harness
-            .oneshot(request_with_appropriate_name.try_into().unwrap())
-            .await
-            .unwrap();
-        let response: graphql::Response = serde_json::from_slice(
-            service_response
-                .next_response()
-                .await
-                .unwrap()
-                .unwrap()
-                .to_vec()
-                .as_slice(),
-        )
+    // ...And call our service stack with it
+    let mut service_response = test_harness
+        .oneshot(request_with_appropriate_name.try_into().unwrap())
+        .await
         .unwrap();
-
-        assert_eq!(response.errors, vec![]);
-
-        assert_eq!(StatusCode::OK, service_response.response.status());
-
-        let expected_mock_response_data = "response created within the mock";
-        // with the expected message
-        assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
-    }
-
-    #[tokio::test]
-    #[should_panic]
-    async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
-        let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
-    }
-
-    #[tokio::test]
-    #[should_panic]
-    async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
-        let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
-    }
-
-    fn build_jwks_search_components() -> (SharedDeduplicate, Vec<Url>) {
-        let mut sets = vec![];
-        let mut urls = vec![];
-
-        let jwks_url = create_an_url("jwks.json");
-
-        sets.push(jwks_url);
-
-        for s_url in &sets {
-            let url: Url = Url::from_str(s_url).expect("created a valid url");
-            urls.push(url);
-        }
-
-        // We have to help the compiler out a bit by casting our function item to be a function
-        // pointer.
-        let g_f = getter as fn(url::Url) -> Pin<Box<dyn Future<Output = Option<JwkSet>> + Send>>;
-        let deduplicator = Arc::new(Deduplicate::with_capacity(g_f, urls.len()));
-        (deduplicator, urls)
-    }
-
-    #[tokio::test]
-    async fn it_finds_key_with_criteria_kid_and_algorithm() {
-        let (deduplicator, urls) = build_jwks_search_components();
-        let context = Context::new();
-
-        let criteria = JWTCriteria {
-            kid: Some("key2".to_string()),
-            alg: Algorithm::HS256,
-        };
-
-        let key = search_jwks(deduplicator, &criteria, urls, &context)
+    let response: graphql::Response = serde_json::from_slice(
+        service_response
+            .next_response()
             .await
-            .expect("search worked")
-            .expect("found a key");
-        assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
-        assert_eq!("key2", key.common.key_id.unwrap());
+            .unwrap()
+            .unwrap()
+            .to_vec()
+            .as_slice(),
+    )
+    .unwrap();
+
+    assert_eq!(response.errors, vec![]);
+
+    assert_eq!(StatusCode::OK, service_response.response.status());
+
+    let expected_mock_response_data = "response created within the mock";
+    // with the expected message
+    assert_eq!(expected_mock_response_data, response.data.as_ref().unwrap());
+}
+
+#[tokio::test]
+#[should_panic]
+async fn it_panics_when_auth_prefix_has_correct_format_but_contains_whitespace() {
+    let _test_harness = build_a_test_harness(None, Some("SOMET HING".to_string()), false).await;
+}
+
+#[tokio::test]
+#[should_panic]
+async fn it_panics_when_auth_prefix_has_correct_format_but_contains_trailing_whitespace() {
+    let _test_harness = build_a_test_harness(None, Some("SOMETHING ".to_string()), false).await;
+}
+
+async fn build_jwks_search_components() -> JwksManager {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(url);
     }
 
-    #[tokio::test]
-    async fn it_finds_best_matching_key_with_criteria_algorithm() {
-        let (deduplicator, urls) = build_jwks_search_components();
-        let context = Context::new();
+    JwksManager::new(urls).await
+}
 
-        let criteria = JWTCriteria {
-            kid: None,
-            alg: Algorithm::HS256,
-        };
+#[tokio::test]
+async fn it_finds_key_with_criteria_kid_and_algorithm() {
+    let jwks_manager = build_jwks_search_components().await;
 
-        let key = search_jwks(deduplicator, &criteria, urls, &context)
-            .await
-            .expect("search worked")
-            .expect("found a key");
-        assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
-        assert_eq!("key1", key.common.key_id.unwrap());
-    }
+    let criteria = JWTCriteria {
+        kid: Some("key2".to_string()),
+        alg: Algorithm::HS256,
+    };
 
-    #[tokio::test]
-    async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
-        let (deduplicator, urls) = build_jwks_search_components();
-        let context = Context::new();
+    let key = search_jwks(&jwks_manager, &criteria)
+        .await
+        .expect("search worked")
+        .expect("found a key");
+    assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    assert_eq!("key2", key.common.key_id.unwrap());
+}
 
-        let criteria = JWTCriteria {
-            kid: None,
-            alg: Algorithm::RS512,
-        };
+#[tokio::test]
+async fn it_finds_best_matching_key_with_criteria_algorithm() {
+    let jwks_manager = build_jwks_search_components().await;
 
-        assert!(search_jwks(deduplicator, &criteria, urls, &context)
-            .await
-            .expect("search worked")
-            .is_none());
-    }
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::HS256,
+    };
 
-    #[tokio::test]
-    async fn it_finds_key_with_criteria_algorithm_ec() {
-        let (deduplicator, urls) = build_jwks_search_components();
-        let context = Context::new();
+    let key = search_jwks(&jwks_manager, &criteria)
+        .await
+        .expect("search worked")
+        .expect("found a key");
+    assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
+    assert_eq!("key1", key.common.key_id.unwrap());
+}
 
-        let criteria = JWTCriteria {
-            kid: None,
-            alg: Algorithm::ES256,
-        };
+#[tokio::test]
+async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
+    let jwks_manager = build_jwks_search_components().await;
 
-        let key = search_jwks(deduplicator, &criteria, urls, &context)
-            .await
-            .expect("search worked")
-            .expect("found a key");
-        assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
-        assert_eq!(
-            "afda85e09a320cf748177874592de64d",
-            key.common.key_id.unwrap()
-        );
-    }
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::RS512,
+    };
 
-    #[tokio::test]
-    async fn it_finds_key_with_criteria_algorithm_rsa() {
-        let (deduplicator, urls) = build_jwks_search_components();
-        let context = Context::new();
+    assert!(search_jwks(&jwks_manager, &criteria)
+        .await
+        .expect("search worked")
+        .is_none());
+}
 
-        let criteria = JWTCriteria {
-            kid: None,
-            alg: Algorithm::RS256,
-        };
+#[tokio::test]
+async fn it_finds_key_with_criteria_algorithm_ec() {
+    let jwks_manager = build_jwks_search_components().await;
 
-        let key = search_jwks(deduplicator, &criteria, urls, &context)
-            .await
-            .expect("search worked")
-            .expect("found a key");
-        assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
-        assert_eq!(
-            "022516583d56b68faf40260fda72978a",
-            key.common.key_id.unwrap()
-        );
-    }
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::ES256,
+    };
+
+    let key = search_jwks(&jwks_manager, &criteria)
+        .await
+        .expect("search worked")
+        .expect("found a key");
+    assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
+    assert_eq!(
+        "afda85e09a320cf748177874592de64d",
+        key.common.key_id.unwrap()
+    );
+}
+
+#[tokio::test]
+async fn it_finds_key_with_criteria_algorithm_rsa() {
+    let jwks_manager = build_jwks_search_components().await;
+
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::RS256,
+    };
+
+    let key = search_jwks(&jwks_manager, &criteria)
+        .await
+        .expect("search worked")
+        .expect("found a key");
+    assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
+    assert_eq!(
+        "022516583d56b68faf40260fda72978a",
+        key.common.key_id.unwrap()
+    );
+}
