@@ -4395,6 +4395,11 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_enable_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "type": "boolean",
+              "nullable": true
+            },
             "experimental_retry": {
               "description": "Retry configuration",
               "type": "object",
@@ -4534,6 +4539,11 @@ expression: "&schema"
               },
               "deduplicate_query": {
                 "description": "Enable query deduplication",
+                "type": "boolean",
+                "nullable": true
+              },
+              "experimental_enable_http2": {
+                "description": "Enable HTTP2 for subgraphs",
                 "type": "boolean",
                 "nullable": true
               },
