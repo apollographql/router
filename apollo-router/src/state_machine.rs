@@ -420,7 +420,7 @@ where
                 break;
             }
         }
-        tracing::debug!("stopped");
+        tracing::info!("stopped");
 
         match state {
             Stopped => Ok(()),
