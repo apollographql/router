@@ -2,6 +2,8 @@
 #![allow(missing_docs)] // FIXME
 #![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
@@ -52,7 +54,9 @@ use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
 use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::entitlement_stream::EntitlementStreamExt;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
 use crate::uplink::Endpoints;
@@ -67,13 +71,14 @@ async fn make_router_service<RF>(
     schema: &str,
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
+    entitlement: EntitlementState,
 ) -> Result<router::BoxCloneService, BoxError> {
     let schema = Arc::new(Schema::parse(schema, &configuration)?);
     let service_factory = YamlRouterFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints)?;
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
     let ListenAddrAndRouter(_listener, router) = routers.main;
 
     Ok(router
@@ -117,6 +122,9 @@ pub enum ApolloRouterError {
 
     /// no valid entitlement was supplied
     NoEntitlement,
+
+    /// entitlement violation
+    EntitlementViolation,
 
     /// could not create router: {0}
     ServiceCreationError(BoxError),
@@ -457,31 +465,49 @@ impl EntitlementSource {
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             EntitlementSource::Static { entitlement } => {
-                stream::once(future::ready(UpdateEntitlement(entitlement))).boxed()
+                stream::once(future::ready(entitlement)).boxed()
             }
-            EntitlementSource::Stream(stream) => stream.map(UpdateEntitlement).boxed(),
+            EntitlementSource::Stream(stream) => stream.boxed(),
             EntitlementSource::File { path, watch } => {
                 // Sanity check, does the schema file exists, if it doesn't then bail.
                 if !path.exists() {
                     tracing::error!(
-                        "Schema file at path '{}' does not exist.",
+                        "Entitlement file at path '{}' does not exist.",
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
                 } else {
-                    //The entitlement file exists try and load it
+                    // The entitlement file exists try and load it
                     match std::fs::read_to_string(&path).map(|e| e.parse()) {
                         Ok(Ok(entitlement)) => {
                             if watch {
                                 crate::files::watch(&path)
                                     .filter_map(move |_| {
-                                        future::ready(std::fs::read_to_string(&path).ok())
+                                        let path = path.clone();
+                                        async move {
+                                            let result = tokio::fs::read_to_string(&path).await;
+                                            if let Err(e) = &result {
+                                                tracing::error!(
+                                                    "failed to read entitlement file, {}",
+                                                    e
+                                                );
+                                            }
+                                            result.ok()
+                                        }
                                     })
-                                    .filter_map(|e| async move { e.parse().ok() })
-                                    .map(UpdateEntitlement)
+                                    .filter_map(|e| async move {
+                                        let result = e.parse();
+                                        if let Err(e) = &result {
+                                            tracing::error!(
+                                                "failed to parse entitlement file, {}",
+                                                e
+                                            );
+                                        }
+                                        result.ok()
+                                    })
                                     .boxed()
                             } else {
-                                stream::once(future::ready(UpdateEntitlement(entitlement))).boxed()
+                                stream::once(future::ready(entitlement)).boxed()
                             }
                         }
                         Ok(Err(err)) => {
@@ -510,7 +536,7 @@ impl EntitlementSource {
             )
             .filter_map(|res| {
                 future::ready(match res {
-                    Ok(entitlement) => Some(UpdateEntitlement(entitlement)),
+                    Ok(entitlement) => Some(entitlement),
                     Err(e) => {
                         tracing::error!("{}", e);
                         None
@@ -521,20 +547,16 @@ impl EntitlementSource {
             EntitlementSource::Env => {
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
-                    Ok(Ok(entitlement)) => {
-                        stream::once(future::ready(UpdateEntitlement(entitlement))).boxed()
-                    }
+                    Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),
                     Ok(Err(err)) => {
                         tracing::error!("Failed to parse entitlement: {}", err);
                         stream::empty().boxed()
                     }
-                    Err(_) => {
-                        stream::once(future::ready(UpdateEntitlement(Entitlement::default())))
-                            .boxed()
-                    }
+                    Err(_) => stream::once(future::ready(Entitlement::default())).boxed(),
                 }
             }
         }
+        .expand_entitlements()
         .chain(stream::iter(vec![NoMoreEntitlement]))
     }
 }
@@ -765,7 +787,6 @@ impl RouterHttpServer {
 }
 
 /// Messages that are broadcast across the app.
-#[derive(Debug)]
 pub(crate) enum Event {
     /// The configuration was updated.
     UpdateConfiguration(Configuration),
@@ -779,20 +800,42 @@ pub(crate) enum Event {
     /// There are no more updates to the schema
     NoMoreSchema,
 
-    /// Update entitlement.
-    UpdateEntitlement(Entitlement),
-
-    /// The entitlement has entered warn_at has passed.
-    WarnEntitlement,
-
-    /// The entitlement has halt_at has passed.
-    HaltEntitlement,
+    /// Update entitlement {}
+    UpdateEntitlement(EntitlementState),
 
     /// There were no more updates to entitlement.
     NoMoreEntitlement,
 
     /// The server should gracefully shutdown.
     Shutdown,
+}
+
+impl Debug for Event {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateConfiguration(_) => {
+                write!(f, "UpdateConfiguration(<redacted>)")
+            }
+            NoMoreConfiguration => {
+                write!(f, "NoMoreConfiguration")
+            }
+            UpdateSchema(_) => {
+                write!(f, "UpdateSchema(<redacted>)")
+            }
+            NoMoreSchema => {
+                write!(f, "NoMoreSchema")
+            }
+            UpdateEntitlement(e) => {
+                write!(f, "UpdateEntitlement({e:?})")
+            }
+            NoMoreEntitlement => {
+                write!(f, "NoMoreEntitlement")
+            }
+            Shutdown => {
+                write!(f, "Shutdown")
+            }
+        }
+    }
 }
 
 impl Drop for RouterHttpServer {
