@@ -4,6 +4,169 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.11.0] - 2023-02-21
+
+## 🚀 Features
+
+### Support for UUID and Unix timestamp functions in Rhai 
+
+*Description*
+
+When building Rhai scripts, it's often that you'll need to add headers that either uniquely identify a request, or append timestamp information for processing information later, such as crafting a trace header or otherwise. 
+
+While the default `timestamp()` and similar functions (e.g. `apollo_start`) can be used for a somewhat similar function, it also isn't able to be translated into an epoch. As a result, it doesn't acutely address the asks we've heard from users.
+
+This adds a `uuid_v4()` and `unix_now()` function to obtain a UUID and Unix timestamp, respectively.
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/2617
+
+### Show cookie toggle for embedded sandbox 
+
+This adds default support for using the "Include Cookies" toggle when working with Embedded Sandbox.
+
+By [@esilverm](https://github.com/esilverm) in https://github.com/apollographql/router/pull/2553
+
+### Add a metric to track the cache size ([Issue #2522](https://github.com/apollographql/router/issues/2522))
+
+The new `apollo_router_cache_size` metric will indicate the current size of in memory caches.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2607
+
+### Add a rhai global variable resolver and populate it ([Issue #2628](https://github.com/apollographql/router/issues/2628))
+
+rhai doesn't place constants into global scope. Functions are expected to be pure. We only became aware of this limitation this week, mainly as a consequence of people having difficulties with the experimental APOLLO_AUTHENTICATION_JWT_CLAIMS constant.
+
+Our fix is to introduce a new global variable resolver and populate it with a `Router` global constant. It has three members:
+
+ - `APOLLO_START -> should be used in place of `apollo_start`
+ - `APOLLO_SDL -> should be used in place of `apollo_sdl`
+ - `APOLLO_AUTHENTICATION_JWT_CLAIMS`
+
+You access a member of this variable as follows:
+
+```
+   let my_var = Router.APOLLO_SDL;
+```
+
+We retain the existing non-experimental constants (for purposes of backwards compatibility), but recommend that you shift to the new global constants. We are removing the APOLLO_AUTHENTICATION_JWT_CLAIMS constant.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2627
+
+### Activate TLS for Redis cluster connections ([Issue #2332](https://github.com/apollographql/router/issues/2332))
+
+This adds support for TLS connection in redis cluster mode, using redis urls with the scheme `rediss`
+
+By [@AUTHOR](https://github.com/AUTHOR) in https://github.com/apollographql/router/pull/2605
+
+### Make terminationGracePeriodSeconds property configurable in the Helm chart
+
+`terminationGracePeriodSeconds` is now configurable on the Deployment object in Helm chart.
+
+This is useful & recommended to adjust if you are changing the default timeout on the router, and should always be a value slightly bigger than the timeout in order to ensure no requests are closed prematurely on shutdown.
+
+By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2582
+
+## 🐛 Fixes
+
+### Fix histograms metrics in OTLP ([Issue #2393](https://github.com/apollographql/router/issues/2493))
+
+with the "inexpensive" metrics selector, histogram are only reported as gauges, and so they will be incorrectly interpreted when reaching Datadog
+
+By [@GEal](https://github.com/geal) in https://github.com/apollographql/router/pull/2564
+
+### Revisit Open Telemetry integration ([Issue #1812](https://github.com/apollographql/router/issues/1812), [Issue #2359](https://github.com/apollographql/router/issues/2359), [Issue #2338](https://github.com/apollographql/router/issues/2338), [Issue #2113](https://github.com/apollographql/router/issues/2113), [Issue #2113](https://github.com/apollographql/router/issues/2113))
+
+There were several issues with the existing Open Telemetry integration in the router:
+* It leaked memory
+* Metrics did not work after a schema or config update.
+* Telemetry config could not be changed at runtime.
+* Logging format changed depending on where the log statement occurred in the code.
+* On shutdown the following message frequently occurred: `OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is closed`
+
+We have revisited the way we integrate with OpenTelemetry and Tracing to fix the above errors, and to bring our use of these libraries in line with best practice.
+In addition, the testing coverage for telemetry had been improved significantly.
+
+For more details of what changed and why take a look at https://github.com/apollographql/router/pull/2358. 
+
+By [@bryncooke](https://github.com/bryncooke) and [@geal](https://github.com/geal) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2358
+
+### Metrics attributes allow value types as defined by otel ([Issue #2510](https://github.com/apollographql/router/issues/2510))
+
+Metrics attributes in OpenTelemetry allow the following types:
+* string
+* string[]
+* float
+* float[]
+* int
+* int[]
+* bool
+* bool[]
+
+However, our configuration only allowed strings. This has been fixed, and therefore it is now possible to use booleans via env expansion as metrics attributes.  
+
+For example:
+```yaml
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+    common:
+      attributes:
+        supergraph:
+          static:
+            - name: "my_boolean"
+              value: ''
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2616
+
+### Add missing `status` attribute on some metrics ([PR #2593](https://github.com/apollographql/router/pull/2593))
+
+When it created a status code 500 we didn't provide the `status` attribute in metrics. Instead of having an empty `status` attribute on your metrics you'll have `status="500"`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2593
+
+## 🛠 Maintenance
+
+### CORS: Give a more meaningful message for users who misconfigured allow_any_origin ([PR #2634](https://github.com/apollographql/router/pull/2634))
+
+Allowing any origins in the router configuration is done this way:
+```yaml
+cors:
+  allow_any_origin: true
+```
+
+It is however intuitive for users to try to set it up like so:
+```yaml
+cors:
+  origins:
+    - "*"
+```
+
+Unfortunately, this won't work and the error message was neither comprehensive nor actionnable:
+
+```
+ERROR panicked at 'Wildcard origin (`*`) cannot be passed to `AllowOrigin::list`. Use `AllowOrigin::any()` instead'
+```
+
+This change adds a meaningful error message which will help you successfully set up the router:
+
+```
+Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2634
+
+## 🧪 Experimental
+
+### Cleanup the error reporting in the experimental JWT authentication plugin ([PR #2609](https://github.com/apollographql/router/pull/2609))
+
+Introduce the new AuthenticatinError enum to document and consolidate various JWT processing errors that may occur.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2609
+
+
+
 # [1.10.3] - 2023-02-10
 
 ## 🐛 Fixes
