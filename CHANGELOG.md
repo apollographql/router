@@ -4,6 +4,176 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.11.0] - 2023-02-21
+
+## 🚀 Features
+
+### Support for UUID and Unix timestamp functions in Rhai ([PR #2617](https://github.com/apollographql/router/pull/2617))
+
+When building Rhai scripts, it's often that you'll need to add headers that either uniquely identify a request, or append timestamp information for processing information later, such as crafting a trace header or otherwise.
+
+While the default `timestamp()` and similar functions (e.g. `apollo_start`) can be used for a somewhat similar function, it also isn't able to be translated into an epoch. As a result, it doesn't acutely address the asks we've heard from users.
+
+This adds a `uuid_v4()` and `unix_now()` function to obtain a UUID and Unix timestamp, respectively.
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/2617
+
+### Show option to "Include Cookies" in Sandbox
+
+This adds default support for using the "Include Cookies" toggle when working with Embedded Sandbox.
+
+By [@esilverm](https://github.com/esilverm) in https://github.com/apollographql/router/pull/2553
+
+### Add a metric to track the cache size ([Issue #2522](https://github.com/apollographql/router/issues/2522))
+
+We've introduced a new `apollo_router_cache_size` metric that reports the current size of in-memory caches.  Like [other metrics](https://www.apollographql.com/docs/router/configuration/metrics), it is available via OpenTelemetry Metrics including Prometheus scraping.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2607
+
+### Add a rhai global variable resolver and populate it ([Issue #2628](https://github.com/apollographql/router/issues/2628))
+
+Rhai doesn't place _constants_ into the global scope, instead requiring that functions be pure. We only became aware of this limitation this week, mainly as a consequence of people having difficulties with the experimental `APOLLO_AUTHENTICATION_JWT_CLAIMS` constant.
+
+Our fix is to introduce a new global [variable resolver](https://rhai.rs/book/engine/var.html) and populate it with a `Router` global constant. It currently has three members:
+
+ - `APOLLO_START -> should be used in place of `apollo_start`
+ - `APOLLO_SDL -> should be used in place of `apollo_sdl`
+ - `APOLLO_AUTHENTICATION_JWT_CLAIMS`
+
+You access a member of this variable as follows:
+
+```
+   let my_var = Router.APOLLO_SDL;
+```
+
+We are removing the _experimental_ `APOLLO_AUTHENTICATION_JWT_CLAIMS` constant, but we will **retain the existing non-experimental constants** for purposes of backwards compatibility.
+
+
+We recommend that you shift to the new global constants since we will remove them in a major breaking change release in the future.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2627
+
+### Activate TLS for Redis cluster connections ([Issue #2332](https://github.com/apollographql/router/issues/2332))
+
+This adds support for TLS connections in Redis Cluster mode, by applying it when the URLs use the `rediss` schema.
+
+By [@Geaal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2605
+
+### Make `terminationGracePeriodSeconds` property configurable in the Helm chart
+
+The `terminationGracePeriodSeconds` property is now configurable on the `Deployment` object in the Helm chart.
+
+This can be useful when adjusting the default timeout values for the router, and should always be a value slightly bigger than the timeout in order to ensure no requests are closed prematurely on shutdown.
+
+By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2582
+
+## 🐛 Fixes
+
+### Properly emit histograms metrics via OpenTelemetry ([Issue #2393](https://github.com/apollographql/router/issues/2493))
+
+With the "inexpensive" metrics selector, histograms are only reported as gauges which caused them to be incorrectly interpreted when reaching Datadog
+
+By [@Geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2564
+
+### Revisit Open Telemetry integration ([Issue #1812](https://github.com/apollographql/router/issues/1812), [Issue #2359](https://github.com/apollographql/router/issues/2359), [Issue #2338](https://github.com/apollographql/router/issues/2338), [Issue #2113](https://github.com/apollographql/router/issues/2113), [Issue #2113](https://github.com/apollographql/router/issues/2113))
+
+There were several issues with the existing OpenTelemetry integration in the router which we are happy to have resolved with this re-factoring:
+
+- Metrics would stop working after a schema or config update.
+- Telemetry config could **not** be changed at runtime, instead requiring a full restart of the router.
+- Logging format would vary depending on where the log statement existed in the code.
+- On shutdown, the following message occurred frequently:
+
+  ```
+  OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is closed
+  ```
+
+- And worst of all, it had a tendency to leak memory.
+
+We have corrected these by re-visiting the way we integrate with OpenTelemetry and the supporting tracing packages and brought our usage to align with new best-practices.
+
+In addition, the testing coverage for telemetry in general has been significantly improved.  For more details of what changed and why take a look at https://github.com/apollographql/router/pull/2358.
+
+By [@bryncooke](https://github.com/bryncooke) and [@geal](https://github.com/geal) and [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2358
+
+### Metrics attributes allow value types as defined by OpenTelemetry ([Issue #2510](https://github.com/apollographql/router/issues/2510))
+
+Metrics attributes in OpenTelemetry allow the following types:
+
+* `string`
+* `string[]`
+* `float`
+* `float[]`
+* `int`
+* `int[]`
+* `bool`
+* `bool[]`
+
+However, our configuration only allowed strings. This has been fixed, and therefore it is now possible to use booleans via environment variable expansion as metrics attributes.
+
+For example:
+```yaml
+telemetry:
+  metrics:
+    prometheus:
+      enabled: true
+    common:
+      attributes:
+        supergraph:
+          static:
+            - name: "my_boolean"
+              value: ''
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2616
+
+### Add missing `status` attribute on some metrics ([PR #2593](https://github.com/apollographql/router/pull/2593))
+
+When we were labeling metrics, we were not consistently adding the `status` attribute for some status codes. Instead of having an empty `status` attribute on your metrics, you'll now have `status="500"`.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2593
+
+## 🛠 Maintenance
+
+### CORS: Give a more meaningful message for users who misconfigured `allow_any_origin` ([PR #2634](https://github.com/apollographql/router/pull/2634))
+
+Allowing "any" origin in the router configuration can be done as follows:
+
+```yaml
+cors:
+  allow_any_origin: true
+```
+
+However, some intuition and familiarity with the CORS specification might also lead someone to configure it as follows:
+
+```yaml
+cors:
+  origins:
+    - "*"
+```
+
+Unfortunately, this won't work and the error message received when it was attempted was neither comprehensive nor actionable:
+
+```
+ERROR panicked at 'Wildcard origin (`*`) cannot be passed to `AllowOrigin::list`. Use `AllowOrigin::any()` instead'
+```
+
+This usability improvement adds helpful instructions to the error message, pointing you to the correct pattern for setting up this behavior in the router:
+
+```
+Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`
+```
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2634
+
+## 🧪 Experimental
+
+### Cleanup the error reporting in the experimental JWT authentication plugin ([PR #2609](https://github.com/apollographql/router/pull/2609))
+
+Introduce a new `AuthenticationError` enum to document and consolidate various JWT processing errors that may occur.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2609
+
 # [1.10.3] - 2023-02-10
 
 ## 🐛 Fixes
