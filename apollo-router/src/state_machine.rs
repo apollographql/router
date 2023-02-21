@@ -211,7 +211,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     .shutdown()
                     .map_ok_or_else(Errored, |_| Stopped)
                     .await;
-                tracing::info!("server was shut down");
                 //FIXME: we might want to set a timeout here
                 let _ = all_connections_stopped_signal.recv().await;
                 tracing::info!("all connections shut down");
