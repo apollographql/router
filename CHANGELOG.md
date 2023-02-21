@@ -67,9 +67,10 @@ This can be useful when adjusting the default timeout values for the Router, and
 The Router timeout is configured via `traffic_shaping`
 
 ```yaml
-traffic_shaping: 
-  router: 
+traffic_shaping:
+  router:
     timeout: ...
+```
 
 By [@Meemaw](https://github.com/Meemaw) in https://github.com/apollographql/router/pull/2582
 
