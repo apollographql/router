@@ -16,10 +16,12 @@ use jsonwebtoken::jwk::JwkSet;
 use mime::APPLICATION_JSON;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
+use tower::BoxError;
 use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
+use crate::configuration::ConfigurationError;
 #[cfg(not(test))]
 use crate::error::LicenseError;
 use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
@@ -34,7 +36,7 @@ pub(super) struct JwksManager {
 }
 
 impl JwksManager {
-    pub(super) async fn new(urls: Vec<Url>) -> Self {
+    pub(super) async fn new(urls: Vec<Url>) -> Result<Self, BoxError> {
         use futures::FutureExt;
 
         let downloads = urls
@@ -43,22 +45,30 @@ impl JwksManager {
             .map(|url| get_jwks(url.clone()).map(|jwks| (url, jwks)))
             .collect::<Vec<_>>();
 
-        let jwks_map = Arc::new(Mutex::new(
-            join_all(downloads)
-                .await
-                .into_iter()
-                .filter_map(|(url, opt)| opt.map(|jwks| (url, jwks)))
-                .collect(),
-        ));
+        let jwks_map: Option<_> = join_all(downloads)
+            .await
+            .into_iter()
+            .map(|(url, opt)| opt.map(|jwks| (url, jwks)))
+            .collect();
 
-        let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
+        match jwks_map {
+            None => Err(ConfigurationError::InvalidConfiguration {
+                message: "bad configuration for the JWT authentication plugin",
+                error: "could not download or parse some of the JWKS".to_string(),
+            }
+            .into()),
+            Some(map) => {
+                let jwks_map = Arc::new(Mutex::new(map));
+                let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
-        tokio::task::spawn(poll(urls.clone(), jwks_map.clone(), drop_receiver));
+                tokio::task::spawn(poll(urls.clone(), jwks_map.clone(), drop_receiver));
 
-        JwksManager {
-            urls,
-            jwks_map,
-            _drop_signal: Arc::new(_drop_signal),
+                Ok(JwksManager {
+                    urls,
+                    jwks_map,
+                    _drop_signal: Arc::new(_drop_signal),
+                })
+            }
         }
     }
 

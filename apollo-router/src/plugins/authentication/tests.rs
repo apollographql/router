@@ -519,7 +519,7 @@ async fn build_jwks_search_components() -> JwksManager {
         urls.push(url);
     }
 
-    JwksManager::new(urls).await
+    JwksManager::new(urls).await.unwrap()
 }
 
 #[tokio::test]
