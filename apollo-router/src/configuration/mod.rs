@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::io::BufReader;
+use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
@@ -28,7 +29,8 @@ use rustls::Certificate;
 use rustls::PrivateKey;
 use rustls::ServerConfig;
 use rustls_pemfile::certs;
-use rustls_pemfile::rsa_private_keys;
+use rustls_pemfile::read_one;
+use rustls_pemfile::Item;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
@@ -720,50 +722,40 @@ fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
 
 //FIXME: handle ECDSA keys too
 fn load_keys(data: &str) -> io::Result<PrivateKey> {
-    /*rsa_private_keys(&mut BufReader::new(data.as_bytes()))
-    .map_err(|_| serde::de::Error::custom(io::Error::new(io::ErrorKind::InvalidInput, "invalid key")))
-    .map(|mut keys| keys.drain(..).map(PrivateKey).collect())*/
+    let mut reader = BufReader::new(data.as_bytes());
+    let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
 
-    let mut keys = rsa_private_keys(&mut BufReader::new(data.as_bytes()))
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))?;
+    let private_key = match key_iterator.next() {
+        Some(Ok(Item::RSAKey(key))) => PrivateKey(key),
+        Some(Ok(Item::PKCS8Key(key))) => PrivateKey(key),
+        Some(Ok(Item::ECKey(key))) => PrivateKey(key),
+        Some(Err(e)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("could not parse the key: {e}"),
+            ))
+        }
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a private key",
+            ))
+        }
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find a private key",
+            ))
+        }
+    };
 
-    if keys.len() > 1 {
+    if key_iterator.next().is_some() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "expected exactly one private key",
         ));
-    } else if let Some(key) = keys.pop() {
-        return Ok(PrivateKey(key));
     }
-
-    let mut keys = rustls_pemfile::pkcs8_private_keys(&mut BufReader::new(data.as_bytes()))
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))?;
-
-    if keys.len() > 1 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "expected exactly one private key",
-        ));
-    } else if let Some(key) = keys.pop() {
-        return Ok(PrivateKey(key));
-    }
-
-    let mut keys = rustls_pemfile::ec_private_keys(&mut BufReader::new(data.as_bytes()))
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid key"))?;
-
-    if keys.len() > 1 {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "expected exactly one private key",
-        ))
-    } else if let Some(key) = keys.pop() {
-        Ok(PrivateKey(key))
-    } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "expected exactly one private key",
-        ))
-    }
+    Ok(private_key)
 }
 
 /// Configuration options pertaining to the subgraph server component.
