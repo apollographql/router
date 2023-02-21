@@ -169,7 +169,6 @@ sha2 = "0.10.6"
 serde = { version = "1.0.149", features = ["derive", "rc"] }
 serde_json_bytes = { version = "0.2.0", features = ["preserve_order"] }
 serde_json = { version = "1.0.85", features = ["preserve_order"] }
-serde_millis = "0.1.1"
 serde_urlencoded = "0.7.1"
 serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
@@ -212,6 +211,7 @@ uname = "0.1.1"
 uname = "0.1.1"
 
 [dev-dependencies]
+futures-test = "0.3.21"
 insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.0"
 maplit = "1.0.2"
@@ -224,7 +224,6 @@ reqwest = { version = "0.11.14", default-features = false, features = [
 ] }
 similar-asserts = "1.4.2"
 tempfile = "3.3.0"
-test-binary = "2.0.0"
 test-log = { version = "0.2.11", default-features = false, features = [
     "trace",
 ] }

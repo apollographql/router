@@ -298,14 +298,6 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        Self::parse_with_hir(query, schema, configuration)
-    }
-
-    pub(crate) fn parse_with_hir(
-        query: impl Into<String>,
-        schema: &Schema,
-        configuration: &Configuration,
-    ) -> Result<Self, SpecError> {
         let query = query.into();
         let mut compiler = ApolloCompiler::with_recursion_limit(
             configuration.server.experimental_parser_recursion_limit,
@@ -340,55 +332,6 @@ impl Query {
         Ok(Query {
             string: query,
             compiler: OnceCell::from(Mutex::new(compiler)),
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-        })
-    }
-
-    pub(crate) fn parse_with_ast(
-        query: impl Into<String>,
-        schema: &Schema,
-        configuration: &Configuration,
-    ) -> Result<Self, SpecError> {
-        let query = query.into();
-        let parser = apollo_parser::Parser::new(query.as_str())
-            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
-        let tree = parser.parse();
-
-        // Trace log recursion limit data
-        let recursion_limit = tree.recursion_limit();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        let errors = tree
-            .errors()
-            .map(|err| format!("{err:?}"))
-            .collect::<Vec<_>>();
-
-        if !errors.is_empty() {
-            let errors = errors.join(", ");
-            failfast_debug!("parsing error(s): {}", errors);
-            return Err(SpecError::ParsingError(errors));
-        }
-
-        let document = tree.document();
-        let fragments = Fragments::from_ast(&document, schema)?;
-
-        let operations: Vec<Operation> = document
-            .definitions()
-            .filter_map(|definition| {
-                if let ast::Definition::OperationDefinition(operation) = definition {
-                    Some(operation)
-                } else {
-                    None
-                }
-            })
-            .map(|operation| Operation::from_ast(operation, schema))
-            .collect::<Result<Vec<_>, SpecError>>()?;
-
-        Ok(Query {
-            compiler: OnceCell::new(),
-            string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -1214,84 +1157,6 @@ impl Operation {
         })
     }
 
-    // clippy false positive due to the bytes crate
-    // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
-    #[allow(clippy::mutable_key_type)]
-    // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
-        let name = operation.name().map(|x| x.text().to_string());
-
-        let kind = operation
-            .operation_type()
-            .and_then(|op| {
-                op.query_token()
-                    .map(|_| OperationKind::Query)
-                    .or_else(|| op.mutation_token().map(|_| OperationKind::Mutation))
-                    .or_else(|| op.subscription_token().map(|_| OperationKind::Subscription))
-            })
-            .unwrap_or(OperationKind::Query);
-
-        if kind == OperationKind::Subscription {
-            return Err(SpecError::SubscriptionNotSupported);
-        }
-        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
-
-        let selection_set = operation
-            .selection_set()
-            .ok_or_else(|| {
-                SpecError::ParsingError(
-                    "the node SelectionSet is not optional in the spec".to_string(),
-                )
-            })?
-            .selections()
-            .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
-            .collect::<Result<Vec<Option<_>>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<Selection>>();
-
-        let variables = operation
-            .variable_definitions()
-            .iter()
-            .flat_map(|x| x.variable_definitions())
-            .map(|definition| {
-                let name = definition
-                    .variable()
-                    .ok_or_else(|| {
-                        SpecError::ParsingError(
-                            "the node Variable is not optional in the spec".to_string(),
-                        )
-                    })?
-                    .name()
-                    .ok_or_else(|| {
-                        SpecError::ParsingError(
-                            "the node Name is not optional in the spec".to_string(),
-                        )
-                    })?
-                    .text()
-                    .to_string();
-                let ty = FieldType::try_from(definition.ty().ok_or_else(|| {
-                    SpecError::ParsingError("the node Type is not optional in the spec".to_string())
-                })?)?;
-
-                Ok((
-                    name.into(),
-                    Variable {
-                        field_type: ty,
-                        default_value: parse_default_value(&definition),
-                    },
-                ))
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(Operation {
-            selection_set,
-            name,
-            variables,
-            kind,
-        })
-    }
-
     /// A query or mutation containing only `__typename` at the root level
     fn is_only_typename(&self) -> bool {
         self.selection_set.len() == 1
@@ -1351,13 +1216,6 @@ impl From<ast::OperationType> for OperationKind {
     }
 }
 
-fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
-    definition
-        .default_value()
-        .and_then(|v| v.value())
-        .and_then(|value| parse_value(&value))
-}
-
 pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
     match value {
         hir::Value::Variable(_) => None,
@@ -1372,40 +1230,6 @@ pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
             .iter()
             .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
             .collect(),
-    }
-}
-
-pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
-    match value {
-        ast::Value::Variable(_) => None,
-        ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
-        ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
-        ast::Value::IntValue(i) => {
-            let token = i.int_token()?;
-            let s = token.text();
-            s.parse::<i64>()
-                .ok()
-                .map(Into::into)
-                .or_else(|| s.parse::<u64>().ok().map(Into::into))
-        }
-        ast::Value::BooleanValue(b) => bool::try_from(b).ok().map(Into::into),
-        ast::Value::NullValue(_) => Some(Value::Null),
-        ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
-        ast::Value::ListValue(l) => l
-            .values()
-            .map(|v| parse_value(&v))
-            .collect::<Option<_>>()
-            .map(Value::Array),
-        ast::Value::ObjectValue(o) => o
-            .object_fields()
-            .map(|field| match (field.name(), field.value()) {
-                (Some(name), Some(value)) => {
-                    parse_value(&value).map(|v| (name.text().to_string().into(), v))
-                }
-                _ => None,
-            })
-            .collect::<Option<_>>()
-            .map(Value::Object),
     }
 }
 
