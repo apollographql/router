@@ -1,3 +1,4 @@
+use std::fmt;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -9,15 +10,19 @@ use crate::services::subgraph;
 use anyhow::Result;
 use serde_json::Value;
 
-pub(crate) async fn base_process_function<S: AsRef<str>>(
+pub(crate) async fn base_process_function<S: AsRef<str> + fmt::Display>(
+    scripts: S,
+    main: S,
     fn_name: S,
 ) -> Result<(), Box<rhai::EvalAltResult>> {
+    let plugin_config = format!(r#"{{"scripts":"{scripts}", "main":"{main}"}}"#);
     let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
         .find(|factory| factory.name == "apollo.rhai")
         .expect("Plugin not found")
         .create_instance_without_schema(
             &Value::from_str(
-                r#"{"scripts":"apollo-router/tests/fixtures", "main":"request_response_test.rhai"}"#,
+                // r#"{"scripts":"apollo-router/tests/fixtures", "main":"request_response_test.rhai"}"#,
+                &plugin_config,
             )
             .unwrap(),
         )

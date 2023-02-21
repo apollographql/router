@@ -388,7 +388,15 @@ impl Executable {
         use crate::router_rhai;
 
         let args: Vec<String> = std::env::args().collect();
-        router_rhai::base_process_function(&args[1])
+        if args.len() != 4 {
+            eprintln!("usage: {} <scripts> <main> <function>", args[0]);
+            eprintln!(
+                "example: {} apollo-router/tests/fixtures request_response_test.rhai process_subgraph_response_om_ok",
+                args[0]
+            );
+            return Err(anyhow::anyhow!("invalid arguments provided"));
+        }
+        router_rhai::base_process_function(&args[1], &args[2], &args[3])
             .await
             .map_err(|e| anyhow::Error::new(e))
     }
