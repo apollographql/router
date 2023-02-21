@@ -3,3 +3,6 @@ health_check:
 homepage:
   enabled: true
 
+plugins:
+  experimental.restricted:
+    enabled: true
