@@ -65,6 +65,7 @@ async fn get_router_service() -> BoxCloneService {
             ROUTER_SERVICE_RUNTIME
                 .spawn(async {
                     TestHarness::builder()
+                        .log_level("INFO")
                         .configuration_json(config)
                         .expect("test harness had config errors")
                         .schema(include_str!("fixtures/supergraph.graphql"))
@@ -150,18 +151,21 @@ async fn report(
     gz.read_to_end(&mut buf)
         .expect("could not decompress bytes");
     let report = Report::decode(&*buf).expect("could not deserialize report");
+
     state.lock().await.push(report);
     Ok(Json(()))
 }
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
     get_report(request, |r| {
-        !r.traces_per_query
+        let r = !r
+            .traces_per_query
             .values()
             .next()
             .expect("traces and stats required")
             .trace
-            .is_empty()
+            .is_empty();
+        r
     })
     .await
 }
