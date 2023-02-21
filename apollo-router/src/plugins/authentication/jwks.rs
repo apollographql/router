@@ -29,7 +29,7 @@ use crate::services::apollo_graph_reference;
 #[derive(Clone)]
 pub(super) struct JwksManager {
     urls: Vec<Url>,
-    jwks_map: Arc<Mutex<HashMap<Url, Option<JwkSet>>>>,
+    jwks_map: Arc<Mutex<HashMap<Url, JwkSet>>>,
     _drop_signal: Arc<oneshot::Sender<()>>,
 }
 
@@ -43,7 +43,13 @@ impl JwksManager {
             .map(|url| get_jwks(url.clone()).map(|jwks| (url, jwks)))
             .collect::<Vec<_>>();
 
-        let jwks_map = Arc::new(Mutex::new(join_all(downloads).await.into_iter().collect()));
+        let jwks_map = Arc::new(Mutex::new(
+            join_all(downloads)
+                .await
+                .into_iter()
+                .filter_map(|(url, opt)| opt.map(|jwks| (url, jwks)))
+                .collect(),
+        ));
 
         let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
@@ -66,7 +72,7 @@ impl JwksManager {
 
 async fn poll(
     urls: Vec<Url>,
-    jwks_map: Arc<Mutex<HashMap<Url, Option<JwkSet>>>>,
+    jwks_map: Arc<Mutex<HashMap<Url, JwkSet>>>,
     drop_receiver: oneshot::Receiver<()>,
 ) {
     use futures::stream::StreamExt;
@@ -76,10 +82,9 @@ async fn poll(
         Box::pin(repeat((url, jwks_map)).then(|(url, jwks_map)| async move {
             tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
 
-            let opt_jwks = get_jwks(url.clone()).await;
-            {
+            if let Some(jwks) = get_jwks(url.clone()).await {
                 if let Ok(mut map) = jwks_map.lock() {
-                    map.insert(url, opt_jwks);
+                    map.insert(url, jwks);
                 }
             }
         }))
@@ -178,13 +183,18 @@ impl<'a> Iterator for Iter<'a> {
     type Item = JwkSet;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.urls.pop() {
-            None => None,
-            Some(url) => {
-                if let Ok(map) = self.manager.jwks_map.lock() {
-                    map.get(&url)?.clone()
-                } else {
-                    None
+        loop {
+            match self.urls.pop() {
+                None => return None,
+                Some(url) => {
+                    if let Ok(map) = self.manager.jwks_map.lock() {
+                        match map.get(&url) {
+                            Some(jwks) => return Some(jwks.clone()),
+                            None => {}
+                        }
+                    } else {
+                        return None;
+                    }
                 }
             }
         }
