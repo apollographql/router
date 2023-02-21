@@ -4153,7 +4153,7 @@ expression: "&schema"
                 },
                 "service_name": {
                   "description": "The trace service name",
-                  "default": "${env.OTEL_SERVICE_NAME:-router}",
+                  "default": "router",
                   "type": "string"
                 },
                 "service_namespace": {
