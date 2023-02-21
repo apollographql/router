@@ -698,7 +698,7 @@ impl Plugin for AuthenticationPlugin {
                     }
                 }
             })
-            .buffered()
+            // .buffered()
             .service(service)
         .boxed()
     }

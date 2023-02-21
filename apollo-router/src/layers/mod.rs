@@ -138,7 +138,7 @@ pub trait ServiceBuilderExt<L>: Sized {
         async_checkpoint_fn: F,
     ) -> ServiceBuilder<Stack<AsyncCheckpointLayer<S, Fut, Request>, L>>
     where
-        S: Service<Request, Error = BoxError> + Clone + Send + 'static,
+        S: Service<Request, Error = BoxError> + Send + 'static,
         Fut: Future<
             Output = Result<ControlFlow<<S as Service<Request>>::Response, Request>, BoxError>,
         >,
