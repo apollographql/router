@@ -135,6 +135,12 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🛠 Maintenance
 
+### Upgrade to Apollo Federation v2.3.2
+
+This brings in a patch update to our Federation support, bringing it to v2.3.2.
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2586
+
 ### CORS: Give a more meaningful message for users who misconfigured `allow_any_origin` ([PR #2634](https://github.com/apollographql/router/pull/2634))
 
 Allowing "any" origin in the router configuration can be done as follows:
