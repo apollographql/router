@@ -98,9 +98,6 @@ static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
-    #[error("JWKSet cannot be loaded")]
-    JwkSet,
-
     #[error("header_value_prefix must not contain whitespace")]
     BadHeaderValuePrefix,
 }
@@ -169,7 +166,7 @@ struct JWTCriteria {
 /// The search criteria allow us to match a variety of keys depending on which criteria are provided
 /// by the JWT header. The only mandatory parameter is "alg".
 /// Note: "none" is not implemented by jsonwebtoken, so it can't be part of the [`Algorithm`] enum.
-async fn search_jwks(
+fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
 ) -> Result<Option<Jwk>, BoxError> {
@@ -338,205 +335,202 @@ impl Plugin for AuthenticationPlugin {
 
         ServiceBuilder::new()
             .instrument(authentication_service_span())
-            .checkpoint_async(move |request: router::Request| {
+            .checkpoint(move |request: router::Request| {
                 let my_config = request_full_config.clone();
                 let jwks_manager = jwks_manager.clone();
                 const AUTHENTICATION_KIND: &str = "JWT";
 
-                async move {
-                    // We are going to do a lot of similar checking so let's define a local function
-                    // to help reduce repetition
-                    fn failure_message(
-                        context: Context,
-                        error: AuthenticationError,
-                        status: StatusCode,
-                    ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
-                    {
-                        // This is a metric and will not appear in the logs
-                        tracing::info!(
-                            monotonic_counter.apollo_authentication_failure_count = 1u64,
-                            kind = %AUTHENTICATION_KIND
-                        );
-                        tracing::info!(message = %error, "jwt authentication failure");
-                        let response = router::Response::error_builder()
-                            .error(
-                                graphql::Error::builder()
-                                    .message(error.to_string())
-                                    .extension_code("AUTH_ERROR")
-                                    .build(),
-                            )
-                            .status_code(status)
-                            .context(context)
-                            .build()?;
-                        Ok(ControlFlow::Break(response))
-                    }
+                // We are going to do a lot of similar checking so let's define a local function
+                // to help reduce repetition
+                fn failure_message(
+                    context: Context,
+                    error: AuthenticationError,
+                    status: StatusCode,
+                ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
+                {
+                    // This is a metric and will not appear in the logs
+                    tracing::info!(
+                        monotonic_counter.apollo_authentication_failure_count = 1u64,
+                        kind = %AUTHENTICATION_KIND
+                    );
+                    tracing::info!(message = %error, "jwt authentication failure");
+                    let response = router::Response::error_builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message(error.to_string())
+                                .extension_code("AUTH_ERROR")
+                                .build(),
+                        )
+                        .status_code(status)
+                        .context(context)
+                        .build()?;
+                    Ok(ControlFlow::Break(response))
+                }
 
-                    // The http_request is stored in a `Router::Request` context.
-                    // We are going to check the headers for the presence of the configured header
-                    let jwt_value_result =
-                        match request.router_request.headers().get(&my_config.header_name) {
-                            Some(value) => value.to_str(),
-                            None => {
+                // The http_request is stored in a `Router::Request` context.
+                // We are going to check the headers for the presence of the configured header
+                let jwt_value_result =
+                    match request.router_request.headers().get(&my_config.header_name) {
+                        Some(value) => value.to_str(),
+                        None => {
+                            return failure_message(
+                                request.context,
+                                AuthenticationError::MissingHeader(&my_config.header_name),
+                                StatusCode::UNAUTHORIZED,
+                            );
+                        }
+                    };
+
+                // If we find the header, but can't convert it to a string, let the client know
+                let jwt_value_untrimmed = match jwt_value_result {
+                    Ok(value) => value,
+                    Err(_not_a_string_error) => {
+                        return failure_message(
+                            request.context,
+                            AuthenticationError::CannotConvertToString,
+                            StatusCode::BAD_REQUEST,
+                        );
+                    }
+                };
+
+                // Let's trim out leading and trailing whitespace to be accommodating
+                let jwt_value = jwt_value_untrimmed.trim();
+
+                // Make sure the format of our message matches our expectations
+                // Technically, the spec is case sensitive, but let's accept
+                // case variations
+                //
+                let prefix_len = my_config.header_value_prefix.len();
+                if jwt_value.len() < prefix_len
+                    || !&jwt_value[..prefix_len]
+                        .eq_ignore_ascii_case(&my_config.header_value_prefix)
+                {
+                    return failure_message(
+                        request.context,
+                        AuthenticationError::InvalidPrefix(
+                            jwt_value_untrimmed,
+                            &my_config.header_value_prefix,
+                        ),
+                        StatusCode::BAD_REQUEST,
+                    );
+                }
+
+                // Split our string in (at most 2) sections.
+                let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
+                if jwt_parts.len() != 2 {
+                    return failure_message(
+                        request.context,
+                        AuthenticationError::MissingJWT(jwt_value),
+                        StatusCode::BAD_REQUEST,
+                    );
+                }
+
+                // We have our jwt
+                let jwt = jwt_parts[1];
+
+                // Try to create a valid header to work with
+                let jwt_header = match decode_header(jwt) {
+                    Ok(h) => h,
+                    Err(e) => {
+                        return failure_message(
+                            request.context,
+                            AuthenticationError::InvalidHeader(jwt, e),
+                            StatusCode::BAD_REQUEST,
+                        );
+                    }
+                };
+
+                // Extract our search criteria from our jwt
+                let criteria = JWTCriteria {
+                    kid: jwt_header.kid,
+                    alg: jwt_header.alg,
+                };
+
+                // Search our list of JWKS to find the kid and process it
+                // Note: This will search through JWKS in the order in which they are defined
+                // in configuration.
+
+                let jwk_opt = match search_jwks(&jwks_manager, &criteria) {
+                    Ok(j) => j,
+                    Err(e) => {
+                        return failure_message(
+                            request.context,
+                            AuthenticationError::CannotRetrieveJWKS(e),
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                        );
+                    }
+                };
+
+                if let Some(jwk) = jwk_opt {
+                    let decoding_key = match DecodingKey::from_jwk(&jwk) {
+                        Ok(k) => k,
+                        Err(e) => {
+                            return failure_message(
+                                request.context,
+                                AuthenticationError::CannotCreateDecodingKey(e),
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            );
+                        }
+                    };
+
+                    let algorithm = match jwk.common.algorithm {
+                        Some(a) => a,
+                        None => {
+                            return failure_message(
+                                request.context,
+                                AuthenticationError::JWKHasNoAlgorithm,
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                            );
+                        }
+                    };
+
+                    let validation = Validation::new(algorithm);
+
+                    let token_data =
+                        match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+                            Ok(v) => v,
+                            Err(e) => {
                                 return failure_message(
                                     request.context,
-                                    AuthenticationError::MissingHeader(&my_config.header_name),
+                                    AuthenticationError::CannotDecodeJWT(e),
                                     StatusCode::UNAUTHORIZED,
                                 );
                             }
                         };
 
-                    // If we find the header, but can't convert it to a string, let the client know
-                    let jwt_value_untrimmed = match jwt_value_result {
-                        Ok(value) => value,
-                        Err(_not_a_string_error) => {
-                            return failure_message(
-                                request.context,
-                                AuthenticationError::CannotConvertToString,
-                                StatusCode::BAD_REQUEST,
-                            );
-                        }
-                    };
-
-                    // Let's trim out leading and trailing whitespace to be accommodating
-                    let jwt_value = jwt_value_untrimmed.trim();
-
-                    // Make sure the format of our message matches our expectations
-                    // Technically, the spec is case sensitive, but let's accept
-                    // case variations
-                    //
-                    let prefix_len = my_config.header_value_prefix.len();
-                    if jwt_value.len() < prefix_len
-                        || !&jwt_value[..prefix_len]
-                            .eq_ignore_ascii_case(&my_config.header_value_prefix)
+                    if let Err(e) = request
+                        .context
+                        .insert("apollo_authentication::JWT::claims", token_data.claims)
                     {
                         return failure_message(
                             request.context,
-                            AuthenticationError::InvalidPrefix(
-                                jwt_value_untrimmed,
-                                &my_config.header_value_prefix,
-                            ),
-                            StatusCode::BAD_REQUEST,
+                            AuthenticationError::CannotInsertClaimsIntoContext(e),
+                            StatusCode::INTERNAL_SERVER_ERROR,
                         );
                     }
+                    // This is a metric and will not appear in the logs
+                    tracing::info!(
+                        monotonic_counter.apollo_authentication_success_count = 1u64,
+                        kind = %AUTHENTICATION_KIND
+                    );
+                    return Ok(ControlFlow::Continue(request));
+                }
 
-                    // Split our string in (at most 2) sections.
-                    let jwt_parts: Vec<&str> = jwt_value.splitn(2, ' ').collect();
-                    if jwt_parts.len() != 2 {
-                        return failure_message(
-                            request.context,
-                            AuthenticationError::MissingJWT(jwt_value),
-                            StatusCode::BAD_REQUEST,
-                        );
-                    }
-
-                    // We have our jwt
-                    let jwt = jwt_parts[1];
-
-                    // Try to create a valid header to work with
-                    let jwt_header = match decode_header(jwt) {
-                        Ok(h) => h,
-                        Err(e) => {
-                            return failure_message(
-                                request.context,
-                                AuthenticationError::InvalidHeader(jwt, e),
-                                StatusCode::BAD_REQUEST,
-                            );
-                        }
-                    };
-
-                    // Extract our search criteria from our jwt
-                    let criteria = JWTCriteria {
-                        kid: jwt_header.kid,
-                        alg: jwt_header.alg,
-                    };
-
-                    // Search our list of JWKS to find the kid and process it
-                    // Note: This will search through JWKS in the order in which they are defined
-                    // in configuration.
-
-                    let jwk_opt = match search_jwks(&jwks_manager, &criteria).await {
-                        Ok(j) => j,
-                        Err(e) => {
-                            return failure_message(
-                                request.context,
-                                AuthenticationError::CannotRetrieveJWKS(e),
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                            );
-                        }
-                    };
-
-                    if let Some(jwk) = jwk_opt {
-                        let decoding_key = match DecodingKey::from_jwk(&jwk) {
-                            Ok(k) => k,
-                            Err(e) => {
-                                return failure_message(
-                                    request.context,
-                                    AuthenticationError::CannotCreateDecodingKey(e),
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                );
-                            }
-                        };
-
-                        let algorithm = match jwk.common.algorithm {
-                            Some(a) => a,
-                            None => {
-                                return failure_message(
-                                    request.context,
-                                    AuthenticationError::JWKHasNoAlgorithm,
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                );
-                            }
-                        };
-
-                        let validation = Validation::new(algorithm);
-
-                        let token_data =
-                            match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-                                Ok(v) => v,
-                                Err(e) => {
-                                    return failure_message(
-                                        request.context,
-                                        AuthenticationError::CannotDecodeJWT(e),
-                                        StatusCode::UNAUTHORIZED,
-                                    );
-                                }
-                            };
-
-                        if let Err(e) = request
-                            .context
-                            .insert("apollo_authentication::JWT::claims", token_data.claims)
-                        {
-                            return failure_message(
-                                request.context,
-                                AuthenticationError::CannotInsertClaimsIntoContext(e),
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                            );
-                        }
-                        // This is a metric and will not appear in the logs
-                        tracing::info!(
-                            monotonic_counter.apollo_authentication_success_count = 1u64,
-                            kind = %AUTHENTICATION_KIND
-                        );
-                        return Ok(ControlFlow::Continue(request));
-                    }
-
-                    // We can't find a key to process this JWT.
-                    if criteria.kid.is_some() {
-                        failure_message(
-                            request.context,
-                            AuthenticationError::CannotFindKID(criteria.kid),
-                            StatusCode::UNAUTHORIZED,
-                        )
-                    } else {
-                        failure_message(
-                            request.context,
-                            AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
-                            StatusCode::UNAUTHORIZED,
-                        )
-                    }
+                // We can't find a key to process this JWT.
+                if criteria.kid.is_some() {
+                    failure_message(
+                        request.context,
+                        AuthenticationError::CannotFindKID(criteria.kid),
+                        StatusCode::UNAUTHORIZED,
+                    )
+                } else {
+                    failure_message(
+                        request.context,
+                        AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
+                        StatusCode::UNAUTHORIZED,
+                    )
                 }
             })
-            .buffered()
             .service(service)
             .boxed()
     }

@@ -532,7 +532,6 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
     };
 
     let key = search_jwks(&jwks_manager, &criteria)
-        .await
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
@@ -549,7 +548,6 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
     };
 
     let key = search_jwks(&jwks_manager, &criteria)
-        .await
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
@@ -566,7 +564,6 @@ async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
     };
 
     assert!(search_jwks(&jwks_manager, &criteria)
-        .await
         .expect("search worked")
         .is_none());
 }
@@ -581,7 +578,6 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
     };
 
     let key = search_jwks(&jwks_manager, &criteria)
-        .await
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
@@ -601,7 +597,6 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
     };
 
     let key = search_jwks(&jwks_manager, &criteria)
-        .await
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
