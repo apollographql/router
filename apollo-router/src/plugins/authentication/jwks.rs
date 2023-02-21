@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 use futures::future::join_all;
 use futures::future::select;
@@ -31,7 +31,7 @@ use crate::services::apollo_graph_reference;
 #[derive(Clone)]
 pub(super) struct JwksManager {
     urls: Vec<Url>,
-    jwks_map: Arc<Mutex<HashMap<Url, JwkSet>>>,
+    jwks_map: Arc<RwLock<HashMap<Url, JwkSet>>>,
     _drop_signal: Arc<oneshot::Sender<()>>,
 }
 
@@ -58,7 +58,7 @@ impl JwksManager {
             }
             .into()),
             Some(map) => {
-                let jwks_map = Arc::new(Mutex::new(map));
+                let jwks_map = Arc::new(RwLock::new(map));
                 let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
                 tokio::task::spawn(poll(urls.clone(), jwks_map.clone(), drop_receiver));
@@ -82,7 +82,7 @@ impl JwksManager {
 
 async fn poll(
     urls: Vec<Url>,
-    jwks_map: Arc<Mutex<HashMap<Url, JwkSet>>>,
+    jwks_map: Arc<RwLock<HashMap<Url, JwkSet>>>,
     drop_receiver: oneshot::Receiver<()>,
 ) {
     use futures::stream::StreamExt;
@@ -93,7 +93,7 @@ async fn poll(
             tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
 
             if let Some(jwks) = get_jwks(url.clone()).await {
-                if let Ok(mut map) = jwks_map.lock() {
+                if let Ok(mut map) = jwks_map.write() {
                     map.insert(url, jwks);
                 }
             }
@@ -197,7 +197,7 @@ impl<'a> Iterator for Iter<'a> {
             match self.urls.pop() {
                 None => return None,
                 Some(url) => {
-                    if let Ok(map) = self.manager.jwks_map.lock() {
+                    if let Ok(map) = self.manager.jwks_map.read() {
                         if let Some(jwks) = map.get(&url) {
                             return Some(jwks.clone());
                         }
