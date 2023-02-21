@@ -36,8 +36,8 @@ Rhai scripts cannot access Rust global constants by default, making cross plugin
 
 This change introduces a new global [variable resolver](https://rhai.rs/book/engine/var.html) populates with a `Router` global constant. It currently has three members:
 
- - `APOLLO_START -> should be used in place of `apollo_start`
- - `APOLLO_SDL -> should be used in place of `apollo_sdl`
+ - `APOLLO_START` -> should be used in place of `apollo_start`
+ - `APOLLO_SDL` -> should be used in place of `apollo_sdl`
  - `APOLLO_AUTHENTICATION_JWT_CLAIMS`
 
 You access a member of this variable as follows:
