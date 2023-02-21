@@ -95,16 +95,16 @@ Returning a `200` "error" is not currently supported. If encountered, it will be
 
 ## Timing execution
 
-Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
+Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         // highlight-start
-        let start = apollo_start.elapsed;
+        let start = Router.APOLLO_START.elapsed;
         // Do some processing here...
-        let duration = apollo_start.elapsed - start;
+        let duration = Router.APOLLO_START.elapsed - start;
         print(`response processing took: ${duration}`);
         // highlight-end
 
@@ -118,11 +118,11 @@ fn supergraph_service(service) {
 
 ## Accessing the SDL
 
-Your Rhai customization can use the global `apollo_sdl` constant to examine the supergraph.
+Your Rhai customization can use the global `Router.APOLLO_SDL` constant to examine the supergraph.
 
 ```rhai
 fn supergraph_service(service) {
-    print(`${apollo_sdl}`);
+    print(`${Router.APOLLO_SDL}`);
 }
 ```
 
@@ -195,6 +195,26 @@ The simple get/set api for dealing with single value headers is sufficient for m
 If you wish to get multiple values for a header key, then you must use the `values()` fn, NOT the indexed accessor. If you do use the indexed accessor, it will only return the first value (as a string) associated with the key.
 
 Look at the examples to see how this works in practice.
+
+## Unix timestamp
+
+Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_now();
+}
+```
+
+## Unique IDs (UUID)
+
+Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
+ 
+```rhai
+fn supergraph_service(service) {
+    let id = uuid_v4();
+}
+```
 
 ## `Request` interface
 

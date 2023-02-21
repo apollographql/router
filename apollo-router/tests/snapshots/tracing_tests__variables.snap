@@ -208,6 +208,18 @@ expression: get_spans()
                       [
                         "storage",
                         "memory"
+                      ],
+                      [
+                        "value.apollo_router_cache_size",
+                        1
+                      ],
+                      [
+                        "kind",
+                        "query planner"
+                      ],
+                      [
+                        "storage",
+                        "memory"
                       ]
                     ],
                     "metadata": {

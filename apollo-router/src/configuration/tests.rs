@@ -367,7 +367,26 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
+    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+}
+
+#[test]
+fn it_doesnt_allow_origins_wildcard() {
+    let cfg = validate_yaml_configuration(
+        r#"
+cors:
+  origins:
+    - "*"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    let error = cfg
+        .cors
+        .into_layer()
+        .expect_err("should have resulted in an error");
+    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
 }
 
 #[test]

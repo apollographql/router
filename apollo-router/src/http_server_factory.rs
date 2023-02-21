@@ -1,3 +1,4 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -13,6 +14,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::uplink::entitlement::EntitlementState;
 
 /// Factory for creating the http server component.
 ///
@@ -28,6 +30,7 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        entitlement: EntitlementState,
     ) -> Self::Future
     where
         RF: RouterFactory;
@@ -101,6 +104,7 @@ impl HttpServerHandle {
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
+        entitlement: EntitlementState,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -122,10 +126,11 @@ impl HttpServerHandle {
         let handle = factory
             .create(
                 router,
-                Arc::clone(&configuration),
+                configuration,
                 Some(main_listener),
                 extra_listeners,
                 web_endpoints,
+                entitlement,
             )
             .await?;
         tracing::debug!(
