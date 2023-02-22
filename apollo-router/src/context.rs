@@ -68,7 +68,7 @@ impl Context {
     /// Get a value from the context using the provided key.
     ///
     /// Semantics:
-    ///  - If the operation fails, then the key is not present.
+    ///  - If the operation fails, that's because we can't deserialize the value.
     ///  - If the operation succeeds, the value is an [`Option`].
     pub fn get<K, V>(&self, key: K) -> Result<Option<V>, BoxError>
     where
