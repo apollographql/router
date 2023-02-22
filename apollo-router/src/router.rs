@@ -137,6 +137,9 @@ pub enum ApolloRouterError {
 
     /// tried to register two endpoints on `{0}:{1}{2}`
     SameRouteUsedTwice(IpAddr, u16, String),
+
+    /// TLS configuration error: {0}
+    Rustls(rustls::Error),
 }
 
 type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;

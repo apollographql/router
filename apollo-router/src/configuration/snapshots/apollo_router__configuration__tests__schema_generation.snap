@@ -4291,6 +4291,7 @@ expression: "&schema"
     "tls": {
       "description": "TLS related configuration options.",
       "default": {
+        "supergraph": null,
         "subgraph": {
           "all": {
             "certificate_authorities": null
@@ -4346,6 +4347,35 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "supergraph": {
+          "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
+          "default": null,
+          "type": "object",
+          "required": [
+            "certificate",
+            "certificate_chain",
+            "key"
+          ],
+          "properties": {
+            "certificate": {
+              "description": "server certificate in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "certificate_chain": {
+              "description": "list of certificate authorities in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "key": {
+              "description": "server key in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         }
       },
       "additionalProperties": false
