@@ -1,4 +1,5 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -65,7 +66,11 @@ impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
         server_future: Pin<
-            Box<dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>> + Send>,
+            Box<
+                dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>>
+                    + Send
+                    + 'static,
+            >,
         >,
         graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
@@ -153,15 +158,43 @@ pub(crate) enum Listener {
     Tcp(tokio::net::TcpListener),
     #[cfg(unix)]
     Unix(tokio::net::UnixListener),
+    Tls {
+        listener: tokio::net::TcpListener,
+        acceptor: tokio_rustls::TlsAcceptor,
+    },
 }
 
 pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
+    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
 }
 
 impl Listener {
+    pub(crate) async fn new_from_socket_addr(
+        address: SocketAddr,
+        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    ) -> Result<Self, ApolloRouterError> {
+        let listener = tokio::net::TcpListener::bind(address)
+            .await
+            .map_err(ApolloRouterError::ServerCreationError)?;
+        match tls_acceptor {
+            None => Ok(Listener::Tcp(listener)),
+            Some(acceptor) => Ok(Listener::Tls { listener, acceptor }),
+        }
+    }
+
+    pub(crate) fn new_from_listener(
+        listener: tokio::net::TcpListener,
+        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    ) -> Self {
+        match tls_acceptor {
+            None => Listener::Tcp(listener),
+            Some(acceptor) => Listener::Tls { listener, acceptor },
+        }
+    }
+
     pub(crate) fn local_addr(&self) -> std::io::Result<ListenAddr> {
         match self {
             Listener::Tcp(listener) => listener.local_addr().map(Into::into),
@@ -173,6 +206,7 @@ impl Listener {
                         .unwrap_or_default(),
                 )
             }),
+            Listener::Tls { listener, .. } => listener.local_addr().map(Into::into),
         }
     }
 
@@ -187,6 +221,11 @@ impl Listener {
                 .accept()
                 .await
                 .map(|(stream, _)| NetworkStream::Unix(stream)),
+            Listener::Tls { listener, acceptor } => {
+                let (stream, _) = listener.accept().await?;
+
+                Ok(NetworkStream::Tls(acceptor.accept(stream).await?))
+            }
         }
     }
 }

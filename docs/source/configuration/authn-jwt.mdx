@@ -48,7 +48,6 @@ You enable JWT authentication for your router with the following steps:
           # These keys are optional. Default values are shown.
           header_name: Authorization
           header_value_prefix: Bearer
-          cooldown: 15s
     ```
 
     These options are documented [below](#configuration-options).
@@ -131,17 +130,6 @@ The default value is `Bearer`.
 <tr>
 <td style="min-width: 150px;">
 
-##### `cooldown`
-
-</td>
-<td>
-
-Whenever the router receives a JWT with a key ID (`kid`) that it doesn't recognize, it refetches the JWK Sets from all of its [`jwks_urls`](#jwks_urls), _if_ it's been _at least_ the amount of time specified by `cooldown` since it most recently fetched.
-
-The default value is `15s` (fifteen seconds), which is suitable for almost all use cases.
-
-</td>
-</tr>
 
 </tbody>
 </table>
@@ -564,7 +552,6 @@ If your router enables [metrics collection via Prometheus](./metrics/#using-prom
 
 - `apollo_authentication_failure_count`
 - `apollo_authentication_success_count`
-- `apollo_authentication_cooldown_count`
 
 Those metrics have the following shapes:
 
@@ -576,8 +563,4 @@ apollo_authentication_failure_count{kind="JWT",service_name="apollo-router"} 1
 # HELP apollo_authentication_success_count apollo_authentication_success_count
 # TYPE apollo_authentication_success_count counter
 apollo_authentication_success_count{kind="JWT",service_name="apollo-router"} 11
-
-# HELP apollo_authentication_cooldown_count apollo_authentication_cooldown_count
-# TYPE apollo_authentication_cooldown_count counter
-apollo_authentication_cooldown_count{kind="JWT",service_name="apollo-router"} 3
 ```
