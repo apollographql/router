@@ -196,7 +196,11 @@ pub(crate) struct Opt {
     apollo_router_entitlement: Option<String>,
 
     /// Entitlement location relative to the current directory.
-    #[clap(long = "entitlement", env = "APOLLO_ROUTER_ENTITLEMENT_PATH")]
+    #[clap(
+        long = "entitlement",
+        env = "APOLLO_ROUTER_ENTITLEMENT_PATH",
+        hide(true)
+    )]
     apollo_router_entitlement_path: Option<PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
