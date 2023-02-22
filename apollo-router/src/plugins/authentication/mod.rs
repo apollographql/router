@@ -48,6 +48,7 @@ mod jwks;
 mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
+pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
 
 #[derive(Debug, Display, Error)]
 enum AuthenticationError<'a> {
@@ -87,7 +88,7 @@ enum AuthenticationError<'a> {
     /// Cannot find a suitable key for: alg: '{0:?}', kid: '{1:?}' in JWKS list
     CannotFindSuitableKey(Algorithm, Option<String>),
 
-    /// Invalid issuer: the token's `iss` was {token}, but signed with a key from {expected}
+    /// Invalid issuer: the token's `iss` was '{token}', but signed with a key from '{expected}'
     InvalidIssuer { expected: String, token: String },
 }
 
@@ -542,7 +543,7 @@ fn authenticate(
 
         if let Err(e) = request
             .context
-            .insert("apollo_authentication::JWT::claims", token_data.claims)
+            .insert(APOLLO_AUTHENTICATION_JWT_CLAIMS, token_data.claims)
         {
             return failure_message(
                 request.context,

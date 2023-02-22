@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use jsonwebtoken::jwk::{
-    CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, JwkSet,
-};
-use jsonwebtoken::{encode, get_current_timestamp, EncodingKey};
+use jsonwebtoken::encode;
+use jsonwebtoken::get_current_timestamp;
+use jsonwebtoken::jwk::CommonParameters;
+use jsonwebtoken::jwk::EllipticCurveKeyParameters;
+use jsonwebtoken::jwk::EllipticCurveKeyType;
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::EncodingKey;
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::EncodePrivateKey;
 use rand_core::OsRng;
@@ -658,6 +661,10 @@ async fn issuer_check() {
 
     let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
 
+    let url_safe_engine = base64::engine::fast_portable::FastPortable::from(
+        &base64::alphabet::URL_SAFE,
+        base64::engine::fast_portable::NO_PAD,
+    );
     let jwk = Jwk {
         common: CommonParameters {
             public_key_use: Some(PublicKeyUse::Signature),
@@ -668,28 +675,26 @@ async fn issuer_check() {
         },
         algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
             key_type: EllipticCurveKeyType::EC,
-
             curve: EllipticCurve::P256,
-            x: base64::encode(point.x().unwrap()),
-            y: base64::encode(point.y().unwrap()),
+            x: base64::encode_engine(point.x().unwrap(), &url_safe_engine),
+            y: base64::encode_engine(point.y().unwrap(), &url_safe_engine),
         }),
     };
 
     let manager = make_manager(&jwk, Some("hello".to_string()));
 
-    let claims = Claims {
-        sub: "test".to_string(),
-        exp: get_current_timestamp(),
-        iss: Some("hallo".to_string()),
-    };
-
+    // No issuer
     let token = encode(
         &jsonwebtoken::Header::new(Algorithm::ES256),
-        &claims,
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: None,
+        },
         &encoding_key,
     )
     .unwrap();
-    println!("token: {token}");
+
     let request = supergraph::Request::canned_builder()
         .operation_name("me".to_string())
         .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
@@ -704,11 +709,125 @@ async fn issuer_check() {
             println!("got req with issuer check");
             let claims: Value = req
                 .context
-                .get("apollo_authentication::JWT::claims")
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
                 .unwrap()
                 .unwrap();
             println!("claims: {claims:?}");
-            panic!()
+        }
+    }
+
+    // Valid issuer
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: Some("hello".to_string()),
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
+        }
+        ControlFlow::Continue(req) => {
+            println!("got req with issuer check");
+            let claims: Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+            println!("claims: {claims:?}");
+        }
+    }
+
+    // Invalid issuer
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: Some("AAAA".to_string()),
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+        }
+        ControlFlow::Continue(_) => {
+            panic!("issuer check should have failed")
+        }
+    }
+
+    // no issuer check
+    let manager = make_manager(&jwk, None);
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: Some("hello".to_string()),
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+        }
+        ControlFlow::Continue(req) => {
+            println!("got req with issuer check");
+            let claims: Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+            println!("claims: {claims:?}");
         }
     }
 }
