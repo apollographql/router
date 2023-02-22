@@ -721,7 +721,6 @@ fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
         .map(|mut certs| certs.drain(..).map(Certificate).collect())
 }
 
-//FIXME: handle ECDSA keys too
 fn load_keys(data: &str) -> io::Result<PrivateKey> {
     let mut reader = BufReader::new(data.as_bytes());
     let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
