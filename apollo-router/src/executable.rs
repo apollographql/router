@@ -129,7 +129,7 @@ enum ConfigSubcommand {
 #[derive(Parser, Debug)]
 #[clap(name = "router", about = "Apollo federation router")]
 #[command(disable_version_flag(true))]
-pub(crate) struct Opt {
+pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
         long = "log",
@@ -340,8 +340,9 @@ impl Executable {
         schema: Option<SchemaSource>,
         entitlement: Option<EntitlementSource>,
         config: Option<ConfigurationSource>,
+        cli_args: Option<Opt>,
     ) -> Result<()> {
-        let opt = Opt::parse();
+        let opt = cli_args.unwrap_or_else(Opt::parse);
 
         if opt.version {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
