@@ -1,4 +1,15 @@
+use std::collections::HashMap;
 use std::path::Path;
+
+use jsonwebtoken::jwk::{
+    CommonParameters, EllipticCurveKeyParameters, EllipticCurveKeyType, JwkSet,
+};
+use jsonwebtoken::{encode, get_current_timestamp, EncodingKey};
+use p256::ecdsa::SigningKey;
+use p256::pkcs8::EncodePrivateKey;
+use rand_core::OsRng;
+use serde::Serialize;
+use serde_json::Value;
 
 use super::*;
 use crate::plugin::test;
@@ -70,7 +81,14 @@ async fn build_a_test_harness(
             "authentication": {
                 "experimental" : {
                     "jwt" : {
-                        "jwks_urls": [&jwks_url, &jwks_url]
+                        "jwks": [
+                            {
+                                "url": &jwks_url
+                            },
+                            {
+                                "url": &jwks_url
+                            }
+                        ]
                     }
                 }
             }
@@ -80,7 +98,11 @@ async fn build_a_test_harness(
             "authentication": {
                 "experimental" : {
                     "jwt" : {
-                        "jwks_urls": [&jwks_url]
+                        "jwks": [
+                            {
+                                "url": &jwks_url
+                            }
+                        ]
                     }
                 }
             }
@@ -516,7 +538,7 @@ async fn build_jwks_search_components() -> JwksManager {
 
     for s_url in &sets {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
-        urls.push(url);
+        urls.push(JwksConfig { url, issuer: None });
     }
 
     JwksManager::new(urls).await.unwrap()
@@ -531,7 +553,7 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
@@ -547,7 +569,7 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
@@ -577,7 +599,7 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
         alg: Algorithm::ES256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
@@ -596,7 +618,7 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         alg: Algorithm::RS256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
@@ -604,4 +626,89 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         "022516583d56b68faf40260fda72978a",
         key.common.key_id.unwrap()
     );
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: u64,
+    iss: Option<String>,
+}
+
+fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
+    let jwks = JwkSet {
+        keys: vec![jwk.clone()],
+    };
+
+    let url = Url::from_str("file:///jwks.json").unwrap();
+    let list = vec![JwksConfig {
+        url: url.clone(),
+        issuer: issuer,
+    }];
+    let map = HashMap::from([(url, jwks); 1]);
+
+    JwksManager::new_test(list, map)
+}
+
+#[tokio::test]
+async fn issuer_check() {
+    let signing_key = SigningKey::random(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    let point = verifying_key.to_encoded_point(false);
+
+    let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
+
+    let jwk = Jwk {
+        common: CommonParameters {
+            public_key_use: Some(PublicKeyUse::Signature),
+            key_operations: Some(vec![KeyOperations::Verify]),
+            algorithm: Some(Algorithm::ES256),
+            key_id: Some("hello".to_string()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+            key_type: EllipticCurveKeyType::EC,
+
+            curve: EllipticCurve::P256,
+            x: base64::encode(point.x().unwrap()),
+            y: base64::encode(point.y().unwrap()),
+        }),
+    };
+
+    let manager = make_manager(&jwk, Some("hello".to_string()));
+
+    let claims = Claims {
+        sub: "test".to_string(),
+        exp: get_current_timestamp(),
+        iss: Some("hallo".to_string()),
+    };
+
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &claims,
+        &encoding_key,
+    )
+    .unwrap();
+    println!("token: {token}");
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            panic!("unexpected response: {res:?}");
+        }
+        ControlFlow::Continue(req) => {
+            println!("got req with issuer check");
+            let claims: Value = req
+                .context
+                .get("apollo_authentication::JWT::claims")
+                .unwrap()
+                .unwrap();
+            println!("claims: {claims:?}");
+            panic!()
+        }
+    }
 }
