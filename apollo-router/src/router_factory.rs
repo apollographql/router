@@ -363,6 +363,7 @@ pub(crate) async fn create_plugins(
     let mandatory_plugins = vec![
         "apollo.include_subgraph_errors",
         "apollo.csrf",
+        "apollo.headers",
         "apollo.telemetry",
     ];
 
