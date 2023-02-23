@@ -8,5 +8,5 @@ Configuration that your plugin exposes will automatically participate in `router
 
 ## Usage
 ```bash
-cargo run -- -s ../graphql/supergraph.graphql -c ./router.yaml
+cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
 ```
