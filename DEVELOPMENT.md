@@ -41,7 +41,7 @@ Use `cargo build --all-targets` to build the project.
 
 Some tests use external services such as Jaeger and Redis. 
 
-To start these service: 
+To start these services: 
 
 ```
 docker-compose up -d
