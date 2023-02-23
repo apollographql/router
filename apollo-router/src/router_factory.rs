@@ -182,10 +182,11 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                                 .map(|apq| apq.enabled)
                                 .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
                             subgraph_root_store,
+                            shaping.enable_subgraph_http2(name),
                         ),
                     ),
                 ),
-                None => Either::B(SubgraphService::new(name, false, subgraph_root_store)),
+                None => Either::B(SubgraphService::new(name, false, subgraph_root_store, true)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -269,10 +270,11 @@ impl YamlRouterFactory {
                                 .map(|apq| apq.enabled)
                                 .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
                             subgraph_root_store,
+                            shaping.enable_subgraph_http2(name),
                         ),
                     ),
                 ),
-                None => Either::B(SubgraphService::new(name, false, subgraph_root_store)),
+                None => Either::B(SubgraphService::new(name, false, subgraph_root_store, true)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
