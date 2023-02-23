@@ -10,6 +10,10 @@ pub struct Lint {
     /// apply formatting fixes
     #[structopt(long)]
     fmt: bool,
+
+    /// skip xtask subproject
+    #[structopt(long)]
+    skip_xtask: bool,
 }
 
 const RUSTFMT_CONFIG: &[&str] = &["imports_granularity=Item", "group_imports=StdExternalCrate"];
@@ -17,27 +21,25 @@ const RUSTFMT_CONFIG: &[&str] = &["imports_granularity=Item", "group_imports=Std
 impl Lint {
     pub fn run(&self) -> Result<()> {
         if self.fmt {
-            let [mut command_1, mut command_2] = Self::fmt_commands()?;
-            let status = command_1.status()?;
-            ensure!(status.success(), "cargo fmt failed");
-            let status = command_2.status()?;
-            ensure!(status.success(), "cargo fmt failed");
+            for mut command in self.fmt_commands()? {
+                let status = command.status()?;
+                ensure!(status.success(), "cargo fmt failed");
+            }
             Ok(())
         } else {
-            self.run_common(Self::check_fmt)
+            self.run_common(|| self.check_fmt())
         }
     }
 
     pub fn run_local(&self) -> Result<()> {
         self.run_common(|| {
-            if Self::check_fmt().is_err() {
+            if self.check_fmt().is_err() {
                 // cargo fmt check failed, this means there is some formatting to do
                 // given this task is running locally, let's do it and let our user know
-                let [mut command_1, mut command_2] = Self::fmt_commands()?;
-                let status = command_1.status()?;
-                ensure!(status.success(), "cargo fmt failed");
-                let status = command_2.status()?;
-                ensure!(status.success(), "cargo fmt failed");
+                for mut command in self.fmt_commands()? {
+                    let status = command.status()?;
+                    ensure!(status.success(), "cargo fmt failed");
+                }
                 eprintln!(
                     "🧹 cargo fmt job is complete 🧹\n\
                     Commit the changes and you should be good to go!"
@@ -54,23 +56,27 @@ impl Lint {
         Ok(())
     }
 
-    fn check_fmt() -> Result<()> {
-        let [mut command_1, mut command_2] = Self::fmt_commands()?;
-        let status = command_1.arg("--check").status()?;
-        ensure!(status.success(), "cargo fmt check failed");
-        let status = command_2.arg("--check").status()?;
-        ensure!(status.success(), "cargo fmt check failed");
+    fn check_fmt(&self) -> Result<()> {
+        for mut command in self.fmt_commands()? {
+            let status = command.arg("--check").status()?;
+            ensure!(status.success(), "cargo fmt failed");
+        }
         Ok(())
     }
 
-    fn fmt_commands() -> Result<[Command; 2]> {
+    fn fmt_commands(&self) -> Result<Vec<Command>> {
+        let mut commands = Vec::new();
         let cargo = which::which("cargo")?;
         let args = ["fmt", "--all", "--", "--config", &RUSTFMT_CONFIG.join(",")];
-        let mut command_1 = Command::new(&cargo);
-        let mut command_2 = Command::new(&cargo);
         let root = &*PKG_PROJECT_ROOT;
-        command_1.args(args).current_dir(root);
-        command_2.args(args).current_dir(root.join("xtask"));
-        Ok([command_1, command_2])
+        let mut command = Command::new(&cargo);
+        command.args(args).current_dir(root);
+        commands.push(command);
+        if !self.skip_xtask {
+            let mut command = Command::new(&cargo);
+            command.args(args).current_dir(root.join("xtask"));
+            commands.push(command);
+        }
+        Ok(commands)
     }
 }
