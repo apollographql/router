@@ -25,10 +25,10 @@ use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
-use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::mpsc;
+use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -178,21 +178,30 @@ impl HttpServerFactory for AxumHttpServerFactory {
             // if we received a TCP listener, reuse it, otherwise create a new one
             let main_listener = match all_routers.main.0.clone() {
                 ListenAddr::SocketAddr(addr) => {
-                    match main_listener.take().and_then(|listener| {
-                        listener.local_addr().ok().and_then(|l| {
-                            if l == ListenAddr::SocketAddr(addr) {
-                                Some(listener)
+                    let tls_config = configuration
+                        .tls
+                        .supergraph
+                        .as_ref()
+                        .map(|tls| tls.tls_config())
+                        .transpose()?;
+                    let tls_acceptor = tls_config.clone().map(TlsAcceptor::from);
+
+                    match main_listener.take() {
+                        Some(Listener::Tcp(listener)) => {
+                            if listener.local_addr().ok() == Some(addr) {
+                                Listener::new_from_listener(listener, tls_acceptor)
                             } else {
-                                None
+                                Listener::new_from_socket_addr(addr, tls_acceptor).await?
                             }
-                        })
-                    }) {
-                        Some(listener) => listener,
-                        None => Listener::Tcp(
-                            TcpListener::bind(addr)
-                                .await
-                                .map_err(ApolloRouterError::ServerCreationError)?,
-                        ),
+                        }
+                        Some(Listener::Tls { listener, .. }) => {
+                            if listener.local_addr().ok() == Some(addr) {
+                                Listener::new_from_listener(listener, tls_acceptor)
+                            } else {
+                                Listener::new_from_socket_addr(addr, tls_acceptor).await?
+                            }
+                        }
+                        _ => Listener::new_from_socket_addr(addr, tls_acceptor).await?,
                     }
                 }
                 #[cfg(unix)]

@@ -184,5 +184,8 @@ tolerations: []
 
 affinity: {}
 
-# set to existing PriorityClass name to control pod preemption by the scheduler
+# -- Set to existing PriorityClass name to control pod preemption by the scheduler
 priorityClassName: ""
+
+# -- Sets the [termination grace period](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution) for Deployment pods
+terminationGracePeriodSeconds: 30

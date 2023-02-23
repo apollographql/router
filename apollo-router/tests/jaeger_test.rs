@@ -13,6 +13,7 @@ use tower::BoxError;
 use crate::common::IntegrationTest;
 use crate::common::ValueExt;
 
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jaeger_tracing() -> Result<(), BoxError> {
     let tracer = opentelemetry_jaeger::new_agent_pipeline()
