@@ -329,7 +329,7 @@ impl Plugin for AuthenticationPlugin {
             });
         }
 
-        tracing::info!(jwks_urls=?init.config.experimental.jwt.jwks, "JWT authentication using JWKSets from these");
+        tracing::info!(jwks=?init.config.experimental.jwt.jwks, "JWT authentication using JWKSets from");
 
         let jwks_manager = JwksManager::new(list).await?;
 
