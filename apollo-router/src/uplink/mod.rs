@@ -1,5 +1,6 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::fmt::Debug;
 use std::time::Duration;
 
 use futures::Stream;
@@ -44,7 +45,11 @@ pub(crate) struct UplinkRequest {
     id: Option<String>,
 }
 
-pub(crate) enum UplinkResponse<Response> {
+#[derive(Debug)]
+pub(crate) enum UplinkResponse<Response>
+where
+    Response: Send + 'static + std::fmt::Debug,
+{
     Result {
         response: Response,
         id: String,
@@ -126,7 +131,7 @@ where
     Query: graphql_client::GraphQLQuery,
     <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
-    Response: Send + 'static,
+    Response: Send + 'static + Debug,
 {
     let (sender, receiver) = channel(2);
     let task = async move {
@@ -145,6 +150,7 @@ where
             match fetch::<Query>(&query_body, &mut endpoints.iter(), timeout).await {
                 Ok(value) => {
                     let response: UplinkResponse<Response> = value.into();
+                    tracing::debug!("uplink response {:?}", response);
                     match response {
                         UplinkResponse::Result {
                             id,
