@@ -367,7 +367,26 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
+    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+}
+
+#[test]
+fn it_doesnt_allow_origins_wildcard() {
+    let cfg = validate_yaml_configuration(
+        r#"
+cors:
+  origins:
+    - "*"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    let error = cfg
+        .cors
+        .into_layer()
+        .expect_err("should have resulted in an error");
+    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
 }
 
 #[test]
@@ -712,4 +731,37 @@ fn test_configuration_validate_and_sanitize() {
         .supergraph(Supergraph::builder().path("/*/whatever").build())
         .build()
         .is_err());
+}
+
+#[test]
+fn load_tls() {
+    let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    cert_path.push("src");
+    cert_path.push("configuration");
+    cert_path.push("testdata");
+    cert_path.push("server.crt");
+    let cert_path = cert_path.to_string_lossy();
+
+    let mut key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    key_path.push("src");
+    key_path.push("configuration");
+    key_path.push("testdata");
+    key_path.push("server.key");
+    let key_path = key_path.to_string_lossy();
+
+    let cfg = validate_yaml_configuration(
+        &format!(
+            r#"
+tls:
+  supergraph:
+    certificate: ${{file.{cert_path}}}
+    certificate_chain: ${{file.{cert_path}}}
+    key: ${{file.{key_path}}}
+"#,
+        ),
+        Expansion::builder().supported_mode("file").build(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    cfg.tls.supergraph.unwrap().tls_config().unwrap();
 }

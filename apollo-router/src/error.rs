@@ -59,12 +59,6 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
-    /// service '{service}' returned no response.
-    SubrequestNoResponse {
-        /// The service that returned no response.
-        service: String,
-    },
-
     /// service '{service}' response was malformed: {reason}
     SubrequestMalformedResponse {
         /// The service that responded with the malformed response.
@@ -178,7 +172,6 @@ impl ErrorExtension for FetchError {
             FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
             FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
             FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
-            FetchError::SubrequestNoResponse { .. } => "SUBREQUEST_NO_RESPONSE",
         }
         .to_string()
     }

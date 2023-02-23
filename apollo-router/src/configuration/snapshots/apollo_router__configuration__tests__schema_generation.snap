@@ -29,11 +29,6 @@ expression: "&schema"
                 "jwks_urls"
               ],
               "properties": {
-                "cooldown": {
-                  "description": "JWKS retrieval cooldown",
-                  "default": null,
-                  "type": "string"
-                },
                 "header_name": {
                   "description": "HTTP header expected to contain JWT",
                   "default": "authorization",
@@ -639,6 +634,19 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.broken": {
+          "description": "This is a broken plugin for testing purposes only.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the broken plugin.",
+              "type": "boolean"
+            }
+          }
+        },
         "experimental.expose_query_plan": {
           "description": "Expose query plan",
           "type": "boolean"
@@ -730,6 +738,19 @@ expression: "&schema"
             "url": {
               "description": "The url you'd like to offload processing to",
               "type": "string"
+            }
+          }
+        },
+        "experimental.restricted": {
+          "description": "Restricted plugin (for testing purposes only)",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the restricted plugin (for testing purposes only)",
+              "type": "boolean"
             }
           }
         }
@@ -1275,12 +1296,17 @@ expression: "&schema"
           "properties": {
             "display_filename": {
               "description": "Display the filename in the logs",
-              "default": true,
+              "default": false,
               "type": "boolean"
             },
             "display_line_number": {
               "description": "Display the line number in the logs",
-              "default": true,
+              "default": false,
+              "type": "boolean"
+            },
+            "display_target": {
+              "description": "Display the target in the logs",
+              "default": false,
               "type": "boolean"
             },
             "format": {
@@ -1369,8 +1395,7 @@ expression: "&schema"
               }
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "metrics": {
           "description": "Metrics configuration",
@@ -1404,7 +1429,61 @@ expression: "&schema"
                                 "properties": {
                                   "default": {
                                     "description": "The optional default value",
-                                    "type": "string",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "named": {
@@ -1438,7 +1517,61 @@ expression: "&schema"
                                     "properties": {
                                       "default": {
                                         "description": "The optional default value",
-                                        "type": "string",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "name": {
@@ -1480,7 +1613,61 @@ expression: "&schema"
                                     "properties": {
                                       "default": {
                                         "description": "The optional default value",
-                                        "type": "string",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "name": {
@@ -1511,7 +1698,61 @@ expression: "&schema"
                                         "properties": {
                                           "default": {
                                             "description": "The optional default value",
-                                            "type": "string",
+                                            "anyOf": [
+                                              {
+                                                "description": "bool values",
+                                                "type": "boolean"
+                                              },
+                                              {
+                                                "description": "i64 values",
+                                                "type": "integer",
+                                                "format": "int64"
+                                              },
+                                              {
+                                                "description": "f64 values",
+                                                "type": "number",
+                                                "format": "double"
+                                              },
+                                              {
+                                                "description": "String values",
+                                                "type": "string"
+                                              },
+                                              {
+                                                "description": "Array of homogeneous values",
+                                                "anyOf": [
+                                                  {
+                                                    "description": "Array of bools",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of integers",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "integer",
+                                                      "format": "int64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of floats",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "number",
+                                                      "format": "double"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of strings",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "string"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            ],
                                             "nullable": true
                                           },
                                           "named": {
@@ -1565,7 +1806,61 @@ expression: "&schema"
                                     "properties": {
                                       "default": {
                                         "description": "The optional default value",
-                                        "type": "string",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "name": {
@@ -1596,7 +1891,61 @@ expression: "&schema"
                                         "properties": {
                                           "default": {
                                             "description": "The optional default value",
-                                            "type": "string",
+                                            "anyOf": [
+                                              {
+                                                "description": "bool values",
+                                                "type": "boolean"
+                                              },
+                                              {
+                                                "description": "i64 values",
+                                                "type": "integer",
+                                                "format": "int64"
+                                              },
+                                              {
+                                                "description": "f64 values",
+                                                "type": "number",
+                                                "format": "double"
+                                              },
+                                              {
+                                                "description": "String values",
+                                                "type": "string"
+                                              },
+                                              {
+                                                "description": "Array of homogeneous values",
+                                                "anyOf": [
+                                                  {
+                                                    "description": "Array of bools",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of integers",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "integer",
+                                                      "format": "int64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of floats",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "number",
+                                                      "format": "double"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of strings",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "string"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            ],
                                             "nullable": true
                                           },
                                           "named": {
@@ -1650,7 +1999,61 @@ expression: "&schema"
                                   },
                                   "value": {
                                     "description": "The value of the attribute to insert",
-                                    "type": "string"
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
                                   }
                                 },
                                 "additionalProperties": false
@@ -1680,7 +2083,61 @@ expression: "&schema"
                                   "properties": {
                                     "default": {
                                       "description": "The optional default value",
-                                      "type": "string",
+                                      "anyOf": [
+                                        {
+                                          "description": "bool values",
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "description": "i64 values",
+                                          "type": "integer",
+                                          "format": "int64"
+                                        },
+                                        {
+                                          "description": "f64 values",
+                                          "type": "number",
+                                          "format": "double"
+                                        },
+                                        {
+                                          "description": "String values",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "description": "Array of homogeneous values",
+                                          "anyOf": [
+                                            {
+                                              "description": "Array of bools",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of integers",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "integer",
+                                                "format": "int64"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of floats",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "number",
+                                                "format": "double"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of strings",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ],
                                       "nullable": true
                                     },
                                     "named": {
@@ -1714,7 +2171,61 @@ expression: "&schema"
                                       "properties": {
                                         "default": {
                                           "description": "The optional default value",
-                                          "type": "string",
+                                          "anyOf": [
+                                            {
+                                              "description": "bool values",
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "description": "i64 values",
+                                              "type": "integer",
+                                              "format": "int64"
+                                            },
+                                            {
+                                              "description": "f64 values",
+                                              "type": "number",
+                                              "format": "double"
+                                            },
+                                            {
+                                              "description": "String values",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "description": "Array of homogeneous values",
+                                              "anyOf": [
+                                                {
+                                                  "description": "Array of bools",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of integers",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of floats",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "number",
+                                                    "format": "double"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of strings",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "nullable": true
                                         },
                                         "name": {
@@ -1756,7 +2267,61 @@ expression: "&schema"
                                       "properties": {
                                         "default": {
                                           "description": "The optional default value",
-                                          "type": "string",
+                                          "anyOf": [
+                                            {
+                                              "description": "bool values",
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "description": "i64 values",
+                                              "type": "integer",
+                                              "format": "int64"
+                                            },
+                                            {
+                                              "description": "f64 values",
+                                              "type": "number",
+                                              "format": "double"
+                                            },
+                                            {
+                                              "description": "String values",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "description": "Array of homogeneous values",
+                                              "anyOf": [
+                                                {
+                                                  "description": "Array of bools",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of integers",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of floats",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "number",
+                                                    "format": "double"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of strings",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "nullable": true
                                         },
                                         "name": {
@@ -1787,7 +2352,61 @@ expression: "&schema"
                                           "properties": {
                                             "default": {
                                               "description": "The optional default value",
-                                              "type": "string",
+                                              "anyOf": [
+                                                {
+                                                  "description": "bool values",
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "description": "i64 values",
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                },
+                                                {
+                                                  "description": "f64 values",
+                                                  "type": "number",
+                                                  "format": "double"
+                                                },
+                                                {
+                                                  "description": "String values",
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "description": "Array of homogeneous values",
+                                                  "anyOf": [
+                                                    {
+                                                      "description": "Array of bools",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of integers",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "integer",
+                                                        "format": "int64"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of floats",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "number",
+                                                        "format": "double"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of strings",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string"
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              ],
                                               "nullable": true
                                             },
                                             "named": {
@@ -1841,7 +2460,61 @@ expression: "&schema"
                                       "properties": {
                                         "default": {
                                           "description": "The optional default value",
-                                          "type": "string",
+                                          "anyOf": [
+                                            {
+                                              "description": "bool values",
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "description": "i64 values",
+                                              "type": "integer",
+                                              "format": "int64"
+                                            },
+                                            {
+                                              "description": "f64 values",
+                                              "type": "number",
+                                              "format": "double"
+                                            },
+                                            {
+                                              "description": "String values",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "description": "Array of homogeneous values",
+                                              "anyOf": [
+                                                {
+                                                  "description": "Array of bools",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of integers",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of floats",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "number",
+                                                    "format": "double"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of strings",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "nullable": true
                                         },
                                         "name": {
@@ -1872,7 +2545,61 @@ expression: "&schema"
                                           "properties": {
                                             "default": {
                                               "description": "The optional default value",
-                                              "type": "string",
+                                              "anyOf": [
+                                                {
+                                                  "description": "bool values",
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "description": "i64 values",
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                },
+                                                {
+                                                  "description": "f64 values",
+                                                  "type": "number",
+                                                  "format": "double"
+                                                },
+                                                {
+                                                  "description": "String values",
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "description": "Array of homogeneous values",
+                                                  "anyOf": [
+                                                    {
+                                                      "description": "Array of bools",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of integers",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "integer",
+                                                        "format": "int64"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of floats",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "number",
+                                                        "format": "double"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of strings",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string"
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              ],
                                               "nullable": true
                                             },
                                             "named": {
@@ -1926,7 +2653,61 @@ expression: "&schema"
                                     },
                                     "value": {
                                       "description": "The value of the attribute to insert",
-                                      "type": "string"
+                                      "anyOf": [
+                                        {
+                                          "description": "bool values",
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "description": "i64 values",
+                                          "type": "integer",
+                                          "format": "int64"
+                                        },
+                                        {
+                                          "description": "f64 values",
+                                          "type": "number",
+                                          "format": "double"
+                                        },
+                                        {
+                                          "description": "String values",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "description": "Array of homogeneous values",
+                                          "anyOf": [
+                                            {
+                                              "description": "Array of bools",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of integers",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "integer",
+                                                "format": "int64"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of floats",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "number",
+                                                "format": "double"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of strings",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -1958,7 +2739,61 @@ expression: "&schema"
                             "properties": {
                               "default": {
                                 "description": "The optional default value",
-                                "type": "string",
+                                "anyOf": [
+                                  {
+                                    "description": "bool values",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "description": "i64 values",
+                                    "type": "integer",
+                                    "format": "int64"
+                                  },
+                                  {
+                                    "description": "f64 values",
+                                    "type": "number",
+                                    "format": "double"
+                                  },
+                                  {
+                                    "description": "String values",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "description": "Array of homogeneous values",
+                                    "anyOf": [
+                                      {
+                                        "description": "Array of bools",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of integers",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "integer",
+                                          "format": "int64"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of floats",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of strings",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ],
                                 "nullable": true
                               },
                               "named": {
@@ -1992,7 +2827,61 @@ expression: "&schema"
                                 "properties": {
                                   "default": {
                                     "description": "The optional default value",
-                                    "type": "string",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "name": {
@@ -2034,7 +2923,61 @@ expression: "&schema"
                                 "properties": {
                                   "default": {
                                     "description": "The optional default value",
-                                    "type": "string",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "name": {
@@ -2065,7 +3008,61 @@ expression: "&schema"
                                     "properties": {
                                       "default": {
                                         "description": "The optional default value",
-                                        "type": "string",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "named": {
@@ -2119,7 +3116,61 @@ expression: "&schema"
                                 "properties": {
                                   "default": {
                                     "description": "The optional default value",
-                                    "type": "string",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "name": {
@@ -2150,7 +3201,61 @@ expression: "&schema"
                                     "properties": {
                                       "default": {
                                         "description": "The optional default value",
-                                        "type": "string",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "named": {
@@ -2204,7 +3309,61 @@ expression: "&schema"
                               },
                               "value": {
                                 "description": "The value of the attribute to insert",
-                                "type": "string"
+                                "anyOf": [
+                                  {
+                                    "description": "bool values",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "description": "i64 values",
+                                    "type": "integer",
+                                    "format": "int64"
+                                  },
+                                  {
+                                    "description": "f64 values",
+                                    "type": "number",
+                                    "format": "double"
+                                  },
+                                  {
+                                    "description": "String values",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "description": "Array of homogeneous values",
+                                    "anyOf": [
+                                      {
+                                        "description": "Array of bools",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of integers",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "integer",
+                                          "format": "int64"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of floats",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of strings",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -2885,6 +4044,7 @@ expression: "&schema"
               "properties": {
                 "attributes": {
                   "description": "Default attributes",
+                  "default": {},
                   "type": "object",
                   "additionalProperties": {
                     "anyOf": [
@@ -3014,7 +4174,7 @@ expression: "&schema"
                 },
                 "service_name": {
                   "description": "The trace service name",
-                  "default": "${env.OTEL_SERVICE_NAME:-router}",
+                  "default": "router",
                   "type": "string"
                 },
                 "service_namespace": {
@@ -3131,6 +4291,7 @@ expression: "&schema"
     "tls": {
       "description": "TLS related configuration options.",
       "default": {
+        "supergraph": null,
         "subgraph": {
           "all": {
             "certificate_authorities": null
@@ -3186,6 +4347,35 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "supergraph": {
+          "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
+          "default": null,
+          "type": "object",
+          "required": [
+            "certificate",
+            "certificate_chain",
+            "key"
+          ],
+          "properties": {
+            "certificate": {
+              "description": "server certificate in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "certificate_chain": {
+              "description": "list of certificate authorities in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "key": {
+              "description": "server key in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         }
       },
       "additionalProperties": false
@@ -3227,6 +4417,11 @@ expression: "&schema"
             },
             "deduplicate_query": {
               "description": "Enable query deduplication",
+              "type": "boolean",
+              "nullable": true
+            },
+            "experimental_enable_http2": {
+              "description": "Enable HTTP2 for subgraphs",
               "type": "boolean",
               "nullable": true
             },
@@ -3403,6 +4598,11 @@ expression: "&schema"
               },
               "deduplicate_query": {
                 "description": "Enable query deduplication",
+                "type": "boolean",
+                "nullable": true
+              },
+              "experimental_enable_http2": {
+                "description": "Enable HTTP2 for subgraphs",
                 "type": "boolean",
                 "nullable": true
               },

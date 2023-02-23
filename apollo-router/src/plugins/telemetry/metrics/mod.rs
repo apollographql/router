@@ -14,7 +14,6 @@ use opentelemetry::metrics::MeterProvider;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Serialize;
-use serde_json::Value;
 use tower::BoxError;
 
 use crate::error::FetchError;
@@ -24,13 +23,14 @@ use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::apollo_exporter::Sender;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
 use crate::router_factory::Endpoint;
 use crate::Context;
 use crate::ListenAddr;
 
-mod aggregation;
+pub(crate) mod aggregation;
 pub(crate) mod apollo;
 pub(crate) mod layer;
 pub(crate) mod otlp;
@@ -40,6 +40,7 @@ pub(crate) mod span_metrics_exporter;
 pub(crate) const METRIC_PREFIX_MONOTONIC_COUNTER: &str = "monotonic_counter.";
 pub(crate) const METRIC_PREFIX_COUNTER: &str = "counter.";
 pub(crate) const METRIC_PREFIX_HISTOGRAM: &str = "histogram.";
+pub(crate) const METRIC_PREFIX_VALUE: &str = "value.";
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 
@@ -87,7 +88,7 @@ pub(crate) struct Insert {
     /// The name of the attribute to insert
     pub(crate) name: String,
     /// The value of the attribute to insert
-    pub(crate) value: String,
+    pub(crate) value: AttributeValue,
 }
 
 /// Configuration to forward from headers/body
@@ -129,7 +130,7 @@ pub(crate) enum HeaderForward {
         /// The optional output name
         rename: Option<String>,
         /// The optional default value
-        default: Option<String>,
+        default: Option<AttributeValue>,
     },
 
     /// Match via rgex
@@ -152,7 +153,7 @@ pub(crate) struct BodyForward {
     /// The name of the attribute
     pub(crate) name: String,
     /// The optional default value
-    pub(crate) default: Option<String>,
+    pub(crate) default: Option<AttributeValue>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
@@ -164,14 +165,14 @@ pub(crate) struct ContextForward {
     /// The optional output name
     pub(crate) rename: Option<String>,
     /// The optional default value
-    pub(crate) default: Option<String>,
+    pub(crate) default: Option<AttributeValue>,
 }
 
 impl HeaderForward {
     pub(crate) fn get_attributes_from_headers(
         &self,
         headers: &HeaderMap,
-    ) -> HashMap<String, String> {
+    ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
         match self {
             HeaderForward::Named {
@@ -181,7 +182,11 @@ impl HeaderForward {
             } => {
                 let value = headers.get(named);
                 if let Some(value) = value
-                    .and_then(|v| v.to_str().ok()?.to_string().into())
+                    .and_then(|v| {
+                        v.to_str()
+                            .ok()
+                            .map(|v| AttributeValue::String(v.to_string()))
+                    })
                     .or_else(|| default.clone())
                 {
                     attributes.insert(rename.clone().unwrap_or_else(|| named.to_string()), value);
@@ -193,7 +198,10 @@ impl HeaderForward {
                     .filter(|(name, _)| matching.is_match(name.as_str()))
                     .for_each(|(name, value)| {
                         if let Ok(value) = value.to_str() {
-                            attributes.insert(name.to_string(), value.to_string());
+                            attributes.insert(
+                                name.to_string(),
+                                AttributeValue::String(value.to_string()),
+                            );
                         }
                     });
             }
@@ -240,7 +248,10 @@ impl ErrorsForward {
         self.include_messages = to_merge.include_messages;
     }
 
-    pub(crate) fn get_attributes_from_error(&self, err: &BoxError) -> HashMap<String, String> {
+    pub(crate) fn get_attributes_from_error(
+        &self,
+        err: &BoxError,
+    ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
         if let Some(fetch_error) = err
             .source()
@@ -250,17 +261,18 @@ impl ErrorsForward {
             let gql_error = fetch_error.to_graphql_error(None);
             // Include error message
             if self.include_messages {
-                attributes.insert("message".to_string(), gql_error.message);
+                attributes.insert(
+                    "message".to_string(),
+                    AttributeValue::String(gql_error.message),
+                );
             }
             // Extract data from extensions
             if let Some(extensions_fw) = &self.extensions {
                 for ext_fw in extensions_fw {
                     let output = ext_fw.path.execute(&gql_error.extensions).unwrap();
                     if let Some(val) = output {
-                        if let Value::String(val_str) = val {
-                            attributes.insert(ext_fw.name.clone(), val_str);
-                        } else {
-                            attributes.insert(ext_fw.name.clone(), val.to_string());
+                        if let Ok(val) = AttributeValue::try_from(val) {
+                            attributes.insert(ext_fw.name.clone(), val);
                         }
                     } else if let Some(default_val) = &ext_fw.default {
                         attributes.insert(ext_fw.name.clone(), default_val.clone());
@@ -268,7 +280,10 @@ impl ErrorsForward {
                 }
             }
         } else if self.include_messages {
-            attributes.insert("message".to_string(), err.to_string());
+            attributes.insert(
+                "message".to_string(),
+                AttributeValue::String(err.to_string()),
+            );
         }
 
         attributes
@@ -281,7 +296,7 @@ impl AttributesForwardConf {
         parts: &Parts,
         context: &Context,
         first_response: &Option<graphql::Response>,
-    ) -> HashMap<String, String> {
+    ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -298,7 +313,7 @@ impl AttributesForwardConf {
                 rename,
             } in from_context
             {
-                match context.get::<_, String>(named) {
+                match context.get::<_, AttributeValue>(named) {
                     Ok(Some(value)) => {
                         attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
                     }
@@ -331,10 +346,8 @@ impl AttributesForwardConf {
                     for body_fw in body_forward {
                         let output = body_fw.path.execute(body).unwrap();
                         if let Some(val) = output {
-                            if let Value::String(val_str) = val {
-                                attributes.insert(body_fw.name.clone(), val_str);
-                            } else {
-                                attributes.insert(body_fw.name.clone(), val.to_string());
+                            if let Ok(val) = AttributeValue::try_from(val) {
+                                attributes.insert(body_fw.name.clone(), val);
                             }
                         } else if let Some(default_val) = &body_fw.default {
                             attributes.insert(body_fw.name.clone(), default_val.clone());
@@ -348,7 +361,10 @@ impl AttributesForwardConf {
     }
 
     /// Get attributes from context
-    pub(crate) fn get_attributes_from_context(&self, context: &Context) -> HashMap<String, String> {
+    pub(crate) fn get_attributes_from_context(
+        &self,
+        context: &Context,
+    ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
 
         if let Some(from_context) = &self.context {
@@ -358,7 +374,7 @@ impl AttributesForwardConf {
                 rename,
             } in from_context
             {
-                match context.get::<_, String>(named) {
+                match context.get::<_, AttributeValue>(named) {
                     Ok(Some(value)) => {
                         attributes.insert(rename.as_ref().unwrap_or(named).clone(), value);
                     }
@@ -381,7 +397,7 @@ impl AttributesForwardConf {
         &self,
         headers: &HeaderMap,
         body: &T,
-    ) -> HashMap<String, String> {
+    ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -405,10 +421,8 @@ impl AttributesForwardConf {
                 for body_fw in body_forward {
                     let output = body_fw.path.execute(body).unwrap();
                     if let Some(val) = output {
-                        if let Value::String(val_str) = val {
-                            attributes.insert(body_fw.name.clone(), val_str);
-                        } else {
-                            attributes.insert(body_fw.name.clone(), val.to_string());
+                        if let Ok(val) = AttributeValue::try_from(val) {
+                            attributes.insert(body_fw.name.clone(), val);
                         }
                     } else if let Some(default_val) = &body_fw.default {
                         attributes.insert(body_fw.name.clone(), default_val.clone());
@@ -424,7 +438,7 @@ impl AttributesForwardConf {
         &self,
         headers: &HeaderMap,
         body: &Request,
-    ) -> HashMap<String, String> {
+    ) -> HashMap<String, AttributeValue> {
         let mut attributes = HashMap::new();
 
         // Fill from static
@@ -448,10 +462,8 @@ impl AttributesForwardConf {
                 for body_fw in body_forward {
                     let output = body_fw.path.execute(body).ok().flatten();
                     if let Some(val) = output {
-                        if let Value::String(val_str) = val {
-                            attributes.insert(body_fw.name.clone(), val_str);
-                        } else {
-                            attributes.insert(body_fw.name.clone(), val.to_string());
+                        if let Ok(val) = AttributeValue::try_from(val) {
+                            attributes.insert(body_fw.name.clone(), val);
                         }
                     } else if let Some(default_val) = &body_fw.default {
                         attributes.insert(body_fw.name.clone(), default_val.clone());
@@ -463,7 +475,10 @@ impl AttributesForwardConf {
         attributes
     }
 
-    pub(crate) fn get_attributes_from_error(&self, err: &BoxError) -> HashMap<String, String> {
+    pub(crate) fn get_attributes_from_error(
+        &self,
+        err: &BoxError,
+    ) -> HashMap<String, AttributeValue> {
         self.errors
             .as_ref()
             .map(|e| e.get_attributes_from_error(err))
@@ -534,9 +549,9 @@ pub(crate) struct BasicMetrics {
     pub(crate) http_requests_duration: Histogram<f64>,
 }
 
-impl Default for BasicMetrics {
-    fn default() -> BasicMetrics {
-        let meter = opentelemetry::global::meter_provider().meter("apollo/router");
+impl BasicMetrics {
+    pub(crate) fn new(meter_provider: &impl MeterProvider) -> BasicMetrics {
+        let meter = meter_provider.meter("apollo/router");
         BasicMetrics {
             http_requests_total: meter
                 .u64_counter("apollo_router_http_requests_total")

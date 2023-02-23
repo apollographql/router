@@ -101,6 +101,10 @@ expression: get_spans()
               [
                 "message",
                 "dropping telemetry..."
+              ],
+              [
+                "message",
+                "tracer shutdown failed: Timeout"
               ]
             ],
             "metadata": {
@@ -144,7 +148,7 @@ expression: get_spans()
                   ],
                   [
                     "apollo_private.field_level_instrumentation_ratio",
-                    0.01
+                    0.0
                   ],
                   [
                     "apollo_private.graphql.variables",

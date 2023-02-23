@@ -1,14 +1,19 @@
-use anyhow::{anyhow, Error, Result};
+use std::str::FromStr;
+
+use anyhow::anyhow;
+use anyhow::Error;
+use anyhow::Result;
 use cargo_metadata::MetadataCommand;
 use chrono::prelude::Utc;
 use git2::Repository;
 use octorust::types::PullsCreateRequest;
 use octorust::Client;
-use std::str::FromStr;
 use structopt::StructOpt;
 use tap::TapFallible;
 use walkdir::WalkDir;
 use xtask::*;
+
+use crate::commands::changeset::slurp_and_remove_changesets;
 
 #[derive(Debug, StructOpt)]
 pub enum Command {
@@ -390,30 +395,11 @@ impl Prepare {
     /// Clear `NEXT_CHANGELOG.md` leaving only the template.
     fn finalize_changelog(&self, version: &str) -> Result<()> {
         println!("finalizing changelog");
-        let next_changelog = std::fs::read_to_string("./NEXT_CHANGELOG.md")?;
         let changelog = std::fs::read_to_string("./CHANGELOG.md")?;
-        let changes_regex = regex::Regex::new(
-            r"(?ms)(?P<example>^<!-- <KEEP>.*^</KEEP> -->\s*)(?P<newChangelog>.*)?",
-        )?;
-        let captures = changes_regex
-            .captures(&next_changelog)
-            .expect("changelog format was unexpected1");
-
-        // There must be a block like this in the CHANGELOG.
-        //
-        // <!-- <KEEP>
-        //   Anything here.  Doesn't matter.
-        // </KEEP> -->
-        captures.name("example").expect("example block was not found in changelog; see xtask release command source code for expectation of example block");
-
-        let new_changelog_text = captures
-            .name("newChangelog")
-            .expect("newChangelog was not found, possibly because the format was unexpected")
-            .as_str();
-
-        let new_next_changelog = changes_regex.replace(&next_changelog, "${example}");
 
         let semver_heading = "This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).";
+
+        let new_changelog = slurp_and_remove_changesets();
 
         let update_regex =
             regex::Regex::new(format!("(?ms){}\n", regex::escape(semver_heading)).as_str())?;
@@ -424,11 +410,10 @@ impl Prepare {
                 semver_heading,
                 version,
                 chrono::Utc::now().date_naive(),
-                new_changelog_text
+                &new_changelog,
             ),
         );
         std::fs::write("./CHANGELOG.md", updated.to_string())?;
-        std::fs::write("./NEXT_CHANGELOG.md", new_next_changelog.to_string())?;
         Ok(())
     }
     /// Update the license list with `cargo about generate --workspace -o licenses.html about.hbs`.

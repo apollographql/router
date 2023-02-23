@@ -73,6 +73,8 @@ struct Shaping {
     /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
+    /// Enable HTTP2 for subgraphs
+    experimental_enable_http2: Option<bool>,
 }
 
 impl Merge for Shaping {
@@ -92,6 +94,11 @@ impl Merge for Shaping {
                     .experimental_retry
                     .as_ref()
                     .or(fallback.experimental_retry.as_ref())
+                    .cloned(),
+                experimental_enable_http2: self
+                    .experimental_enable_http2
+                    .as_ref()
+                    .or(fallback.experimental_enable_http2.as_ref())
                     .cloned(),
             },
         }
@@ -436,6 +443,14 @@ impl TrafficShaping {
         } else {
             Either::B(service)
         }
+    }
+
+    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> bool {
+        self.config
+            .subgraphs
+            .get(service_name)
+            .and_then(|subgraph| subgraph.shaping.experimental_enable_http2)
+            .unwrap_or(true)
     }
 }
 

@@ -23,7 +23,8 @@
       "Security": {
         "CORS": "/configuration/cors",
         "CSRF prevention": "/configuration/csrf",
-        "JWT Authentication (experimental)": "/configuration/authn-jwt"
+        "JWT Authentication (experimental)": "/configuration/authn-jwt",
+        "Privacy and data collection": "/privacy"
       }
     },
     "Monitoring & Metrics": {
@@ -58,7 +59,6 @@
     "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
       "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
-    },
-    "Privacy": "/privacy"
+    }
   }
 }
