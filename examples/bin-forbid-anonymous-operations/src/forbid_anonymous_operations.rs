@@ -62,6 +62,7 @@ impl Plugin for ForbidAnonymousOperations {
                         .error(
                             graphql::Error::builder()
                                 .message("Anonymous operations are not allowed")
+                                .extension_code("ANONYMOUS_OPERATION")
                                 .build(),
                         )
                         .status_code(StatusCode::BAD_REQUEST)
