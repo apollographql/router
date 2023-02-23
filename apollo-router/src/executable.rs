@@ -5,6 +5,8 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -589,7 +591,12 @@ fn setup_panic_handler() {
     }));
 }
 
+static COPIED: AtomicBool = AtomicBool::new(false);
+
 fn copy_args_to_env() {
+    if Ok(false) != COPIED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
+        panic!("`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen");
+    }
     // Copy all the args to env.
     // This way, Clap is still responsible for the definitive view of what the current options are.
     // But if we have code that relies on env variable then it will still work.
