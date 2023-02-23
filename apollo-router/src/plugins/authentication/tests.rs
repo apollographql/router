@@ -646,7 +646,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
     let url = Url::from_str("file:///jwks.json").unwrap();
     let list = vec![JwksConfig {
         url: url.clone(),
-        issuer: issuer,
+        issuer,
     }];
     let map = HashMap::from([(url, jwks); 1]);
 

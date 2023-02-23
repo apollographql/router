@@ -474,7 +474,7 @@ fn authenticate(
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
 
-    let jwk_opt = match search_jwks(&jwks_manager, &criteria) {
+    let jwk_opt = match search_jwks(jwks_manager, &criteria) {
         Ok(j) => j,
         Err(e) => {
             return failure_message(
