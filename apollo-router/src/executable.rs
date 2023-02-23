@@ -5,6 +5,8 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -129,7 +131,7 @@ enum ConfigSubcommand {
 #[derive(Parser, Debug)]
 #[clap(name = "router", about = "Apollo federation router")]
 #[command(disable_version_flag(true))]
-pub(crate) struct Opt {
+pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
         long = "log",
@@ -340,8 +342,9 @@ impl Executable {
         schema: Option<SchemaSource>,
         entitlement: Option<EntitlementSource>,
         config: Option<ConfigurationSource>,
+        cli_args: Option<Opt>,
     ) -> Result<()> {
-        let opt = Opt::parse();
+        let opt = cli_args.unwrap_or_else(Opt::parse);
 
         if opt.version {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
@@ -588,7 +591,12 @@ fn setup_panic_handler() {
     }));
 }
 
+static COPIED: AtomicBool = AtomicBool::new(false);
+
 fn copy_args_to_env() {
+    if Ok(false) != COPIED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
+        panic!("`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen");
+    }
     // Copy all the args to env.
     // This way, Clap is still responsible for the definitive view of what the current options are.
     // But if we have code that relies on env variable then it will still work.
