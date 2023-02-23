@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::SinkExt;
 use futures::StreamExt;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -18,28 +19,28 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
-use super::new_service::NewService;
-use super::subgraph_service::SubgraphServiceFactory;
+use super::new_service::ServiceFactory;
 use super::Plugins;
+use super::SubgraphServiceFactory;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
+use crate::json_ext::Object;
+use crate::json_ext::Path;
+use crate::json_ext::PathElement;
 use crate::json_ext::ValueExt;
 use crate::services::execution;
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::Schema;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::spec::Schema;
 
 /// [`Service`] for query execution.
 #[derive(Clone)]
-pub(crate) struct ExecutionService<SF: SubgraphServiceFactory> {
+pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_creator: Arc<SF>,
+    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }
 
-impl<SF> Service<ExecutionRequest> for ExecutionService<SF>
-where
-    SF: SubgraphServiceFactory,
-{
+impl Service<ExecutionRequest> for ExecutionService {
     type Response = ExecutionResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -75,7 +76,7 @@ where
                 .query_plan
                 .execute(
                     &context,
-                    &this.subgraph_creator,
+                    &this.subgraph_service_factory,
                     &Arc::new(req.supergraph_request),
                     &this.schema,
                     sender,
@@ -90,18 +91,33 @@ where
             };
 
             let schema = this.schema.clone();
+            let mut nullified_paths: Vec<Path> = vec![];
 
             let stream = stream
-                .map(move |mut response: Response| {
+                .filter_map(move |mut response: Response| {
+                    // responses that would fall under a path that was previously nullified are not sent
+                    if nullified_paths.iter().any(|path| match &response.path {
+                        None => false,
+                        Some(response_path) => response_path.starts_with(path),
+                    }) {
+                        if response.has_next == Some(false) {
+                            return ready(Some(Response::builder().has_next(false).build()));
+                        } else {
+                            return ready(None);
+                        }
+                    }
+
                     let has_next = response.has_next.unwrap_or(true);
                     tracing::debug_span!("format_response").in_scope(|| {
-                        query.format_response(
+                        let paths = query.format_response(
                             &mut response,
                             operation_name.as_deref(),
                             is_deferred,
                             variables.clone(),
                             schema.api_schema(),
-                        )
+                        );
+
+                        nullified_paths.extend(paths.into_iter());
                     });
 
                     match (response.path.as_ref(), response.data.as_ref()) {
@@ -110,7 +126,11 @@ where
                                 response.has_next = Some(has_next);
                             }
 
-                            response
+                            response.errors.retain(|error| match &error.path {
+                                    None => true,
+                                    Some(error_path) => query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path),
+                                });
+                            ready(Some(response))
                         }
                         // if the deferred response specified a path, we must extract the
                         // values matched by that path and create a separate response for
@@ -124,36 +144,122 @@ where
                         // under an array would generate one response par array element
                         (Some(response_path), Some(response_data)) => {
                             let mut sub_responses = Vec::new();
-                            response_data.select_values_and_paths(response_path, |path, value| {
-                                sub_responses.push((path.clone(), value.clone()));
+                            // TODO: this selection at `response_path` below is applied on the response data _after_
+                            // is has been post-processed with the user query (in the "format_response" span above).
+                            // It is not quite right however, because `response_path` (sent by the query planner) 
+                            // may contain `PathElement::Fragment`, whose goal is to filter out only those entities that
+                            // match the fragment type. However, because the data is been filtered, `response_data` will
+                            // not contain the `__typename` value for entities (even though those are in the unfiltered
+                            // data), at least unless the user query selects them manually. The result being that those
+                            // `PathElement::Fragment` in the path will be essentially ignored (we'll match any object
+                            // for which we don't have a `__typename` as we would otherwise miss the data that we need
+                            // to return). I believe this might make it possible to return some data that should not have
+                            // been returned (at least not in that particular response). And while this is probably only
+                            // true in fairly contrived examples, this is not working as intended by the query planner,
+                            // so it is dodgy and could create bigger problems in the future.
+                            response_data.select_values_and_paths(&schema, response_path, |path, value| {
+                                // if the deferred path points to an array, split it into multiple subresponses
+                                // because the root must be an object
+                                if let Value::Array(array) = value {
+                                    let mut parent = path.clone();
+                                    for (i, value) in array.iter().enumerate() {
+                                        parent.push(PathElement::Index(i));
+                                        sub_responses.push((parent.clone(), value.clone()));
+                                        parent.pop();
+                                    }
+                                } else {
+                                    sub_responses.push((path.clone(), value.clone()));
+                                }
                             });
 
-                            Response::builder()
-                                .has_next(has_next)
-                                .incremental(
-                                    sub_responses
-                                        .into_iter()
-                                        .map(move |(path, data)| {
-                                            let errors = response
-                                                .errors
-                                                .iter()
-                                                .filter(|error| match &error.path {
-                                                    None => false,
-                                                    Some(err_path) => err_path.starts_with(&path),
-                                                })
-                                                .cloned()
-                                                .collect::<Vec<_>>();
+                            let query = query.clone();
+                            let operation_name = operation_name.clone();
+
+                            let incremental = sub_responses
+                                .into_iter()
+                                .filter_map(move |(path, data)| {
+                                    // filter errors that match the path of this incremental response
+                                    let errors = response
+                                        .errors
+                                        .iter()
+                                        .filter(|error| match &error.path {
+                                            None => false,
+                                            Some(error_path) =>query.contains_error_path(operation_name.as_deref(), response.subselection.as_deref(), response.path.as_ref(), error_path) &&  error_path.starts_with(&path),
+
+                                        })
+                                        .cloned()
+                                        .collect::<Vec<_>>();
+
+                                        let extensions: Object = response
+                                        .extensions
+                                        .iter()
+                                        .map(|(key, value)| {
+                                            if key.as_str() == "valueCompletion" {
+                                                let value = match value.as_array() {
+                                                    None => Value::Null,
+                                                    Some(v) => Value::Array(
+                                                        v.iter()
+                                                            .filter(|ext| {
+                                                                match ext
+                                                                    .as_object()
+                                                                    .as_ref()
+                                                                    .and_then(|ext| {
+                                                                        ext.get("path")
+                                                                    })
+                                                                    .and_then(|v| {
+                                                                        let p:Option<Path> = serde_json_bytes::from_value(v.clone()).ok();
+                                                                        p
+                                                                    }) {
+                                                                    None => false,
+                                                                    Some(ext_path) => {
+                                                                        ext_path
+                                                                            .starts_with(
+                                                                                &path,
+                                                                            )
+                                                                    }
+                                                                }
+                                                            })
+                                                            .cloned()
+                                                            .collect(),
+                                                    ),
+                                                };
+
+                                                (key.clone(), value)
+                                            } else {
+                                                (key.clone(), value.clone())
+                                            }
+                                        })
+                                        .collect();
+
+                                    // an empty response should not be sent
+                                    // still, if there's an error or extension to show, we should
+                                    // send it
+                                    if !data.is_null()
+                                        || !errors.is_empty()
+                                        || !extensions.is_empty()
+                                    {
+                                        Some(
                                             IncrementalResponse::builder()
                                                 .and_label(response.label.clone())
                                                 .data(data)
                                                 .path(path)
                                                 .errors(errors)
-                                                .extensions(response.extensions.clone())
-                                                .build()
-                                        })
-                                        .collect(),
-                                )
-                                .build()
+                                                .extensions(extensions)
+                                                .build(),
+                                        )
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
+
+                            ready(Some(
+                                Response::builder()
+                                    .has_next(has_next)
+                                    .incremental(incremental)
+                                    .build(),
+                            ))
+
                         }
                     }
                 })
@@ -229,39 +335,24 @@ async fn consume_responses(
     }
 }
 
-pub(crate) trait ExecutionServiceFactory:
-    NewService<ExecutionRequest, Service = Self::ExecutionService> + Clone + Send + 'static
-{
-    type ExecutionService: Service<
-            ExecutionRequest,
-            Response = ExecutionResponse,
-            Error = BoxError,
-            Future = Self::Future,
-        > + Send;
-    type Future: Send;
-}
-
 #[derive(Clone)]
-pub(crate) struct ExecutionCreator<SF: SubgraphServiceFactory> {
+pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) subgraph_creator: Arc<SF>,
+    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
 }
 
-impl<SF> NewService<ExecutionRequest> for ExecutionCreator<SF>
-where
-    SF: SubgraphServiceFactory,
-{
+impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
     type Service = execution::BoxService;
 
-    fn new_service(&self) -> Self::Service {
+    fn create(&self) -> Self::Service {
         ServiceBuilder::new()
             .layer(AllowOnlyHttpPostMutationsLayer::default())
             .service(
                 self.plugins.iter().rev().fold(
                     crate::services::execution_service::ExecutionService {
                         schema: self.schema.clone(),
-                        subgraph_creator: self.subgraph_creator.clone(),
+                        subgraph_service_factory: self.subgraph_service_factory.clone(),
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),
@@ -269,11 +360,4 @@ where
             )
             .boxed()
     }
-}
-
-impl<SF: SubgraphServiceFactory> ExecutionServiceFactory for ExecutionCreator<SF> {
-    type ExecutionService = execution::BoxService;
-    type Future = <<ExecutionCreator<SF> as NewService<ExecutionRequest>>::Service as Service<
-        ExecutionRequest,
-    >>::Future;
 }

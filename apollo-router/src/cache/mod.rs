@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
@@ -9,10 +10,14 @@ use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
 
+pub(crate) mod redis;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
-pub(crate) const DEFAULT_CACHE_CAPACITY: usize = 512;
+pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
+    Some(v) => v,
+    None => unreachable!(),
+};
 
 /// Cache implementation with query deduplication
 #[derive(Clone)]
@@ -26,15 +31,27 @@ where
     K: KeyType + 'static,
     V: ValueType + 'static,
 {
-    pub(crate) async fn new() -> Self {
-        Self::with_capacity(DEFAULT_CACHE_CAPACITY, None).await
-    }
-
-    pub(crate) async fn with_capacity(capacity: usize, redis_urls: Option<Vec<String>>) -> Self {
+    pub(crate) async fn with_capacity(
+        capacity: NonZeroUsize,
+        redis_urls: Option<Vec<String>>,
+        caller: &str,
+    ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
-            storage: CacheStorage::new(capacity, redis_urls).await,
+            storage: CacheStorage::new(capacity, redis_urls, caller).await,
         }
+    }
+
+    pub(crate) async fn from_configuration(
+        config: &crate::configuration::Cache,
+        caller: &str,
+    ) -> Self {
+        Self::with_capacity(
+            config.in_memory.limit,
+            config.redis.as_ref().map(|c| c.urls.clone()),
+            caller,
+        )
+        .await
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
@@ -96,7 +113,7 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.storage.insert(key, value.clone()).await;
+        self.storage.insert(key, value).await;
     }
 
     async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
@@ -105,6 +122,10 @@ where
         let mut locked_wait_map = self.wait_map.lock().await;
         let _ = locked_wait_map.remove(key);
         let _ = sender.send(value);
+    }
+
+    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+        self.storage.in_memory_keys().await
     }
 }
 
@@ -177,6 +198,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZeroUsize;
+
     use futures::stream::FuturesUnordered;
     use futures::stream::StreamExt;
     use mockall::mock;
@@ -187,7 +210,8 @@ mod tests {
     #[tokio::test]
     async fn example_cache_usage() {
         let k = "key".to_string();
-        let cache = DeduplicatingCache::with_capacity(1, None).await;
+        let cache =
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(1).unwrap(), None, "test").await;
 
         let entry = cache.get(&k).await;
 
@@ -204,7 +228,7 @@ mod tests {
     #[test(tokio::test)]
     async fn it_should_enforce_cache_limits() {
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(13, None).await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(13).unwrap(), None, "test").await;
 
         for i in 0..14 {
             let entry = cache.get(&i).await;
@@ -227,7 +251,7 @@ mod tests {
         mock.expect_retrieve().times(1).return_const(1usize);
 
         let cache: DeduplicatingCache<usize, usize> =
-            DeduplicatingCache::with_capacity(10, None).await;
+            DeduplicatingCache::with_capacity(NonZeroUsize::new(10).unwrap(), None, "test").await;
 
         // Let's trigger 100 concurrent gets of the same value and ensure only
         // one delegated retrieve is made

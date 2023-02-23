@@ -1,4 +1,0 @@
-supergraph:
-  listen: 127.0.0.1:0
-health-check:
-  listen: 127.0.0.1:0

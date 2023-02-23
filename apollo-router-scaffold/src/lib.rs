@@ -126,7 +126,7 @@ mod test {
             .build();
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([
             (
-                format!("type_{}", plugin_type),
+                format!("type_{plugin_type}"),
                 toml::Value::String(plugin_type.to_string()),
             ),
             (
@@ -169,7 +169,7 @@ mod test {
 
             // best effort to prepare the output directory
             let _ = std::fs::remove_dir_all(&output_dir);
-            copy_dir::copy_dir(&temp_dir, &output_dir)
+            copy_dir::copy_dir(temp_dir, &output_dir)
                 .expect("couldn't copy test_scaffold_output directory");
             anyhow::anyhow!(
                 "scaffold test failed: {e}\nYou can find the scaffolded project at '{}'",

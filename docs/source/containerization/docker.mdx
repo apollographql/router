@@ -11,13 +11,13 @@ The default behaviour of the router images is suitable for a quickstart or devel
 
 Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
-Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.4.0`
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.11.0`
 
 ## Override the configuration
 
 Our default Docker images include a basic configuration which can be seen [in our repository](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml).  Inside the container, this file is located at `/dist/config/router.yaml`.
 
-If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network inferface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
+If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network interface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
 
 You can provide your own configuration from the host environment to the Router by mounting your configuration to `/dist/config/router.yaml`, as follows:
 
@@ -48,7 +48,7 @@ docker run -p 4000:4000 \
 
 ## Debugging your container
 
-If you run the debug image, then it's easy to debug your container:
+It's easy to debug your container by changing the `entrypoint`
 
 ```bash
 docker run -p 4000:4000 \
@@ -58,17 +58,30 @@ docker run -p 4000:4000 \
   --rm \
   --interactive \
   --tty \
-  --entrypoint=sh
-  ghcr.io/apollographql/router:<image version>-debug
-/dist # pwd
+  --entrypoint=bash \
+  ghcr.io/apollographql/router:<image version>
+dist# pwd
 /dist
-/dist # ls
-LICENSE        config         router
-README.md      licenses.html  schema
-/dist # exit
+dist# ls
+config	router	schema
+dist# exit
+exit
 ```
 
 In this case, we've added interactive and tty flags and changed the entrypoint of the image to be a shell.
+
+## Running the debug container to investigate memory issues
+
+```bash
+docker run -p 4000:4000 \
+  --env APOLLO_GRAPH_REF="<your graph>" \
+  --env APOLLO_KEY="<your key>" \
+  --mount "type=bind,source=/data,target=/dist/data"
+  --rm \
+  ghcr.io/apollographql/router:<image version>-debug
+```
+
+The router will run under the control of heaptrack. The heaptrack output will be saved to the /data directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support staff.
 
 ## Specifying the Supergraph
 
@@ -91,16 +104,26 @@ In the `dockerfiles/diy` directory, we now provide a script, `build_docker_image
 
 ```bash
 % ./build_docker_image.sh -h
-Usage: build_docker_image.sh [-b] [<release>]
-	-b build docker image from a repo, if not present build from a released tarball
+Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
+	-b build docker image from the default repo, if not present build from a released version
+	-d build debug image, router will run under control of heaptrack
+	-r build docker image from a specified repo, only valid with -b flag
 	<release> a valid release. If [-b] is specified, this is optional
 	Example 1: Building HEAD from the repo
 		build_docker_image.sh -b
-	Example 2: Building tag from the repo
-		build_docker_image.sh -b v1.4.0
-	Example 3: Building commit hash from the repo
-		build_docker_image.sh -b 1c220d35acf9ad2537b8edc58c498390b6701d3d
-	Example 4: Building tag v1.4.0 from the released tarball
-		build_docker_image.sh v1.4.0
+	Example 2: Building HEAD from a different repo
+		build_docker_image.sh -b -r /Users/anon/dev/router
+	Example 3: Building tag from the repo
+		build_docker_image.sh -b v0.9.1
+	Example 4: Building commit hash from the repo
+		build_docker_image.sh -b 7f7d223f42af34fad35b898d976bc07d0f5440c5
+	Example 5: Building tag v0.9.1 from the released version
+		build_docker_image.sh v0.9.1
+	Example 6: Building a debug image with tag v0.9.1 from the released version
+		build_docker_image.sh -d v0.9.1
 ```
-Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [distroless images](https://github.com/GoogleContainerTools/distroless) for the final image build. Feel free to modify the script to use images which better suit your own needs.
+Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the [-d] flag since it makes the assumption that there is a `heaptrack` package available to install.
+
+## Building your own container with plugins
+
+Any project created using the method shown in the [Custom router binary](../customizations/custom-binary) section of this documentation contains a Dockerfile. Use and adapt the provided [Dockerfile](https://github.com/apollographql/router/tree/main/apollo-router-scaffold/templates/base/Dockerfile) to suit your usecase.

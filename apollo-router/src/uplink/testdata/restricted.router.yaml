@@ -1,0 +1,8 @@
+health_check:
+  enabled: true
+homepage:
+  enabled: true
+
+plugins:
+  experimental.restricted:
+    enabled: true

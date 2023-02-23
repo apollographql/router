@@ -1,11 +1,15 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
 #![allow(missing_docs)] // FIXME
 #![allow(deprecated)] // Note: Required to prevents complaints on enum declaration
 
+use std::fmt::Debug;
+use std::fmt::Formatter;
 use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
@@ -36,43 +40,52 @@ use self::Event::UpdateSchema;
 use crate::axum_factory::make_axum_router;
 use crate::axum_factory::AxumHttpServerFactory;
 use crate::axum_factory::ListenAddrAndRouter;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::orbiter::OrbiterRouterSuperServiceFactory;
 use crate::plugin::DynPlugin;
-use crate::router_factory::SupergraphServiceConfigurator;
-use crate::router_factory::SupergraphServiceFactory;
-use crate::router_factory::YamlSupergraphServiceFactory;
-use crate::services::layers::apq::APQLayer;
-use crate::services::transport;
+use crate::router::Event::NoMoreEntitlement;
+use crate::router::Event::UpdateEntitlement;
+use crate::router_factory::RouterFactory;
+use crate::router_factory::RouterSuperServiceFactory;
+use crate::router_factory::YamlRouterFactory;
+use crate::services::router;
 use crate::spec::Schema;
+use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
-
-type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
+use crate::uplink::entitlement::Entitlement;
+use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::entitlement_stream::EntitlementStreamExt;
+use crate::uplink::schema_stream::SupergraphSdlQuery;
+use crate::uplink::stream_from_uplink;
+use crate::uplink::Endpoints;
 
 // For now this is unused:
+// TODO: Check with simon once the refactor is complete
 #[allow(unused)]
 // Later we might add a public API for this (probably a builder similar to `test_harness.rs`),
 // see https://github.com/apollographql/router/issues/1496.
 // In the meantime keeping this function helps make sure it still compiles.
-async fn make_transport_service<RF>(
+async fn make_router_service<RF>(
     schema: &str,
     configuration: Arc<Configuration>,
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
-) -> Result<transport::BoxCloneService, BoxError> {
+    entitlement: EntitlementState,
+) -> Result<router::BoxCloneService, BoxError> {
     let schema = Arc::new(Schema::parse(schema, &configuration)?);
-    let service_factory = YamlSupergraphServiceFactory
+    let service_factory = YamlRouterFactory
         .create(configuration.clone(), schema, None, Some(extra_plugins))
         .await?;
-
-    let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
     let web_endpoints = service_factory.web_endpoints();
-    let routers = make_axum_router(service_factory, &configuration, web_endpoints, apq)?;
-    // FIXME: how should
+    let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
     let ListenAddrAndRouter(_listener, router) = routers.main;
+
     Ok(router
-        .map_response(|response| {
-            response.map(|body| {
+        .map_request(|req: router::Request| req.router_request)
+        .map_err(|error| match error {})
+        .map_response(|res| {
+            res.map(|body| {
                 // Axum makes this `body` have type:
                 // https://docs.rs/http-body/0.4.5/http_body/combinators/struct.UnsyncBoxBody.html
                 let mut body = Box::pin(body);
@@ -87,8 +100,8 @@ async fn make_transport_service<RF>(
                 // If we want to use trailers, we may need remove this convertion to `hyper::Body`
                 // and return `UnsyncBoxBody` (a.k.a. `axum::BoxBody`) as-is.
             })
+            .into()
         })
-        .map_err(|error| match error {})
         .boxed_clone())
 }
 
@@ -107,7 +120,13 @@ pub enum ApolloRouterError {
     /// no valid schema was supplied
     NoSchema,
 
-    /// could not create the HTTP pipeline: {0}
+    /// no valid entitlement was supplied
+    NoEntitlement,
+
+    /// entitlement violation
+    EntitlementViolation,
+
+    /// could not create router: {0}
     ServiceCreationError(BoxError),
 
     /// could not create the HTTP server: {0}
@@ -118,7 +137,12 @@ pub enum ApolloRouterError {
 
     /// tried to register two endpoints on `{0}:{1}{2}`
     SameRouteUsedTwice(IpAddr, u16, String),
+
+    /// TLS configuration error: {0}
+    Rustls(rustls::Error),
 }
+
+type SchemaStream = Pin<Box<dyn Stream<Item = String> + Send>>;
 
 /// The user supplied schema. Either a static string or a stream for hot reloading.
 #[derive(From, Display, Derivative)]
@@ -151,10 +175,10 @@ pub enum SchemaSource {
     /// Apollo managed federation.
     #[display(fmt = "Registry")]
     Registry {
-        /// The Apollo key: <YOUR_GRAPH_API_KEY>
+        /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
         apollo_key: String,
 
-        /// The apollo graph reference: <YOUR_GRAPH_ID>@<VARIANT>
+        /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
         apollo_graph_ref: String,
 
         /// The endpoint polled to fetch its latest supergraph schema.
@@ -162,6 +186,9 @@ pub enum SchemaSource {
 
         /// The duration between polling
         poll_interval: Duration,
+
+        /// The HTTP client timeout for each poll
+        timeout: Duration,
     },
 }
 
@@ -221,20 +248,27 @@ impl SchemaSource {
                 apollo_graph_ref,
                 urls,
                 poll_interval,
+                timeout,
             } => {
                 // With regards to ELv2 licensing, the code inside this block
                 // is license key functionality
-                crate::uplink::stream_supergraph(apollo_key, apollo_graph_ref, urls, poll_interval)
-                    .filter_map(|res| {
-                        future::ready(match res {
-                            Ok(schema_result) => Some(UpdateSchema(schema_result.schema)),
-                            Err(e) => {
-                                tracing::error!("{}", e);
-                                None
-                            }
-                        })
+                stream_from_uplink::<SupergraphSdlQuery, String>(
+                    apollo_key,
+                    apollo_graph_ref,
+                    urls.map(Endpoints::round_robin),
+                    poll_interval,
+                    timeout,
+                )
+                .filter_map(|res| {
+                    future::ready(match res {
+                        Ok(schema) => Some(UpdateSchema(schema)),
+                        Err(e) => {
+                            tracing::error!("{}", e);
+                            None
+                        }
                     })
-                    .boxed()
+                })
+                .boxed()
             }
         }
         .chain(stream::iter(vec![NoMoreSchema]))
@@ -288,11 +322,9 @@ impl ConfigurationSource {
     fn into_stream(self) -> impl Stream<Item = Event> {
         match self {
             ConfigurationSource::Static(instance) => {
-                stream::iter(vec![UpdateConfiguration(instance)]).boxed()
+                stream::iter(vec![UpdateConfiguration(*instance)]).boxed()
             }
-            ConfigurationSource::Stream(stream) => {
-                stream.map(|x| UpdateConfiguration(Box::new(x))).boxed()
-            }
+            ConfigurationSource::Stream(stream) => stream.map(UpdateConfiguration).boxed(),
             #[allow(deprecated)]
             ConfigurationSource::File {
                 path,
@@ -309,7 +341,7 @@ impl ConfigurationSource {
                 } else if watch {
                     crate::files::watch(&path)
                         .map(move |_| match ConfigurationSource::read_config(&path) {
-                            Ok(config) => UpdateConfiguration(Box::new(config)),
+                            Ok(config) => UpdateConfiguration(config),
                             Err(err) => {
                                 tracing::error!("{}", err);
                                 NoMoreConfiguration
@@ -321,10 +353,8 @@ impl ConfigurationSource {
                         Ok(configuration) => {
                             #[cfg(any(test, not(unix)))]
                             {
-                                stream::once(future::ready(UpdateConfiguration(Box::new(
-                                    configuration,
-                                ))))
-                                .boxed()
+                                stream::once(future::ready(UpdateConfiguration(configuration)))
+                                    .boxed()
                             }
 
                             #[cfg(all(not(test), unix))]
@@ -341,14 +371,12 @@ impl ConfigurationSource {
                                     }
                                 });
                                 futures::stream::select(
-                                    stream::once(future::ready(UpdateConfiguration(Box::new(
-                                        configuration,
-                                    ))))
-                                    .boxed(),
+                                    stream::once(future::ready(UpdateConfiguration(configuration)))
+                                        .boxed(),
                                     rx.filter_map(
                                         move |()| match ConfigurationSource::read_config(&path) {
                                             Ok(configuration) => future::ready(Some(
-                                                UpdateConfiguration(Box::new(configuration)),
+                                                UpdateConfiguration(configuration),
                                             )),
                                             Err(err) => {
                                                 tracing::error!("{}", err);
@@ -376,6 +404,163 @@ impl ConfigurationSource {
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
         let config = fs::read_to_string(path)?;
         config.parse().map_err(ReadConfigError::Validation)
+    }
+}
+type EntitlementStream = Pin<Box<dyn Stream<Item = Entitlement> + Send>>;
+
+/// Entitlement controls availability of certain features of the Router.
+/// This API experimental and is subject to change outside of semver.
+#[derive(From, Display, Derivative)]
+#[derivative(Debug)]
+#[non_exhaustive]
+pub enum EntitlementSource {
+    /// A static entitlement.
+    #[display(fmt = "Static")]
+    Static { entitlement: Entitlement },
+
+    #[display(fmt = "Env")]
+    Env,
+
+    /// A stream of entitlement.
+    #[display(fmt = "Stream")]
+    Stream(#[derivative(Debug = "ignore")] EntitlementStream),
+
+    /// A raw file that may be watched for changes.
+    #[display(fmt = "File")]
+    File {
+        /// The path of the entitlement file.
+        path: PathBuf,
+
+        /// `true` to watch the file for changes and hot apply them.
+        watch: bool,
+    },
+
+    /// Apollo uplink.
+    #[display(fmt = "Registry")]
+    Registry {
+        /// The Apollo key: `<YOUR_GRAPH_API_KEY>`
+        apollo_key: String,
+
+        /// The apollo graph reference: `<YOUR_GRAPH_ID>@<VARIANT>`
+        apollo_graph_ref: String,
+
+        /// The endpoint polled to fetch its latest supergraph schema.
+        urls: Option<Vec<Url>>,
+
+        /// The duration between polling
+        poll_interval: Duration,
+
+        /// The HTTP client timeout for each poll
+        timeout: Duration,
+    },
+}
+
+impl Default for EntitlementSource {
+    fn default() -> Self {
+        EntitlementSource::Static {
+            entitlement: Default::default(),
+        }
+    }
+}
+
+impl EntitlementSource {
+    /// Convert this entitlement into a stream regardless of if is static or not. Allows for unified handling later.
+    fn into_stream(self) -> impl Stream<Item = Event> {
+        match self {
+            EntitlementSource::Static { entitlement } => {
+                stream::once(future::ready(entitlement)).boxed()
+            }
+            EntitlementSource::Stream(stream) => stream.boxed(),
+            EntitlementSource::File { path, watch } => {
+                // Sanity check, does the schema file exists, if it doesn't then bail.
+                if !path.exists() {
+                    tracing::error!(
+                        "Entitlement file at path '{}' does not exist.",
+                        path.to_string_lossy()
+                    );
+                    stream::empty().boxed()
+                } else {
+                    // The entitlement file exists try and load it
+                    match std::fs::read_to_string(&path).map(|e| e.parse()) {
+                        Ok(Ok(entitlement)) => {
+                            if watch {
+                                crate::files::watch(&path)
+                                    .filter_map(move |_| {
+                                        let path = path.clone();
+                                        async move {
+                                            let result = tokio::fs::read_to_string(&path).await;
+                                            if let Err(e) = &result {
+                                                tracing::error!(
+                                                    "failed to read entitlement file, {}",
+                                                    e
+                                                );
+                                            }
+                                            result.ok()
+                                        }
+                                    })
+                                    .filter_map(|e| async move {
+                                        let result = e.parse();
+                                        if let Err(e) = &result {
+                                            tracing::error!(
+                                                "failed to parse entitlement file, {}",
+                                                e
+                                            );
+                                        }
+                                        result.ok()
+                                    })
+                                    .boxed()
+                            } else {
+                                stream::once(future::ready(entitlement)).boxed()
+                            }
+                        }
+                        Ok(Err(err)) => {
+                            tracing::error!("Failed to parse entitlement: {}", err);
+                            stream::empty().boxed()
+                        }
+                        Err(err) => {
+                            tracing::error!("Failed to read entitlement: {}", err);
+                            stream::empty().boxed()
+                        }
+                    }
+                }
+            }
+            EntitlementSource::Registry {
+                apollo_key,
+                apollo_graph_ref,
+                urls,
+                poll_interval,
+                timeout,
+            } => stream_from_uplink::<EntitlementRequest, Entitlement>(
+                apollo_key,
+                apollo_graph_ref,
+                urls.map(Endpoints::round_robin),
+                poll_interval,
+                timeout,
+            )
+            .filter_map(|res| {
+                future::ready(match res {
+                    Ok(entitlement) => Some(entitlement),
+                    Err(e) => {
+                        tracing::error!("{}", e);
+                        None
+                    }
+                })
+            })
+            .boxed(),
+            EntitlementSource::Env => {
+                match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
+                {
+                    Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),
+                    Ok(Err(err)) => {
+                        tracing::error!("Failed to parse entitlement: {}", err);
+                        stream::empty().boxed()
+                    }
+                    Err(_) => stream::once(future::ready(Entitlement::default())).boxed(),
+                }
+            }
+        }
+        .expand_entitlements()
+        .chain(stream::iter(vec![NoMoreEntitlement]))
     }
 }
 
@@ -483,8 +668,7 @@ impl ShutdownSource {
 ///
 pub struct RouterHttpServer {
     result: Pin<Box<dyn Future<Output = Result<(), ApolloRouterError>> + Send>>,
-    graphql_listen_address: Arc<RwLock<Option<ListenAddr>>>,
-    extra_listen_adresses: Arc<RwLock<Vec<ListenAddr>>>,
+    listen_addresses: Arc<RwLock<ListenAddresses>>,
     shutdown_sender: Option<oneshot::Sender<()>>,
 }
 
@@ -503,6 +687,11 @@ impl RouterHttpServer {
     ///   Optional.
     ///   Specifies where to find the router configuration.
     ///   If not provided, the default configuration as with an empty YAML file.
+    ///
+    /// * `.entitlement(impl Into<`[`EntitlementSource`]`>)`
+    ///   Optional.
+    ///   Specifies where to find the router entitlement which controls if commercial features are enabled or not.
+    ///   If not provided then commercial features will not be enabled.
     ///
     /// * `.shutdown(impl Into<`[`ShutdownSource`]`>)`
     ///   Optional.
@@ -527,6 +716,7 @@ impl RouterHttpServer {
     fn start(
         schema: SchemaSource,
         configuration: Option<ConfigurationSource>,
+        entitlement: Option<EntitlementSource>,
         shutdown: Option<ShutdownSource>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
@@ -534,13 +724,13 @@ impl RouterHttpServer {
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
             schema,
+            entitlement.unwrap_or_default(),
             shutdown_receiver,
         );
         let server_factory = AxumHttpServerFactory::new();
-        let router_factory = YamlSupergraphServiceFactory::default();
+        let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
         let state_machine = StateMachine::new(server_factory, router_factory);
-        let extra_listen_adresses = state_machine.extra_listen_adresses.clone();
-        let graphql_listen_address = state_machine.graphql_listen_address.clone();
+        let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
                 .with_current_subscriber(),
@@ -559,8 +749,7 @@ impl RouterHttpServer {
         RouterHttpServer {
             result,
             shutdown_sender: Some(shutdown_sender),
-            graphql_listen_address,
-            extra_listen_adresses,
+            listen_addresses,
         }
     }
 
@@ -571,7 +760,11 @@ impl RouterHttpServer {
     ///
     /// Note: if configuration is dynamic, the listen address can change over time.
     pub async fn listen_address(&self) -> Option<ListenAddr> {
-        self.graphql_listen_address.read().await.clone()
+        self.listen_addresses
+            .read()
+            .await
+            .graphql_listen_address
+            .clone()
     }
 
     /// Returns the extra listen addresses the router can receive requests to.
@@ -580,7 +773,11 @@ impl RouterHttpServer {
     /// of all addresses used by the router.
     /// Note: if configuration is dynamic, the listen address can change over time.
     pub async fn extra_listen_adresses(&self) -> Vec<ListenAddr> {
-        self.extra_listen_adresses.read().await.clone()
+        self.listen_addresses
+            .read()
+            .await
+            .extra_listen_addresses
+            .clone()
     }
 
     /// Trigger and wait for graceful shutdown
@@ -593,10 +790,9 @@ impl RouterHttpServer {
 }
 
 /// Messages that are broadcast across the app.
-#[derive(Debug)]
 pub(crate) enum Event {
     /// The configuration was updated.
-    UpdateConfiguration(Box<Configuration>),
+    UpdateConfiguration(Configuration),
 
     /// There are no more updates to the configuration
     NoMoreConfiguration,
@@ -607,8 +803,42 @@ pub(crate) enum Event {
     /// There are no more updates to the schema
     NoMoreSchema,
 
+    /// Update entitlement {}
+    UpdateEntitlement(EntitlementState),
+
+    /// There were no more updates to entitlement.
+    NoMoreEntitlement,
+
     /// The server should gracefully shutdown.
     Shutdown,
+}
+
+impl Debug for Event {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            UpdateConfiguration(_) => {
+                write!(f, "UpdateConfiguration(<redacted>)")
+            }
+            NoMoreConfiguration => {
+                write!(f, "NoMoreConfiguration")
+            }
+            UpdateSchema(_) => {
+                write!(f, "UpdateSchema(<redacted>)")
+            }
+            NoMoreSchema => {
+                write!(f, "NoMoreSchema")
+            }
+            UpdateEntitlement(e) => {
+                write!(f, "UpdateEntitlement({e:?})")
+            }
+            NoMoreEntitlement => {
+                write!(f, "NoMoreEntitlement")
+            }
+            Shutdown => {
+                write!(f, "Shutdown")
+            }
+        }
+    }
 }
 
 impl Drop for RouterHttpServer {
@@ -634,6 +864,7 @@ fn generate_event_stream(
     shutdown: ShutdownSource,
     configuration: ConfigurationSource,
     schema: SchemaSource,
+    entitlement: EntitlementSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
     // Chain is required so that the final shutdown message is sent.
@@ -641,6 +872,7 @@ fn generate_event_stream(
         shutdown.into_stream().boxed(),
         configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
+        entitlement.into_stream().boxed(),
         shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
@@ -652,9 +884,7 @@ fn generate_event_stream(
 mod tests {
     use std::env::temp_dir;
 
-    use serde_json::json;
     use serde_json::to_string_pretty;
-    use serde_json::Value;
     use test_log::test;
 
     use super::*;
@@ -665,7 +895,7 @@ mod tests {
 
     fn init_with_server() -> RouterHttpServer {
         let configuration =
-            serde_yaml::from_str::<Configuration>(include_str!("testdata/supergraph_config.yaml"))
+            Configuration::from_str(include_str!("testdata/supergraph_config.router.yaml"))
                 .unwrap();
         let schema = include_str!("testdata/supergraph.graphql");
         RouterHttpServer::builder()
@@ -699,7 +929,7 @@ mod tests {
         request: &graphql::Request,
     ) -> Result<graphql::Response, crate::error::FetchError> {
         Ok(reqwest::Client::new()
-            .post(format!("{}/", listen_addr))
+            .post(format!("{listen_addr}/"))
             .json(request)
             .send()
             .await
@@ -712,7 +942,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_watching() {
         let (path, mut file) = create_temp_file();
-        let contents = include_str!("testdata/supergraph_config.yaml");
+        let contents = include_str!("testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
         let mut stream = ConfigurationSource::File {
             path,
@@ -728,8 +958,10 @@ mod tests {
             UpdateConfiguration(_)
         ));
 
+        // Need different contents, since we won't get an event if content is the same
+        let contents_datadog = include_str!("testdata/datadog.router.yaml");
         // Modify the file and try again
-        write_and_flush(&mut file, contents).await;
+        write_and_flush(&mut file, contents_datadog).await;
         assert!(matches!(
             stream.next().await.unwrap(),
             UpdateConfiguration(_)
@@ -739,31 +971,6 @@ mod tests {
         write_and_flush(&mut file, ":garbage").await;
         let event = stream.into_future().now_or_never();
         assert!(event.is_none() || matches!(event, Some((Some(NoMoreConfiguration), _))));
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn config_dev_mode_without_file() {
-        let mut stream =
-            ConfigurationSource::from(Configuration::builder().dev(true).build().unwrap())
-                .into_stream()
-                .boxed();
-
-        let cfg = match stream.next().await.unwrap() {
-            UpdateConfiguration(configuration) => configuration,
-            _ => panic!("the event from the stream must be UpdateConfiguration"),
-        };
-        assert!(cfg.supergraph.introspection);
-        assert!(cfg.sandbox.enabled);
-        assert!(!cfg.homepage.enabled);
-        assert!(cfg.plugins().iter().any(
-            |(name, val)| name == "experimental.expose_query_plan" && val == &Value::Bool(true)
-        ));
-        assert!(cfg
-            .plugins()
-            .iter()
-            .any(|(name, val)| name == "apollo.include_subgraph_errors"
-                && val == &json!({"all": true})));
-        cfg.validate().unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -797,7 +1004,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn config_by_file_no_watch() {
         let (path, mut file) = create_temp_file();
-        let contents = include_str!("testdata/supergraph_config.yaml");
+        let contents = include_str!("testdata/supergraph_config.router.yaml");
         write_and_flush(&mut file, contents).await;
 
         let mut stream = ConfigurationSource::File {
@@ -829,15 +1036,17 @@ mod tests {
         // First update is guaranteed
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
 
+        // Need different contents, since we won't get an event if content is the same
+        let schema_minimal = include_str!("testdata/minimal_supergraph.graphql");
         // Modify the file and try again
-        write_and_flush(&mut file, schema).await;
+        write_and_flush(&mut file, schema_minimal).await;
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
     }
 
     #[test(tokio::test)]
     async fn schema_by_file_missing() {
         let mut stream = SchemaSource::File {
-            path: temp_dir().join("does_not_exit"),
+            path: temp_dir().join("does_not_exist"),
             watch: true,
             delay: None,
         }

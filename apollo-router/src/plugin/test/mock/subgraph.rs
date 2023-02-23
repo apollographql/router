@@ -14,8 +14,8 @@ use tower::Service;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 type MockResponses = HashMap<Request, Response>;
 
@@ -101,6 +101,7 @@ impl Service<SubgraphRequest> for MockSubgraph {
                     "couldn't find mock for query {}",
                     serde_json::to_string(&req.subgraph_request.body()).unwrap()
                 ))
+                .extension_code("FETCH_ERROR".to_string())
                 .extensions(self.extensions.clone().unwrap_or_default())
                 .build();
             SubgraphResponse::fake_builder()

@@ -8,13 +8,27 @@ use http::Method;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
 
-use super::*;
+use super::DeferredNode;
+use super::Depends;
+use super::FlattenNode;
+use super::OperationKind;
+use super::PlanNode;
+use super::Primary;
+use super::QueryPlan;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
+use crate::plugin;
 use crate::plugin::test::MockSubgraph;
-use crate::plugin::test::MockSubgraphFactory;
+use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
+use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
+use crate::services::SubgraphResponse;
+use crate::services::SubgraphServiceFactory;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
+use crate::Context;
 
 macro_rules! test_query_plan {
     () => {
@@ -59,7 +73,6 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     let query_plan: QueryPlan = QueryPlan {
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
-        options: QueryPlanOptions::default(),
         query: Arc::new(Query::default()),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -80,11 +93,11 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     });
 
     let (sender, _) = futures::channel::mpsc::channel(10);
-    let sf = Arc::new(MockSubgraphFactory {
-        subgraphs: HashMap::from([(
+    let sf = Arc::new(SubgraphServiceFactory {
+        services: Arc::new(HashMap::from([(
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )]),
+        )])),
         plugins: Default::default(),
     });
 
@@ -93,7 +106,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &Context::new(),
             &sf,
             &Default::default(),
-            &Schema::parse(test_schema!(), &Default::default()).unwrap(),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             sender,
         )
         .await;
@@ -114,7 +127,6 @@ async fn fetch_includes_operation_name() {
             referenced_fields_by_type: Default::default(),
         },
         query: Arc::new(Query::default()),
-        options: QueryPlanOptions::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -138,11 +150,11 @@ async fn fetch_includes_operation_name() {
 
     let (sender, _) = futures::channel::mpsc::channel(10);
 
-    let sf = Arc::new(MockSubgraphFactory {
-        subgraphs: HashMap::from([(
+    let sf = Arc::new(SubgraphServiceFactory {
+        services: Arc::new(HashMap::from([(
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )]),
+        )])),
         plugins: Default::default(),
     });
 
@@ -151,7 +163,7 @@ async fn fetch_includes_operation_name() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Schema::parse(test_schema!(), &Default::default()).unwrap(),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             sender,
         )
         .await;
@@ -169,7 +181,6 @@ async fn fetch_makes_post_requests() {
             referenced_fields_by_type: Default::default(),
         },
         query: Arc::new(Query::default()),
-        options: QueryPlanOptions::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -193,11 +204,11 @@ async fn fetch_makes_post_requests() {
 
     let (sender, _) = futures::channel::mpsc::channel(10);
 
-    let sf = Arc::new(MockSubgraphFactory {
-        subgraphs: HashMap::from([(
+    let sf = Arc::new(SubgraphServiceFactory {
+        services: Arc::new(HashMap::from([(
             "product".into(),
             Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )]),
+        )])),
         plugins: Default::default(),
     });
 
@@ -206,7 +217,7 @@ async fn fetch_makes_post_requests() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Schema::parse(test_schema!(), &Default::default()).unwrap(),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             sender,
         )
         .await;
@@ -234,6 +245,8 @@ async fn defer() {
                         operation_name: Some("t".to_string()),
                         operation_kind: OperationKind::Query,
                         id: Some("fetch1".to_string()),
+                        input_rewrites: None,
+                        output_rewrites: None,
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -242,7 +255,7 @@ async fn defer() {
                         defer_label: None,
                     }],
                     label: None,
-                    path: Path(vec![PathElement::Key("t".to_string())]),
+                    query_path: Path(vec![PathElement::Key("t".to_string())]), 
                     subselection: Some("{ y }".to_string()),
                     node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
                         path: Path(vec![PathElement::Key("t".to_string())]),
@@ -274,6 +287,8 @@ async fn defer() {
                             operation_name: None,
                             operation_kind: OperationKind::Query,
                             id: Some("fetch2".to_string()),
+                            input_rewrites: None,
+                            output_rewrites: None,
                         })),
                     }))),
                 }],
@@ -283,7 +298,6 @@ async fn defer() {
                 referenced_fields_by_type: Default::default(),
             },
             query: Arc::new(Query::default()),
-            options: QueryPlanOptions::default(),
         };
 
     let mut mock_x_service = plugin::test::MockSubgraphService::new();
@@ -326,9 +340,9 @@ async fn defer() {
     let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
-    let schema = Schema::parse(schema, &Default::default()).unwrap();
-    let sf = Arc::new(MockSubgraphFactory {
-        subgraphs: HashMap::from([
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let sf = Arc::new(SubgraphServiceFactory {
+        services: Arc::new(HashMap::from([
             (
                 "X".into(),
                 Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
@@ -337,7 +351,7 @@ async fn defer() {
                 "Y".into(),
                 Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
             ),
-        ]),
+        ])),
         plugins: Default::default(),
     });
 
@@ -376,7 +390,7 @@ async fn defer_if_condition() {
           }"#;
 
     let schema = include_str!("testdata/defer_clause.graphql");
-    let schema = Schema::parse(schema, &Default::default()).unwrap();
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
     let root: PlanNode =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -395,7 +409,6 @@ async fn defer_if_condition() {
             )
             .unwrap(),
         ),
-        options: QueryPlanOptions::default(),
         formatted_query_plan: None,
     };
 
@@ -417,11 +430,11 @@ async fn defer_if_condition() {
 
     let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
-    let service_factory = Arc::new(MockSubgraphFactory {
-        subgraphs: HashMap::from([(
+    let service_factory = Arc::new(SubgraphServiceFactory {
+        services: Arc::new(HashMap::from([(
             "accounts".into(),
             Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-        )]),
+        )])),
         plugins: Default::default(),
     });
 
@@ -560,7 +573,6 @@ async fn dependent_mutations() {
             referenced_fields_by_type: Default::default(),
         },
         query: Arc::new(Query::default()),
-        options: QueryPlanOptions::default(),
     };
 
     let mut mock_a_service = plugin::test::MockSubgraphService::new();
@@ -578,8 +590,8 @@ async fn dependent_mutations() {
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
     mock_b_service.expect_call().never();
 
-    let sf = Arc::new(MockSubgraphFactory {
-        subgraphs: HashMap::from([
+    let sf = Arc::new(SubgraphServiceFactory {
+        services: Arc::new(HashMap::from([
             (
                 "A".into(),
                 Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
@@ -588,7 +600,7 @@ async fn dependent_mutations() {
                 "B".into(),
                 Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
             ),
-        ]),
+        ])),
         plugins: Default::default(),
     });
 
@@ -598,7 +610,7 @@ async fn dependent_mutations() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Schema::parse(schema, &Default::default()).unwrap(),
+            &Arc::new(Schema::parse(schema, &Default::default()).unwrap()),
             sender,
         )
         .await;

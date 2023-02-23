@@ -1,14 +1,17 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Axum http server factory. Axum provides routing capability on top of Hyper HTTP.
 use std::pin::Pin;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::Instant;
 
 use axum::extract::Extension;
-use axum::extract::Host;
-use axum::extract::OriginalUri;
-use axum::http::header::HeaderMap;
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::middleware;
+use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
@@ -17,13 +20,14 @@ use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
 use http::Request;
+use http_body::combinators::UnsyncBoxBody;
 use hyper::Body;
 use itertools::Itertools;
 use multimap::MultiMap;
 use serde::Serialize;
-use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
+use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -32,37 +36,29 @@ use tower_http::compression::CompressionLayer;
 use tower_http::compression::DefaultPredicate;
 use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
-use tracing::Span;
 
-use super::handlers::handle_get;
-use super::handlers::handle_get_with_static;
-use super::handlers::handle_post;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
 use super::listeners::ListenersAndRouters;
-use super::utils::check_accept_header;
 use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
-use crate::cache::DeduplicatingCache;
 use crate::configuration::Configuration;
-use crate::configuration::Homepage;
 use crate::configuration::ListenAddr;
-use crate::configuration::Sandbox;
-use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
-use crate::plugins::telemetry::formatters::TRACE_ID_FIELD_NAME;
+use crate::plugins::traffic_shaping::Elapsed;
+use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
-use crate::router_factory::SupergraphServiceFactory;
-use crate::services::layers::apq::APQLayer;
-use crate::services::transport;
-use crate::tracer::TraceId;
+use crate::router_factory::RouterFactory;
+use crate::services::router;
+use crate::uplink::entitlement::EntitlementState;
+use crate::uplink::entitlement::ENTITLEMENT_EXPIRED_SHORT_MESSAGE;
 
 /// A basic http server using Axum.
 /// Uses streaming as primary method of response.
@@ -75,7 +71,7 @@ impl AxumHttpServerFactory {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "UPPERCASE")]
 #[allow(dead_code)]
 enum HealthStatus {
@@ -83,7 +79,7 @@ enum HealthStatus {
     Down,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct Health {
     status: HealthStatus,
 }
@@ -92,30 +88,34 @@ pub(crate) fn make_axum_router<RF>(
     service_factory: RF,
     configuration: &Configuration,
     mut endpoints: MultiMap<ListenAddr, Endpoint>,
-    apq: APQLayer,
+    entitlement: EntitlementState,
 ) -> Result<ListenersAndRouters, ApolloRouterError>
 where
-    RF: SupergraphServiceFactory,
+    RF: RouterFactory,
 {
     ensure_listenaddrs_consistency(configuration, &endpoints)?;
 
     if configuration.health_check.enabled {
         tracing::info!(
-            "healthcheck endpoint exposed at {}/health",
+            "Health check endpoint exposed at {}/health",
             configuration.health_check.listen
         );
         endpoints.insert(
             configuration.health_check.listen.clone(),
-            Endpoint::new(
+            Endpoint::from_router_service(
                 "/health".to_string(),
-                service_fn(move |_req: transport::Request| {
+                service_fn(move |req: router::Request| {
                     let health = Health {
                         status: HealthStatus::Up,
                     };
-
+                    tracing::trace!(?health, request = ?req.router_request, "health check");
                     async move {
-                        Ok(http::Response::builder()
-                            .body(serde_json::to_vec(&health).map_err(BoxError::from)?.into())?)
+                        Ok(router::Response {
+                            response: http::Response::builder().body::<hyper::Body>(
+                                serde_json::to_vec(&health).map_err(BoxError::from)?.into(),
+                            )?,
+                            context: req.context,
+                        })
                     }
                 })
                 .boxed(),
@@ -131,7 +131,7 @@ where
         endpoints
             .remove(&configuration.supergraph.listen)
             .unwrap_or_default(),
-        apq,
+        entitlement,
     )?;
     let mut extra_endpoints = extra_endpoints(endpoints);
 
@@ -158,36 +158,48 @@ impl HttpServerFactory for AxumHttpServerFactory {
         mut main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        entitlement: EntitlementState,
     ) -> Self::Future
     where
-        RF: SupergraphServiceFactory,
+        RF: RouterFactory,
     {
         Box::pin(async move {
-            let apq = APQLayer::with_cache(DeduplicatingCache::new().await);
-
-            let all_routers =
-                make_axum_router(service_factory, &configuration, extra_endpoints, apq)?;
+            let all_routers = make_axum_router(
+                service_factory,
+                &configuration,
+                extra_endpoints,
+                entitlement,
+            )?;
 
             // serve main router
 
             // if we received a TCP listener, reuse it, otherwise create a new one
             let main_listener = match all_routers.main.0.clone() {
                 ListenAddr::SocketAddr(addr) => {
-                    match main_listener.take().and_then(|listener| {
-                        listener.local_addr().ok().and_then(|l| {
-                            if l == ListenAddr::SocketAddr(addr) {
-                                Some(listener)
+                    let tls_config = configuration
+                        .tls
+                        .supergraph
+                        .as_ref()
+                        .map(|tls| tls.tls_config())
+                        .transpose()?;
+                    let tls_acceptor = tls_config.clone().map(TlsAcceptor::from);
+
+                    match main_listener.take() {
+                        Some(Listener::Tcp(listener)) => {
+                            if listener.local_addr().ok() == Some(addr) {
+                                Listener::new_from_listener(listener, tls_acceptor)
                             } else {
-                                None
+                                Listener::new_from_socket_addr(addr, tls_acceptor).await?
                             }
-                        })
-                    }) {
-                        Some(listener) => listener,
-                        None => Listener::Tcp(
-                            TcpListener::bind(addr)
-                                .await
-                                .map_err(ApolloRouterError::ServerCreationError)?,
-                        ),
+                        }
+                        Some(Listener::Tls { listener, .. }) => {
+                            if listener.local_addr().ok() == Some(addr) {
+                                Listener::new_from_listener(listener, tls_acceptor)
+                            } else {
+                                Listener::new_from_socket_addr(addr, tls_acceptor).await?
+                            }
+                        }
+                        _ => Listener::new_from_socket_addr(addr, tls_acceptor).await?,
                     }
                 }
                 #[cfg(unix)]
@@ -213,8 +225,11 @@ impl HttpServerFactory for AxumHttpServerFactory {
                 .local_addr()
                 .map_err(ApolloRouterError::ServerCreationError)?;
 
-            let (main_server, main_shutdown_sender) =
-                serve_router_on_listen_addr(main_listener, all_routers.main.1);
+            let (main_server, main_shutdown_sender) = serve_router_on_listen_addr(
+                main_listener,
+                actual_main_listen_address.clone(),
+                all_routers.main.1,
+            );
 
             tracing::info!(
                 "GraphQL endpoint exposed at {}{} 🚀",
@@ -248,7 +263,7 @@ impl HttpServerFactory for AxumHttpServerFactory {
                     .into_iter()
                     .map(|((listen_addr, listener), router)| {
                         let (server, shutdown_sender) =
-                            serve_router_on_listen_addr(listener, router);
+                            serve_router_on_listen_addr(listener, listen_addr.clone(), router);
                         (
                             server.map(|listener| (listen_addr, listener)),
                             shutdown_sender,
@@ -289,43 +304,22 @@ fn main_endpoint<RF>(
     service_factory: RF,
     configuration: &Configuration,
     endpoints_on_main_listener: Vec<Endpoint>,
-    apq: APQLayer,
+    entitlement: EntitlementState,
 ) -> Result<ListenAddrAndRouter, ApolloRouterError>
 where
-    RF: SupergraphServiceFactory,
+    RF: RouterFactory,
 {
     let cors = configuration.cors.clone().into_layer().map_err(|e| {
         ApolloRouterError::ServiceCreationError(format!("CORS configuration error: {e}").into())
     })?;
 
-    let main_route = main_router::<RF>(configuration, apq)
+    let main_route = main_router::<RF>(configuration)
         .layer(middleware::from_fn(decompress_request_body))
-        .layer(
-            TraceLayer::new_for_http()
-                .make_span_with(PropagatingMakeSpan::new())
-                .on_request(|_: &Request<_>, span: &Span| {
-                    let trace_id = TraceId::maybe_new()
-                        .map(|t| t.to_string())
-                        .unwrap_or_default();
-
-                    span.record(TRACE_ID_FIELD_NAME, &trace_id.as_str());
-                })
-                .on_response(|resp: &Response<_>, duration: Duration, span: &Span| {
-                    // Duration here is instant based
-                    span.record("apollo_private.duration_ns", &(duration.as_nanos() as i64));
-                    if resp.status() >= StatusCode::BAD_REQUEST {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Error.as_str(),
-                        );
-                    } else {
-                        span.record(
-                            "otel.status_code",
-                            &opentelemetry::trace::StatusCode::Ok.as_str(),
-                        );
-                    }
-                }),
-        )
+        .layer(middleware::from_fn_with_state(
+            (entitlement, Instant::now(), Arc::new(AtomicU64::new(0))),
+            entitlement_handler,
+        ))
+        .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { entitlement }))
         .layer(Extension(service_factory))
         .layer(cors)
         // Compress the response body, except for multipart responses such as with `@defer`.
@@ -342,70 +336,130 @@ where
     Ok(ListenAddrAndRouter(listener, route))
 }
 
-pub(super) fn main_router<RF>(configuration: &Configuration, apq: APQLayer) -> axum::Router
-where
-    RF: SupergraphServiceFactory,
-{
-    let mut graphql_configuration = configuration.supergraph.clone();
-    if graphql_configuration.path.ends_with("/*") {
-        // Needed for axum (check the axum docs for more information about wildcards https://docs.rs/axum/latest/axum/struct.Router.html#wildcards)
-        graphql_configuration.path = format!("{}router_extra_path", graphql_configuration.path);
+async fn entitlement_handler<B>(
+    State((entitlement, start, delta)): State<(EntitlementState, Instant, Arc<AtomicU64>)>,
+    request: Request<B>,
+    next: Next<B>,
+) -> Response {
+    if matches!(
+        entitlement,
+        EntitlementState::EntitledHalt | EntitlementState::EntitledWarn
+    ) {
+        ::tracing::error!(
+           monotonic_counter.apollo_router_http_requests_total = 1u64,
+           status = %500u16,
+           error = ENTITLEMENT_EXPIRED_SHORT_MESSAGE,
+        );
+
+        // This will rate limit logs about entitlement to 1 a second.
+        // The way it works is storing the delta in seconds from a starting instant.
+        // If the delta is over one second from the last time we logged then try and do a compare_exchange and if successfull log.
+        // If not successful some other thread will have logged.
+        let last_elapsed_seconds = delta.load(Ordering::SeqCst);
+        let elapsed_seconds = start.elapsed().as_secs();
+        if elapsed_seconds > last_elapsed_seconds
+            && delta
+                .compare_exchange(
+                    last_elapsed_seconds,
+                    elapsed_seconds,
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .is_ok()
+        {
+            ::tracing::error!("{}", ENTITLEMENT_EXPIRED_SHORT_MESSAGE);
+        }
     }
 
-    let apq2 = apq.clone();
-    let get_handler = if configuration.sandbox.enabled {
-        get({
-            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get_with_static(
-                    Sandbox::display_page(),
-                    host,
-                    apq2,
-                    service.new_service().boxed(),
-                    http_request,
-                )
-            }
-        })
-    } else if configuration.homepage.enabled {
-        get({
-            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get_with_static(
-                    Homepage::display_page(),
-                    host,
-                    apq2,
-                    service.new_service().boxed(),
-                    http_request,
-                )
-            }
-        })
+    if matches!(entitlement, EntitlementState::EntitledHalt) {
+        http::Response::builder()
+            .status(StatusCode::INTERNAL_SERVER_ERROR)
+            .body(UnsyncBoxBody::default())
+            .expect("canned response must be valid")
     } else {
+        next.run(request).await
+    }
+}
+
+pub(super) fn main_router<RF>(configuration: &Configuration) -> axum::Router
+where
+    RF: RouterFactory,
+{
+    let mut router = Router::new().route(
+        &configuration.supergraph.sanitized_path(),
         get({
-            move |host: Host, Extension(service): Extension<RF>, http_request: Request<Body>| {
-                handle_get(host, apq2, service.new_service().boxed(), http_request)
+            move |Extension(service): Extension<RF>, request: Request<Body>| {
+                handle_graphql(service.create().boxed(), request)
             }
         })
-    };
+        .post({
+            move |Extension(service): Extension<RF>, request: Request<Body>| {
+                handle_graphql(service.create().boxed(), request)
+            }
+        }),
+    );
 
-    Router::<hyper::Body>::new().route(
-        &graphql_configuration.path,
-        get_handler
-            .post({
-                move |host: Host,
-                      uri: OriginalUri,
-                      request: Json<graphql::Request>,
-                      Extension(service): Extension<RF>,
-                      header_map: HeaderMap| {
-                    {
-                        handle_post(
-                            host,
-                            uri,
-                            request,
-                            apq,
-                            service.new_service().boxed(),
-                            header_map,
-                        )
-                    }
+    if configuration.supergraph.path == "/*" {
+        router = router.route(
+            "/",
+            get({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
                 }
             })
-            .layer(middleware::from_fn(check_accept_header)),
-    )
+            .post({
+                move |Extension(service): Extension<RF>, request: Request<Body>| {
+                    handle_graphql(service.create().boxed(), request)
+                }
+            }),
+        );
+    }
+
+    router
+}
+
+async fn handle_graphql(
+    service: router::BoxService,
+    http_request: Request<Body>,
+) -> impl IntoResponse {
+    tracing::info!(counter.apollo_router_session_count_active = 1,);
+
+    let request: router::Request = http_request.into();
+    let context = request.context.clone();
+
+    let res = service.oneshot(request).await;
+    let dur = context.busy_time().await;
+    let processing_seconds = dur.as_secs_f64();
+
+    tracing::info!(histogram.apollo_router_processing_time = processing_seconds,);
+
+    match res {
+        Err(e) => {
+            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            if let Some(source_err) = e.source() {
+                if source_err.is::<RateLimited>() {
+                    return RateLimited::new().into_response();
+                }
+                if source_err.is::<Elapsed>() {
+                    return Elapsed::new().into_response();
+                }
+            }
+            if e.is::<RateLimited>() {
+                return RateLimited::new().into_response();
+            }
+            if e.is::<Elapsed>() {
+                return Elapsed::new().into_response();
+            }
+
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "router service call failed",
+            )
+                .into_response()
+        }
+        Ok(response) => {
+            tracing::info!(counter.apollo_router_session_count_active = -1,);
+            response.response.into_response()
+        }
+    }
 }

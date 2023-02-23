@@ -1,0 +1,8 @@
+---
+source: apollo-router/src/configuration/yaml.rs
+expression: "format!(\"{:#?}\", parse(yaml).unwrap_err())"
+---
+InvalidConfiguration {
+    message: "duplicated keys detected in your yaml configuration",
+    error: "'test.a', 'c.dup', 'test'",
+}

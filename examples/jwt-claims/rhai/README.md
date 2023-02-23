@@ -1,0 +1,27 @@
+# Rhai script
+
+Demonstrates JWT claim manipulation via Rhai script.
+
+Example JWTs you can use with this example. These JWTS don't expire until 2054, so they'll be good for a while yet...
+
+Valid JWT:
+
+eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImFmZGE4NWUwOWEzMjBjZjc0ODE3Nzg3NDU5MmRlNjRkIn0.eyJpc3MiOiJodHRwczovL2lkcC5sb2NhbCIsImF1ZCI6ImFwaTEiLCJzdWIiOiI1YmU4NjM1OTA3M2M0MzRiYWQyZGEzOTMyMjIyZGFiZSIsImNsaWVudF9pZCI6Im15X2NsaWVudF9hcHAiLCJleHAiOjI2NzMyNjQ3MzcsImlhdCI6MTY3MzI2MTEzNywianRpIjoiOGI3YmMzNGQwMTg1NmNlZDIyYTE5OTRiZGUxYjAwNmUifQ.IYxko-oFtNY3bIFofbFH2XjnXbye96rHIgcdLshbEEtHG_vJmRS3_gHqIsKiUDZ8DPSOa9LxQ3MLn1kcjcaGDg
+
+Invalid JWT (No Issuer defined):
+
+eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImFmZGE4NWUwOWEzMjBjZjc0ODE3Nzg3NDU5MmRlNjRkIn0.eyJhdWQiOiJhcGkxIiwic3ViIjoiNWJlODYzNTkwNzNjNDM0YmFkMmRhMzkzMjIyMmRhYmUiLCJjbGllbnRfaWQiOiJteV9jbGllbnRfYXBwIiwiZXhwIjoyNjczMjY0NzM3LCJpYXQiOjE2NzMyNjExMzcsImp0aSI6IjhiN2JjMzRkMDE4NTZjZWQyMmExOTk0YmRlMWIwMDZlIn0.87IGoxmFkj2tJL7wUG_KH20WpQK35p3Fg1koSHoWp_rqoYrsV1vh-Ij0_jHklGIXNsZ2JqU_FkEr435G9jKE8w
+
+Invalid JWT (Issuer not acceptable):
+
+eyJ0eXAiOiJhdCtqd3QiLCJhbGciOiJFUzI1NiIsImtpZCI6ImFmZGE4NWUwOWEzMjBjZjc0ODE3Nzg3NDU5MmRlNjRkIn0.eyJpc3MiOiJodHRwczovL2RpZmZlcmVudC1pZHAubG9jYWwiLCJhdWQiOiJhcGkxIiwic3ViIjoiNWJlODYzNTkwNzNjNDM0YmFkMmRhMzkzMjIyMmRhYmUiLCJjbGllbnRfaWQiOiJteV9jbGllbnRfYXBwIiwiZXhwIjoyNjczMjY0NzM3LCJpYXQiOjE2NzMyNjExMzcsImp0aSI6IjhiN2JjMzRkMDE4NTZjZWQyMmExOTk0YmRlMWIwMDZlIn0.k4DtEbk18OnLNV0OE6eiTIby4wCF6ouJRW7fwnbm7ECIt0Vai2dJ60nQY1DlCz-GgdCz9eV83VYWlQ4u6c07SA
+
+Usage:
+
+Before you run this example you must edit the path to the jwks.json file in router.yaml so that the URL is a correct absolute URL. Relative file paths are not valid URLs, so we need an absolute path. I've left the absolute path that I use on my laptop in router.yaml so that you can see what a valid URL would look like.
+
+You must also enable commercial feature support in the router by making sure APOLLO_GRAPH_REF is set in your environment.
+
+```bash
+APOLLO_GRAPH_REF= cargo run -- -s ../../graphql/supergraph.graphql -c ./router.yaml
+```

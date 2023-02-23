@@ -2,18 +2,8 @@
 title: Traffic shaping in the Apollo Router
 ---
 
-The Apollo Router supports the following types of traffic shaping between itself and your subgraphs:
-
-- **Sub-query deduplication** - Whenever the router is sending multiple identical in-flight query operations to a subgraph, it can consolidate them into a single request.
-  - Mutation operations are never deduplicated.
-  - Only in-flight requests are deduplicated.
-- **Variable deduplication** - If a request to a subgraph includes multiple GraphQL variables with the same value, the router can replace those with a single variable.
-- **Compression** - The router can compress request bodies to subgraphs (along with response bodies to clients) with a supported algorithm
-  - The router currently supports `gzip`, `br`, and `deflate`.
-- **Global rate limiting** - If you want to rate limit requests to subgraphs or to the router itself.
-- **Timeout**: - Set a timeout to subgraphs and router requests.
-
-Each of these optimizations can reduce network bandwidth and CPU usage for your subgraphs.
+The Apollo Router provides various features to improve the performance and reliability of
+the traffic between the client and router and between the router and subgraphs.
 
 ## Configuration
 
@@ -21,7 +11,6 @@ To enable traffic shaping, add the `traffic_shaping` plugin to your [YAML config
 
 ```yaml title="router.yaml"
 traffic_shaping:
-  deduplicate_variables: true # Enable the variable deduplication optimization.
   router: # Rules applied to requests from clients to the router
     global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
       capacity: 10
@@ -38,6 +27,122 @@ traffic_shaping:
         capacity: 10
         interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
       timeout: 50s # If a request to the subgraph 'products' takes more than 50secs then cancel the request (30 sec by default)
+      experimental_retry:
+        min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
+        ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
+        retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
+        retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
 ```
 
-Any configuration under the `subgraphs` key takes precedence over configuration under the `all` key. In the example above, query deduplication is enabled for all subgraphs _except_ the `products` subgraph.
+## Client side traffic shaping
+
+### Rate limiting
+
+The Apollo Router can apply rate limiting on client requests, as follows:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router: # Rules applied to requests from clients to the router
+    global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
+      capacity: 10
+      interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+```
+
+This rate limiting applies to all requests, there is no filtering per IP or other criteria.
+
+### Timeout
+
+The Apollo Router applies a default limit of 30 seconds to receive the entire client request. That limit is configurable:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  router: 
+    timeout: 50s # If a request to the router takes more than 50secs then cancel the request (30 sec by default)
+```
+
+### Compression
+
+Compression is automatically supported on the client side, depending on the `Accept-Encoding` header provided by the client.
+
+## Subgraph traffic shaping
+
+The Apollo Router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    deduplicate_query: true # Enable query deduplication for all subgraphs.
+  subgraphs: # Rules applied to requests from the router to individual subgraphs
+    products:
+      deduplicate_query: false # Disable query deduplication for the products subgraph.
+```
+
+### Compression
+
+The Apollo Router can compress request bodies to subgraphs (along with response bodies to clients).
+It currently supports these algorithms: `gzip`, `br`, and `deflate`.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    compression: br # Enable brotli compression for all subgraphs.
+```
+
+Subgraph response decompression is always supported for these algorithms: `gzip`, `br`, and `deflate`.
+
+### Rate limiting
+
+Subgraph request rate limiting uses the same configuration as client rate limiting, and is calculated per subgraph, not per backend host.
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    global_rate_limit: # Accept a maximum of 10 requests per 5 secs. Excess requests must be rejected.
+      capacity: 10
+      interval: 5s # Must not be greater than 18_446_744_073_709_551_615 milliseconds and not less than 0 milliseconds
+```
+
+### Experimental request retry
+
+On failure, subgraph requests can be retried automatically. This is deactivated by default for mutations. This uses [Finagle's *RetryBudget* algorithm](https://finagle.github.io/blog/2016/02/08/retry-budgets/), in which every successful request adds an expirable token to a bucket, and every retry consumes a number of those tokens. On top of that, a minimal number of retries per second is available, to test regularly when the retry budget was entirely consumed or on startup when very few requests have been sent. The tokens expire so the budget has a large number of available retries if a lot of recent requests were successful but reduces quickly on frequent failures to avoid sending too much traffic to the subgraph.
+
+It is configurable as follows:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    experimental_retry:
+      min_per_sec: 10 # minimal number of retries per second (`min_per_sec`, default is 10 retries per second)
+      ttl: 10s # for each successful request, we register a token, that expires according to this option (default: 10s)
+      retry_percent: 0.2 # defines the proportion of available retries to the current number of tokens
+      retry_mutations: false # allows retries on mutations. This should only be enabled if mutations are idempotent
+```
+
+### Variable deduplication
+
+When subgraphs are sent entity requests by the Router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
+
+To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent can be deduplicated. This is always active.
+
+### Query deduplication
+
+If the Router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled, the Router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
+
+```yaml title="router.yaml"
+traffic_shaping:
+  all:
+    deduplicate_query: true # Enable query deduplication for all subgraphs.
+```
+
+### Ordering
+
+Traffic shaping always executes these steps in the same order, to ensure a consistent behaviour. Declaration order in the configuration will not affect the runtime order:
+
+- preparing the subgraph request
+- variable deduplication
+- rate limiting
+- request retry
+- timeout
+- query deduplication
+- compression
+- sending the request to the subgraph

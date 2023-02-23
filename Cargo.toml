@@ -8,23 +8,24 @@ members = [
     "examples/async-auth/rust",
     "examples/bin-hello-world",
     "examples/bin-forbid-anonymous-operations",
-    "examples/cookies-to-headers/rhai",
-    "examples/embedded/rust",
     "examples/context/rust",
-    "examples/forbid-anonymous-operations/rust",
-    "examples/forbid-anonymous-operations/rhai",
-    "examples/hello-world/rust",
-    "examples/status-code-propagation/rust",
-    "examples/op-name-to-header/rhai",
-    "examples/logging/rhai",
+    "examples/cookies-to-headers/rhai",
     "examples/data-response-mutate/rhai",
+    "examples/embedded/rust",
     "examples/error-response-mutate/rhai",
-    "examples/subgraph-request-log/rhai",
-    "examples/surrogate-cache-key/rhai",
-    "examples/supergraph-sdl/rust",
+    "examples/forbid-anonymous-operations/rhai",
+    "examples/forbid-anonymous-operations/rust",
+    "examples/hello-world/rust",
     "examples/jwt-auth/rust",
+    "examples/jwt-claims/rhai",
+    "examples/logging/rhai",
+    "examples/op-name-to-header/rhai",
+    "examples/status-code-propagation/rust",
+    "examples/subgraph-request-log/rhai",
+    "examples/supergraph-sdl/rust",
+    "examples/surrogate-cache-key/rhai",
     "fuzz",
-    "xtask",
+    # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
 
 # this makes build scripts and proc macros faster to compile
@@ -40,3 +41,11 @@ incremental = false
 [profile.release-dhat]
 inherits = "release"
 debug = 1
+
+# TODO: to delete
+# [patch.crates-io]
+# opentelemetry = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
+# opentelemetry-http = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
+# opentelemetry-jaeger = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
+# opentelemetry-zipkin = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}
+# opentelemetry-datadog = { git = "https://github.com/open-telemetry/opentelemetry-rust.git", rev = "e5ef3552efab2bdbf2f838023c37461cd799ab2c"}

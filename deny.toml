@@ -16,6 +16,13 @@ yanked = "warn"
 # 2019-12-17 there are no security notice advisories in
 # https://github.com/rustsec/advisory-db
 notice = "warn"
+
+# If this is true, then cargo deny will use the git executable to fetch advisory database.
+# If this is false, then it uses a built-in git library.
+# Setting this to true can be helpful if you have special authentication requirements that cargo-deny does not support.
+# See Git Authentication for more information about setting up git authentication.
+git-fetch-with-cli = true
+
 # A list of advisory IDs to ignore. Note that ignored advisories will still
 # output a note when they are encountered.
 
@@ -44,7 +51,7 @@ allow = [
     "LicenseRef-ring",
     "MIT",
     "MPL-2.0",
-    "LicenseRef-ELv2",
+    "Elastic-2.0",
     "Unicode-DFS-2016"
 ]
 copyleft = "warn"
@@ -99,3 +106,9 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
 github = ["open-telemetry", "apollographql", "tokio-rs"]
+
+[deny]
+name = "openssl-sys"
+# scaffold uses openssl for some reason
+# TODO: Remove the redis wrappers from this list once we move to rustls
+wrappers = ["apollo-router-scaffold", "redis", "redis-cluster-async"]

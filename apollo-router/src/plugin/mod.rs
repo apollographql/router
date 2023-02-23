@@ -5,7 +5,6 @@
 //! Requests received by the router make their way through a processing pipeline. Each request is
 //! processed at:
 //!  - router
-//!  - query planning
 //!  - execution
 //!  - subgraph (multiple in parallel if multiple subgraphs are accessed)
 //!  stages.
@@ -21,9 +20,8 @@ pub mod serde;
 pub mod test;
 
 use std::any::TypeId;
-use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
@@ -44,15 +42,19 @@ use tower::ServiceBuilder;
 use crate::layers::ServiceBuilderExt;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
+use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
-use crate::transport;
 use crate::ListenAddr;
 
 type InstanceFactory =
     fn(&serde_json::Value, Arc<String>) -> BoxFuture<Result<Box<dyn DynPlugin>, BoxError>>;
 
 type SchemaFactory = fn(&mut SchemaGenerator) -> schemars::schema::Schema;
+
+/// Global list of plugins.
+#[linkme::distributed_slice]
+pub static PLUGINS: [Lazy<PluginFactory>] = [..];
 
 /// Initialise details for a plugin
 #[non_exhaustive]
@@ -93,13 +95,45 @@ where
 
 /// Factories for plugin schema and configuration.
 #[derive(Clone)]
-pub(crate) struct PluginFactory {
+pub struct PluginFactory {
+    pub(crate) name: String,
     instance_factory: InstanceFactory,
     schema_factory: SchemaFactory,
     pub(crate) type_id: TypeId,
 }
 
+impl fmt::Debug for PluginFactory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PluginFactory")
+            .field("name", &self.name)
+            .field("type_id", &self.type_id)
+            .finish()
+    }
+}
+
 impl PluginFactory {
+    /// Create a plugin factory.
+    pub fn new<P: Plugin>(group: &str, name: &str) -> PluginFactory {
+        let plugin_factory_name = if group.is_empty() {
+            name.to_string()
+        } else {
+            format!("{group}.{name}")
+        };
+        tracing::debug!(%plugin_factory_name, "creating plugin factory");
+        PluginFactory {
+            name: plugin_factory_name,
+            instance_factory: |configuration, schema| {
+                Box::pin(async move {
+                    let init = PluginInit::try_new(configuration.clone(), schema)?;
+                    let plugin = P::new(init).await?;
+                    Ok(Box::new(plugin) as Box<dyn DynPlugin>)
+                })
+            },
+            schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
+            type_id: TypeId::of::<P>(),
+        }
+    }
+
     pub(crate) async fn create_instance(
         &self,
         configuration: &serde_json::Value,
@@ -121,33 +155,10 @@ impl PluginFactory {
     }
 }
 
-static PLUGIN_REGISTRY: Lazy<Mutex<HashMap<String, PluginFactory>>> = Lazy::new(|| {
-    let m = HashMap::new();
-    Mutex::new(m)
-});
-
-/// Register a plugin factory.
-pub fn register_plugin<P: Plugin>(name: String) {
-    let plugin_factory = PluginFactory {
-        instance_factory: |configuration, schema| {
-            Box::pin(async move {
-                let init = PluginInit::try_new(configuration.clone(), schema)?;
-                let plugin = P::new(init).await?;
-                Ok(Box::new(plugin) as Box<dyn DynPlugin>)
-            })
-        },
-        schema_factory: |gen| gen.subschema_for::<<P as Plugin>::Config>(),
-        type_id: TypeId::of::<P>(),
-    };
-    PLUGIN_REGISTRY
-        .lock()
-        .expect("Lock poisoned")
-        .insert(name, plugin_factory);
-}
-
+// If we wanted to create a custom subset of plugins, this is where we would do it
 /// Get a copy of the registered plugin factories.
-pub(crate) fn plugins() -> HashMap<String, PluginFactory> {
-    PLUGIN_REGISTRY.lock().expect("Lock poisoned").clone()
+pub(crate) fn plugins() -> impl Iterator<Item = &'static Lazy<PluginFactory>> {
+    PLUGINS.iter()
 }
 
 /// All router plugins must implement the Plugin trait.
@@ -173,9 +184,19 @@ pub trait Plugin: Send + Sync + 'static {
     where
         Self: Sized;
 
+    /// This function is EXPERIMENTAL and its signature is subject to change.
+    ///
     /// This service runs at the very beginning and very end of the request lifecycle.
+    /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        service
+    }
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         service
     }
@@ -211,15 +232,6 @@ pub trait Plugin: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
-
-    /// Support downcasting.
-    #[cfg(test)]
-    fn as_any(&self) -> &dyn std::any::Any
-    where
-        Self: Sized,
-    {
-        self
-    }
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -237,6 +249,11 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// It's the entrypoint of every requests and also the last hook before sending the response.
     /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible.
     /// For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+    fn router_service(&self, service: router::BoxService) -> router::BoxService;
+
+    /// This service runs after the HTTP request payload has been deserialized into a GraphQL request,
+    /// and before the GraphQL response payload is serialized into a raw HTTP response.
+    /// Define supergraph_service if your customization needs to interact at the earliest or latest point possible, yet operates on GraphQL payloads.
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService;
 
     /// This service handles initiating the execution of a query plan after it's been generated.
@@ -258,8 +275,11 @@ pub trait DynPlugin: Send + Sync + 'static {
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
-    /// Allow the plugin to be cast to Any.
+    /// Support downcasting
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Support downcasting
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 #[async_trait]
@@ -268,6 +288,10 @@ where
     T: Plugin,
     for<'de> <T as Plugin>::Config: Deserialize<'de>,
 {
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        self.router_service(service)
+    }
+
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         self.supergraph_service(service)
     }
@@ -292,6 +316,10 @@ where
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 /// Register a plugin with a group and a name
@@ -302,16 +330,14 @@ macro_rules! register_plugin {
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
-            #[$crate::_private::ctor::ctor]
-            fn register_plugin() {
-                let qualified_name = if $group == "" {
-                    $name.to_string()
-                } else {
-                    format!("{}.{}", $group, $name)
-                };
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
 
-                $crate::plugin::register_plugin::<$plugin_type>(qualified_name);
-            }
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> =
+                Lazy::new(|| $crate::plugin::PluginFactory::new::<$plugin_type>($group, $name));
         };
     };
 }
@@ -319,19 +345,19 @@ macro_rules! register_plugin {
 /// Handler represents a [`Plugin`] endpoint.
 #[derive(Clone)]
 pub(crate) struct Handler {
-    service: Buffer<transport::BoxService, transport::Request>,
+    service: Buffer<router::BoxService, router::Request>,
 }
 
 impl Handler {
-    pub(crate) fn new(service: transport::BoxService) -> Self {
+    pub(crate) fn new(service: router::BoxService) -> Self {
         Self {
             service: ServiceBuilder::new().buffered().service(service),
         }
     }
 }
 
-impl Service<transport::Request> for Handler {
-    type Response = transport::Response;
+impl Service<router::Request> for Handler {
+    type Response = router::Response;
     type Error = BoxError;
     type Future = ResponseFuture<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
@@ -339,13 +365,13 @@ impl Service<transport::Request> for Handler {
         self.service.poll_ready(cx)
     }
 
-    fn call(&mut self, req: transport::Request) -> Self::Future {
+    fn call(&mut self, req: router::Request) -> Self::Future {
         self.service.call(req)
     }
 }
 
-impl From<transport::BoxService> for Handler {
-    fn from(original: transport::BoxService) -> Self {
+impl From<router::BoxService> for Handler {
+    fn from(original: router::BoxService) -> Self {
         Self::new(original)
     }
 }

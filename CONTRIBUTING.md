@@ -71,7 +71,7 @@ opening [localhost:8888](http://localhost:8888) in your browser.
 
 ### Adding a new page to the documentation
 
-If you're interesed in adding new pages, head over to [the creating pages section](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs#creating-pages).
+If you're interested in adding new pages, head over to [the creating pages section](https://github.com/apollographql/gatsby-theme-apollo/tree/master/packages/gatsby-theme-apollo-docs#creating-pages).
 
 ### Documentation sidebar
 

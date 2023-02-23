@@ -6,9 +6,9 @@
 
 The **Apollo Router** is a configurable, high-performance **graph router** written in Rust to run a [federated supergraph](https://www.apollographql.com/docs/federation/) that uses [Apollo Federation 2](https://www.apollographql.com/docs/federation/v2/federation-2/new-in-federation-2).
 
-Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads.  Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes.  Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format.  We will clearly convey such changes in the release notes.
+Apollo Router is well-tested, regularly benchmarked, includes most major features of Apollo Gateway and is able to serve production-scale workloads. Please note that the (pre-1.0) version is not yet "semver stable" and we may still make breaking changes. Generally speaking, we expect most breaking changes to be on the plugin API and the configuration file format. We will clearly convey such changes in the release notes.
 
-New releases and their release notes (along with notes about any breaking changes) can be found on the [Releases](https://github.com/apollographql/router/releases) page, and the latest release can always be found [on the latest page](https://github.com/apollographql/router/releases/latest).  The `CHANGELOG.md` at the root of this repository also contains _unreleased_ changes in addition to the full history of changes.
+New releases and their release notes (along with notes about any breaking changes) can be found on the [Releases](https://github.com/apollographql/router/releases) page, and the latest release can always be found [on the latest page](https://github.com/apollographql/router/releases/latest). The `CHANGELOG.md` at the root of this repository also contains _unreleased_ changes in addition to the full history of changes.
 
 Currently, we're publishing new releases every 1-2 weeks.
 
@@ -26,11 +26,44 @@ specified via flag, either by an absolute path, or a path relative to the curren
 directory.
 
 ```
+USAGE:
+    router [OPTIONS] [SUBCOMMAND]
+
 OPTIONS:
-    -c, --config <configuration-path>    Configuration file location
-    -s, --supergraph <supergraph-path>   Supergraph Schema location
-    --hr, --hot-reload                   Watches for changes in the supergraph and configuration file
-        --schema                         Prints out a JSON schema of the configuration file
+        --apollo-uplink-endpoints <APOLLO_UPLINK_ENDPOINTS>
+            The endpoints (comma separated) polled to fetch the latest supergraph schema [env:
+            APOLLO_UPLINK_ENDPOINTS=]
+
+        --apollo-uplink-poll-interval <APOLLO_UPLINK_POLL_INTERVAL>
+            The time between polls to Apollo uplink. Minimum 10s [env: APOLLO_UPLINK_POLL_INTERVAL=]
+            [default: 10s]
+
+        --apollo-uplink-timeout <APOLLO_UPLINK_TIMEOUT>
+            The timeout for each of the polls to Apollo Uplink. [env: APOLLO_UPLINK_TIMEOUT=]
+            [default: 30s]
+
+    -c, --config <CONFIG_PATH>
+            Configuration location relative to the project directory [env:
+            APOLLO_ROUTER_CONFIG_PATH=]
+
+    -h, --help
+            Print help information
+
+        --hot-reload
+            Reload configuration and schema files automatically [env: APOLLO_ROUTER_HOT_RELOAD=]
+
+        --log <LOG_LEVEL>
+            Log level (off|error|warn|info|debug|trace) [env: APOLLO_ROUTER_LOG=] [default: info]
+
+    -s, --supergraph <SUPERGRAPH_PATH>
+            Schema location relative to the project directory [env: APOLLO_ROUTER_SUPERGRAPH_PATH=]
+
+    -V, --version
+            Display version and exit
+
+SUBCOMMANDS:
+    config    Configuration subcommands
+    help      Print this message or the help of the given subcommand(s)
 ```
 
 ## Who is Apollo?
@@ -38,7 +71,7 @@ OPTIONS:
 [Apollo](https://apollographql.com/) is building software and a graph platform to unify GraphQL across your apps and services. We help you ship faster with:
 
 * [Apollo Studio](https://www.apollographql.com/studio/develop/) – A free, end-to-end platform for managing your GraphQL lifecycle. Track your GraphQL schemas in a hosted registry to create a source of truth for everything in your graph. Studio provides an IDE (Apollo Explorer) so you can explore data, collaborate on queries, observe usage, and safely make schema changes.
-* [Apollo Federation](https://www.apollographql.com/apollo-federation) – The industry-standard open architecture for building a distributed graph.  Compose and manage your graphs using [Rover](https://www.apollographql.com/rover/) and then use Apollo Router to query plan and route requests across multiple subgraphs.
+* [Apollo Federation](https://www.apollographql.com/apollo-federation) – The industry-standard open architecture for building a distributed graph. Compose and manage your graphs using [Rover](https://www.apollographql.com/rover/) and then use Apollo Router to query plan and route requests across multiple subgraphs.
 * [Apollo Client](https://www.apollographql.com/apollo-client/) – The most popular GraphQL client for the web. Apollo also builds and maintains [Apollo iOS](https://github.com/apollographql/apollo-ios) and [Apollo Android](https://github.com/apollographql/apollo-android).
 * [Apollo Server](https://www.apollographql.com/docs/apollo-server/) – A production-ready JavaScript GraphQL server that connects to any microservice, API, or database. Compatible with all popular JavaScript frameworks and deployable in serverless environments.
 
@@ -82,4 +115,4 @@ Apollo Graph, Inc.
 Source code in this repository is covered by the Elastic License 2.0. The
 default throughout the repository is a license under the Elastic License 2.0,
 unless a file header or a license file in a subdirectory specifies another
-license.  [See the LICENSE](./LICENSE) for the full license text.
+license. [See the LICENSE](./LICENSE) for the full license text.

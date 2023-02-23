@@ -23,16 +23,18 @@ The Apollo Router supports two types of customizations:
 
 ## How customizations work
 
-Before you build a customization, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, three **services** in the router communicate with each other as shown:
+Before you build a customization, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, different **services** in the router communicate with each other as shown:
 
 ```mermaid
 sequenceDiagram
     actor Client
+    participant RS as RouterService<br/>(experimental)
     participant SupergraphService
     participant ExecutionService
     participant SubgraphService(s)
 
-    Client->>SupergraphService: Sends request
+    Client->>RS: Sends request
+    RS->>SupergraphService: Transforms raw HTTP<br/>request into GraphQL/JSON<br/>request
     SupergraphService->>ExecutionService: Initiates query<br/>plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
@@ -45,10 +47,11 @@ sequenceDiagram
     SubgraphService(s)-->>ExecutionService: 
     end
     ExecutionService-->>SupergraphService: Assembles and<br/>returns response
-    SupergraphService-->>Client: Returns response
+    SupergraphService-->>RS: Returns GraphQL/JSON<br/>response
+    RS-->>Client: Returns HTTP<br/>response
 ```
 
-As execution proceeds "left to right" from the `SupergraphService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `SupergraphService`, each service passes the generated response for the client.
+As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
 
 Apollo Router customizations can hook into _any combination_ of these services and modify the request, response, and/or related metadata as they're passed along.
 
@@ -68,15 +71,32 @@ Each Apollo Router service has a corresponding function that a customization can
 <tr>
 <td>
 
+##### `RouterService`
+
+`router_service`
+</td>
+<td>
+
+**Experimental.** Runs at the very beginning and very end of the HTTP request lifecycle.
+
+**This service is currently available only to native Rust plugins, _not_ Rhai scripts.**
+
+Define `router_service` if your customization needs to interact at the earliest or latest point possible. For example, this is a good opportunity to perform JWT validation before allowing a request to proceed further, or to make the payload a valid GraphQL request.
+
+</td>
+</tr>
+<tr>
+<td>
+
 ##### `SupergraphService`
 
 `supergraph_service`
 </td>
 <td>
 
-Runs at the very beginning and very end of the request lifecycle.
+Runs at the very beginning and very end of the GraphQL request lifecycle.
 
-Define `supergraph_service` if your customization needs to interact at the earliest or latest point possible. For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further.
+Define `supergraph_service` if your customization needs to interact with the GraphQL request or the GraphQL response. For example, you can add a check for anonymous queries.
 
 </td>
 </tr>
@@ -111,7 +131,7 @@ Handles communication between the Apollo Router and your subgraphs.
 
 Define `subgraph_service` to configure this communication (for example, to dynamically add HTTP headers to pass to a subgraph).
 
-Whereas other services are called once per client request, this service is called once per _subgraph_ that's required to resolve the client's request. Each call is passed a `subgraph` parameter that indicates the name of the corresponding subgraph
+Whereas other services are called once per client request, this service is called once per _subgraph_ that's required to resolve the client's request. Each call is passed a `subgraph` parameter that indicates the name of the corresponding subgraph.
 
 </td>
 </tr>
@@ -120,7 +140,7 @@ Whereas other services are called once per client request, this service is calle
 </tbody>
 </table>
 
-Each service has a request and response data-structure that holds:
+Each service uses data structures for request and response data that contain:
 * A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
     - The original request from the client
     - A bag of data that can be populated by plugins for communication across the request lifecycle

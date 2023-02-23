@@ -1,9 +1,6 @@
-use std::time::Duration;
-
-use futures::Stream;
-use futures::StreamExt;
+use opentelemetry::sdk::export::metrics::aggregation;
 use opentelemetry::sdk::metrics::selectors;
-use opentelemetry::util::tokio_interval_stream;
+use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::HttpExporterBuilder;
 use opentelemetry_otlp::TonicExporterBuilder;
@@ -44,26 +41,27 @@ impl MetricsConfigurator for super::super::otlp::Config {
         match exporter.exporter {
             Some(exporter) => {
                 let exporter = opentelemetry_otlp::new_pipeline()
-                    .metrics(tokio::spawn, delayed_interval)
+                    .metrics(
+                        selectors::simple::histogram([
+                            0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
+                        ]),
+                        aggregation::stateless_temporality_selector(),
+                        opentelemetry::runtime::Tokio,
+                    )
                     .with_exporter(exporter)
-                    .with_aggregator_selector(selectors::simple::Selector::Exact)
-                    .with_resource(
+                    .with_resource(Resource::new(
                         metrics_config
                             .resources
                             .clone()
                             .into_iter()
                             .map(|(k, v)| KeyValue::new(k, v)),
-                    )
+                    ))
                     .build()?;
-                builder = builder.with_meter_provider(exporter.provider());
+                builder = builder.with_meter_provider(exporter.clone());
                 builder = builder.with_exporter(exporter);
                 Ok(builder)
             }
             None => Err("otlp metric export does not support http yet".into()),
         }
     }
-}
-
-fn delayed_interval(duration: Duration) -> impl Stream<Item = tokio::time::Instant> {
-    tokio_interval_stream(duration).skip(1)
 }

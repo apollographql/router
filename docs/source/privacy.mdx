@@ -4,7 +4,7 @@ title: Privacy and data collection
 
 By default, the Apollo Router collects some anonymous usage data to help us improve the product.
 
-**To opt out of data collection,** set the `APOLLO_TELEMETRY_DISABLED` environment variable to `1` in each environment where you run the Apollo Router.
+**To opt out of data collection,** set the `APOLLO_TELEMETRY_DISABLED` environment variable to `true` in each environment where you run the Apollo Router.
 
 > The Apollo Router doesn't collect _any_ personally identifiable information (such as API keys, graph names, or file paths). For more information on how Apollo collects and uses this data, see [our privacy policy](https://www.apollographql.com/Apollo-Privacy-Policy.pdf).
 
@@ -14,7 +14,7 @@ Unless you opt out, the Apollo Router reports the following data:
 
 - The execution command that was run _(excluding any identifiable arguments such as file-system paths or profile names)_
 - The version of `router` that was executed
-- The configuration properties which have been referenced, but limited to types which could not contain personally identifyable information (e.g., certain scalar types; a property which is set to `true` not the value if it is a `string`)
+- The configuration properties which have been referenced, but limited to types which could not contain personally identifiable information (e.g., certain scalar types; a property which is set to `true` not the value if it is a `string`)
 - A unique, anonymized **machine identifier**, which is the same for every command run on the same machine
 - A unique, anonymized **session identifier**, which is different for every command
 - The SHA-256 hash of the directory that `router` was executed from

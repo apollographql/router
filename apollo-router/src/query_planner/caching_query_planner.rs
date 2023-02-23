@@ -1,3 +1,5 @@
+// This entire file is license key functionality
+
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -8,13 +10,16 @@ use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 use serde_json_bytes::value::Serializer;
 use tower::ServiceExt;
+use tracing::Instrument;
 
 use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
-use crate::*;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::Context;
 
 /// A query planner wrapper that caches results.
 ///
@@ -30,21 +35,79 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
 where
-    T: tower::Service<QueryPlannerRequest, Response = QueryPlannerResponse>,
+    T: tower::Service<
+        QueryPlannerRequest,
+        Response = QueryPlannerResponse,
+        Error = QueryPlannerError,
+    >,
 {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(
         delegate: T,
-        plan_cache_limit: usize,
         schema_id: Option<String>,
-        redis_urls: Option<Vec<String>>,
+        config: &crate::configuration::QueryPlanning,
     ) -> CachingQueryPlanner<T> {
-        let cache = Arc::new(DeduplicatingCache::with_capacity(plan_cache_limit, redis_urls).await);
+        let cache = Arc::new(
+            DeduplicatingCache::from_configuration(&config.experimental_cache, "query planner")
+                .await,
+        );
         Self {
             cache,
             delegate,
             schema_id,
         }
+    }
+
+    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        let keys = self.cache.in_memory_keys().await;
+        keys.into_iter()
+            .take(count)
+            .map(|key| (key.query, key.operation))
+            .collect()
+    }
+
+    pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
+        let schema_id = self.schema_id.clone();
+
+        let mut count = 0usize;
+        for (query, operation) in cache_keys {
+            let caching_key = CachingQueryKey {
+                schema_id: schema_id.clone(),
+                query: query.clone(),
+                operation: operation.to_owned(),
+            };
+            let context = Context::new();
+
+            let entry = self.cache.get(&caching_key).await;
+            if entry.is_first() {
+                let request = QueryPlannerRequest {
+                    query,
+                    operation_name: operation,
+                    context: context.clone(),
+                };
+
+                let res = match self.delegate.ready().await {
+                    Ok(service) => service.call(request).await,
+                    Err(_) => break,
+                };
+
+                match res {
+                    Ok(QueryPlannerResponse { content, .. }) => {
+                        if let Some(content) = &content {
+                            count += 1;
+                            entry.insert(Ok(content.clone())).await;
+                        }
+                    }
+                    Err(error) => {
+                        count += 1;
+                        let e = Arc::new(error);
+                        entry.insert(Err(e.clone())).await;
+                    }
+                }
+            }
+        }
+
+        tracing::debug!("warmed up the query planner cache with {count} queries");
     }
 }
 
@@ -78,42 +141,58 @@ where
             let context = request.context.clone();
             let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
-                let res = qp.delegate.ready().await?.call(request).await;
-                match res {
-                    Ok(QueryPlannerResponse {
-                        content,
-                        context,
-                        errors,
-                    }) => {
-                        if let Some(content) = &content {
-                            entry.insert(Ok(content.clone())).await;
-                        }
+                // some clients might timeout and cancel the request before query planning is finished,
+                // so we execute it in a task that can continue even after the request was canceled and
+                // the join handle was dropped. That way, the next similar query will use the cache instead
+                // of restarting the query planner until another timeout
+                tokio::task::spawn(
+                    async move {
+                        let res = qp.delegate.ready().await?.call(request).await;
 
-                        if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                            match (&plan.usage_reporting).serialize(Serializer) {
-                                Ok(v) => {
-                                    context.insert_json_value(USAGE_REPORTING, v);
+                        match res {
+                            Ok(QueryPlannerResponse {
+                                content,
+                                context,
+                                errors,
+                            }) => {
+                                if let Some(content) = &content {
+                                    entry.insert(Ok(content.clone())).await;
                                 }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        e
-                                    );
+
+                                if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
+                                    match (plan.usage_reporting).serialize(Serializer) {
+                                        Ok(v) => {
+                                            context.insert_json_value(USAGE_REPORTING, v);
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                            "usage reporting was not serializable to context, {}",
+                                            e
+                                        );
+                                        }
+                                    }
                                 }
+                                Ok(QueryPlannerResponse {
+                                    content,
+                                    context,
+                                    errors,
+                                })
+                            }
+                            Err(error) => {
+                                let e = Arc::new(error);
+                                entry.insert(Err(e.clone())).await;
+                                Err(CacheResolverError::RetrievalError(e))
                             }
                         }
-                        Ok(QueryPlannerResponse {
-                            content,
-                            context,
-                            errors,
-                        })
                     }
-                    Err(error) => {
-                        let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
-                        Err(CacheResolverError::RetrievalError(e))
-                    }
-                }
+                    .in_current_span(),
+                )
+                .await
+                .map_err(|e| {
+                    CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
+                        e.to_string(),
+                    )))
+                })?
             } else {
                 let res = entry
                     .get()
@@ -123,7 +202,7 @@ where
                 match res {
                     Ok(content) => {
                         if let QueryPlannerContent::Plan { plan, .. } = &content {
-                            match (&plan.usage_reporting).serialize(Serializer) {
+                            match (plan.usage_reporting).serialize(Serializer) {
                                 Ok(v) => {
                                     context.insert_json_value(USAGE_REPORTING, v);
                                 }
@@ -190,7 +269,7 @@ impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "plan|{}|{}|{}",
+            "plan\0{}\0{}\0{}",
             self.schema_id.as_deref().unwrap_or("-"),
             self.query,
             self.operation.as_deref().unwrap_or("-")
@@ -202,14 +281,14 @@ impl std::fmt::Display for CachingQueryKey {
 mod tests {
     use mockall::mock;
     use mockall::predicate::*;
-    use query_planner::QueryPlan;
     use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
     use crate::error::PlanErrors;
-    use crate::query_planner::QueryPlanOptions;
+    use crate::query_planner::QueryPlan;
+    use crate::spec::Query;
 
     mock! {
         #[derive(Debug)]
@@ -262,7 +341,12 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10, None, None).await;
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            None,
+            &crate::configuration::QueryPlanning::default(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner
@@ -299,7 +383,6 @@ mod tests {
                 let query_plan: QueryPlan = QueryPlan {
                     formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    options: QueryPlanOptions::default(),
                     usage_reporting: UsageReporting {
                         stats_report_key: "this is a test report key".to_string(),
                         referenced_fields_by_type: Default::default(),
@@ -318,7 +401,12 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(delegate, 10, None, None).await;
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            None,
+            &crate::configuration::QueryPlanning::default(),
+        )
+        .await;
 
         for _ in 0..5 {
             assert!(planner

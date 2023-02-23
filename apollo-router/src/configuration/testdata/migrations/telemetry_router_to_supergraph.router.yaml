@@ -1,0 +1,8 @@
+telemetry:
+  metrics:
+    common:
+      attributes:
+        router:
+          request:
+            header:
+            - named: "fd"
