@@ -24,6 +24,7 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         assert!(metrics.contains("apollo_router_cache_miss_time"));
         assert!(metrics.contains("apollo_router_session_count_total"));
         assert!(metrics.contains("apollo_router_session_count_active"));
+        assert!(metrics.contains("custom_header=\"test_custom\""));
         router.touch_config().await;
         router.assert_reloaded().await;
     }
