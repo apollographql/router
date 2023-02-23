@@ -14,7 +14,7 @@ executors:
     docker:
       - image: cimg/base:stable
       - image: cimg/redis:7.0.8
-      - image: jaegertracing/all-in-one:89133199
+      - image: jaegertracing/all-in-one:1.42.0
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
