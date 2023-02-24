@@ -122,6 +122,7 @@ const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
+const ENABLE_SUBGRAPH_FTV1: &str = "apollo_telemetry::enable_subgraph_ftv1";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
@@ -345,7 +346,7 @@ impl Plugin for Telemetry {
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
-                    Self::populate_context(config.clone(), req);
+                    Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
@@ -390,7 +391,6 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
-        let apollo_handler = self.apollo_handler();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| {
                 let query = req
@@ -415,8 +415,8 @@ impl Plugin for Telemetry {
                     "apollo_private.ftv1" = field::Empty
                 )
             })
-            .map_request(move |req| apollo_handler.request_ftv1(req))
-            .map_response(move |resp| apollo_handler.store_ftv1(&subgraph_name, resp))
+            .map_request(request_ftv1)
+            .map_response(move |resp| store_ftv1(&subgraph_name, resp))
             .map_future_with_request_data(
                 move |sub_request: &SubgraphRequest| {
                     Self::store_subgraph_request_attributes(
@@ -780,7 +780,11 @@ impl Telemetry {
         res
     }
 
-    fn populate_context(config: Arc<Conf>, req: &SupergraphRequest) {
+    fn populate_context(
+        config: Arc<Conf>,
+        field_level_instrumentation_ratio: f64,
+        req: &SupergraphRequest,
+    ) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
         let http_request = &req.supergraph_request;
@@ -844,15 +848,8 @@ impl Telemetry {
 
             let _ = context.insert(ATTRIBUTES, attributes);
         }
-    }
-
-    fn apollo_handler(&self) -> ApolloFtv1Handler {
-        let mut rng = rand::thread_rng();
-
-        if rng.gen_bool(self.field_level_instrumentation_ratio) {
-            ApolloFtv1Handler::Enabled
-        } else {
-            ApolloFtv1Handler::Disabled
+        if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
+            context.insert_json_value(ENABLE_SUBGRAPH_FTV1, json!(true));
         }
     }
 
@@ -1379,49 +1376,40 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 
 register_plugin!("apollo", "telemetry", Telemetry);
 
-/// This enum is a partial cleanup of the telemetry plugin logic.
-///
-#[derive(Copy, Clone)]
-enum ApolloFtv1Handler {
-    Enabled,
-    Disabled,
+fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
+    if req.context.contains_key(ENABLE_SUBGRAPH_FTV1)
+        && Span::current().context().span().span_context().is_sampled()
+    {
+        req.subgraph_request.headers_mut().insert(
+            "apollo-federation-include-trace",
+            HeaderValue::from_static("ftv1"),
+        );
+    }
+    req
 }
 
-impl ApolloFtv1Handler {
-    fn request_ftv1(&self, mut req: SubgraphRequest) -> SubgraphRequest {
-        if let ApolloFtv1Handler::Enabled = self {
-            if Span::current().context().span().span_context().is_sampled() {
-                req.subgraph_request.headers_mut().insert(
-                    "apollo-federation-include-trace",
-                    HeaderValue::from_static("ftv1"),
-                );
-            }
+fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphResponse {
+    // Stash the FTV1 data
+    if resp.context.contains_key(ENABLE_SUBGRAPH_FTV1) {
+        if let Some(serde_json_bytes::Value::String(ftv1)) =
+            resp.response.body().extensions.get("ftv1")
+        {
+            // Record the ftv1 trace for processing later
+            Span::current().record("apollo_private.ftv1", ftv1.as_str());
+            resp.context
+                .upsert_json_value(SUBGRAPH_FTV1, |value: Value| {
+                    let mut vec = match value {
+                        Value::Array(array) => array,
+                        // upsert_json_value populate the entry with null if it was vacant
+                        Value::Null => Vec::new(),
+                        _ => panic!("unexpected JSON value kind"),
+                    };
+                    vec.push(json!([subgraph_name.clone(), ftv1.clone()]));
+                    Value::Array(vec)
+                })
         }
-        req
     }
-
-    fn store_ftv1(&self, subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphResponse {
-        // Stash the FTV1 data
-        if let ApolloFtv1Handler::Enabled = self {
-            if let Some(serde_json_bytes::Value::String(ftv1)) =
-                resp.response.body().extensions.get("ftv1")
-            {
-                // Record the ftv1 trace for processing later
-                Span::current().record("apollo_private.ftv1", ftv1.as_str());
-                resp.context
-                    .upsert_json_value(SUBGRAPH_FTV1, |value: Value| {
-                        let mut vec = match value {
-                            Value::Array(array) => array,
-                            Value::Null => Vec::new(),
-                            _ => panic!("unexpected JSON value kind"),
-                        };
-                        vec.push(json!([subgraph_name.clone(), ftv1.clone()]));
-                        Value::Array(vec)
-                    })
-            }
-        }
-        resp
-    }
+    resp
 }
 
 /// CustomTraceIdPropagator to set custom trace_id for our tracing system
