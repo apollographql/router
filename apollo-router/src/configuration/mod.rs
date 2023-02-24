@@ -11,7 +11,6 @@ mod tests;
 mod upgrade;
 mod yaml;
 
-use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::io::BufReader;
@@ -746,31 +745,6 @@ fn load_keys(data: &str) -> io::Result<PrivateKey> {
         ));
     }
     Ok(private_key)
-}
-
-/// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct TlsSubgraphWrapper {
-    /// options applying to all subgraphs
-    pub(crate) all: TlsSubgraph,
-    /// per subgraph options
-    pub(crate) subgraphs: HashMap<String, TlsSubgraph>,
-}
-
-#[buildstructor::buildstructor]
-impl TlsSubgraphWrapper {
-    #[builder]
-    pub(crate) fn new(all: TlsSubgraph, subgraphs: HashMap<String, TlsSubgraph>) -> Self {
-        Self { all, subgraphs }
-    }
-}
-
-impl Default for TlsSubgraphWrapper {
-    fn default() -> Self {
-        Self::builder().all(TlsSubgraph::default()).build()
-    }
 }
 
 /// Configuration options pertaining to the subgraph server component.
