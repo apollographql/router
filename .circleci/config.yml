@@ -13,6 +13,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
+      - image: cimg/redis:7.0.8
+      - image: jaegertracing/all-in-one:1.42.0
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
@@ -52,10 +54,6 @@ parameters:
     type: string
     # increment this to invalidate all the caches
     default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
-  jaeger_version:
-    type: string
-    # update this as new versions of jaeger become available
-    default: "1.33.0"
   protoc_version:
     type: string
     default: "21.8"
@@ -80,17 +78,11 @@ commands:
           name: Update and install dependencies
           command: |
             sudo apt-get update
-            sudo apt-get install -y libssl-dev cmake
+            sudo apt-get install -y libssl-dev libdw-dev cmake
       - install_minimal_rust
   linux_amd_install_baseline:
     steps:
       - linux_install_baseline
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
       - run:
           name: Install protoc
           command: |
@@ -101,12 +93,6 @@ commands:
     steps:
       - linux_install_baseline
       - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
-      - run:
           name: Install protoc
           command: |
             curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
@@ -114,12 +100,6 @@ commands:
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   macos_install_baseline:
     steps:
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
       - install_minimal_rust
       - run:
           name: Install protoc
@@ -129,13 +109,6 @@ commands:
             echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
   windows_install_baseline:
     steps:
-      - run:
-          name: Download jaeger
-          shell: bash.exe
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
       - run:
           name: Install protoc
           shell: bash.exe
@@ -149,16 +122,6 @@ commands:
             $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
             $newpath = "$oldpath;$HOME/.local/bin"
             Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
-
-  # This job makes sure everything is ready to run integration tests
-  macos_prepare_env:
-    steps:
-      - run:
-          # The jaeger exporter won't work without this
-          name: Increase udp packet size
-          command: |
-            sudo sysctl net.inet.udp.maxdgram=65536
-            sudo sysctl net.inet.udp.maxdgram
 
   windows_prepare_env:
     steps:
@@ -285,10 +248,6 @@ commands:
 
   windows_test_workspace:
     steps:
-      - run:
-          name: Start jaeger
-          background: true
-          command: jaeger\jaeger-all-in-one.exe
       - restore_cache:
           name: Restore .cargo
           keys:
@@ -313,10 +272,6 @@ commands:
         type: string
         default: ""
     steps:
-      - run:
-          name: Start jaeger
-          background: true
-          command: ./jaeger/jaeger-all-in-one
       - restore_cache:
           name: Restore .cargo
           keys:
@@ -379,6 +334,7 @@ jobs:
             - linux_amd_install_baseline
             - xtask_check_compliance:
                 os: linux_amd
+
   test:
     environment:
       <<: *common_job_environment
@@ -610,7 +566,7 @@ jobs:
             cd artifacts && sha1sum *.tar.gz > sha1sums.txt
       - run:
           command: >
-            gh release create $VERSION --notes-file NEXT_CHANGELOG.md --title $VERSION artifacts/*
+            gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/*
       - setup_remote_docker:
           version: 20.10.11
           docker_layer_caching: true
@@ -670,15 +626,10 @@ workflows:
             parameters:
               platform: [amd_linux_build]
 
-      # check-compliance is disabled for now because it is flaky
-      # `cargo about` seems to be non-deterministic and sometimes
-      # produces a different licenses.html file even though dependencies haven’t changed.
-      # For now, we’ll re-generate it for each release instead. (See RELEASE_CHECKLIST.md)
-
-      # - check_compliance:
-      #     matrix:
-      #       parameters:
-      #         platform: [linux]
+      - check_compliance:
+          matrix:
+            parameters:
+              platform: [amd_linux_build]
 
       - test_updated:
           requires:

@@ -12,17 +12,16 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::server::conn::Http;
 use multimap::MultiMap;
-use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
 use tokio::sync::Notify;
 
 use crate::configuration::Configuration;
-use crate::configuration::ListenAddr;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
+use crate::ListenAddr;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -163,11 +162,7 @@ pub(super) async fn get_extra_listeners(
         // if we received a TCP listener, reuse it, otherwise create a new one
         #[cfg_attr(not(unix), allow(unused_mut))]
         let listener = match listen_addr.clone() {
-            ListenAddr::SocketAddr(addr) => Listener::Tcp(
-                TcpListener::bind(addr)
-                    .await
-                    .map_err(ApolloRouterError::ServerCreationError)?,
-            ),
+            ListenAddr::SocketAddr(addr) => Listener::new_from_socket_addr(addr, None).await?,
             #[cfg(unix)]
             ListenAddr::UnixSocket(path) => Listener::Unix(
                 UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
@@ -259,6 +254,38 @@ pub(super) fn serve_router_on_listen_addr(
                                         let connection = Http::new()
                                         .http1_keep_alive(true)
                                         .serve_connection(stream, app);
+
+                                        tokio::pin!(connection);
+                                        tokio::select! {
+                                            // the connection finished first
+                                            _res = &mut connection => {
+                                            }
+                                            // the shutdown receiver was triggered first,
+                                            // so we tell the connection to do a graceful shutdown
+                                            // on the next request, then we wait for it to finish
+                                            _ = connection_shutdown.notified() => {
+                                                let c = connection.as_mut();
+                                                c.graceful_shutdown();
+
+                                                let _= connection.await;
+                                            }
+                                        }
+                                    },
+                                    NetworkStream::Tls(stream) => {
+                                        stream.get_ref().0
+                                            .set_nodelay(true)
+                                            .expect(
+                                                "this should not fail unless the socket is invalid",
+                                            );
+
+                                            let protocol = stream.get_ref().1.alpn_protocol();
+                                            let http2 = protocol == Some(&b"h2"[..]);
+
+                                            let connection = Http::new()
+                                            .http1_keep_alive(true)
+                                            .http1_header_read_timeout(Duration::from_secs(10))
+                                            .http2_only(http2)
+                                            .serve_connection(stream, app);
 
                                         tokio::pin!(connection);
                                         tokio::select! {

@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -12,6 +14,7 @@ use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::uplink::entitlement::EntitlementState;
 
 /// Factory for creating the http server component.
 ///
@@ -27,6 +30,7 @@ pub(crate) trait HttpServerFactory {
         main_listener: Option<Listener>,
         previous_listeners: Vec<(ListenAddr, Listener)>,
         extra_endpoints: MultiMap<ListenAddr, Endpoint>,
+        entitlement: EntitlementState,
     ) -> Self::Future
     where
         RF: RouterFactory;
@@ -62,7 +66,11 @@ impl HttpServerHandle {
     pub(crate) fn new(
         shutdown_sender: oneshot::Sender<()>,
         server_future: Pin<
-            Box<dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>> + Send>,
+            Box<
+                dyn Future<Output = Result<MainAndExtraListeners, ApolloRouterError>>
+                    + Send
+                    + 'static,
+            >,
         >,
         graphql_listen_address: Option<ListenAddr>,
         listen_addresses: Vec<ListenAddr>,
@@ -96,6 +104,7 @@ impl HttpServerHandle {
         router: RF,
         configuration: Arc<Configuration>,
         web_endpoints: MultiMap<ListenAddr, Endpoint>,
+        entitlement: EntitlementState,
     ) -> Result<Self, ApolloRouterError>
     where
         SF: HttpServerFactory,
@@ -117,10 +126,11 @@ impl HttpServerHandle {
         let handle = factory
             .create(
                 router,
-                Arc::clone(&configuration),
+                configuration,
                 Some(main_listener),
                 extra_listeners,
                 web_endpoints,
+                entitlement,
             )
             .await?;
         tracing::debug!(
@@ -148,15 +158,43 @@ pub(crate) enum Listener {
     Tcp(tokio::net::TcpListener),
     #[cfg(unix)]
     Unix(tokio::net::UnixListener),
+    Tls {
+        listener: tokio::net::TcpListener,
+        acceptor: tokio_rustls::TlsAcceptor,
+    },
 }
 
 pub(crate) enum NetworkStream {
     Tcp(tokio::net::TcpStream),
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
+    Tls(tokio_rustls::server::TlsStream<tokio::net::TcpStream>),
 }
 
 impl Listener {
+    pub(crate) async fn new_from_socket_addr(
+        address: SocketAddr,
+        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    ) -> Result<Self, ApolloRouterError> {
+        let listener = tokio::net::TcpListener::bind(address)
+            .await
+            .map_err(ApolloRouterError::ServerCreationError)?;
+        match tls_acceptor {
+            None => Ok(Listener::Tcp(listener)),
+            Some(acceptor) => Ok(Listener::Tls { listener, acceptor }),
+        }
+    }
+
+    pub(crate) fn new_from_listener(
+        listener: tokio::net::TcpListener,
+        tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    ) -> Self {
+        match tls_acceptor {
+            None => Listener::Tcp(listener),
+            Some(acceptor) => Listener::Tls { listener, acceptor },
+        }
+    }
+
     pub(crate) fn local_addr(&self) -> std::io::Result<ListenAddr> {
         match self {
             Listener::Tcp(listener) => listener.local_addr().map(Into::into),
@@ -168,6 +206,7 @@ impl Listener {
                         .unwrap_or_default(),
                 )
             }),
+            Listener::Tls { listener, .. } => listener.local_addr().map(Into::into),
         }
     }
 
@@ -182,6 +221,11 @@ impl Listener {
                 .accept()
                 .await
                 .map(|(stream, _)| NetworkStream::Unix(stream)),
+            Listener::Tls { listener, acceptor } => {
+                let (stream, _) = listener.accept().await?;
+
+                Ok(NetworkStream::Tls(acceptor.accept(stream).await?))
+            }
         }
     }
 }

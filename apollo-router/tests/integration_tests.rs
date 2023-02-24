@@ -7,31 +7,26 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use apollo_router::Context;
-use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
+use apollo_router::Context;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
-use insta::internals::Content;
-use insta::internals::Redaction;
 use maplit::hashmap;
 use mime::APPLICATION_JSON;
 use serde_json::to_string_pretty;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
-use test_span::prelude::*;
 use tower::BoxError;
 use tower::ServiceExt;
-use tracing_subscriber::prelude::__tracing_subscriber_SubscriberExt;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -113,36 +108,6 @@ async fn api_schema_hides_field() {
         .message
         .as_str()
         .contains("Cannot query field \"inStock\" on type \"Product\"."));
-}
-
-#[test_span(tokio::test)]
-#[target(apollo_router=tracing::Level::DEBUG)]
-async fn traced_basic_request() {
-    assert_federated_response!(
-        r#"{ topProducts { name name2:name } }"#,
-        hashmap! {
-            "products".to_string()=>1,
-        },
-    );
-    insta::assert_json_snapshot!(get_spans(), {
-      ".**.children.*.record.entries[]" => redact_dynamic()
-    });
-}
-
-#[test_span(tokio::test)]
-#[target(apollo_router=tracing::Level::DEBUG)]
-async fn traced_basic_composition() {
-    assert_federated_response!(
-        r#"{ topProducts { upc name reviews {id product { name } author { id name } } } }"#,
-        hashmap! {
-            "products".to_string()=>2,
-            "reviews".to_string()=>1,
-            "accounts".to_string()=>1,
-        },
-    );
-    insta::assert_json_snapshot!(get_spans(), {
-      ".**.children.*.record.entries[]" => redact_dynamic()
-    });
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -464,31 +429,6 @@ async fn automated_persisted_queries() {
 
     assert_eq!(0, actual.errors.len());
     assert_eq!(registry.totals(), expected_service_hits);
-}
-
-#[test_span(tokio::test(flavor = "multi_thread"))]
-async fn variables() {
-    assert_federated_response!(
-        r#"
-            query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {
-                topProducts(first: $topProductsFirst) {
-                    name
-                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {
-                        body
-                        author {
-                            id
-                            name
-                        }
-                    }
-                }
-            }
-            "#,
-        hashmap! {
-            "products".to_string()=>1,
-            "reviews".to_string()=>1,
-            "accounts".to_string()=>1,
-        },
-    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -881,7 +821,17 @@ async fn http_query_rust(
 async fn query_rust(
     request: supergraph::Request,
 ) -> (apollo_router::graphql::Response, CountingServiceRegistry) {
-    query_rust_with_config(request, serde_json::json!({})).await
+    query_rust_with_config(
+        request,
+        serde_json::json!({
+            "telemetry":{
+              "apollo": {
+                    "field_level_instrumentation_sampler": "always_off"
+                }
+            }
+        }),
+    )
+    .await
 }
 
 async fn http_query_rust_with_config(
@@ -910,24 +860,12 @@ async fn setup_router_and_registry(
     config: serde_json::Value,
 ) -> (router::BoxCloneService, CountingServiceRegistry) {
     let counting_registry = CountingServiceRegistry::new();
-    let telemetry = TelemetryPlugin::new_with_subscriber(
-        serde_json::json!({
-            "tracing": {},
-            "apollo": {
-                "schema_id": ""
-            }
-        }),
-        tracing_subscriber::registry().with(test_span::Layer {}),
-    )
-    .await
-    .unwrap();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(config)
         .unwrap()
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
-        .extra_plugin(telemetry)
         .build_router()
         .await
         .unwrap();
@@ -1057,49 +995,4 @@ impl ValueExt for Value {
             (a, b) => a == b,
         }
     }
-}
-
-// Useful to redact request_id in snapshot because it's not determinist
-fn redact_dynamic() -> Redaction {
-    insta::dynamic_redaction(|value, _path| {
-        if let Some(value_slice) = value.as_slice() {
-            if value_slice
-                .get(0)
-                .and_then(|v| {
-                    v.as_str().map(|s| {
-                        [
-                            "request.id",
-                            "response_headers",
-                            "trace_id",
-                            "histogram.apollo_router_cache_miss_time",
-                            "histogram.apollo_router_cache_hit_time",
-                        ]
-                        .contains(&s)
-                    })
-                })
-                .unwrap_or_default()
-            {
-                return Content::Seq(vec![
-                    value_slice.get(0).unwrap().clone(),
-                    Content::String("[REDACTED]".to_string()),
-                ]);
-            }
-            if value_slice
-                .get(0)
-                .and_then(|v| {
-                    v.as_str().map(|s| {
-                        [
-                            "apollo_private.sent_time_offset",
-                            "apollo_private.duration_ns",
-                        ]
-                        .contains(&s)
-                    })
-                })
-                .unwrap_or_default()
-            {
-                return Content::Seq(vec![value_slice.get(0).unwrap().clone(), Content::I64(0)]);
-            }
-        }
-        value
-    })
 }

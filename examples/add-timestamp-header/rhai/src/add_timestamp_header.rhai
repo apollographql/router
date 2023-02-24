@@ -1,4 +1,4 @@
-// The apollo rhai engine provides a global constant "apollo_start" which can
+// The apollo rhai engine provides a global constant "Router.APOLLO_START" which can
 // be used as a time base for timing operations.
 
 // Call map_request/map_response for our service and pass in strings with the names
@@ -15,12 +15,12 @@ fn supergraph_service(service) {
 
 // Add a timestamp to context which we'll use in the response.
 fn process_request(request) {
-    request.context["request_start"] = apollo_start.elapsed;
+    request.context["request_start"] = Router.APOLLO_START.elapsed;
 }
 
 // Calculate elapsed time and add that to the response as a header
 fn process_response(response) {
-    let elapsed = apollo_start.elapsed - response.context["request_start"];
+    let elapsed = Router.APOLLO_START.elapsed - response.context["request_start"];
     print(`elapsed: ${elapsed}`);
 
     // Add the elapsed time as a header to the response

@@ -25,7 +25,7 @@ managedFederation:
   # -- If using managed federation, the graph API key to identify router to Studio
   apiKey:
   # -- If using managed federation, use existing Secret which stores the graph API key instead of creating a new one.
-  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name 
+  # If set along `managedFederation.apiKey`, a secret with the graph API key will be created using this parameter as name
   existingSecret:
   # -- If using managed federation, the variant of which graph to use
   graphRef: ""
@@ -183,3 +183,17 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+
+# -- Set to existing PriorityClass name to control pod preemption by the scheduler
+priorityClassName: ""
+
+# -- Sets the [termination grace period](https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#hook-handler-execution) for Deployment pods
+terminationGracePeriodSeconds: 30
+
+probes:
+  # -- Configure readiness probe
+  readiness:
+    initialDelaySeconds: 0
+  # -- Configure liveness probe
+  liveness:
+    initialDelaySeconds: 0

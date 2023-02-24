@@ -68,7 +68,7 @@ impl Context {
     /// Get a value from the context using the provided key.
     ///
     /// Semantics:
-    ///  - If the operation fails, then the key is not present.
+    ///  - If the operation fails, that's because we can't deserialize the value.
     ///  - If the operation succeeds, the value is an [`Option`].
     pub fn get<K, V>(&self, key: K) -> Result<Option<V>, BoxError>
     where
@@ -158,6 +158,21 @@ impl Context {
                 }
             });
         result.map_err(|e| e.into())
+    }
+
+    /// Upsert a JSON value in the context using the provided key and resolving
+    /// function.
+    ///
+    /// The resolving function must yield a value to be used in the context. It
+    /// is provided with the current value to use in evaluating which value to
+    /// yield.
+    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl Fn(Value) -> Value)
+    where
+        K: Into<String>,
+    {
+        let key = key.into();
+        self.entries.entry(key.clone()).or_insert(Value::Null);
+        self.entries.alter(&key, |_, v| upsert(v));
     }
 
     /// Iterate over the entries.

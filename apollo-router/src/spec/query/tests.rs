@@ -1014,6 +1014,116 @@ fn reformat_response_query_with_root_typename() {
         .test();
 }
 
+#[test]
+fn reformat_response_interface_typename_not_queried() {
+    // With the introduction of @interfaceObject, a subgraph can send back a typename that
+    // correspond to an interface in the supergraph. As long as that typename is not requested,
+    // we want this to be fine and to prevent formatting of the response.
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                i: I
+            }
+            interface I {
+                x: String
+            }
+            type A implements I {
+                x: String
+            }",
+        )
+        .query("{i{x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "I",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{
+            "i": {
+                "x": "foo",
+            },
+        }})
+        .test();
+}
+
+#[test]
+fn reformat_response_interface_typename_queried() {
+    // As mentioned in the previous test, the introduction of @interfaceObject makes it possible
+    // for a subgraph to send back a typename that correspond to an interface in the supergraph.
+    // If that typename is queried, then the query planner will ensure that such typename is
+    // replaced (overriden to a proper object type of the supergraph by a followup fetch). But
+    // as that later fetch can fail, we can have to format a response where the typename is
+    // requested and is still set to the interface. We must not return that value (it's invalid
+    // graphQL) and instead nullify the response in that case.
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                i: I
+            }
+            interface I {
+                x: String
+            }
+            type A implements I {
+                x: String
+            }",
+        )
+        .query("{i{__typename x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "I",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{
+            "i": null,
+        }})
+        .test();
+}
+
+#[test]
+fn reformat_response_unknown_typename() {
+    // If in a response we get a typename for a completely unknown type name, then we should
+    // nullify the object as something is off, and in the worst case we could be inadvertently
+    // leaking some @inaccessible type (or the subgraph is simply drunk but nullifying is fine too
+    // then). This should happen whether the actual __typename is queried or not.
+    let schema = "
+      type Query {
+          i: I
+      }
+      interface I {
+          x: String
+      }
+      type A implements I {
+          x: String
+      }";
+
+    // Without __typename queried
+    FormatTest::builder()
+        .schema(schema)
+        .query("{i{x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "X",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{ "i": null, }})
+        .test();
+
+    // With __typename queried
+    FormatTest::builder()
+        .schema(schema)
+        .query("{i{__typename x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "X",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{ "i": null, }})
+        .test();
+}
+
 macro_rules! run_validation {
     ($schema:expr, $query:expr, $variables:expr $(,)?) => {{
         let variables = match $variables {

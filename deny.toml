@@ -106,3 +106,9 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
 github = ["open-telemetry", "apollographql", "tokio-rs"]
+
+[deny]
+name = "openssl-sys"
+# scaffold uses openssl for some reason
+# TODO: Remove the redis wrappers from this list once we move to rustls
+wrappers = ["apollo-router-scaffold", "redis", "redis-cluster-async"]
