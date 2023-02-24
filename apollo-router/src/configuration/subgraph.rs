@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 use schemars::JsonSchema;
@@ -73,10 +74,10 @@ use serde::Serialize;
 // - deserialize to the plugin configuration
 
 /// Configuration options pertaining to the subgraph server component.
-#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[derive(Default, Serialize, JsonSchema)]
 pub(crate) struct SubgraphConfiguration<T>
 where
-    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+    T: Default + Serialize + JsonSchema,
 {
     /// options applying to all subgraphs
     #[serde(default)]
@@ -88,7 +89,7 @@ where
 
 impl<T> SubgraphConfiguration<T>
 where
-    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+    T: Default + Serialize + JsonSchema,
 {
     #[allow(dead_code)]
     fn get(&self, subgraph_name: &str) -> &T {
@@ -96,21 +97,33 @@ where
     }
 }
 
-impl<T> Default for SubgraphConfiguration<T>
+impl<T> Debug for SubgraphConfiguration<T>
 where
-    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+    T: Debug + Default + Serialize + JsonSchema,
 {
-    fn default() -> Self {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SubgraphConfiguration")
+            .field("all", &self.all)
+            .field("subgraphs", &self.subgraphs)
+            .finish()
+    }
+}
+
+impl<T> Clone for SubgraphConfiguration<T>
+where
+    T: Clone + Default + Serialize + JsonSchema,
+{
+    fn clone(&self) -> Self {
         Self {
-            all: T::default(),
-            subgraphs: HashMap::default(),
+            all: self.all.clone(),
+            subgraphs: self.subgraphs.clone(),
         }
     }
 }
 
 impl<T> PartialEq for SubgraphConfiguration<T>
 where
-    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema + PartialEq,
+    T: Default + Serialize + JsonSchema + PartialEq,
 {
     fn eq(&self, other: &Self) -> bool {
         self.all == other.all && self.subgraphs == other.subgraphs
@@ -120,7 +133,7 @@ where
 impl<'de, T> Deserialize<'de> for SubgraphConfiguration<T>
 where
     T: DeserializeOwned,
-    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+    T: Default + Serialize + JsonSchema,
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -137,7 +150,7 @@ struct SubgraphVisitor<T> {
 impl<'de, T> Visitor<'de> for SubgraphVisitor<T>
 where
     T: DeserializeOwned,
-    T: std::fmt::Debug + Default + Clone + Serialize + JsonSchema,
+    T: Default + Serialize + JsonSchema,
 {
     type Value = SubgraphConfiguration<T>;
 
