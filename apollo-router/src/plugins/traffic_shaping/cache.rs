@@ -24,6 +24,7 @@ use crate::error::FetchError;
 use crate::graphql;
 use crate::json_ext::Object;
 use crate::services::subgraph;
+use crate::spec::TYPENAME;
 
 #[derive(Clone)]
 pub(crate) struct SubgraphCacheLayer {
@@ -204,7 +205,7 @@ fn extract_cache_keys(
     for representation in representations {
         let opt_type = representation
             .as_object_mut()
-            .and_then(|o| o.remove("__typename"))
+            .and_then(|o| o.remove(TYPENAME))
             .ok_or_else(|| FetchError::MalformedRequest {
                 reason: "missing __typename in representation".to_string(),
             })?;
