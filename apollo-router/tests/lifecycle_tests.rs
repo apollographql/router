@@ -1,27 +1,12 @@
-use std::convert::Infallible;
-use std::net::SocketAddr;
 use std::time::Duration;
 
 use apollo_router::graphql;
-use apollo_router::Configuration;
-use apollo_router::ConfigurationSource;
-use apollo_router::Executable;
-use apollo_router::SchemaSource;
-use apollo_router::ShutdownSource;
-use http::header::CONTENT_TYPE;
-use http::HeaderValue;
-use http::Request;
-use http::Response;
-use hyper::service::make_service_fn;
-use hyper::service::service_fn;
-use hyper::Body;
-use hyper::Server;
-use mime::APPLICATION_JSON;
 use serde_json::json;
-use tokio::sync::oneshot;
 use tower::BoxError;
+use wiremock::ResponseTemplate;
 
 use crate::common::IntegrationTest;
+use crate::common::TracedResponder;
 
 mod common;
 
@@ -103,130 +88,56 @@ async fn create_router(config: &str) -> Result<IntegrationTest, BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_graceful_shutdown() -> Result<(), BoxError> {
-    async fn handle(_req: Request<Body>) -> Result<Response<String>, Infallible> {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        let mut response = Response::new(
-            json!({
-                "data":{
-                    "currentUser": {
-                        "id": 1
-                    }
-                }
-            })
-            .to_string(),
-        );
-        response
-            .headers_mut()
-            .insert("Content-Type", HeaderValue::from_static("application/json"));
+    let tracer = opentelemetry_jaeger::new_agent_pipeline()
+        .with_service_name("my_app")
+        .install_simple()?;
 
-        Ok(response)
-    }
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-
-    let make_service = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-
-    let server = Server::bind(&addr).serve(make_service);
-    let addr = server.local_addr();
-
-    tokio::task::spawn(async move {
-        if let Err(e) = server.await {
-            eprintln!("server error: {e}");
-        }
-    });
-
-    println!("started subgraph at {addr}");
-
-    let schema_sdl = r#"schema
-    @core(feature: "https://specs.apollo.dev/core/v0.1")
-    @core(feature: "https://specs.apollo.dev/join/v0.1")
-    @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
-     {
-    query: Query
-}
-directive @core(feature: String!) repeatable on SCHEMA
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
-directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
-directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
-directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
-scalar join__FieldSet
-enum join__Graph {
-   USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
-   ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
-}
-type Query {
-   currentUser: User @join__field(graph: USER)
-}
-type User
-@join__owner(graph: USER)
-@join__type(graph: ORGA, key: "id")
-@join__type(graph: USER, key: "id"){
-   id: ID!
-   name: String
-   activeOrganization: Organization
-}
-type Organization
-@join__owner(graph: ORGA)
-@join__type(graph: ORGA, key: "id")
-@join__type(graph: USER, key: "id") {
-   id: ID
-   creatorUser: User
-   name: String
-   nonNullId: ID!
-   suborga: [Organization]
-}"#.to_string();
-
-    let config: Configuration = serde_yaml::from_str(&format!(
-        r#"
-supergraph:
-    listen: 127.0.0.1:4321
+    let mut router = IntegrationTest::with_mock_responder(
+        tracer,
+        opentelemetry_jaeger::Propagator::new(),
+        "telemetry:
+  tracing:
+    propagation:
+      jaeger: true
+    trace_config:
+      service_name: router
+    jaeger:
+      batch_processor:
+        scheduled_delay: 100ms
+      agent:
+        endpoint: default
 override_subgraph_url:
-    user: http://{addr}
+  products: http://localhost:4005
 include_subgraph_errors:
-    all: true
-"#,
-    ))
-    .unwrap();
+  all: true
+",
+       TracedResponder(ResponseTemplate::new(200).set_body_json(
+            json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}),
+        ).set_delay(Duration::from_secs(5))),
+    )
+    .await;
 
-    let (shutdown_sender, shutdown_receiver) = oneshot::channel();
-    let f = async move {
-        let _: Result<(), _> = shutdown_receiver.await;
-    };
+    router.start().await;
+    router.assert_started().await;
+    let pid = router.pid();
 
-    let _router_handle = tokio::task::spawn(async move {
-        Executable::builder()
-            .shutdown(ShutdownSource::Custom(Box::pin(f)))
-            .schema(SchemaSource::Static { schema_sdl })
-            .config(ConfigurationSource::Static(Box::new(config)))
-            .start()
-            .await
+    let client_handle = tokio::task::spawn(async move {
+        let (_, res) = router.run_query().await;
+        (
+            router,
+            serde_json::from_slice::<graphql::Response>(&res.bytes().await.unwrap()).unwrap(),
+        )
     });
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
-    println!("started router");
+    unsafe {
+        libc::kill(pid, libc::SIGINT);
+    }
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
-    let client = reqwest::Client::new();
-
-    let request = client
-        .post("http://127.0.0.1:4321")
-        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-        .header("apollographql-client-name", "custom_name")
-        .header("apollographql-client-version", "1.0")
-        .json(&json!({"query":"{ currentUser { id } }","variables":{}}))
-        .build()
-        .unwrap();
-
-    let client_handle = tokio::task::spawn(async move {
-        let res = client.execute(request).await.unwrap();
-        serde_json::from_slice::<graphql::Response>(&res.bytes().await.unwrap()).unwrap()
-    });
-
-    // tell the router to shutdown while a client request is in flight
-    shutdown_sender.send(()).unwrap();
-
-    let data = client_handle.await.unwrap();
+    let (mut router, data) = client_handle.await.unwrap();
     insta::assert_json_snapshot!(data);
+    router.assert_shutdown().await;
 
     println!("executed client request");
 
