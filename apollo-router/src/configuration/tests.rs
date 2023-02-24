@@ -787,6 +787,7 @@ fn set_true() -> bool {
 }
 
 #[test]
+#[cfg(unix)]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
         s.option_nullable = true;
