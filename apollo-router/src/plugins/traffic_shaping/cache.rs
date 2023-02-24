@@ -159,7 +159,6 @@ where
             )
             .await?;
 
-            //FIXME: check that entities_it is now empty
             data.as_mut()
                 .and_then(|v| v.as_object_mut())
                 .map(|o| o.insert("_entities", new_entities.into()));
