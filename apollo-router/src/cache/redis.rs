@@ -114,44 +114,8 @@ where
 
 impl RedisCacheStorage {
     pub(crate) async fn new(urls: Vec<Url>, ttl: Option<Duration>) -> Result<Self, RedisError> {
-        println!("{}: RedisCacheStorage::new", line!());
-        /*let server_config = if urls.len() == 1 {
-            let url = Url::parse(&urls.pop().expect("urls contains only one url; qed")).unwrap();
-            println!("{}: RedisCacheStorage::new", line!());
-
-            ServerConfig::new_centralized(url.host_str().unwrap(), url.port().unwrap())
-        } else {
-            let urls = urls
-                .into_iter()
-                .map(|u| Url::parse(&u).unwrap())
-                .map(|u| (u.host_str().unwrap().to_string(), u.port().unwrap()))
-                .collect::<Vec<_>>();
-
-            println!("{}: RedisCacheStorage::new", line!());
-
-            ServerConfig::new_clustered(urls)
-        };
-
-        println!(
-            "{}: RedisCacheStorage::new server config = {server_config:?}",
-            line!()
-        );
-
-        let tls = ClientConfig::builder()
-            .with_safe_defaults()
-            .with_native_roots()
-            .with_no_client_auth();
-
-        //FIXME: username and password
-        let config = RedisConfig {
-            server: server_config,
-            tls: Some(tls.into()),
-            ..Default::default()
-        };*/
-
         let url = Self::preprocess_urls(urls)?;
         let config = RedisConfig::from_url(url.as_str())?;
-        println!("{}: RedisCacheStorage::new config: {config:?}", line!());
 
         let client = RedisClient::new(
             config,
@@ -159,7 +123,6 @@ impl RedisCacheStorage {
             Some(ReconnectPolicy::new_exponential(10, 1, 2000, 10)),
         );
         let _handle = client.connect();
-        println!("{}: RedisCacheStorage::new will wait for connect", line!());
 
         // spawn tasks that listen for connection close or reconnect events
         let mut error_rx = client.on_error();
@@ -167,17 +130,21 @@ impl RedisCacheStorage {
 
         tokio::spawn(async move {
             while let Ok(error) = error_rx.recv().await {
-                println!("Client disconnected with error: {:?}", error);
+                tracing::error!("Client disconnected with error: {:?}", error);
             }
         });
         tokio::spawn(async move {
             while let Ok(_) = reconnect_rx.recv().await {
-                println!("Client reconnected.");
+                tracing::info!("Redis client reconnected.");
             }
         });
-        client.wait_for_connect().await.unwrap();
 
-        println!("{}: RedisCacheStorage::new connected", line!());
+        // a TLS connection to a TCP Redis could hang, so we add a timeout
+        tokio::time::timeout(Duration::from_secs(5), client.wait_for_connect())
+            .await
+            .map_err(|_| {
+                RedisError::new(RedisErrorKind::Timeout, "timeout connecting to Redis")
+            })??;
 
         tracing::trace!("redis connection established");
         Ok(Self {
