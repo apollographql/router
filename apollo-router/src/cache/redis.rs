@@ -13,6 +13,7 @@ use fred::types::Expiration;
 use fred::types::FromRedis;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use url::Url;
 
 use super::KeyType;
 use super::ValueType;
@@ -112,10 +113,7 @@ where
 }
 
 impl RedisCacheStorage {
-    pub(crate) async fn new(
-        mut urls: Vec<String>,
-        ttl: Option<Duration>,
-    ) -> Result<Self, RedisError> {
+    pub(crate) async fn new(urls: Vec<Url>, ttl: Option<Duration>) -> Result<Self, RedisError> {
         println!("{}: RedisCacheStorage::new", line!());
         /*let server_config = if urls.len() == 1 {
             let url = Url::parse(&urls.pop().expect("urls contains only one url; qed")).unwrap();
@@ -151,7 +149,8 @@ impl RedisCacheStorage {
             ..Default::default()
         };*/
 
-        let config = RedisConfig::from_url(urls.first().unwrap()).unwrap();
+        let url = Self::preprocess_urls(urls)?;
+        let config = RedisConfig::from_url(url.as_str())?;
         println!("{}: RedisCacheStorage::new config: {config:?}", line!());
 
         let client = RedisClient::new(
@@ -185,6 +184,82 @@ impl RedisCacheStorage {
             inner: Arc::new(client),
             ttl,
         })
+    }
+
+    fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
+        match urls.get(0) {
+            None => {
+                return Err(RedisError::new(
+                    RedisErrorKind::Config,
+                    "empty Redis URL list",
+                ));
+            }
+            Some(first) => {
+                if urls.len() == 1 {
+                    return Ok(first.clone());
+                }
+
+                let username = first.username();
+                let password = first.password();
+
+                let scheme = first.scheme();
+
+                let mut result = first.clone();
+
+                match scheme {
+                    "redis" => {
+                        let _ = result.set_scheme("redis-cluster");
+                    }
+                    "rediss" => {
+                        let _ = result.set_scheme("rediss-cluster");
+                    }
+                    other => {
+                        return Err(RedisError::new(
+                            RedisErrorKind::Config,
+                            format!(
+                                "invalid Redis URL scheme, expected 'redis' or 'rediss', got: {}",
+                                other
+                            ),
+                        ))
+                    }
+                }
+
+                for url in &urls[1..] {
+                    if url.username() != username {
+                        return Err(RedisError::new(
+                            RedisErrorKind::Config,
+                            "incompatible usernames between Redis URLs",
+                        ));
+                    }
+                    if url.password() != password {
+                        return Err(RedisError::new(
+                            RedisErrorKind::Config,
+                            "incompatible passwords between Redis URLs",
+                        ));
+                    }
+                    if url.scheme() != scheme {
+                        return Err(RedisError::new(
+                            RedisErrorKind::Config,
+                            "incompatible schemes between Redis URLs",
+                        ));
+                    }
+
+                    let host = url.host_str().ok_or_else(|| {
+                        RedisError::new(RedisErrorKind::Config, "missing host in Redis URL")
+                    })?;
+
+                    let port = url.port().ok_or_else(|| {
+                        RedisError::new(RedisErrorKind::Config, "missing port in Redis URL")
+                    })?;
+
+                    result
+                        .query_pairs_mut()
+                        .append_pair("node", &format!("{host}:{port}"));
+                }
+
+                Ok(result)
+            }
+        }
     }
 
     pub(crate) fn set_ttl(&mut self, ttl: Option<Duration>) {
@@ -290,48 +365,5 @@ impl RedisCacheStorage {
             }
         };
         tracing::trace!("insert result {:?}", r);
-
-        //FIXME: expiration with pipeline
-
-        /*if let Some(ttl) = self.ttl.as_ref() {
-            let expiration: usize = ttl.as_secs().try_into().unwrap();
-            let mut pipeline = redis::pipe();
-            pipeline.atomic();
-
-            for (key, value) in data {
-                pipeline.set_ex(key, value, expiration);
-            }
-
-            let mut guard = self.inner.lock().await;
-
-            let r = match &mut *guard {
-                RedisConnection::Single(conn) => {
-                    pipeline
-                        .query_async::<redis::aio::Connection, redis::Value>(conn)
-                        .await
-                }
-                RedisConnection::Cluster(conn) => {
-                    pipeline.query_async::<Connection, redis::Value>(conn).await
-                }
-            };
-
-            tracing::trace!("insert result {:?}", r);
-        } else {
-            let mut guard = self.inner.lock().await;
-
-            let r = match &mut *guard {
-                RedisConnection::Single(conn) => {
-                    conn.set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
-                        .await
-                }
-                RedisConnection::Cluster(conn) => {
-                    conn.set_multiple::<RedisKey<K>, RedisValue<V>, redis::Value>(data)
-                        .await
-                }
-            };
-
-            tracing::trace!("insert result {:?}", r);
-        }*/
-        todo!()
     }
 }
