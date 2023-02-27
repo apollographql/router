@@ -47,12 +47,12 @@ where
     }
 }
 
-impl<K> Into<fred::types::RedisKey> for RedisKey<K>
+impl<K> From<RedisKey<K>> for fred::types::RedisKey
 where
     K: KeyType,
 {
-    fn into(self) -> fred::types::RedisKey {
-        self.to_string().into()
+    fn from(val: RedisKey<K>) -> Self {
+        val.to_string().into()
     }
 }
 
@@ -75,18 +75,18 @@ where
                 serde_json::from_slice(&data).map(RedisValue).map_err(|e| {
                     RedisError::new(
                         RedisErrorKind::Parse,
-                        format!("can't deserialize from JSON: {}", e.to_string()),
+                        format!("can't deserialize from JSON: {e}"),
                     )
                 })
             }
-            fred::types::RedisValue::String(s) => serde_json::from_str(&s.to_string())
-                .map(RedisValue)
-                .map_err(|e| {
+            fred::types::RedisValue::String(s) => {
+                serde_json::from_str(&s).map(RedisValue).map_err(|e| {
                     RedisError::new(
                         RedisErrorKind::Parse,
-                        format!("can't deserialize from JSON: {}", e.to_string()),
+                        format!("can't deserialize from JSON: {e}"),
                     )
-                }),
+                })
+            }
             res => {
                 println!("got redisvalue: {res:?}");
                 Err(RedisError::new(
@@ -134,7 +134,7 @@ impl RedisCacheStorage {
             }
         });
         tokio::spawn(async move {
-            while let Ok(_) = reconnect_rx.recv().await {
+            while reconnect_rx.recv().await.is_ok() {
                 tracing::info!("Redis client reconnected.");
             }
         });
@@ -155,12 +155,10 @@ impl RedisCacheStorage {
 
     fn preprocess_urls(urls: Vec<Url>) -> Result<Url, RedisError> {
         match urls.get(0) {
-            None => {
-                return Err(RedisError::new(
-                    RedisErrorKind::Config,
-                    "empty Redis URL list",
-                ));
-            }
+            None => Err(RedisError::new(
+                RedisErrorKind::Config,
+                "empty Redis URL list",
+            )),
             Some(first) => {
                 if urls.len() == 1 {
                     return Ok(first.clone());
@@ -293,10 +291,11 @@ impl RedisCacheStorage {
         value: RedisValue<V>,
     ) {
         tracing::trace!("inserting into redis: {:?}, {:?}", key, value);
-        let expiration = match self.ttl.as_ref() {
-            Some(ttl) => Some(Expiration::EX(ttl.as_secs() as i64)),
-            None => None,
-        };
+        let expiration = self
+            .ttl
+            .as_ref()
+            .map(|ttl| Expiration::EX(ttl.as_secs() as i64));
+
         let r = self
             .inner
             .set::<(), _, _>(key, value, expiration, None, false)
