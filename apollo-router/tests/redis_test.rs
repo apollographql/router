@@ -90,7 +90,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() -> Result<(), BoxError> {
         let client = RedisClient::new(
-            RedisConfig::from_url("redis://127.0.0.1:6379").unwrap(),
+            RedisConfig::from_url("redis://localhost:6379").unwrap(),
             None,
             None,
         );
@@ -110,10 +110,13 @@ mod test {
         });
 
         println!("redis wait for connect");
-        client
-            .wait_for_connect()
-            .await
-            .expect("opening redis client");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            client.wait_for_connect(),
+        )
+        .await
+        .unwrap()
+        .expect("opening redis client");
         println!("redis connected");
 
         let config = json!({
@@ -124,7 +127,7 @@ mod test {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://127.0.0.1:6379"]
+                            "urls": ["redis://localhost:6379"]
                         }
                     }
                 }
