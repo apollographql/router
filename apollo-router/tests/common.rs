@@ -243,7 +243,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn get_metrics(&self) -> reqwest::Result<String> {
+    pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
         let client = reqwest::Client::new();
 
         let request = client
@@ -253,9 +253,7 @@ impl IntegrationTest {
             .build()
             .unwrap();
 
-        let res = client.execute(request).await?;
-
-        res.text().await
+        client.execute(request).await
     }
 
     #[allow(dead_code)]
