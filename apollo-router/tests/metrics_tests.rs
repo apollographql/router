@@ -22,7 +22,14 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
 
         // Validate metric headers.
         let metrics_headers = metrics_response.headers();
-        assert!("text/plain; version=0.0.4" == metrics_headers.get(http::header::CONTENT_TYPE).unwrap().to_str().unwrap());
+        assert!(
+            "text/plain; version=0.0.4"
+                == metrics_headers
+                    .get(http::header::CONTENT_TYPE)
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+        );
 
         // Validate metric request body.
         let metrics = metrics_response.text().await?;
