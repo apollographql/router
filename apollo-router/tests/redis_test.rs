@@ -22,10 +22,13 @@ mod test {
             None,
             None,
         );
-        client
-            .wait_for_connect()
-            .await
-            .expect("opening redis client");
+        tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            client.wait_for_connect(),
+        )
+        .await
+        .unwrap()
+        .expect("opening redis client");
 
         client
         .del::<(), &'static str>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
