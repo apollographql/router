@@ -94,10 +94,27 @@ mod test {
             None,
             None,
         );
+
+        // spawn tasks that listen for connection close or reconnect events
+        let mut error_rx = client.on_error();
+        let mut reconnect_rx = client.on_reconnect();
+        tokio::spawn(async move {
+            while let Ok(error) = error_rx.recv().await {
+                tracing::error!("Client disconnected with error: {:?}", error);
+            }
+        });
+        tokio::spawn(async move {
+            while reconnect_rx.recv().await.is_ok() {
+                tracing::info!("Redis client reconnected.");
+            }
+        });
+
+        println!("redis wait for connect");
         client
             .wait_for_connect()
             .await
             .expect("opening redis client");
+        println!("redis connected");
 
         let config = json!({
             "supergraph": {
