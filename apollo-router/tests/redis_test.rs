@@ -19,7 +19,7 @@ mod test {
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
         let client = fred::prelude::RedisClient::new(
-            fred::types::RedisConfig::from_url("redis://redis:6379").unwrap(),
+            fred::types::RedisConfig::from_url("redis://127.0.0.1:6379").unwrap(),
             None,
             Some(ReconnectPolicy::new_exponential(10, 1, 2000, 10)),
         );
