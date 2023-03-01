@@ -211,6 +211,7 @@ uname = "0.1.1"
 
 [dev-dependencies]
 fred = "6.0.0-beta.2"
+redis = { version = "0.21.7", features = ["tokio-comp"] }
 futures-test = "0.3.26"
 insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.0"

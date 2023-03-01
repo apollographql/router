@@ -3,12 +3,10 @@ mod test {
     use apollo_router::services::execution::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
-    use fred::prelude::ClientLike;
-    use fred::prelude::KeysInterface;
-    use fred::prelude::RedisClient;
-    use fred::types::RedisConfig;
     use futures::StreamExt;
     use http::Method;
+    use redis::AsyncCommands;
+    use redis::Client;
     use serde::Deserialize;
     use serde::Serialize;
     use serde_json::json;
@@ -17,36 +15,14 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
-        let client = RedisClient::new(
-            RedisConfig::from_url("redis://redis:6379").unwrap(),
-            None,
-            None,
-        );
-        // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.on_error();
-        let mut reconnect_rx = client.on_reconnect();
-        tokio::spawn(async move {
-            while let Ok(error) = error_rx.recv().await {
-                println!("Client disconnected with error: {:?}", error);
-            }
-        });
-        tokio::spawn(async move {
-            while reconnect_rx.recv().await.is_ok() {
-                println!("Redis client reconnected.");
-            }
-        });
+        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
+        let mut connection = client
+            .get_async_connection()
+            .await
+            .expect("got redis connection");
 
-        println!("qp redis wait for connect");
-        tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            client.wait_for_connect(),
-        )
-        .await
-        .unwrap()
-        .expect("opening redis client");
-
-        client
-        .del::<(), &'static str>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
+        connection
+        .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
 
@@ -77,7 +53,7 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s:String = client
+        let s:String = connection
           .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
@@ -107,35 +83,11 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn apq() -> Result<(), BoxError> {
-        let client = RedisClient::new(
-            RedisConfig::from_url("redis://localhost:6379").unwrap(),
-            None,
-            None,
-        );
-
-        // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.on_error();
-        let mut reconnect_rx = client.on_reconnect();
-        tokio::spawn(async move {
-            while let Ok(error) = error_rx.recv().await {
-                println!("Client disconnected with error: {:?}", error);
-            }
-        });
-        tokio::spawn(async move {
-            while reconnect_rx.recv().await.is_ok() {
-                println!("Redis client reconnected.");
-            }
-        });
-
-        println!("redis wait for connect");
-        tokio::time::timeout(
-            std::time::Duration::from_secs(10),
-            client.wait_for_connect(),
-        )
-        .await
-        .unwrap()
-        .expect("opening redis client");
-        println!("redis connected");
+        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
+        let mut connection = client
+            .get_async_connection()
+            .await
+            .expect("got redis connection");
 
         let config = json!({
             "supergraph": {
@@ -145,7 +97,7 @@ mod test {
                             "limit": 2
                         },
                         "redis": {
-                            "urls": ["redis://localhost:6379"]
+                            "urls": ["redis://127.0.0.1:6379"]
                         }
                     }
                 }
@@ -161,8 +113,8 @@ mod test {
 
         let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
-        client
-            .del::<(), String>(format!("apq\x00{query_hash}"))
+        connection
+            .del::<String, ()>(format!("apq\x00{query_hash}"))
             .await
             .unwrap();
 
@@ -191,7 +143,10 @@ mod test {
             .unwrap()?;
         assert_eq!(res.errors.get(0).unwrap().message, "PersistedQueryNotFound");
 
-        let r: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
+        let r: Option<String> = connection
+            .get(&format!("apq\x00{query_hash}"))
+            .await
+            .unwrap();
         assert!(r.is_none());
 
         // Now we register the query
@@ -216,7 +171,10 @@ mod test {
         assert!(res.data.is_some());
         assert!(res.errors.is_empty());
 
-        let s: Option<String> = client.get(&format!("apq\x00{query_hash}")).await.unwrap();
+        let s: Option<String> = connection
+            .get(&format!("apq\x00{query_hash}"))
+            .await
+            .unwrap();
         insta::assert_display_snapshot!(s.unwrap());
 
         // we start a new router with the same config
