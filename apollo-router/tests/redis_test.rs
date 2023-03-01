@@ -39,7 +39,7 @@ mod test {
 
         println!("qp redis wait for connect");
         tokio::time::timeout(
-            std::time::Duration::from_secs(10),
+            std::time::Duration::from_secs(60),
             client.wait_for_connect(),
         )
         .await
