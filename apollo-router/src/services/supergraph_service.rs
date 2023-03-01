@@ -14,6 +14,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::field;
 use tracing_futures::Instrument;
 
 use super::layers::content_negociation;
@@ -32,6 +33,7 @@ use crate::introspection::Introspection;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
+use crate::plugins::telemetry::tracing::apollo_telemetry::DOCUMENT;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -238,7 +240,13 @@ async fn plan_query(
     body: &graphql::Request,
     context: Context,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
-    planning
+    let span = tracing::info_span!(
+        QUERY_PLANNING_SPAN_NAME,
+        graphql.document = field::Empty,
+        graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
+        "otel.kind" = "INTERNAL"
+    );
+    let res = planning
         .call(
             QueryPlannerRequest::builder()
                 .query(
@@ -250,17 +258,24 @@ async fn plan_query(
                 .context(context)
                 .build(),
         )
-        .instrument(tracing::info_span!(
-            QUERY_PLANNING_SPAN_NAME,
-            graphql.document = body
-                .query
+        .instrument(span.clone())
+        .await;
+
+    match res.as_ref().ok().and_then(|res| res.content.as_ref()) {
+        Some(QueryPlannerContent::Plan { plan }) => span.record(
+            DOCUMENT.as_str(),
+            plan.usage_reporting.stats_report_key.as_str(),
+        ),
+        _ => span.record(
+            DOCUMENT.as_str(),
+            body.query
                 .clone()
                 .expect("the query presence was already checked by a plugin")
                 .as_str(),
-            graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
-            "otel.kind" = "INTERNAL"
-        ))
-        .await
+        ),
+    };
+
+    res
 }
 
 /// Builder which generates a plugin pipeline.

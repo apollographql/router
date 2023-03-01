@@ -121,7 +121,7 @@ fn verify_supergraph_span_fields(trace: &Value) -> Result<(), BoxError> {
         supergraph_span
             .select_path("$.tags[?(@.key == 'graphql.document')].value")?
             .get(0),
-        Some(&&Value::String("{topProducts{name}}".to_string()))
+        Some(&&Value::String("# -\n{topProducts{name}}".to_string()))
     );
     assert_eq!(
         supergraph_span

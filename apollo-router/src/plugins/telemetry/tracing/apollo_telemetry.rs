@@ -83,6 +83,7 @@ const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
+pub(crate) const DOCUMENT: Key = Key::from_static_str("graphql.document");
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {

@@ -127,10 +127,6 @@ expression: get_spans()
               "record": {
                 "entries": [
                   [
-                    "graphql.document",
-                    "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
-                  ],
-                  [
                     "graphql.operation.name",
                     ""
                   ],
@@ -145,6 +141,10 @@ expression: get_spans()
                   [
                     "apollo_private.graphql.variables",
                     "{}"
+                  ],
+                  [
+                    "graphql.document",
+                    "# ExampleQuery\nquery ExampleQuery($reviewsForAuthorAuthorId:ID!,$topProductsFirst:Int){topProducts(first:$topProductsFirst){name reviewsForAuthor(authorID:$reviewsForAuthorAuthorId){author{id name}body}}}"
                   ],
                   [
                     "apollo_private.operation_signature",
@@ -174,16 +174,16 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "graphql.document",
-                        "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
-                      ],
-                      [
                         "graphql.operation.name",
                         ""
                       ],
                       [
                         "otel.kind",
                         "INTERNAL"
+                      ],
+                      [
+                        "graphql.document",
+                        "# ExampleQuery\nquery ExampleQuery($reviewsForAuthorAuthorId:ID!,$topProductsFirst:Int){topProducts(first:$topProductsFirst){name reviewsForAuthor(authorID:$reviewsForAuthorAuthorId){author{id name}body}}}"
                       ],
                       [
                         "histogram.apollo_router_cache_miss_time",
