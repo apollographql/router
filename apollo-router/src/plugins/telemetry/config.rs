@@ -2,6 +2,7 @@
 use std::collections::BTreeMap;
 
 use axum::headers::HeaderName;
+use derivative::Derivative;
 use opentelemetry::sdk::resource::EnvResourceDetector;
 use opentelemetry::sdk::resource::ResourceDetector;
 use opentelemetry::sdk::trace::SpanLimits;
@@ -52,7 +53,7 @@ where
 impl<T> GenericWith<T> for T where Self: Sized {}
 
 /// Telemetry configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub struct Conf {
     /// Logging configuration
@@ -67,7 +68,7 @@ pub struct Conf {
 }
 
 /// Metrics configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(dead_code)]
 pub(crate) struct Metrics {
@@ -79,7 +80,7 @@ pub(crate) struct Metrics {
     pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct MetricsCommon {
     /// Configuration to add custom labels/attributes to metrics
@@ -94,7 +95,7 @@ pub(crate) struct MetricsCommon {
 }
 
 /// Tracing configuration
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Tracing {
     // TODO: when deleting the `experimental_` prefix, check the usage when enabling dev mode
@@ -116,7 +117,7 @@ pub(crate) struct Tracing {
     pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, Deserialize, PartialEq, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Log format
@@ -164,8 +165,9 @@ impl Logging {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, Derivative, JsonSchema)]
 #[serde(untagged, deny_unknown_fields, rename_all = "snake_case")]
+#[derivative(PartialEq)]
 pub(crate) enum HeaderLoggingCondition {
     /// Match header value given a regex to display logs
     Matching {
@@ -174,6 +176,7 @@ pub(crate) enum HeaderLoggingCondition {
         /// Regex to match the header value
         #[schemars(with = "String", rename = "match")]
         #[serde(deserialize_with = "deserialize_regex", rename = "match")]
+        #[derivative(PartialEq = "ignore")] //FIXME
         matching: Regex,
         /// Display request/response headers (default: false)
         #[serde(default)]
@@ -245,7 +248,7 @@ impl HeaderLoggingCondition {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Copy)]
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema, Copy)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum LoggingFormat {
     /// Pretty text format (default if you're running from a tty)
@@ -264,7 +267,7 @@ impl Default for LoggingFormat {
     }
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
@@ -277,7 +280,7 @@ pub(crate) struct ExposeTraceId {
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Default, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
@@ -294,7 +297,7 @@ pub(crate) struct Propagation {
     pub(crate) zipkin: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
@@ -303,7 +306,7 @@ pub(crate) struct RequestPropagation {
     pub(crate) header_name: Option<HeaderName>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
 pub(crate) struct Trace {
@@ -370,7 +373,7 @@ fn default_max_attributes_per_link() -> u32 {
     SpanLimits::default().max_attributes_per_link
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeValue {
     /// bool values
@@ -445,7 +448,7 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeArray {
     /// Array of bools
@@ -469,7 +472,7 @@ impl From<AttributeArray> for opentelemetry::Array {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum SamplerOption {
     /// Sample a given fraction. Fractions >= 1 will always sample.
@@ -477,7 +480,7 @@ pub(crate) enum SamplerOption {
     Always(Sampler),
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Sampler {
     /// Always sample

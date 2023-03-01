@@ -162,7 +162,7 @@ where
 }
 
 /// Batch processor configuration
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(default)]
 pub(crate) struct BatchProcessorConfig {
     #[serde(deserialize_with = "humantime_serde::deserialize")]

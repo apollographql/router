@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use ::serde::Deserialize;
 use access_json::JSONQuery;
+use derivative::Derivative;
 use http::header::HeaderName;
 use http::response::Parts;
 use http::HeaderMap;
@@ -44,7 +45,7 @@ pub(crate) const METRIC_PREFIX_VALUE: &str = "value.";
 
 pub(crate) type MetricsExporterHandle = Box<dyn Any + Send + Sync + 'static>;
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Configuration to add custom attributes/labels on metrics
 pub(crate) struct MetricsAttributesConf {
@@ -55,7 +56,7 @@ pub(crate) struct MetricsAttributesConf {
 }
 
 /// Configuration to add custom attributes/labels on metrics to subgraphs
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SubgraphAttributesConf {
     /// Attributes for all subgraphs
@@ -65,7 +66,7 @@ pub(crate) struct SubgraphAttributesConf {
 }
 
 /// Configuration to add custom attributes/labels on metrics to subgraphs
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct AttributesForwardConf {
     /// Configuration to insert custom attributes/labels in metrics
@@ -81,7 +82,7 @@ pub(crate) struct AttributesForwardConf {
     pub(crate) errors: Option<ErrorsForward>,
 }
 
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, PartialEq, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to insert custom attributes/labels in metrics
 pub(crate) struct Insert {
@@ -92,7 +93,7 @@ pub(crate) struct Insert {
 }
 
 /// Configuration to forward from headers/body
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Forward {
     /// Forward header values as custom attributes/labels in metrics
@@ -101,7 +102,7 @@ pub(crate) struct Forward {
     pub(crate) body: Option<Vec<BodyForward>>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ErrorsForward {
     /// Will include the error message in a "message" attribute
@@ -116,9 +117,10 @@ schemar_fn!(
     "Using a regex on the header name"
 );
 
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, JsonSchema, Derivative, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 #[serde(untagged)]
+#[derivative(PartialEq)]
 /// Configuration to forward header values in metric labels
 pub(crate) enum HeaderForward {
     /// Match via header name
@@ -138,11 +140,12 @@ pub(crate) enum HeaderForward {
         /// Using a regex on the header name
         #[schemars(schema_with = "forward_header_matching")]
         #[serde(deserialize_with = "deserialize_regex")]
+        #[derivative(PartialEq = "ignore")]
         matching: Regex,
     },
 }
 
-#[derive(Clone, JsonSchema, Deserialize, Debug)]
+#[derive(Clone, PartialEq, JsonSchema, Deserialize, Debug)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 /// Configuration to forward body values in metric attributes/labels
 pub(crate) struct BodyForward {
@@ -156,7 +159,7 @@ pub(crate) struct BodyForward {
     pub(crate) default: Option<AttributeValue>,
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Configuration to forward context values in metric attributes/labels
 pub(crate) struct ContextForward {

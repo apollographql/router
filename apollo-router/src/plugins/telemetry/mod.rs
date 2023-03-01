@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -21,6 +22,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
+use once_cell::sync::Lazy;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -130,6 +132,8 @@ pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::displa
 const DEFAULT_SERVICE_NAME: &str = "apollo-router";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
+
+static PREVIOUS_CONFIG: Lazy<Mutex<Option<Arc<config::Conf>>>> = Lazy::new(|| Mutex::new(None));
 
 #[doc(hidden)] // Only public for integration tests
 pub struct Telemetry {
@@ -459,6 +463,20 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            {
+                let mut previous_guard = PREVIOUS_CONFIG.lock().unwrap();
+
+                // do not reload tracing if the config did not change
+                if let Some(previous_config) = (*previous_guard).as_ref() {
+                    if *previous_config == self.config {
+                        println!("config did not change, not reloading telemetry");
+                        return;
+                    }
+                }
+
+                println!("reloading telemetry");
+                *previous_guard = Some(self.config.clone());
+            }
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we
             // will already have set the new tracer provider and we will be in an inconsistent state.

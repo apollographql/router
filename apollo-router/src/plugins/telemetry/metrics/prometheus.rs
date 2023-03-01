@@ -26,7 +26,7 @@ use crate::services::router;
 use crate::ListenAddr;
 
 /// Prometheus configuration
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Set to true to enable

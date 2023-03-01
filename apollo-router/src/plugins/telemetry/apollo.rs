@@ -33,7 +33,7 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 
 #[derive(Derivative)]
 #[derivative(Debug)]
-#[derive(Clone, Deserialize, JsonSchema)]
+#[derive(Clone, Deserialize, PartialEq, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct Config {
     /// The Apollo Studio endpoint for exporting traces and metrics.
@@ -140,7 +140,7 @@ schemar_fn!(
 );
 
 /// Forward headers
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardHeaders {
     /// Don't send any headers
@@ -179,7 +179,7 @@ schemar_fn!(
 );
 
 /// Forward GraphQL variables
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ForwardValues {
     /// Dont send any variables

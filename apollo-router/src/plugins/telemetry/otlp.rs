@@ -1,6 +1,7 @@
 //! Shared configuration for Otlp tracing and metrics.
 use std::collections::HashMap;
 
+use derivative::Derivative;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use opentelemetry_otlp::HttpExporterBuilder;
@@ -22,7 +23,7 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::tracing::parse_url_for_endpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// The endpoint to send data to
@@ -123,15 +124,16 @@ pub(crate) enum EndpointDefault {
     Default,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct HttpExporter {
     /// Headers to send on report requests
     pub(crate) headers: HashMap<String, String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, Default, JsonSchema)]
+#[derive(Debug, Clone, Derivative, Deserialize, Serialize, Default, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
+#[derivative(PartialEq)]
 pub(crate) struct GrpcExporter {
     /// The optional domain name for tls config.
     /// Note that domain name is will be defaulted to match the endpoint is not explicitly set.
@@ -149,6 +151,7 @@ pub(crate) struct GrpcExporter {
         serialize_with = "metadata_map_serde::serialize"
     )]
     #[schemars(schema_with = "header_map", default)]
+    #[derivative(PartialEq = "ignore")]
     pub(crate) metadata: MetadataMap,
 }
 
@@ -195,7 +198,7 @@ impl GrpcExporter {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Protocol {
     Grpc,
