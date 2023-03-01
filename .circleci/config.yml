@@ -385,6 +385,9 @@ jobs:
           command: |
             rm Cargo.lock
             cargo fetch
+      - run:
+          name: Wait for Redis server
+          command: dockerize -wait tcp://localhost:6379 -timeout 1m
       - test_workspace:
           os: linux_amd
           # schema_generation test skipped because schemars changed its representation of enums:
