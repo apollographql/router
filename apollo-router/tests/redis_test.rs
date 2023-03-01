@@ -75,7 +75,7 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s:String = connection
+        let s:String = client
           .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
