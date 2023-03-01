@@ -14,6 +14,7 @@ use hyper::server::conn::Http;
 use multimap::MultiMap;
 #[cfg(unix)]
 use tokio::net::UnixListener;
+use tokio::sync::mpsc;
 use tokio::sync::Notify;
 
 use crate::configuration::Configuration;
@@ -183,6 +184,7 @@ pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
     address: ListenAddr,
     router: axum::Router,
+    all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     // this server reproduces most of hyper::server::Server's behaviour
@@ -206,6 +208,7 @@ pub(super) fn serve_router_on_listen_addr(
                 res = listener.accept() => {
                     let app = router.clone();
                     let connection_shutdown = connection_shutdown.clone();
+                    let connection_stop_signal = all_connections_stopped_sender.clone();
 
                     match res {
                         Ok(res) => {
@@ -221,6 +224,9 @@ pub(super) fn serve_router_on_listen_addr(
 
                             let address = address.clone();
                             tokio::task::spawn(async move {
+                                // this sender must be moved into the session to track that it is still running
+                                let _connection_stop_signal = connection_stop_signal;
+
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         stream
