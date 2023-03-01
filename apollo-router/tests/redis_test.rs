@@ -5,6 +5,7 @@ mod test {
     use apollo_router::services::supergraph;
     use fred::prelude::ClientLike;
     use fred::prelude::KeysInterface;
+    use fred::types::ReconnectPolicy;
     use futures::StreamExt;
     use http::Method;
     use redis::AsyncCommands;
@@ -20,7 +21,7 @@ mod test {
         let client = fred::prelude::RedisClient::new(
             fred::types::RedisConfig::from_url("redis://redis:6379").unwrap(),
             None,
-            None,
+            Some(ReconnectPolicy::new_exponential(10, 1, 2000, 10)),
         );
         // spawn tasks that listen for connection close or reconnect events
         let mut error_rx = client.on_error();
