@@ -147,7 +147,5 @@ include_subgraph_errors:
     insta::assert_json_snapshot!(data);
     router.assert_shutdown().await;
 
-    println!("executed client request");
-
     Ok(())
 }
