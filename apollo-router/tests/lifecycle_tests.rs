@@ -130,9 +130,17 @@ include_subgraph_errors:
     });
 
     tokio::time::sleep(Duration::from_millis(1000)).await;
+    #[cfg(target_family = "unix")]
     unsafe {
-        libc::kill(pid, libc::SIGINT);
+        libc::kill(pid, libc::SIGTERM);
     }
+    #[cfg(not(target_family = "unix"))]
+    let _ = self
+        .router
+        .as_mut()
+        .expect("router not started")
+        .kill()
+        .await;
     tokio::time::sleep(Duration::from_millis(1000)).await;
 
     let (mut router, data) = client_handle.await.unwrap();
