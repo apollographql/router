@@ -9,6 +9,7 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use router_bridge::planner::Planner;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -36,6 +37,7 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::QueryPlanResult;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -274,6 +276,7 @@ pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
+    planner: Option<Arc<Planner<QueryPlanResult>>>,
 }
 
 impl PluggableSupergraphServiceBuilder {
@@ -283,6 +286,7 @@ impl PluggableSupergraphServiceBuilder {
             plugins: Default::default(),
             subgraph_services: Default::default(),
             configuration: None,
+            planner: None,
         }
     }
 
@@ -316,6 +320,14 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
+    pub(crate) fn with_planner(
+        mut self,
+        planner: Arc<Planner<QueryPlanResult>>,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.planner = Some(planner);
+        self
+    }
+
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
@@ -326,10 +338,21 @@ impl PluggableSupergraphServiceBuilder {
         };
 
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration.clone())
-                .await
-                .map_err(ServiceBuildError::QueryPlannerError)?;
+        let bridge_query_planner = match self.planner {
+            None => {
+                BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration.clone())
+                    .await
+                    .map_err(ServiceBuildError::QueryPlannerError)?
+            }
+            Some(planner) => BridgeQueryPlanner::new_from_planner(
+                planner,
+                self.schema.clone(),
+                introspection,
+                configuration.clone(),
+            )
+            .await
+            .map_err(ServiceBuildError::QueryPlannerError)?,
+        };
         let query_planner_service = CachingQueryPlanner::new(
             bridge_query_planner,
             self.schema.schema_id.clone(),
@@ -454,6 +477,11 @@ impl SupergraphCreator {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.query_planner_service.cache_keys(count).await
     }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.query_planner_service.planner()
+    }
+
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         cache_keys: Vec<(String, Option<String>)>,

@@ -65,6 +65,35 @@ impl BridgeQueryPlanner {
         })
     }
 
+    pub(crate) async fn new_from_planner(
+        planner: Arc<Planner<QueryPlanResult>>,
+        schema: Arc<Schema>,
+        introspection: Option<Arc<Introspection>>,
+        configuration: Arc<Configuration>,
+    ) -> Result<Self, QueryPlannerError> {
+        planner
+            .update(
+                schema.as_string().to_string(),
+                QueryPlannerConfig {
+                    incremental_delivery: Some(IncrementalDeliverySupport {
+                        enable_defer: Some(configuration.supergraph.defer_support),
+                    }),
+                },
+            )
+            .await?;
+
+        Ok(Self {
+            planner,
+            schema,
+            introspection,
+            configuration,
+        })
+    }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.planner.clone()
+    }
+
     async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
