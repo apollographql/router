@@ -42,7 +42,7 @@ pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
 #[derive(Derivative, Default, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq)]
+#[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
@@ -54,37 +54,6 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
-}
-
-impl std::fmt::Debug for Query {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use super::schema::sorted_map;
-        let Query {
-            string,
-            compiler: _,
-            fragments,
-            operations,
-            subselections,
-        } = self;
-        writeln!(f, "Query:")?;
-        writeln!(f, "  string: {string:?}")?;
-        sorted_map(f, "  ", "fragments", &fragments.map)?;
-        writeln!(f, "  operations:")?;
-        for operation in operations {
-            let Operation {
-                name,
-                kind,
-                selection_set,
-                variables,
-            } = operation;
-            writeln!(f, "    - name: {name:?}")?;
-            writeln!(f, "      kind: {kind:?}")?;
-            writeln!(f, "      selection_set: {selection_set:#?}")?;
-            sorted_map(f, "      ", "variables", variables)?;
-        }
-        writeln!(f, "  subselections: {subselections:#?}")?;
-        Ok(())
-    }
 }
 
 #[derive(Debug, Derivative, Default)]

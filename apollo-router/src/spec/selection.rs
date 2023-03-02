@@ -84,13 +84,13 @@ impl Selection {
                         schema
                             .object_types
                             .get(name)
-                            .and_then(|ty| ty.field(field_name))
+                            .and_then(|ty| ty.fields.get(field_name))
                             // otherwise, it might be an interface
                             .or_else(|| {
                                 schema
                                     .interfaces
                                     .get(name)
-                                    .and_then(|ty| ty.field(field_name))
+                                    .and_then(|ty| ty.fields.get(field_name))
                             })
                             .ok_or_else(|| {
                                 SpecError::InvalidField(
