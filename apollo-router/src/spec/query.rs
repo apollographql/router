@@ -10,7 +10,6 @@ use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
-use apollo_parser::ast;
 use derivative::Derivative;
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -1163,24 +1162,6 @@ impl From<hir::OperationType> for OperationKind {
             hir::OperationType::Query => Self::Query,
             hir::OperationType::Mutation => Self::Mutation,
             hir::OperationType::Subscription => Self::Subscription,
-        }
-    }
-}
-
-impl From<ast::OperationType> for OperationKind {
-    // Spec: https://spec.graphql.org/draft/#OperationType
-    fn from(operation_type: ast::OperationType) -> Self {
-        if operation_type.query_token().is_some() {
-            Self::Query
-        } else if operation_type.mutation_token().is_some() {
-            Self::Mutation
-        } else if operation_type.subscription_token().is_some() {
-            Self::Subscription
-        } else {
-            unreachable!(
-                "either the `query` token is provided, either the `mutation` token, \
-                either the `subscription` token; qed"
-            )
         }
     }
 }
