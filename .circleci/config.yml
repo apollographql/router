@@ -49,16 +49,17 @@ executors:
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
+# We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
   toolchain_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ arch }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
   xtask_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ arch }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
   merge_version:
     type: string
-    default: '{{ checksum ".circleci/config.yml" }}-{{ arch }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
   protoc_version:
     type: string
     default: "21.8"
@@ -120,6 +121,26 @@ commands:
       - when:
           condition:
             or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Write arch
+                command: |
+                  echo 'amd_linux' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Write arch
+                command: |
+                  echo 'arm_linux' >> ~/.arch
+      - when:
+          condition:
+            or:
               - equal: [ *macos_build_executor, << parameters.platform >> ]
               - equal: [ *macos_test_executor, << parameters.platform >> ]
           steps:
@@ -128,6 +149,10 @@ commands:
                 command: |
                   mkdir -p ~/.local/aliases
                   ln -s /sbin/md5 ~/.local/aliases/md5sum
+            - run:
+                name: Write arch
+                command: |
+                  echo 'osx' >> ~/.arch
       - when:
           condition:
             or:
@@ -140,6 +165,10 @@ commands:
                   echo 'alias find=/bin/find' >> "$BASH_ENV"
                   echo 'alias sort=/bin/sort' >> "$BASH_ENV"
                   echo 'export EXECUTABLE_SUFFIX=".exe"' >> "$BASH_ENV"
+            - run:
+                name: Write arch
+                command: |
+                  echo 'windows' >> ~/.arch
 
   # Create files that are useful for cache keys
   create_cache_keys:
