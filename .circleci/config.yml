@@ -98,6 +98,7 @@ commands:
       - install_rust:
           platform: << parameters.platform >>
       - install_extra_tools
+      - fetch_dependencies
       - save_cache:
           key: "<< pipeline.parameters.toolchain_version >>"
           paths:
@@ -299,6 +300,11 @@ commands:
               cargo install --locked cargo-deny cargo-about cargo-edit
             fi
 
+  fetch_dependencies:
+    steps:
+      - run:
+          name: Fetch dependencies
+          command: cargo fetch --locked
   install_xtask:
     steps:
       - restore_cache:
