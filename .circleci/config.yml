@@ -321,7 +321,7 @@ commands:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.merge_version >>-lint"
-      - run: xtask lint --skip-xtask
+      - run: xtask lint
       - save_cache:
           key: "<< pipeline.parameters.merge_version >>-lint"
           paths:
