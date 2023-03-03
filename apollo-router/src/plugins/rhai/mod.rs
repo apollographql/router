@@ -634,6 +634,7 @@ macro_rules! gen_map_request {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
                                 message: error_details.message,
+                                extensions: error_details.extensions,
                                 ..Default::default()
                             }])
                             .status_code(error_details.status)
@@ -698,6 +699,7 @@ macro_rules! gen_map_deferred_request {
                         let res = $response::error_builder()
                             .errors(vec![Error {
                                 message: error_details.message,
+                                extensions: error_details.extensions,
                                 ..Default::default()
                             }])
                             .status_code(error_details.status)
@@ -742,6 +744,7 @@ macro_rules! gen_map_response {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
                                 message: error_details.message,
+                                extensions: error_details.extensions,
                                 ..Default::default()
                             }])
                             .status_code(error_details.status)
@@ -800,6 +803,7 @@ macro_rules! gen_map_deferred_response {
                         let res = $response::error_builder()
                             .errors(vec![Error {
                                 message: error_details.message,
+                                extensions: error_details.extensions,
                                 ..Default::default()
                             }])
                             .status_code(error_details.status)
@@ -819,7 +823,8 @@ macro_rules! gen_map_deferred_response {
                         let error_details = ErrorDetails {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
                             message: "rhai execution error: empty response".to_string(),
-                            position: None
+                            position: None,
+                            extensions: Object::default()
                         };
                         return Ok(failure_message(
                             context,
@@ -1097,7 +1102,7 @@ struct ErrorDetails {
     status: StatusCode,
     message: String,
     position: Option<Position>,
-    // Add support for extension_code ?
+    extensions: Object,
 }
 
 impl fmt::Display for ErrorDetails {
@@ -1118,6 +1123,7 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
         message: format!("rhai execution error: '{error}'"),
         position: None,
+        extensions: Object::default(),
     };
 
     // We only want to process errors raised in functions
@@ -1131,30 +1137,11 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
                 // Clone is annoying, but we only have a reference, so...
                 let map = obj.clone().cast::<Map>();
 
-                let mut ed_status: Option<StatusCode> = None;
-                let mut ed_message: Option<String> = None;
-
-                let status_opt = map.get("status");
-                let message_opt = map.get("message");
-
-                // Now we have optional Dynamics
-                // Try to process each independently
-                if let Some(status_dyn) = status_opt {
-                    if let Ok(value) = status_dyn.as_int() {
-                        if let Ok(status) = StatusCode::try_from(value as u16) {
-                            ed_status = Some(status);
-                        }
-                    }
-                }
-
-                if let Some(message_dyn) = message_opt {
-                    let cloned = message_dyn.clone();
-                    if let Ok(value) = cloned.into_string() {
-                        ed_message = Some(value);
-                    }
-                }
-
-                if let Some(status) = ed_status {
+                if let Some(status) = map
+                    .get("status")
+                    .and_then(|status_dyn| status_dyn.as_int().ok())
+                    .and_then(|value| StatusCode::try_from(value as u16).ok())
+                {
                     // Decide in future if returning a 200 here is ok.
                     // If it is, we can simply remove this check
                     if status != StatusCode::OK {
@@ -1162,8 +1149,27 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
                     }
                 }
 
-                if let Some(message) = ed_message {
+                if let Some(message) = map
+                    .get("message")
+                    .cloned()
+                    .and_then(|message_dyn| message_dyn.into_string().ok())
+                {
                     error_details.message = message;
+                }
+
+                if let Some(extensions) = map.get("extensions") {
+                    match from_dynamic::<Value>(extensions) {
+                        Ok(ext) => {
+                            if let Value::Object(o) = ext {
+                                error_details.extensions = o;
+                            } else {
+                                tracing::error!("unexpected error extensions value: not a Map");
+                            }
+                        }
+                        Err(e) => {
+                            tracing::error!("unexpected error extensions value: {e}");
+                        }
+                    }
                 }
             }
         }

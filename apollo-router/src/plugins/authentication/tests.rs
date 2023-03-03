@@ -113,7 +113,35 @@ async fn load_plugin() {
 
 #[tokio::test]
 async fn it_rejects_when_there_is_no_auth_header() {
-    let test_harness = build_a_default_test_harness().await;
+    let mut mock_service = test::MockSupergraphService::new();
+    mock_service.expect_clone().return_once(move || {
+        println!("cloned to supergraph mock");
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service.expect_call().never();
+        mock_service
+    });
+    let jwks_url = create_an_url("jwks.json");
+
+    let config = serde_json::json!({
+        "authentication": {
+            "experimental" : {
+                "jwt" : {
+                    "jwks_urls": [&jwks_url]
+                }
+            }
+        },
+        "rhai": {
+            "scripts":"tests/fixtures",
+            "main":"require_authentication.rhai"
+        }
+    });
+    let test_harness = crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap();
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -138,7 +166,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Missing authorization header")
+        .message("Missing 'Authorization' header")
         .extension_code("AUTH_ERROR")
         .build();
 

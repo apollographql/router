@@ -49,9 +49,6 @@ pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 
 #[derive(Debug, Display, Error)]
 enum AuthenticationError<'a> {
-    /// Missing {0} header
-    MissingHeader(&'a str),
-
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
@@ -372,11 +369,7 @@ impl Plugin for AuthenticationPlugin {
                     match request.router_request.headers().get(&my_config.header_name) {
                         Some(value) => value.to_str(),
                         None => {
-                            return failure_message(
-                                request.context,
-                                AuthenticationError::MissingHeader(&my_config.header_name),
-                                StatusCode::UNAUTHORIZED,
-                            );
+                            return Ok(ControlFlow::Continue(request));
                         }
                     };
 
