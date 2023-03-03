@@ -567,15 +567,10 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -636,15 +631,10 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     known_type,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -682,30 +672,14 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment
-                            .skip
-                            .should_skip(parameters.variables)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if !fragment
-                            .include
-                            .should_include(parameters.variables)
-                            .unwrap_or(true)
-                        {
+                        if fragment.include_skip.should_skip(parameters.variables) {
                             continue;
                         }
 
@@ -763,17 +737,9 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -829,8 +795,7 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     ..
                 } => {
                     // top level objects will not provide a __typename field
@@ -840,11 +805,7 @@ impl Query {
                         return Err(InvalidValue);
                     }
 
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -860,30 +821,14 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment
-                            .skip
-                            .should_skip(parameters.variables)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if !fragment
-                            .include
-                            .should_include(parameters.variables)
-                            .unwrap_or(true)
-                        {
+                        if fragment.include_skip.should_skip(parameters.variables) {
                             continue;
                         }
 
