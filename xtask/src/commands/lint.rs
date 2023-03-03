@@ -51,7 +51,15 @@ impl Lint {
 
     fn run_common(&self, fmt: impl FnOnce() -> Result<()>) -> Result<()> {
         fmt()?;
-        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings",]);
+        cargo!([
+            "clippy",
+            "--all",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+            "--no-deps"
+        ]);
         cargo!(["doc", "--all", "--no-deps"], env = { "RUSTDOCFLAGS" => "-Dwarnings" });
         Ok(())
     }
