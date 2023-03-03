@@ -312,10 +312,14 @@ commands:
             - target
 
   xtask_test:
+    parameters:
+      variant:
+        type: string
+        default: "default"
     steps:
       - restore_cache:
           keys:
-            - "<< pipeline.parameters.merge_version >>-test"
+            - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
       - run: xtask test
       - run:
           name: Delete files from cache
@@ -323,7 +327,7 @@ commands:
             find target/debug/deps -type f -size +100M -delete
             rm target/debug/router*
       - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-test"
+          key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
           paths:
             - target
 
@@ -382,7 +386,8 @@ jobs:
           command: |
             rm Cargo.lock
             cargo fetch
-      - xtask_test
+      - xtask_test:
+          variant: "updated"
 
   build_release:
     parameters:
