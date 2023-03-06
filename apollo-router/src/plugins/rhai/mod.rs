@@ -1142,11 +1142,18 @@ impl From<&rhai::Position> for Position {
 
 #[derive(Deserialize, Debug)]
 struct ErrorDetails {
-    #[serde(with = "http_serde::status_code")]
+    #[serde(
+        with = "http_serde::status_code",
+        default = "default_thrown_status_code"
+    )]
     status: StatusCode,
     message: Option<String>,
     position: Option<Position>,
     body: Option<crate::graphql::Response>,
+}
+
+fn default_thrown_status_code() -> StatusCode {
+    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
