@@ -384,11 +384,11 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked --jobs 4 --test-threads 6
+                command: xtask test --locked
       - run:
           name: Delete large files from cache
           command: |
-            find target/debug/deps -type f -size +100M -delete
+            find target/debug/deps -type f -size +50M -delete
             rm target/debug/router*
       - save_cache:
           key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
