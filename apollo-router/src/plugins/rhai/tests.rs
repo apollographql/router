@@ -654,7 +654,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 124, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 149, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");

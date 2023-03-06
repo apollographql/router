@@ -1170,11 +1170,12 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
         let inner_error = error.unwrap_inner();
         // We only want to process runtime errors raised in functions
         if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
-            let temp_error_details: ErrorDetails = rhai::serde::from_dynamic(obj).unwrap();
-            if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
-                error_details = temp_error_details;
-            } else {
-                error_details.status = temp_error_details.status;
+            if let Ok(temp_error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
+                if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
+                    error_details = temp_error_details;
+                } else {
+                    error_details.status = temp_error_details.status;
+                }
             }
             error_details.position = Some(pos.into());
         }
