@@ -364,7 +364,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked --jobs 4 --test-threads 6
+                command: xtask test --workspace --locked --jobs 4 --test-threads 6
       - when:
           condition:
             or:
@@ -373,7 +373,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked --jobs 8 --test-threads 8
+                command: xtask test --workspace --locked --jobs 8 --test-threads 8
       - when:
           condition:
             or:
@@ -384,7 +384,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked
+                command: xtask test --workspace --locked --jobs 4 --test-threads 6
       - run:
           name: Delete large files from cache
           command: |
