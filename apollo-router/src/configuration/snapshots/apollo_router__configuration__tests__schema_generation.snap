@@ -26,7 +26,7 @@ expression: "&schema"
               "description": "The JWT configuration",
               "type": "object",
               "required": [
-                "jwks_urls"
+                "jwks"
               ],
               "properties": {
                 "header_name": {
@@ -39,11 +39,25 @@ expression: "&schema"
                   "default": "Bearer",
                   "type": "string"
                 },
-                "jwks_urls": {
-                  "description": "Retrieve our JWK Sets from these locations",
+                "jwks": {
+                  "description": "List of JWKS used to verify tokens",
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "object",
+                    "required": [
+                      "url"
+                    ],
+                    "properties": {
+                      "issuer": {
+                        "description": "Expected issuer for tokens verified by that JWKS",
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "url": {
+                        "description": "Retrieve the JWK Set",
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -4420,6 +4434,26 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_enable_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "type": "boolean",
+              "nullable": true
+            },
+            "experimental_entity_caching": {
+              "description": "Enable entity caching",
+              "type": "object",
+              "required": [
+                "ttl"
+              ],
+              "properties": {
+                "ttl": {
+                  "description": "expiration for all keys",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "experimental_retry": {
               "description": "Retry configuration",
               "type": "object",
@@ -4477,6 +4511,25 @@ expression: "&schema"
               "description": "Enable timeout for incoming requests",
               "default": null,
               "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "cache": {
+          "description": "URLs of Redis cache used for query planning",
+          "default": null,
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "additionalProperties": false,
@@ -4560,6 +4613,26 @@ expression: "&schema"
               "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
+                "nullable": true
+              },
+              "experimental_enable_http2": {
+                "description": "Enable HTTP2 for subgraphs",
+                "type": "boolean",
+                "nullable": true
+              },
+              "experimental_entity_caching": {
+                "description": "Enable entity caching",
+                "type": "object",
+                "required": [
+                  "ttl"
+                ],
+                "properties": {
+                  "ttl": {
+                    "description": "expiration for all keys",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "experimental_retry": {
