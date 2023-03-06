@@ -5,6 +5,7 @@ use std::fmt::Formatter;
 use std::sync::Arc;
 
 use futures::prelude::*;
+use tokio::sync::mpsc;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
@@ -57,6 +58,7 @@ enum State<FA: RouterSuperServiceFactory> {
         entitlement: EntitlementState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
+        all_connections_stopped_signal: mpsc::Receiver<()>,
     },
     Stopped,
     Errored(ApolloRouterError),
@@ -155,6 +157,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 entitlement,
                 server_handle,
                 router_service_factory,
+                all_connections_stopped_signal: _,
             } => {
                 tracing::info!("reloading");
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
@@ -200,13 +203,18 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         match self {
             Running {
                 server_handle: Some(server_handle),
+                mut all_connections_stopped_signal,
                 ..
             } => {
                 tracing::info!("shutting down");
-                server_handle
+                let state = server_handle
                     .shutdown()
                     .map_ok_or_else(Errored, |_| Stopped)
-                    .await
+                    .await;
+                //FIXME: we might want to set a timeout here
+                let _ = all_connections_stopped_signal.recv().await;
+                tracing::info!("all connections shut down");
+                state
             }
             _ => Stopped,
         }
@@ -286,6 +294,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             .await
             .map_err(ServiceCreationError)?;
 
+        // used to track if there are still in flight connections when shutting down
+        let (all_connections_stopped_sender, all_connections_stopped_signal) =
+            mpsc::channel::<()>(1);
         let web_endpoints = router_service_factory.web_endpoints();
 
         // The point of no return. We take the previous server handle.
@@ -300,6 +311,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         Default::default(),
                         web_endpoints,
                         effective_entitlement,
+                        all_connections_stopped_sender,
                     )
                     .await?
             }
@@ -326,6 +338,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             entitlement,
             server_handle: Some(server_handle),
             router_service_factory,
+            all_connections_stopped_signal,
         })
     }
 }
@@ -910,7 +923,9 @@ mod tests {
             main_listener: Option<Listener>,
             _extra_listeners: Vec<(ListenAddr, Listener)>,
             _web_endpoints: MultiMap<ListenAddr, Endpoint>,
+
             _entitlment: EntitlementState,
+            _all_connections_stopped_sender: mpsc::Sender<()>,
         ) -> Self::Future
         where
             RF: RouterFactory,
@@ -962,11 +977,14 @@ mod tests {
                         Ok((main_listener, vec![]))
                     };
 
+                    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+
                     Ok(HttpServerHandle::new(
                         shutdown_sender,
                         Box::pin(server),
                         Some(configuration.supergraph.listen.clone()),
                         vec![],
+                        all_connections_stopped_sender,
                     ))
                 },
             );

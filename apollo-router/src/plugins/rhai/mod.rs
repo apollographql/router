@@ -64,6 +64,7 @@ use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::register_plugin;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -1670,7 +1671,7 @@ impl Rhai {
         global_variables.insert("APOLLO_START".into(), Instant::now().into());
         global_variables.insert(
             "APOLLO_AUTHENTICATION_JWT_CLAIMS".into(),
-            "apollo_authentication::JWT::claims".to_string().into(),
+            APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string().into(),
         );
 
         let shared_globals = Arc::new(global_variables);

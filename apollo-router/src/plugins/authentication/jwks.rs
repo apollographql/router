@@ -30,26 +30,36 @@ use crate::services::apollo_graph_reference;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
-    urls: Vec<Url>,
+    list: Vec<JwksConfig>,
     jwks_map: Arc<RwLock<HashMap<Url, JwkSet>>>,
     _drop_signal: Arc<oneshot::Sender<()>>,
 }
 
+#[derive(Clone)]
+pub(super) struct JwksConfig {
+    pub(super) url: Url,
+    pub(super) issuer: Option<String>,
+}
+
+#[derive(Clone)]
+pub(super) struct JwkSetInfo {
+    pub(super) jwks: JwkSet,
+    pub(super) issuer: Option<String>,
+}
+
 impl JwksManager {
-    pub(super) async fn new(urls: Vec<Url>) -> Result<Self, BoxError> {
+    pub(super) async fn new(list: Vec<JwksConfig>) -> Result<Self, BoxError> {
         use futures::FutureExt;
 
-        let downloads = urls
+        let downloads = list
             .iter()
             .cloned()
-            .map(|url| get_jwks(url.clone()).map(|jwks| (url, jwks)))
+            .map(|JwksConfig { url, .. }| {
+                get_jwks(url.clone()).map(|opt_jwks| opt_jwks.map(|jwks| (url, jwks)))
+            })
             .collect::<Vec<_>>();
 
-        let jwks_map: Option<_> = join_all(downloads)
-            .await
-            .into_iter()
-            .map(|(url, opt)| opt.map(|jwks| (url, jwks)))
-            .collect();
+        let jwks_map: Option<_> = join_all(downloads).await.into_iter().collect();
 
         match jwks_map {
             None => Err(ConfigurationError::InvalidConfiguration {
@@ -61,10 +71,10 @@ impl JwksManager {
                 let jwks_map = Arc::new(RwLock::new(map));
                 let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
-                tokio::task::spawn(poll(urls.clone(), jwks_map.clone(), drop_receiver));
+                tokio::task::spawn(poll(list.clone(), jwks_map.clone(), drop_receiver));
 
                 Ok(JwksManager {
-                    urls,
+                    list,
                     jwks_map,
                     _drop_signal: Arc::new(_drop_signal),
                 })
@@ -72,32 +82,45 @@ impl JwksManager {
         }
     }
 
+    #[cfg(test)]
+    pub(super) fn new_test(list: Vec<JwksConfig>, jwks: HashMap<Url, JwkSet>) -> Self {
+        let (_drop_signal, _) = oneshot::channel::<()>();
+
+        JwksManager {
+            list,
+            jwks_map: Arc::new(RwLock::new(jwks)),
+            _drop_signal: Arc::new(_drop_signal),
+        }
+    }
+
     pub(super) fn iter_jwks(&self) -> Iter {
         Iter {
-            urls: self.urls.clone(),
+            list: self.list.clone(),
             manager: self,
         }
     }
 }
 
 async fn poll(
-    urls: Vec<Url>,
+    list: Vec<JwksConfig>,
     jwks_map: Arc<RwLock<HashMap<Url, JwkSet>>>,
     drop_receiver: oneshot::Receiver<()>,
 ) {
     use futures::stream::StreamExt;
 
-    let mut streams = select_all(urls.into_iter().map(move |url| {
+    let mut streams = select_all(list.into_iter().map(move |config| {
         let jwks_map = jwks_map.clone();
-        Box::pin(repeat((url, jwks_map)).then(|(url, jwks_map)| async move {
-            tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
+        Box::pin(
+            repeat((config, jwks_map)).then(|(config, jwks_map)| async move {
+                tokio::time::sleep(DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL).await;
 
-            if let Some(jwks) = get_jwks(url.clone()).await {
-                if let Ok(mut map) = jwks_map.write() {
-                    map.insert(url, jwks);
+                if let Some(jwks) = get_jwks(config.url.clone()).await {
+                    if let Ok(mut map) = jwks_map.write() {
+                        map.insert(config.url, jwks);
+                    }
                 }
-            }
-        }))
+            }),
+        )
     }));
 
     pin_mut!(drop_receiver);
@@ -186,20 +209,23 @@ pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
 
 pub(super) struct Iter<'a> {
     manager: &'a JwksManager,
-    urls: Vec<Url>,
+    list: Vec<JwksConfig>,
 }
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = JwkSet;
+    type Item = JwkSetInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            match self.urls.pop() {
+            match self.list.pop() {
                 None => return None,
-                Some(url) => {
+                Some(config) => {
                     if let Ok(map) = self.manager.jwks_map.read() {
-                        if let Some(jwks) = map.get(&url) {
-                            return Some(jwks.clone());
+                        if let Some(jwks) = map.get(&config.url) {
+                            return Some(JwkSetInfo {
+                                jwks: jwks.clone(),
+                                issuer: config.issuer.clone(),
+                            });
                         }
                     } else {
                         return None;
