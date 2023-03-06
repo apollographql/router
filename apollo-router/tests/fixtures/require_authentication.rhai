@@ -9,7 +9,7 @@ fn process_request(request) {
     if claims == () {
         throw #{
             status: 401,
-            message: "Missing 'Authorization' header",
+            message: "The request is not authenticated",
             extensions: #{
                 code: "AUTH_ERROR",
             }

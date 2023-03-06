@@ -166,7 +166,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Missing 'Authorization' header")
+        .message("The request is not authenticated")
         .extension_code("AUTH_ERROR")
         .build();
 
