@@ -77,7 +77,6 @@ common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: true
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
-  RUST_TEST_THREADS: 6
 commands:
 
   setup_environment:
@@ -348,6 +347,8 @@ commands:
 
   xtask_test:
     parameters:
+      platform:
+        type: executor
       variant:
         type: string
         default: "default"
@@ -355,11 +356,39 @@ commands:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-      - run: xtask test
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Run tests
+                command: xtask test --jobs 4 --test-threads 6
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Run tests
+                command: xtask test --jobs 8 --test-threads 8
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Run tests
+                command: xtask test --workspace --locked
       - run:
-          name: Delete files from cache
+          name: Delete large files from cache
           command: |
-            find target/debug/deps -type f -size +100M -delete
+            find target/debug/deps -type f -size +50M -delete
             rm target/debug/router*
       - save_cache:
           key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
@@ -403,7 +432,8 @@ jobs:
       - checkout
       - setup_environment:
           platform: << parameters.platform >>
-      - xtask_test
+      - xtask_test:
+          platform: << parameters.platform >>
 
   test_updated:
     environment:
@@ -423,6 +453,7 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
+          platform: << parameters.platform >>
 
   build_release:
     parameters:
