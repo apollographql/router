@@ -3,9 +3,6 @@ mod test {
     use apollo_router::services::execution::QueryPlan;
     use apollo_router::services::router;
     use apollo_router::services::supergraph;
-    use fred::prelude::ClientLike;
-    use fred::prelude::KeysInterface;
-    use fred::types::ReconnectPolicy;
     use futures::StreamExt;
     use http::Method;
     use redis::AsyncCommands;
@@ -18,36 +15,14 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn query_planner() -> Result<(), BoxError> {
-        let client = fred::prelude::RedisClient::new(
-            fred::types::RedisConfig::from_url("redis://127.0.0.1:6379").unwrap(),
-            None,
-            Some(ReconnectPolicy::new_exponential(10, 1, 2000, 10)),
-        );
-        // spawn tasks that listen for connection close or reconnect events
-        let mut error_rx = client.on_error();
-        let mut reconnect_rx = client.on_reconnect();
-        tokio::spawn(async move {
-            while let Ok(error) = error_rx.recv().await {
-                println!("Client disconnected with error: {:?}", error);
-            }
-        });
-        tokio::spawn(async move {
-            while reconnect_rx.recv().await.is_ok() {
-                println!("Redis client reconnected.");
-            }
-        });
+        let client = Client::open("redis://127.0.0.1:6379").expect("opening ClusterClient");
+        let mut connection = client
+            .get_async_connection()
+            .await
+            .expect("got redis connection");
 
-        println!("qp redis wait for connect");
-        tokio::time::timeout(
-            std::time::Duration::from_secs(60),
-            client.wait_for_connect(),
-        )
-        .await
-        .unwrap()
-        .expect("opening redis client");
-
-        client
-        .del::<(), &'static str>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-").await.unwrap();
+        connection
+        .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-").await.unwrap();
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -76,7 +51,7 @@ mod test {
 
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
-        let s:String = client
+        let s:String = connection
           .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
           .await
           .unwrap();
