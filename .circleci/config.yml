@@ -323,27 +323,13 @@ commands:
 
   xtask_lint:
     steps:
-      - restore_cache:
-          keys:
-            - "<< pipeline.parameters.merge_version >>-lint"
       - run: xtask lint
-      - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-lint"
-          paths:
-            - target
 
   xtask_check_compliance:
     steps:
-      - restore_cache:
-          keys:
-            - "<< pipeline.parameters.merge_version >>-compliance"
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
       - run: xtask check-compliance
-      - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-compliance"
-          paths:
-            - target
 
   xtask_test:
     parameters:
@@ -353,9 +339,7 @@ commands:
         type: string
         default: "default"
     steps:
-      - restore_cache:
-          keys:
-            - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+
       - when:
           condition:
             or:
@@ -364,7 +348,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked --jobs 4 --test-threads 6
+                command: xtask test --locked --workspace --jobs 4 --test-threads 6
       - when:
           condition:
             or:
@@ -373,7 +357,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked --jobs 8 --test-threads 8
+                command: xtask test --locked --workspace --jobs 8 --test-threads 8
       - when:
           condition:
             or:
@@ -384,16 +368,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --locked --jobs 4 --test-threads 6
-      - run:
-          name: Delete large files from cache
-          command: |
-            find target/debug/deps -type f -size +100M -delete
-            rm target/debug/router*
-      - save_cache:
-          key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-          paths:
-            - target
+                command: xtask test --locked --workspace --jobs 4 --test-threads 6
 
 jobs:
   lint:
