@@ -384,7 +384,7 @@ commands:
           steps:
             - run:
                 name: Run tests
-                command: xtask test --workspace --locked --jobs 4 --test-threads 6
+                command: xtask test --workspace --locked
       - run:
           name: Delete large files from cache
           command: |
