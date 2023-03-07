@@ -632,15 +632,27 @@ macro_rules! gen_map_request {
                         error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
                     {
-                        let res = $base::Response::error_builder()
-                            .errors(vec![Error {
-                                // TODO
-                                message: error_details.message.unwrap_or_default(),
-                                ..Default::default()
-                            }])
-                            .status_code(error_details.status)
-                            .context(context)
-                            .build()?;
+                        let res = if let Some(body) = error_details.body {
+                            $base::Response::builder()
+                                .extensions(body.extensions)
+                                .errors(body.errors)
+                                .status_code(error_details.status)
+                                .context(context)
+                                .and_data(body.data)
+                                .and_label(body.label)
+                                .and_path(body.path)
+                                .build()
+                        } else {
+                            $base::Response::error_builder()
+                                .errors(vec![Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                }])
+                                .context(context)
+                                .status_code(error_details.status)
+                                .build()?
+                        };
+
                         Ok(ControlFlow::Break(res))
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
@@ -814,6 +826,7 @@ macro_rules! gen_map_deferred_response {
                         error_details: ErrorDetails,
                     ) -> $response {
                         let res = $response::error_builder()
+
                         .errors(vec![Error {
                                 // TODO
                                 message: error_details.message.unwrap_or_default(),
