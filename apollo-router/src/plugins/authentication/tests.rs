@@ -68,33 +68,27 @@ async fn build_a_test_harness(
     let mut config = if multiple_jwks {
         serde_json::json!({
             "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks_urls": [&jwks_url, &jwks_url]
-                    }
+                "jwt" : {
+                    "jwks_urls": [&jwks_url, &jwks_url]
                 }
             }
         })
     } else {
         serde_json::json!({
             "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks_urls": [&jwks_url]
-                    }
+                "jwt" : {
+                    "jwks_urls": [&jwks_url]
                 }
             }
         })
     };
 
     if let Some(hn) = header_name {
-        config["authentication"]["experimental"]["jwt"]["header_name"] =
-            serde_json::Value::String(hn);
+        config["authentication"]["jwt"]["header_name"] = serde_json::Value::String(hn);
     }
 
     if let Some(hp) = header_value_prefix {
-        config["authentication"]["experimental"]["jwt"]["header_value_prefix"] =
-            serde_json::Value::String(hp);
+        config["authentication"]["jwt"]["header_value_prefix"] = serde_json::Value::String(hp);
     }
 
     crate::TestHarness::builder()

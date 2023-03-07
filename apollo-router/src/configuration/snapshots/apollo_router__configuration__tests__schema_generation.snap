@@ -12,40 +12,31 @@ expression: "&schema"
       "description": "Authentication",
       "type": "object",
       "required": [
-        "experimental"
+        "jwt"
       ],
       "properties": {
-        "experimental": {
-          "description": "The experimental configuration",
+        "jwt": {
+          "description": "The JWT configuration",
           "type": "object",
           "required": [
-            "jwt"
+            "jwks_urls"
           ],
           "properties": {
-            "jwt": {
-              "description": "The JWT configuration",
-              "type": "object",
-              "required": [
-                "jwks_urls"
-              ],
-              "properties": {
-                "header_name": {
-                  "description": "HTTP header expected to contain JWT",
-                  "default": "authorization",
-                  "type": "string"
-                },
-                "header_value_prefix": {
-                  "description": "Header value prefix",
-                  "default": "Bearer",
-                  "type": "string"
-                },
-                "jwks_urls": {
-                  "description": "Retrieve our JWK Sets from these locations",
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                }
+            "header_name": {
+              "description": "HTTP header expected to contain JWT",
+              "default": "authorization",
+              "type": "string"
+            },
+            "header_value_prefix": {
+              "description": "Header value prefix",
+              "default": "Bearer",
+              "type": "string"
+            },
+            "jwks_urls": {
+              "description": "Retrieve our JWK Sets from these locations",
+              "type": "array",
+              "items": {
+                "type": "string"
               }
             }
           }
