@@ -40,15 +40,14 @@ You enable JWT authentication for your router with the following steps:
 
     ```yaml title="router.yaml"
     authentication:
-      experimental:
-        jwt:
-          jwks: # This key is required.
-            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-              issuer: <optional name of issuer>
+     jwt:
+       jwks: # This key is required.
+         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+           issuer: <optional name of issuer>
 
-          # These keys are optional. Default values are shown.
-          header_name: Authorization
-          header_value_prefix: Bearer
+       # These keys are optional. Default values are shown.
+       header_name: Authorization
+       header_value_prefix: Bearer
     ```
 
     These options are documented [below](#configuration-options).

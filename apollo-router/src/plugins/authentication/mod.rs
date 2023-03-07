@@ -142,22 +142,14 @@ impl Default for JWTConf {
     }
 }
 
-// This is temporary. It will be removed when the plugin is promoted
-// from experimental.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct ExperimentalConf {
-    /// The JWT configuration
-    jwt: JWTConf,
-}
-
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    /// The experimental configuration
-    experimental: ExperimentalConf,
+    /// The JWT configuration
+    jwt: JWTConf,
 }
 
 fn default_header_name() -> String {
@@ -311,7 +303,6 @@ impl Plugin for AuthenticationPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         if init
             .config
-            .experimental
             .jwt
             .header_value_prefix
             .as_bytes()
@@ -321,7 +312,7 @@ impl Plugin for AuthenticationPlugin {
             return Err(Error::BadHeaderValuePrefix.into());
         }
         let mut list = vec![];
-        for jwks_conf in &init.config.experimental.jwt.jwks {
+        for jwks_conf in &init.config.jwt.jwks {
             let url: Url = Url::from_str(jwks_conf.url.as_str())?;
             list.push(JwksConfig {
                 url,
@@ -329,12 +320,12 @@ impl Plugin for AuthenticationPlugin {
             });
         }
 
-        tracing::info!(jwks=?init.config.experimental.jwt.jwks, "JWT authentication using JWKSets from");
+        tracing::info!(jwks=?init.config.jwt.jwks, "JWT authentication using JWKSets from");
 
         let jwks_manager = JwksManager::new(list).await?;
 
         Ok(AuthenticationPlugin {
-            configuration: init.config.experimental.jwt,
+            configuration: init.config.jwt,
             jwks_manager,
         })
     }

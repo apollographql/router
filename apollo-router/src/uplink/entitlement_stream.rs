@@ -12,18 +12,15 @@ use std::task::Poll;
 use std::time::Instant;
 use std::time::SystemTime;
 
-use displaydoc::Display;
 use futures::stream::Fuse;
 use futures::Stream;
 use futures::StreamExt;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
-use thiserror::Error;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
 use crate::uplink::entitlement::Entitlement;
-use crate::uplink::entitlement::EntitlementReport;
 use crate::uplink::entitlement::EntitlementState;
 use crate::uplink::entitlement_stream::entitlement_request::EntitlementRequestRouterEntitlements;
 use crate::uplink::entitlement_stream::entitlement_request::FetchErrorCode;
@@ -98,15 +95,6 @@ impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
             },
         }
     }
-}
-
-#[derive(Error, Display, Debug)]
-pub(crate) enum Error {
-    /// invalid entitlement: {0}
-    InvalidEntitlement(jsonwebtoken::errors::Error),
-
-    /// entitlement violations: {0}
-    EntitlementViolations(EntitlementReport),
 }
 
 pin_project! {

@@ -110,7 +110,11 @@ impl EntitlementReport {
                 .expect("path on restriction was not valid")
                 .first()
             {
-                if **value == restriction.value {
+                if let Some(restriction_value) = &restriction.value {
+                    if *value == restriction_value {
+                        configuration_violations.push(restriction.clone());
+                    }
+                } else {
                     configuration_violations.push(restriction.clone());
                 }
             }
@@ -119,11 +123,17 @@ impl EntitlementReport {
     }
 
     fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![ConfigurationRestriction::builder()
-            .path("$.plugins.['experimental.restricted'].enabled")
-            .value(true)
-            .name("Restricted")
-            .build()]
+        vec![
+            ConfigurationRestriction::builder()
+                .path("$.plugins.['experimental.restricted'].enabled")
+                .value(true)
+                .name("Restricted")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.authentication")
+                .name("Authentication plugin")
+                .build(),
+        ]
     }
 }
 
@@ -221,7 +231,7 @@ impl FromStr for Entitlement {
 pub(crate) struct ConfigurationRestriction {
     name: String,
     path: String,
-    value: Value,
+    value: Option<Value>,
 }
 
 impl Entitlement {
@@ -239,7 +249,6 @@ impl Entitlement {
 mod test {
     use std::str::FromStr;
     use std::time::Duration;
-    use std::time::SystemTime;
     use std::time::UNIX_EPOCH;
 
     use insta::assert_snapshot;
@@ -248,38 +257,10 @@ mod test {
     use crate::spec::Schema;
     use crate::uplink::entitlement::Audience;
     use crate::uplink::entitlement::Claims;
-    use crate::uplink::entitlement::ConfigurationRestriction;
     use crate::uplink::entitlement::Entitlement;
     use crate::uplink::entitlement::EntitlementReport;
     use crate::uplink::entitlement::OneOrMany;
     use crate::Configuration;
-
-    // For testing we restrict healthcheck
-    fn configuration_restrictions() -> Vec<ConfigurationRestriction> {
-        vec![
-            ConfigurationRestriction::builder()
-                .name("Healthcheck")
-                .path("$.health_check.enabled")
-                .value(true)
-                .build(),
-            ConfigurationRestriction::builder()
-                .name("Homepage")
-                .path("$.homepage.enabled")
-                .value(true)
-                .build(),
-        ]
-    }
-
-    fn test_claims() -> Claims {
-        let now = SystemTime::now();
-        Claims {
-            iss: "".to_string(),
-            sub: "".to_string(),
-            aud: OneOrMany::One(Audience::Cloud),
-            warn_at: now,
-            halt_at: now,
-        }
-    }
 
     fn check(router_yaml: &str, supergraph_schema: &str) -> EntitlementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");

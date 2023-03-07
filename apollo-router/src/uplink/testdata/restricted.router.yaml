@@ -3,6 +3,11 @@ health_check:
 homepage:
   enabled: true
 
+authentication:
+  jwt:
+    jwks:
+      - url: https://example.com
+
 plugins:
   experimental.restricted:
     enabled: true

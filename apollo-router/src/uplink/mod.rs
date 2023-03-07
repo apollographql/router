@@ -11,10 +11,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::instrument::WithSubscriber;
 use url::Url;
 
-//TODO Remove once everything is hooked up
-#[allow(dead_code)]
 pub(crate) mod entitlement;
-#[allow(dead_code)]
 pub(crate) mod entitlement_stream;
 pub(crate) mod schema_stream;
 

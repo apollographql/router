@@ -12,52 +12,43 @@ expression: "&schema"
       "description": "Authentication",
       "type": "object",
       "required": [
-        "experimental"
+        "jwt"
       ],
       "properties": {
-        "experimental": {
-          "description": "The experimental configuration",
+        "jwt": {
+          "description": "The JWT configuration",
           "type": "object",
           "required": [
-            "jwt"
+            "jwks"
           ],
           "properties": {
-            "jwt": {
-              "description": "The JWT configuration",
-              "type": "object",
-              "required": [
-                "jwks"
-              ],
-              "properties": {
-                "header_name": {
-                  "description": "HTTP header expected to contain JWT",
-                  "default": "authorization",
-                  "type": "string"
-                },
-                "header_value_prefix": {
-                  "description": "Header value prefix",
-                  "default": "Bearer",
-                  "type": "string"
-                },
-                "jwks": {
-                  "description": "List of JWKS used to verify tokens",
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "url"
-                    ],
-                    "properties": {
-                      "issuer": {
-                        "description": "Expected issuer for tokens verified by that JWKS",
-                        "type": "string",
-                        "nullable": true
-                      },
-                      "url": {
-                        "description": "Retrieve the JWK Set",
-                        "type": "string"
-                      }
-                    }
+            "header_name": {
+              "description": "HTTP header expected to contain JWT",
+              "default": "authorization",
+              "type": "string"
+            },
+            "header_value_prefix": {
+              "description": "Header value prefix",
+              "default": "Bearer",
+              "type": "string"
+            },
+            "jwks": {
+              "description": "List of JWKS used to verify tokens",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "issuer": {
+                    "description": "Expected issuer for tokens verified by that JWKS",
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "url": {
+                    "description": "Retrieve the JWK Set",
+                    "type": "string"
                   }
                 }
               }
