@@ -1,6 +1,0 @@
-FROM node:18-bullseye
-
-WORKDIR /usr/src/app
-RUN git clone https://github.com/apollographql/federation-demo . && \
-    npm install
-

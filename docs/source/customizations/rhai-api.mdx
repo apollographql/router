@@ -89,9 +89,33 @@ fn supergraph_service(service) {
 }
 ```
 
-If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+You can also `throw` a valid GraphQL response, which will be deserialized and dealt with by the router.
 
-Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something goes wrong during request processing...
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](https://www.apollographql.com/docs/router/configuration/rhai).
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
 ## Timing execution
 

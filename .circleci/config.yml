@@ -13,7 +13,8 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:6.2.6
+      - image: cimg/redis:7.0.8
+      - image: jaegertracing/all-in-one:1.42.0
     resource_class: xlarge
   arm_linux_build: &arm_linux_build_executor
     machine:
@@ -41,22 +42,24 @@ executors:
     machine:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.medium
-    shell: powershell.exe -ExecutionPolicy Bypass
+    shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
       image: "windows-server-2019-vs2019:stable"
     resource_class: windows.xlarge
-    shell: powershell.exe -ExecutionPolicy Bypass
+    shell: bash.exe --login -eo pipefail
 
+# We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
-  cache_version:
+  toolchain_version:
     type: string
-    # increment this to invalidate all the caches
-    default: v12.{{ arch}}-{{ checksum "rust-toolchain.toml" }}
-  jaeger_version:
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.daily_version" }}'
+  xtask_version:
     type: string
-    # update this as new versions of jaeger become available
-    default: "1.33.0"
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}'
+  merge_version:
+    type: string
+    default: '{{ checksum ".circleci/config.yml" }}-{{ checksum "~/.arch" }}-{{ checksum "rust-toolchain.toml" }}-{{ checksum "~/.xtask_version" }}-{{ checksum "~/.merge_version" }}'
   protoc_version:
     type: string
     default: "21.8"
@@ -73,279 +76,324 @@ parameters:
 common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: true
   RUST_BACKTRACE: full
-
+  CARGO_INCREMENTAL: 0
 commands:
-  linux_install_baseline:
-    steps:
-      - run:
-          name: Update and install dependencies
-          command: |
-            sudo apt-get update
-            sudo apt-get install -y libssl-dev libdw-dev cmake
-      - install_minimal_rust
-  linux_amd_install_baseline:
-    steps:
-      - linux_install_baseline
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-amd64 jaeger
-      - run:
-          name: Install protoc
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-  linux_arm_install_baseline:
-    steps:
-      - linux_install_baseline
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-linux-arm64 jaeger
-      - run:
-          name: Install protoc
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-  macos_install_baseline:
-    steps:
-      - run:
-          name: Download jaeger
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-darwin-amd64 jaeger
-      - install_minimal_rust
-      - run:
-          name: Install protoc
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-  windows_install_baseline:
-    steps:
-      - run:
-          name: Download jaeger
-          shell: bash.exe
-          command: |
-            curl -L https://github.com/jaegertracing/jaeger/releases/download/v<< pipeline.parameters.jaeger_version >>/jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64.tar.gz --output jaeger.tar.gz
-            tar -xf jaeger.tar.gz
-            mv jaeger-<< pipeline.parameters.jaeger_version >>-windows-amd64 jaeger
-      - run:
-          name: Install protoc
-          shell: bash.exe
-          command: |
-            curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
-            unzip protoc.zip -d $HOME/.local
-            echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$BASH_ENV"
-      - run:
-          name: Add protoc to env
-          command: |
-            $oldpath = (Get-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH).path
-            $newpath = "$oldpath;$HOME/.local/bin"
-            Set-ItemProperty -Path 'Registry::HKEY_LOCAL_MACHINE\System\CurrentControlSet\Control\Session Manager\Environment' -Name PATH -Value $newPath
 
-  # This job makes sure everything is ready to run integration tests
-  macos_prepare_env:
+  setup_environment:
+    parameters:
+      platform:
+        type: executor
     steps:
-      - run:
-          # The jaeger exporter won't work without this
-          name: Increase udp packet size
-          command: |
-            sudo sysctl net.inet.udp.maxdgram=65536
-            sudo sysctl net.inet.udp.maxdgram
+      - unify_environment:
+          platform: << parameters.platform >>
+      - create_cache_keys
+      - restore_cache:
+          keys:
+            - "<< pipeline.parameters.toolchain_version >>"
+      - install_debian_packages:
+          platform: << parameters.platform >>
+      - install_protoc:
+          platform: << parameters.platform >>
+      - install_rust:
+          platform: << parameters.platform >>
+      - install_extra_tools
+      - fetch_dependencies
+      - save_cache:
+          key: "<< pipeline.parameters.toolchain_version >>"
+          paths:
+            - ~/.deb
+            - ~/.cargo
+            - ~/.rustup
+            - ~/.local
+      - install_xtask
 
-  windows_prepare_env:
+  # Even though all executors use bash there are a number of differences that can be taken care of up front.
+  # Windows shell commands are found on the path before the linux subsystem commands, so use aliases to override.
+  # OSX doesn't seem to support aliases properly, so we use a symlink
+  unify_environment:
+    parameters:
+      platform:
+        type: executor
     steps:
       - run:
-          name: Install rustup
-          environment:
-            # Override auto-detection of RAM for Rustc install.
-            # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-            RUSTUP_UNPACK_RAM: "1073741824"
-          command: |
-            $installer_dir = "$Env:TEMP"
-            echo "Downloading rustup"
-            (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
-            echo "Installing rustup"
-            & $installer_dir\rustup-init.exe -y --default-toolchain none --profile minimal
-            exit $LASTEXITCODE
-      - run:
-          name: Special case for Windows because of ssh-agent
-          command: |
-            Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
-            [net]
-            git-fetch-with-cli = true
-            "@
+          name: Setup path
+          command: echo 'export PATH="$HOME/.local/bin:$HOME/.local/aliases:$PATH"' >> "$BASH_ENV"
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Write arch
+                command: |
+                  echo 'amd_linux' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Write arch
+                command: |
+                  echo 'arm_linux' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Make link to md5
+                command: |
+                  mkdir -p ~/.local/aliases
+                  ln -s /sbin/md5 ~/.local/aliases/md5sum
+            - run:
+                name: Write arch
+                command: |
+                  echo 'osx' >> ~/.arch
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Create bash aliases
+                command: |
+                  echo 'alias find=/bin/find' >> "$BASH_ENV"
+                  echo 'alias sort=/bin/sort' >> "$BASH_ENV"
+                  echo 'export EXECUTABLE_SUFFIX=".exe"' >> "$BASH_ENV"
+            - run:
+                name: Write arch
+                command: |
+                  echo 'windows' >> ~/.arch
 
-  install_minimal_rust:
+  # Create files that are useful for cache keys
+  create_cache_keys:
     steps:
       - run:
-          # Install a minimal rust environment
-          name: Install minimal rust
+          name: Create cache keys
           command: |
-            curl https://sh.rustup.rs -sSf -o rustup.sh
-            chmod 755 ./rustup.sh
-            ./rustup.sh -y --default-toolchain none --profile minimal
+            # The Rust index takes time to download. Update this daily.
+            date +%j > ~/.daily_version
+            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild 
+            find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
+            # The closest common ancestor to dev, so that test jobs can take advantage previous compiles
+            git merge-base HEAD dev > ~/.merge_version
+
+  # Linux specific step to install packages that are needed
+  install_debian_packages:
+    parameters:
+      platform:
+        type: executor
+    steps:
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Update and install dependencies
+                command: |
+                  if [[ ! -d "$HOME/.deb" ]]; then
+                    mkdir ~/.deb
+                    sudo apt-get --download-only -o Dir::Cache="$HOME/.deb" -o Dir::Cache::archives="$HOME/.deb" install libssl-dev libdw-dev cmake
+                  fi
+                  sudo dpkg -i ~/.deb/*.deb
+
+  install_protoc:
+    parameters:
+      platform:
+        type: executor
+    steps:
+      - when:
+          condition:
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-x86_64.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+      - when:
+          condition:
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-linux-aarch_64.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+      - when:
+          condition:
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-osx-universal_binary.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Install protoc
+                command: |
+                  if [[ ! -f "$HOME/.local/bin/protoc$EXECUTABLE_SUFFIX" ]]; then
+                    curl -L https://github.com/protocolbuffers/protobuf/releases/download/v<< pipeline.parameters.protoc_version >>/protoc-<< pipeline.parameters.protoc_version >>-win64.zip --output protoc.zip
+                    unzip protoc.zip -d $HOME/.local
+                  fi
+
+  install_rust:
+    parameters:
+      platform:
+        type: executor
+    steps:
+      - run:
+          name: Install Rust
+          command: |
+            if [[ ! -d "$HOME/.cargo" ]]; then
+              curl https://sh.rustup.rs -sSf -o rustup.sh
+              chmod 755 ./rustup.sh
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt 
+            fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
+      - when:
+          condition:
+            or:
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
+          steps:
+            - run:
+                name: Special case for Windows because of ssh-agent
+                command: |
+                  printf "[net]\ngit-fetch-with-cli = true" >> ~/.cargo/Cargo.toml
+
   install_extra_tools:
-    parameters:
-      os:
-        type: string
+    steps:
+      - run:
+          name: Install cargo deny, about, edit
+          command: |
+            if [[ ! -f "$HOME/.cargo/bin/cargo-deny$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked cargo-deny cargo-about cargo-edit
+            fi
+
+  fetch_dependencies:
+    steps:
+      - run:
+          name: Fetch dependencies
+          command: cargo fetch --locked
+  install_xtask:
     steps:
       - restore_cache:
           keys:
-            - rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-
-      - when:
-          condition:
-            equal: [windows, << parameters.os >>]
-          steps:
-            - run:
-                name: Install cargo deny, about, edit
-                command: |
-                  cargo install --locked cargo-deny cargo-about cargo-edit
-            - save_cache:
-                name: Save .cargo
-                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-                paths:
-                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-about.exe
-                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-deny.exe
-                  - C:\\Users\\circleci\\.cargo\\bin\\cargo-edit.exe
-      - when:
-          condition:
-            and:
-              - not:
-                  equal: [windows, << parameters.os >>]
-          steps:
-            - run:
-                name: Install cargo deny if not present
-                command: |
-                  set -e -o pipefail
-                  cargo deny --version || cargo install cargo-deny
-            - run:
-                name: Install cargo about if not present
-                command: |
-                  set -e -o pipefail
-                  cargo about --version || cargo install cargo-about
-            - run:
-                name: Install cargo edit if not present
-                command: |
-                  set -e -o pipefail
-                  cargo edit --version || cargo install cargo-edit
-            - save_cache:
-                key: rust-<< pipeline.parameters.cache_version >>-extra-tools-<< parameters.os >>
-                paths:
-                  - ~/.cargo/bin/cargo-deny
-                  - ~/.cargo/bin/cargo-about
-
-  xtask_lint:
-    parameters:
-      os:
-        type: string
-    steps:
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
+            - "<< pipeline.parameters.xtask_version >>"
       - run:
           name: Install xtask
           command: |
-              set -e -o pipefail
-              xtask help || { cd xtask && cargo install --path . && cd ..; }
+            if [[ ! -f "$HOME/.cargo/bin/xtask$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked --path xtask
+            fi
+      - save_cache:
+          key: "<< pipeline.parameters.xtask_version >>"
+          paths:
+            - ~/.cargo/bin/xtask
+            - ~/.cargo/bin/xtask.exe
+
+  xtask_lint:
+    steps:
+      - restore_cache:
+          keys:
+            - "<< pipeline.parameters.merge_version >>-lint"
       - run: xtask lint
       - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
+          key: "<< pipeline.parameters.merge_version >>-lint"
           paths:
-            - ~/.cargo
+            - target
 
   xtask_check_compliance:
-    parameters:
-      os:
-        type: string
     steps:
       - restore_cache:
-          name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>-{{ checksum "Cargo.lock" }}-{{ checksum "xtask/Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-xtask-<< parameters.os >>
-      - install_extra_tools:
-          os: << parameters.os >>
+            - "<< pipeline.parameters.merge_version >>-compliance"
       # cargo-deny fetches a rustsec advisory DB, which has to happen on github.com over https
       - run: git config --global --unset-all url.ssh://git@github.com.insteadof
-      - run: cargo xtask check-compliance
-
-  windows_test_workspace:
-    steps:
-      - run:
-          name: Start jaeger
-          background: true
-          command: jaeger\jaeger-all-in-one.exe
-      - restore_cache:
-          name: Restore .cargo
-          keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-windows
-      - run: cargo test --workspace --locked
+      - run: xtask check-compliance
       - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-windows-{{ checksum "Cargo.lock" }}
+          key: "<< pipeline.parameters.merge_version >>-compliance"
           paths:
-            - C:\\Users\\circleci\.cargo
+            - target
 
-  test_workspace:
+  xtask_test:
     parameters:
-      os:
+      platform:
+        type: executor
+      variant:
         type: string
-      cargo_test_args:
-        type: string
-        default: "--"
-      # additional cache key to have a cache for test_updated
-      cache_key:
-        type: string
-        default: ""
+        default: "default"
     steps:
-      - run:
-          name: Start jaeger
-          background: true
-          command: ./jaeger/jaeger-all-in-one
       - restore_cache:
-          name: Restore .cargo
           keys:
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>-{{ checksum "Cargo.lock" }}
-            - rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >><<parameters.cache_key>>
-
-      # As of rustc 1.61.0, must limit the number of linux jobs or we run out of memory (large executor/8GB)
+            - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
       - when:
           condition:
-            equal: [linux_amd, << parameters.os >>]
+            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
           steps:
-            - run: cargo test --jobs 4 --workspace --locked << parameters.cargo_test_args >> --test-threads=6
+            - run:
+                name: Run tests
+                command: xtask test --workspace --locked --jobs 4 --test-threads 6
       - when:
           condition:
-            equal: [linux_arm, << parameters.os >>]
+            or:
+              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
           steps:
-            - run: cargo test --jobs 8 --workspace --locked << parameters.cargo_test_args >> --test-threads=8
+            - run:
+                name: Run tests
+                command: xtask test --workspace --locked --jobs 8 --test-threads 8
       - when:
           condition:
-            equal: [macos, << parameters.os >>]
+            or:
+              - equal: [ *macos_build_executor, << parameters.platform >> ]
+              - equal: [ *macos_test_executor, << parameters.platform >> ]
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_test_executor, << parameters.platform >> ]
           steps:
-            - run: cargo test --workspace --locked
-
+            - run:
+                name: Run tests
+                command: xtask test --workspace --locked
+      - run:
+          name: Delete large files from cache
+          command: |
+            find target/debug/deps -type f -size +50M -delete
+            rm target/debug/router*
       - save_cache:
-          name: Save .cargo
-          key: rust-cargo-<< pipeline.parameters.cache_version >>-test-<< parameters.os >>-{{ checksum "Cargo.lock" }}
+          key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
           paths:
-            - ~/.cargo
+            - target
 
 jobs:
   lint:
@@ -357,13 +405,9 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - when:
-          condition:
-            equal: [*amd_linux_build_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - xtask_lint:
-                os: linux_amd
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_lint
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -373,13 +417,9 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - when:
-          condition:
-            equal: [*amd_linux_build_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - xtask_check_compliance:
-                os: linux_amd
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_check_compliance
 
   test:
     environment:
@@ -390,53 +430,30 @@ jobs:
     executor: << parameters.platform >>
     steps:
       - checkout
-      - when:
-          condition:
-            equal: [*amd_linux_test_executor, << parameters.platform >>]
-          steps:
-            - linux_amd_install_baseline
-            - test_workspace:
-                os: linux_amd
-      - when:
-          condition:
-            equal: [*arm_linux_test_executor, << parameters.platform >>]
-          steps:
-            - linux_arm_install_baseline
-            - test_workspace:
-                os: linux_arm
-      - when:
-          condition:
-            equal: [*windows_test_executor, << parameters.platform >>]
-          steps:
-            - windows_install_baseline
-            - windows_prepare_env
-            - windows_test_workspace
-      - when:
-          condition:
-            equal: [*macos_test_executor, << parameters.platform >>]
-          steps:
-            - macos_install_baseline
-            - test_workspace:
-                os: macos
+      - setup_environment:
+          platform: << parameters.platform >>
+      - xtask_test:
+          platform: << parameters.platform >>
 
   test_updated:
     environment:
       <<: *common_job_environment
-    executor: amd_linux_test
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
     steps:
       - checkout
-      - linux_amd_install_baseline
+      - setup_environment:
+          platform: << parameters.platform >>
       - run:
           name: Update all Rust dependencies
           command: |
             rm Cargo.lock
             cargo fetch
-      - test_workspace:
-          os: linux_amd
-          # schema_generation test skipped because schemars changed its representation of enums:
-          # https://github.com/GREsau/schemars/blob/master/CHANGELOG.md#086---2021-09-26
-          cargo_test_args: --no-fail-fast -- --skip schema_generation
-          cache_key: .test_updated
+      - xtask_test:
+          variant: "updated"
+          platform: << parameters.platform >>
 
   build_release:
     parameters:
@@ -454,18 +471,16 @@ jobs:
       MACOS_PRIMARY_BUNDLE_ID: com.apollographql.router
     steps:
       - checkout
+      - setup_environment:
+          platform: << parameters.platform >>
       - when:
           condition:
-            equal: [*macos_build_executor, << parameters.platform >>]
+            equal: [ *macos_build_executor, << parameters.platform >> ]
           steps:
-            - install_minimal_rust
-            - macos_install_baseline
             - when:
                 condition:
-                  equal: [true, << parameters.nightly >>]
+                  equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - install_extra_tools:
-                      os: macos
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
@@ -487,49 +502,16 @@ jobs:
       - when:
           condition:
             or:
-              - equal: [*amd_linux_build_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Update and install dependencies
-                command: |
-                  sudo apt-get update
-            - install_minimal_rust
-            - linux_amd_install_baseline
-            # This will set the version to inlude current date and commit hash
-            - when:
-                condition:
-                  equal: [true, << parameters.nightly >>]
-                steps:
-                  - install_extra_tools:
-                      os: linux_amd
-                  - run: cargo xtask release prepare nightly
-            - run:
-                command: >
-                  cargo xtask dist
-            - run:
-                command: >
-                  mkdir -p artifacts
-            - run:
-                command: >
-                  cargo xtask package --output artifacts/
-      - when:
-          condition:
-            or:
+              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
               - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
+              - equal: [ *windows_build_executor, << parameters.platform >> ]
           steps:
-            - run:
-                name: Update and install dependencies
-                command: |
-                  sudo apt-get update
-            - install_minimal_rust
-            - linux_arm_install_baseline
-            # This will set the version to inlude current date and commit hash
+            # This will set the version to include current date and commit hash
             - when:
                 condition:
-                  equal: [true, << parameters.nightly >>]
+                  equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - install_extra_tools:
-                      os: linux_arm
+                  - install_extra_tools
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
@@ -540,48 +522,6 @@ jobs:
             - run:
                 command: >
                   cargo xtask package --output artifacts/
-      - when:
-          condition:
-            equal: [*windows_build_executor, << parameters.platform >>]
-          steps:
-            - run:
-                name: Install rustup
-                environment:
-                  # Override auto-detection of RAM for Rustc install.
-                  # https://github.com/rust-lang/rustup/issues/2229#issuecomment-585855925
-                  RUSTUP_UNPACK_RAM: "1073741824"
-                command: |
-                  $installer_dir = "$Env:TEMP"
-                  echo "Downloading rustup"
-                  (New-Object System.Net.WebClient).DownloadFile("https://win.rustup.rs/x86_64", "$installer_dir\rustup-init.exe")
-                  echo "Installing rustup"
-                  & $installer_dir\rustup-init.exe --profile minimal --component rustfmt,clippy -y
-                  exit $LASTEXITCODE
-            - run:
-                name: Special case for Windows because of ssh-agent
-                command: |
-                  Add-Content -path "${Env:USERPROFILE}\.cargo\config.toml" @"
-                  [net]
-                  git-fetch-with-cli = true
-                  "@
-            - windows_install_baseline
-            # This will set the version to inlude current date and commit hash
-            - when:
-                condition:
-                  equal: [true, << parameters.nightly >>]
-                steps:
-                  - install_extra_tools:
-                      os: windows
-                  - run: cargo xtask release prepare nightly
-            - run:
-                command: >
-                  cargo xtask dist
-            - run:
-                command: >
-                  mkdir -p artifacts
-            - run:
-                command: >
-                  cargo xtask package --output artifacts
       - persist_to_workspace:
           root: artifacts
           paths:
@@ -645,23 +585,6 @@ jobs:
             # Push chart to repository
             helm push ${CHART} oci://ghcr.io/apollographql/helm-charts
 
-  prepare_release:
-    parameters:
-      release_type:
-        type: string
-    docker:
-      - image: cimg/base:stable
-    resource_class: small
-    steps:
-      - checkout
-      - gh/setup
-      - linux_install_baseline
-      - install_extra_tools:
-          os: linux_amd
-      - run:
-          command: >
-            cargo xtask release prepare << parameters.release_type >>
-
 workflows:
   ci_checks:
     when:
@@ -670,62 +593,26 @@ workflows:
       - lint:
           matrix:
             parameters:
-              platform: [amd_linux_build]
-
+              platform: [ amd_linux_build ]
       - check_compliance:
           matrix:
             parameters:
-              platform: [amd_linux_build]
+              platform: [ amd_linux_build ]
 
       - test_updated:
           requires:
             - lint
+          matrix:
+            parameters:
+              platform:
+                [ amd_linux_test ]
       - test:
           requires:
             - lint
           matrix:
             parameters:
               platform:
-                [macos_test, windows_test, amd_linux_test, arm_linux_test]
-      - prepare_major_release_approval:
-          type: approval
-          requires:
-            - test
-          filters:
-            branches:
-              only:
-                - dev
-      - prepare_minor_release_approval:
-          type: approval
-          requires:
-            - test
-          filters:
-            branches:
-              only:
-                - dev
-      - prepare_patch_release_approval:
-          type: approval
-          requires:
-            - test
-          filters:
-            branches:
-              only:
-                - dev
-      - prepare_release:
-          name: "Prepare major release"
-          release_type: "major"
-          requires:
-            - prepare_major_release_approval
-      - prepare_release:
-          name: "Prepare minor release"
-          release_type: "minor"
-          requires:
-            - prepare_minor_release_approval
-      - prepare_release:
-          name: "Prepare patch release"
-          release_type: "patch"
-          requires:
-            - prepare_patch_release_approval
+                [ macos_test, windows_test, amd_linux_test, arm_linux_test ]
 
   nightly:
     when: << pipeline.parameters.nightly >>
@@ -735,7 +622,7 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
 
   release:
     when:
@@ -745,14 +632,14 @@ workflows:
           matrix:
             parameters:
               platform:
-                [macos_build, windows_build, amd_linux_build, arm_linux_build]
+                [ macos_build, windows_build, amd_linux_build, arm_linux_build ]
           filters:
             branches:
               ignore: /.*/
             tags:
               only: /v.*/
       - publish_github_release:
-          requires: [build_release]
+          requires: [ build_release ]
           filters:
             branches:
               ignore: /.*/
