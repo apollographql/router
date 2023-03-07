@@ -151,7 +151,11 @@ async fn it_rejects_when_there_is_no_auth_header() {
         "authentication": {
             "experimental" : {
                 "jwt" : {
-                    "jwks_urls": [&jwks_url]
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
                 }
             }
         },

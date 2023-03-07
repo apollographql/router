@@ -166,9 +166,13 @@ fn process_request(request) {
     if claims == () {
         throw #{
             status: 401,
-            message: "The request is not authenticated",
-            extensions: #{
-                code: "AUTH_ERROR",
+            body: #{
+                errors: [#{
+                    message: "The request is not authenticated",
+                    extensions: #{
+                        code: "AUTH_ERROR"
+                    }
+                }]
             }
         };
     }
@@ -202,7 +206,11 @@ fn process_request(request) {
         if claims == () {
             throw #{
                 status: 401,
-                message: "No claims presented in this request"
+                body: #{
+                    errors: [#{
+                        message: "No claims presented in this request"
+                    }]
+                }
             };
         }
         if !claims.contains("iss") {
@@ -214,7 +222,11 @@ fn process_request(request) {
         if claims["iss"] != "https://idp.local" {
             throw #{
                 status: 401,
-                message: `Issuer ${claims.iss} is not accepted here`
+                body: #{
+                    errors: [#{
+                        message: `Issuer ${claims.iss} is not accepted here`
+                    }]
+                }
             };
         }
         // Happy path: We have valid claims from the correct idP.

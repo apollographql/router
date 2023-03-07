@@ -17,9 +17,13 @@ fn process_request(request) {
     if claims == () {
         throw #{
             status: 401,
-            message: "The request is not authenticated",
-            extensions: #{
-                code: "AUTH_ERROR",
+            body: #{
+                errors: [#{
+                    message: "The request is not authenticated",
+                    extensions: #{
+                        code: "AUTH_ERROR"
+                    }
+                }]
             }
         };
     }
