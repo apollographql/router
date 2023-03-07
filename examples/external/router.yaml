@@ -18,16 +18,15 @@
 #       - body: the body of the client response
 #       - sdl: the sdl (schema) of the router
 ###
-plugins:
-  experimental.external:
-    url: http://127.0.0.1:8081
-    timeout: 5s
-    stages:
-      router:
-        request:
-          headers: true
-          context: true
-          body: true
-          sdl: true
-        response:
-          headers: true
+external:
+  url: http://127.0.0.1:8081
+  timeout: 5s
+  stages:
+    router:
+      request:
+        headers: true
+        context: true
+        body: true
+        sdl: true
+      response:
+        headers: true

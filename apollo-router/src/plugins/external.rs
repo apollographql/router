@@ -418,7 +418,7 @@ fn internalize_header_map(
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("experimental", "external", ExternalPlugin);
+register_plugin!("apollo", "external", ExternalPlugin);
 
 #[cfg(test)]
 mod tests {
@@ -434,10 +434,8 @@ mod tests {
     #[tokio::test]
     async fn load_plugin() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081"
-                }
+            "external": {
+                "url": "http://127.0.0.1:8081"
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
