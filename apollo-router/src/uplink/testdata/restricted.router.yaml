@@ -5,8 +5,8 @@ homepage:
 
 authentication:
   jwt:
-    jwks_urls:
-      - https://example.com
+    jwks:
+      - url: https://example.com
 
 plugins:
   experimental.restricted:

@@ -88,7 +88,11 @@ mod tests {
         let config = serde_json::json!({
             "authentication": {
                 "jwt": {
-                    "jwks_urls": [&jwks_url]
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
                 }
             }
         });

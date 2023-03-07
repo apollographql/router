@@ -41,8 +41,9 @@ You enable JWT authentication for your router with the following steps:
     ```yaml title="router.yaml"
     authentication:
      jwt:
-       jwks_urls: # This key is required.
-         - https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+       jwks: # This key is required.
+         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+           issuer: <optional name of issuer>
 
        # These keys are optional. Default values are shown.
        header_name: Authorization
@@ -61,10 +62,10 @@ You enable JWT authentication for your router with the following steps:
     APOLLO_GRAPH_REF=docs-example-graph@main APOLLO_KEY="..." ./router --config router.yaml
     ```
 
-When the router starts up, it displays a log message that confirms which `jwks_urls` are in use:
+When the router starts up, it displays a log message that confirms which `jwks` are in use:
 
 ```
-2023-02-03T14:05:28.018932Z  INFO JWT authentication using JWKSets from these jwks_urls=["file:///router/jwks.json"]
+2023-02-03T14:05:28.018932Z  INFO JWT authentication using JWKSets from jwks=[{ url: "file:///router/jwks.json" }]
 ```
 
 ### Configuration options
@@ -83,16 +84,16 @@ The following configuration options are supported:
 <tr class="required">
 <td style="min-width: 150px;">
 
-##### `jwks_urls`
+##### `jwks`
 
 </td>
 <td>
 
-**Required.** A list of URLs, each for a different JWK Set (JWKS) that the router should use. Each item can be an `https://` or a `file://` URL.
-
-- **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
-- **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
-
+**Required.** a list of JWK Set (JWKS) configuration options:
+- `url`: **required** URL from which the JWKS file will be read. It can be an `https://` or a `file://` URL.
+  - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
+  - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
+- `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
 </td>
 </tr>
 
@@ -230,11 +231,11 @@ fn subgraph_service(service, subgraph) {
 
 ## Creating your own JWKS (advanced)
 
-> ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks_urls) to pass to your router.
+> ⚠️ **Most third-party IdP services create and host a JWKS for you.** If you use a third-party IdP, consult its documentation to obtain the [JWKS URL](#jwks) to pass to your router.
 >
 > Read this section if you use a _custom_ IdP that doesn't currently publish its JWKS at a router-accessible URL.
 
-The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks_urls`](#jwks_urls) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
+The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks`](#jwks) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
 
 To provide a JWKS to your router, configure your IdP service to do the following whenever its collection of valid JWKs changes (such as when a JWK expires or is rotated):
 
@@ -520,7 +521,7 @@ The y-coordinate of the elliptic curve point for this public key, as the base64-
 
 The value of the shared symmetric key, as the base64-encoded value of the key's octet sequence representation.
 
-**⚠️ If your JWK uses a symmetric signature algorithm, always [provide your JWKS to the router](#jwks_urls) via a `file://` URL!** Shared keys should never be made available over the network.
+**⚠️ If your JWK uses a symmetric signature algorithm, always [provide your JWKS to the router](#jwks) via a `file://` URL!** Shared keys should never be made available over the network.
 
 </td>
 </tr>

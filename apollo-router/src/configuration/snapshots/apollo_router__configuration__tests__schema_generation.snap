@@ -19,7 +19,7 @@ expression: "&schema"
           "description": "The JWT configuration",
           "type": "object",
           "required": [
-            "jwks_urls"
+            "jwks"
           ],
           "properties": {
             "header_name": {
@@ -32,11 +32,25 @@ expression: "&schema"
               "default": "Bearer",
               "type": "string"
             },
-            "jwks_urls": {
-              "description": "Retrieve our JWK Sets from these locations",
+            "jwks": {
+              "description": "List of JWKS used to verify tokens",
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "issuer": {
+                    "description": "Expected issuer for tokens verified by that JWKS",
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "url": {
+                    "description": "Retrieve the JWK Set",
+                    "type": "string"
+                  }
+                }
               }
             }
           }

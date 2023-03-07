@@ -3,8 +3,8 @@
 # specify an absolute path to make this example work.
 authentication:
   jwt:
-    jwks_urls:
-      - file:///Users/garypen/dev/router/examples/jwt-claims/rhai/jwks.json
+    jwks:
+      - url: file:///Users/garypen/dev/router/examples/jwt-claims/rhai/jwks.json
 
 rhai:
   scripts: src
