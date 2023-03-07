@@ -62,7 +62,6 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
         http_connector.enforce_http(false);
 
-        // todo: grab tls config from configuration
         let tls_config = rustls::ClientConfig::builder()
             .with_safe_defaults()
             .with_native_roots()
@@ -250,7 +249,6 @@ impl RouterStage {
         &self,
         http_client: C,
         service: router::BoxService,
-        // TODO: put it where relevant
         coprocessor_url: String,
         sdl: Arc<String>,
     ) -> router::BoxService
@@ -490,7 +488,6 @@ impl SubgraphStage {
         &self,
         http_client: C,
         service: subgraph::BoxService,
-        // TODO: put it where relevant
         coprocessor_url: String,
         service_name: String,
     ) -> subgraph::BoxService
