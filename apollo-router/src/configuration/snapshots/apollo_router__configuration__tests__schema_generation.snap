@@ -820,7 +820,7 @@ expression: "&schema"
         "defer_support": true,
         "apq": {
           "enabled": true,
-          "experimental_cache": {
+          "cache": {
             "in_memory": {
               "limit": 512
             },
@@ -834,7 +834,7 @@ expression: "&schema"
           }
         },
         "query_planning": {
-          "experimental_cache": {
+          "cache": {
             "in_memory": {
               "limit": 512
             },
@@ -849,7 +849,7 @@ expression: "&schema"
           "description": "Configures automatic persisted queries",
           "default": {
             "enabled": true,
-            "experimental_cache": {
+            "cache": {
               "in_memory": {
                 "limit": 512
               },
@@ -864,12 +864,7 @@ expression: "&schema"
           },
           "type": "object",
           "properties": {
-            "enabled": {
-              "description": "Activates Automatic Persisted Queries (enabled by default)",
-              "default": true,
-              "type": "boolean"
-            },
-            "experimental_cache": {
+            "cache": {
               "description": "Cache configuration",
               "default": {
                 "in_memory": {
@@ -918,6 +913,11 @@ expression: "&schema"
                 }
               },
               "additionalProperties": false
+            },
+            "enabled": {
+              "description": "Activates Automatic Persisted Queries (enabled by default)",
+              "default": true,
+              "type": "boolean"
             },
             "subgraph": {
               "description": "Configuration options pertaining to the subgraph server component.",
@@ -999,7 +999,7 @@ expression: "&schema"
         "query_planning": {
           "description": "Query planning options",
           "default": {
-            "experimental_cache": {
+            "cache": {
               "in_memory": {
                 "limit": 512
               },
@@ -1009,10 +1009,10 @@ expression: "&schema"
           },
           "type": "object",
           "required": [
-            "experimental_cache"
+            "cache"
           ],
           "properties": {
-            "experimental_cache": {
+            "cache": {
               "description": "Cache configuration",
               "type": "object",
               "required": [
@@ -4507,8 +4507,14 @@ expression: "&schema"
           "additionalProperties": false,
           "nullable": true
         },
-        "cache": {
-          "description": "URLs of Redis cache used for query planning",
+        "deduplicate_variables": {
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "default": null,
+          "type": "boolean",
+          "nullable": true
+        },
+        "experimental_cache": {
+          "description": "Experimental URLs of Redis cache used for subgraph response caching",
           "default": null,
           "type": "object",
           "required": [
@@ -4524,12 +4530,6 @@ expression: "&schema"
             }
           },
           "additionalProperties": false,
-          "nullable": true
-        },
-        "deduplicate_variables": {
-          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
-          "default": null,
-          "type": "boolean",
           "nullable": true
         },
         "router": {

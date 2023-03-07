@@ -8,34 +8,33 @@ This is a Least Recently Used (LRU) cache, that can be configured as follows:
 ```yaml title="router.yaml"
 supergraph:
   apq:
-    experimental_cache:
+    cache:
       in_memory:
         limit: 512
   query_planning:
-    experimental_cache:
+    cache:
       in_memory:
         limit: 512
 ```
 
 Introspection responses are cached too, but that cache is not configurable for now.
 
-## Experimental Redis cache
+## Redis cache
 
-The Apollo Router has an experimental external storage cache, using Redis Cluster or a single Redis instance (if you provide only one url).
-It can be tested by building a custom Router binary, with the Cargo feature `experimental_cache`.
+The Apollo Router has an external storage cache, using Redis Cluster or a single Redis instance (if you provide only one url).
 
 This will activate a configuration option to connect to a Redis Cluster:
 
 ```yaml
 supergraph:
   apq:
-    experimental_cache:
+    cache:
       in_memory:
         limit: 512
       redis:
         urls: ["redis://..."]
   query_planning:
-    experimental_cache:
+    cache:
       in_memory:
         limit: 512
       redis:

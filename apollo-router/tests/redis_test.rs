@@ -31,13 +31,11 @@ mod test {
             .configuration_json(json!({
                 "supergraph": {
                     "query_planning": {
-                        "experimental_cache": {
-                            "in_memory": {
-                                "limit": 2
-                            },
-                            "redis": {
-                                "urls": ["redis://127.0.0.1:6379"]
-                            }
+                        "in_memory": {
+                            "limit": 2
+                        },
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"]
                         }
                     }
                 }
