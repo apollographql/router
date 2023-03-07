@@ -327,12 +327,12 @@ impl RouterStage {
                         )
                         .unwrap_or_else(|error| {
                             crate::graphql::Response::builder()
-                                .errors(vec![Error {
-                                    message: format!(
+                                .errors(vec![Error::builder()
+                                    .message(format!(
                                         "couldn't deserialize coprocessor output body: {error}"
-                                    ),
-                                    ..Default::default()
-                                }])
+                                    ))
+                                    .extension_code("EXERNAL_DESERIALIZATION_ERROR")
+                                    .build()])
                                 .build()
                         });
 
@@ -563,15 +563,20 @@ impl SubgraphStage {
                         let code = control.get_http_status()?;
 
                         let res = {
-                            let graphql_response: crate::graphql::Response = serde_json::from_value(
-                                co_processor_output.body.unwrap_or(serde_json::Value::Null),
-                            )
-                            .unwrap_or_else(|error| {
-                                crate::graphql::Response::builder().errors(vec![Error {
-                                    message:format!("couldn't deserialize coprocessor output body: {error}"),
-                                    ..Default::default()
-                                }]).build()
-                            });
+                            let graphql_response: crate::graphql::Response =
+                                serde_json::from_value(
+                                    co_processor_output.body.unwrap_or(serde_json::Value::Null),
+                                )
+                                .unwrap_or_else(|error| {
+                                    crate::graphql::Response::builder()
+                                        .errors(vec![Error::builder()
+                                            .message(format!(
+                                        "couldn't deserialize coprocessor output body: {error}"
+                                    ))
+                                            .extension_code("EXERNAL_DESERIALIZATION_ERROR")
+                                            .build()])
+                                        .build()
+                                });
 
                             subgraph::Response {
                                 response: http::Response::builder()
