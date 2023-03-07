@@ -114,7 +114,7 @@ impl Service<router::Request> for SimpleEndpoint {
                 let context = context.get_mut("entries").unwrap(); // context always has entries.
                 if let Some(context) = context.as_object_mut() {
                     context.insert(
-                        "apollo_telemetry::logging::display_headers".to_string(),
+                        "apollo_authentication::JWT::claims".to_string(),
                         json! { true },
                     );
                 }
@@ -124,7 +124,7 @@ impl Service<router::Request> for SimpleEndpoint {
                         "context".to_string(),
                         json! {{
                             "entries": {
-                                "apollo_telemetry::logging::display_headers": true
+                                "apollo_authentication::JWT::claims": true
                             }
                         }},
                     )

@@ -9,7 +9,6 @@ use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
-use apollo_parser::ast;
 use http::Uri;
 use itertools::Itertools;
 use router_bridge::api_schema;
@@ -22,9 +21,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
 use crate::spec::query::parse_hir_value;
-use crate::spec::query::parse_value;
 use crate::spec::FieldType;
-use crate::spec::SpecError;
 use crate::Configuration;
 
 /// A GraphQL schema.
@@ -102,29 +99,21 @@ impl std::fmt::Debug for Schema {
         sorted_map(f, "  ", "root_operations", &root)?;
         writeln!(f, "  object_types:")?;
         for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k) {
-            let ObjectType {
-                name: _,
-                fields,
-                interfaces,
-            } = v;
+            let ObjectType { fields, interfaces } = v;
             writeln!(f, "    {k:?}:")?;
             writeln!(f, "      interfaces: {interfaces:?}")?;
             sorted_map(f, "      ", "fields", fields)?
         }
         writeln!(f, "  interfaces:")?;
         for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k) {
-            let Interface {
-                name: _,
-                fields,
-                interfaces,
-            } = v;
+            let Interface { fields, interfaces } = v;
             writeln!(f, "    {k:?}:")?;
             writeln!(f, "      interfaces: {interfaces:?}")?;
             sorted_map(f, "      ", "fields", fields)?
         }
         writeln!(f, "  input_types:")?;
         for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k) {
-            let InputObjectType { name: _, fields } = v;
+            let InputObjectType { fields } = v;
             writeln!(f, "    {k:?}:")?;
             sorted_map(f, "      ", "fields", fields)?
         }
@@ -148,13 +137,6 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
 
 impl Schema {
     pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        Self::parse_with_hir(s, configuration)
-    }
-
-    pub(crate) fn parse_with_hir(
-        s: &str,
-        configuration: &Configuration,
-    ) -> Result<Self, SchemaError> {
         let mut schema = parse(s, configuration)?;
         schema.api_schema = Some(Box::new(parse(&make_api_schema(s)?, configuration)?));
         return Ok(schema);
@@ -305,436 +287,6 @@ impl Schema {
             })
         }
     }
-
-    pub(crate) fn parse_with_ast(
-        s: &str,
-        configuration: &Configuration,
-    ) -> Result<Self, SchemaError> {
-        let mut schema = parse(s, configuration)?;
-        schema.api_schema = Some(Box::new(parse(&make_api_schema(s)?, configuration)?));
-        return Ok(schema);
-
-        fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
-            let mut compiler = ApolloCompiler::new();
-            let id = compiler.add_type_system(
-                include_str!("introspection_types.graphql"),
-                "introspection_types.graphql",
-            );
-            let introspection_tree = compiler.db.ast(id);
-            let id = compiler.add_type_system(schema, "schema.graphql");
-            let tree = compiler.db.ast(id);
-
-            // Trace log recursion limit data
-            let recursion_limit = tree.recursion_limit();
-            tracing::trace!(?recursion_limit, "recursion limit data");
-
-            let introspection_errors = introspection_tree.errors().cloned().collect::<Vec<_>>();
-            let errors = tree.errors().cloned().collect::<Vec<_>>();
-
-            assert_eq!(introspection_errors, &[]);
-            if !errors.is_empty() {
-                let errors = ParseErrors {
-                    raw_schema: schema.to_string(),
-                    errors,
-                };
-                errors.print();
-                return Err(SchemaError::Parse(errors));
-            }
-
-            let document = tree.document();
-            let introspection_document = introspection_tree.document();
-            let definitions = || {
-                document
-                    .definitions()
-                    .chain(introspection_document.definitions())
-            };
-            let mut subtype_map: HashMap<String, HashSet<String>> = Default::default();
-            let mut subgraphs = HashMap::new();
-            let mut root_operations = HashMap::new();
-
-            // the logic of this algorithm is inspired from the npm package graphql:
-            // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L302-L327
-            // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L294-L300
-            // https://github.com/graphql/graphql-js/blob/ac8f0c6b484a0d5dca2dc13c387247f96772580a/src/type/schema.ts#L215-L263
-            for definition in definitions() {
-                macro_rules! implements_interfaces {
-                    ($definition:expr) => {{
-                        let name = $definition
-                            .name()
-                            .expect("never optional according to spec; qed")
-                            .text()
-                            .to_string();
-
-                        for key in
-                            $definition
-                                .implements_interfaces()
-                                .iter()
-                                .flat_map(|member_types| {
-                                    member_types.named_types().flat_map(|x| x.name())
-                                })
-                        {
-                            let key = key.text().to_string();
-                            let set = subtype_map.entry(key).or_default();
-                            set.insert(name.clone());
-                        }
-                    }};
-                }
-
-                macro_rules! union_member_types {
-                    ($definition:expr) => {{
-                        let key = $definition
-                            .name()
-                            .expect("never optional according to spec; qed")
-                            .text()
-                            .to_string();
-                        let set = subtype_map.entry(key).or_default();
-
-                        for name in
-                            $definition
-                                .union_member_types()
-                                .iter()
-                                .flat_map(|member_types| {
-                                    member_types.named_types().flat_map(|x| x.name())
-                                })
-                        {
-                            set.insert(name.text().to_string());
-                        }
-                    }};
-                }
-
-                match definition {
-                    // Spec: https://spec.graphql.org/draft/#ObjectTypeDefinition
-                    ast::Definition::ObjectTypeDefinition(object) => implements_interfaces!(object),
-                    // Spec: https://spec.graphql.org/draft/#InterfaceTypeDefinition
-                    ast::Definition::InterfaceTypeDefinition(interface) => {
-                        implements_interfaces!(interface)
-                    }
-                    // Spec: https://spec.graphql.org/draft/#UnionTypeDefinition
-                    ast::Definition::UnionTypeDefinition(union) => union_member_types!(union),
-                    // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
-                    ast::Definition::ObjectTypeExtension(object) => implements_interfaces!(object),
-                    // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
-                    ast::Definition::InterfaceTypeExtension(interface) => {
-                        implements_interfaces!(interface)
-                    }
-                    // Spec: https://spec.graphql.org/draft/#sec-Union-Extensions
-                    ast::Definition::UnionTypeExtension(union) => union_member_types!(union),
-                    // Spec: https://spec.graphql.org/draft/#sec-Enums
-                    ast::Definition::EnumTypeDefinition(enum_type) => {
-                        if enum_type
-                            .name()
-                            .and_then(|n| n.ident_token())
-                            .as_ref()
-                            .map(|id| id.text())
-                            == Some("join__Graph")
-                        {
-                            if let Some(enums) = enum_type.enum_values_definition() {
-                                for enum_kind in enums.enum_value_definitions() {
-                                    if let Some(directives) = enum_kind.directives() {
-                                        for directive in directives.directives() {
-                                            if directive
-                                                .name()
-                                                .and_then(|n| n.ident_token())
-                                                .as_ref()
-                                                .map(|id| id.text())
-                                                == Some("join__graph")
-                                            {
-                                                let mut name = None;
-                                                let mut url = None;
-
-                                                if let Some(arguments) = directive.arguments() {
-                                                    for argument in arguments.arguments() {
-                                                        let arg_name = argument
-                                                            .name()
-                                                            .and_then(|n| n.ident_token())
-                                                            .as_ref()
-                                                            .map(|id| id.text().to_owned());
-
-                                                        let arg_value: Option<String> =
-                                                            match argument.value() {
-                                                                // We are currently parsing name or url.
-                                                                // Both have to be strings.
-                                                                Some(ast::Value::StringValue(
-                                                                    sv,
-                                                                )) => Some(sv.into()),
-                                                                _ => None,
-                                                            };
-
-                                                        match arg_name.as_deref() {
-                                                            Some("name") => name = arg_value,
-                                                            Some("url") => url = arg_value,
-                                                            _ => {}
-                                                        };
-                                                    }
-                                                }
-                                                if let (Some(name), Some(url)) = (name, url) {
-                                                    if url.is_empty() {
-                                                        return Err(
-                                                            SchemaError::MissingSubgraphUrl(name),
-                                                        );
-                                                    }
-                                                    if subgraphs
-                                                        .insert(
-                                                            name.clone(),
-                                                            Uri::from_str(&url).map_err(|err| {
-                                                                SchemaError::UrlParse(
-                                                                    name.clone(),
-                                                                    err,
-                                                                )
-                                                            })?,
-                                                        )
-                                                        .is_some()
-                                                    {
-                                                        return Err(SchemaError::Api(format!("must not have several subgraphs with same name '{name}'")));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // Spec: https://spec.graphql.org/draft/#SchemaDefinition
-                    ast::Definition::SchemaDefinition(schema) => {
-                        for operation in schema.root_operation_type_definitions() {
-                            match (operation.operation_type(), operation.named_type()) {
-                                (Some(optype), Some(name)) => {
-                                    let name = name
-                                        .name()
-                                        .ok_or_else(|| {
-                                            SchemaError::Api(
-                                                "the node Name is not optional in the spec"
-                                                    .to_string(),
-                                            )
-                                        })?
-                                        .text()
-                                        .to_string();
-                                    root_operations.insert(optype.into(), name);
-                                }
-                                _ => {
-                                    return Err(SchemaError::Api("a field on the schema definition should have a name and operation type".to_string()));
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-
-            macro_rules! implement_object_type_or_interface_map {
-                ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                    let mut map = definitions()
-                        .filter_map(|definition| {
-                            if let $ast_ty(definition) = definition {
-                                match <$ty>::try_from(definition) {
-                                    Ok(instance) => Some(Ok((instance.name.clone(), instance))),
-                                    Err(e) => Some(Err(e)),
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Result<HashMap<String, $ty>, SchemaError>>()?;
-
-                    definitions()
-                        .filter_map(|definition| {
-                            if let $ast_extension_ty(extension) = definition {
-                                match <$ty>::try_from(extension) {
-                                    Ok(extension) => Some(Ok(extension)),
-                                    Err(e) => Some(Err(e)),
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
-                        .into_iter()
-                        .for_each(|extension| {
-                            if let Some(instance) = map.get_mut(&extension.name) {
-                                instance.fields.extend(extension.fields);
-                                instance.interfaces.extend(extension.interfaces);
-                            } else {
-                                failfast_debug!(
-                                    concat!(
-                                        "Extension exists for {:?} but ",
-                                        stringify!($ty),
-                                        " could not be found."
-                                    ),
-                                    extension.name,
-                                );
-                            }
-                        });
-
-                    map
-                }};
-            }
-
-            let object_types = implement_object_type_or_interface_map!(
-                ObjectType,
-                ast::Definition::ObjectTypeDefinition,
-                ast::Definition::ObjectTypeExtension,
-            );
-
-            let interfaces = implement_object_type_or_interface_map!(
-                Interface,
-                ast::Definition::InterfaceTypeDefinition,
-                ast::Definition::InterfaceTypeExtension,
-            );
-
-            macro_rules! implement_input_object_type_or_interface_map {
-                ($ty:ty, $ast_ty:path, $ast_extension_ty:path $(,)?) => {{
-                    let mut map = definitions()
-                        .filter_map(|definition| {
-                            if let $ast_ty(definition) = definition {
-                                match <$ty>::try_from(definition) {
-                                    Ok(instance) => Some(Ok((instance.name.clone(), instance))),
-                                    Err(e) => Some(Err(e)),
-                                }
-                            } else {
-                                None
-                            }
-                        })
-                        // todo: impl from
-                        .collect::<Result<HashMap<String, $ty>, _>>()
-                        .map_err(|e| SchemaError::Api(e.to_string()))?;
-
-                    definitions()
-                        .filter_map(|definition| {
-                            if let $ast_extension_ty(extension) = definition {
-                                Some(<$ty>::try_from(extension))
-                            } else {
-                                None
-                            }
-                        })
-                        // todo: impl from
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|e| SchemaError::Api(e.to_string()))?
-                        .into_iter()
-                        .for_each(|extension| {
-                            if let Some(instance) = map.get_mut(&extension.name) {
-                                instance.fields.extend(extension.fields);
-                            } else {
-                                failfast_debug!(
-                                    concat!(
-                                        "Extension exists for {:?} but ",
-                                        stringify!($ty),
-                                        " could not be found."
-                                    ),
-                                    extension.name,
-                                );
-                            }
-                        });
-
-                    map
-                }};
-            }
-
-            let input_types = implement_input_object_type_or_interface_map!(
-                InputObjectType,
-                ast::Definition::InputObjectTypeDefinition,
-                ast::Definition::InputObjectTypeExtension,
-            );
-
-            let custom_scalars = definitions()
-                .filter_map(|definition| match definition {
-                    // Spec: https://spec.graphql.org/draft/#sec-Scalars
-                    // Spec: https://spec.graphql.org/draft/#sec-Scalar-Extensions
-                    ast::Definition::ScalarTypeDefinition(definition) => Some(
-                        definition
-                            .name()
-                            .ok_or_else(|| {
-                                SchemaError::Api(
-                                    "the node Name is not optional in the spec".to_string(),
-                                )
-                            })
-                            .map(|name| name.text().to_string()),
-                    ),
-                    ast::Definition::ScalarTypeExtension(extension) => Some(
-                        extension
-                            .name()
-                            .ok_or_else(|| {
-                                SchemaError::Api(
-                                    "the node Name is not optional in the spec".to_string(),
-                                )
-                            })
-                            .map(|name| name.text().to_string()),
-                    ),
-                    _ => None,
-                })
-                .collect::<Result<_, _>>()?;
-
-            let enums: HashMap<String, HashSet<String>> = definitions()
-                .filter_map(|definition| match definition {
-                    // Spec: https://spec.graphql.org/draft/#sec-Enums
-                    ast::Definition::EnumTypeDefinition(definition) => {
-                        let name = definition
-                            .name()
-                            .ok_or_else(|| {
-                                SchemaError::Api(
-                                    "the node Name is not optional in the spec".to_string(),
-                                )
-                            })
-                            .map(|name| name.text().to_string());
-
-                        let enum_values: Result<HashSet<String>, _> = definition
-                            .enum_values_definition()
-                            .ok_or_else(|| {
-                                SchemaError::Api(
-                                    "the node EnumValuesDefinition is not optional in the spec"
-                                        .to_string(),
-                                )
-                            })
-                            .and_then(|definition| {
-                                definition
-                                    .enum_value_definitions()
-                                    .filter_map(|value| {
-                                        value.enum_value().map(|val| {
-                                            // No need to check for true/false/null here because it's already checked in apollo-rs
-                                            val.name()
-                                                .ok_or_else(|| {
-                                                    SchemaError::Api(
-                                                        "the node Name is not optional in the spec"
-                                                            .to_string(),
-                                                    )
-                                                })
-                                                .map(|name| name.text().to_string())
-                                        })
-                                    })
-                                    .collect()
-                            });
-
-                        match (name, enum_values) {
-                            (Ok(name), Ok(enum_values)) => Some(Ok((name, enum_values))),
-                            (Err(schema_error), _) => Some(Err(schema_error)),
-                            (_, Err(schema_error)) => Some(Err(schema_error)),
-                        }
-                    }
-
-                    _ => None,
-                })
-                .collect::<Result<_, _>>()?;
-
-            let mut hasher = Sha256::new();
-            hasher.update(schema.as_bytes());
-            let schema_id = Some(format!("{:x}", hasher.finalize()));
-
-            Ok(Schema {
-                raw_sdl: Arc::new(schema.to_owned()),
-                type_system: compiler.db.type_system(),
-                subtype_map: Arc::new(subtype_map),
-                subgraphs,
-                object_types,
-                input_types,
-                interfaces,
-                custom_scalars,
-                enums,
-                api_schema: None,
-                schema_id,
-                root_operations,
-            })
-        }
-    }
 }
 
 impl Schema {
@@ -774,10 +326,9 @@ impl Schema {
 pub(crate) struct InvalidObject;
 
 macro_rules! implement_object_type_or_interface {
-    ($visibility:vis $name:ident => $hir_ty:ty, $( $ast_ty:ty ),+ $(,)?) => {
+    ($visibility:vis $name:ident => $hir_ty:ty $(,)?) => {
         #[derive(Debug, Clone)]
         $visibility struct $name {
-            pub(crate) name: String,
             fields: HashMap<String, FieldType>,
             interfaces: Vec<String>,
         }
@@ -791,7 +342,6 @@ macro_rules! implement_object_type_or_interface {
         impl From<&'_ $hir_ty> for $name {
             fn from(def: &'_ $hir_ty) -> Self {
                 Self {
-                    name: def.name().to_owned(),
                     fields: def
                         .fields_definition()
                         .iter()
@@ -815,72 +365,6 @@ macro_rules! implement_object_type_or_interface {
                 }
             }
         }
-
-        $(
-        impl TryFrom<$ast_ty> for $name {
-            type Error = SchemaError;
-
-            fn try_from(definition: $ast_ty) -> Result<Self, Self::Error> {
-                let name = definition
-                    .name()
-                    .ok_or_else(|| {
-                        SchemaError::Api(
-                            "the node Name is not optional in the spec;".to_string(),
-                        )
-                    })?
-                    .text()
-                    .to_string();
-                let fields = definition
-                    .fields_definition()
-                    .iter()
-                    .flat_map(|x| x.field_definitions())
-                    .map(|x| {
-                        let name = x
-                            .name()
-
-                    .ok_or_else(|| {
-                        SchemaError::Api(
-                            "the node Name is not optional in the spec;".to_string(),
-                        )
-                    })?
-                    .text()
-                    .to_string();
-                    let ty = x
-                        .ty()
-                        .ok_or_else(|| {
-                            SchemaError::Api(
-                                "the node Type is not optional in the spec;".to_string(),
-                            )
-                        })?
-                        // todo: there must be a better way
-                        .try_into().map_err(|e: SpecError|SchemaError::Api(e.to_string()))?;
-                        Ok((name, ty))
-                    })
-                    .collect::<Result<_,_>>()?;
-                let interfaces = definition
-                    .implements_interfaces()
-                    .iter()
-                    .flat_map(|x| x.named_types())
-                    .map(|x| {
-                        Ok(x.name()
-                            .ok_or_else(|| {
-                                SchemaError::Api(
-                                    "neither Name nor NamedType are optionals".to_string(),
-                                )
-                            })?
-                            .text()
-                            .to_string())
-                    })
-                    .collect::<Result<_,_>>()?;
-
-                Ok($name {
-                    name,
-                    fields,
-                    interfaces,
-                })
-            }
-        }
-        )+
     };
 }
 
@@ -889,107 +373,41 @@ macro_rules! implement_object_type_or_interface {
 implement_object_type_or_interface!(
     pub(crate) ObjectType =>
     hir::ObjectTypeDefinition,
-    ast::ObjectTypeDefinition,
-    ast::ObjectTypeExtension,
 );
 // Spec: https://spec.graphql.org/draft/#sec-Interfaces
 // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
 implement_object_type_or_interface!(
     pub(crate) Interface =>
     hir::InterfaceTypeDefinition,
-    ast::InterfaceTypeDefinition,
-    ast::InterfaceTypeExtension,
 );
 
-macro_rules! implement_input_object_type_or_interface {
-    ($visibility:vis $name:ident => $( $ast_ty:ty ),+ $(,)?) => {
-        #[derive(Debug, Clone)]
-        $visibility struct $name {
-            name: String,
-            pub(crate) fields: HashMap<String, (FieldType, Option<Value>)>,
-        }
-
-        impl $name {
-            pub(crate) fn validate_object(
-                &self,
-                object: &Object,
-                schema: &Schema,
-            ) -> Result<(), InvalidObject> {
-                 self
-                    .fields
-                    .iter()
-                    .try_for_each(|(name, (ty, default_value))| {
-                        let value = match object.get(name.as_str()) {
-                            Some(&Value::Null) | None => default_value.as_ref().unwrap_or(&Value::Null),
-                            Some(value) => value,
-                        };
-                        ty.validate_input_value(value, schema)
-                    })
-                    .map_err(|_| InvalidObject)
-            }
-        }
-
-        $(
-
-        impl TryFrom<$ast_ty> for $name {
-            type Error = SpecError;
-            fn try_from(definition: $ast_ty) -> Result<Self, Self::Error> {
-                let name = definition
-                    .name()
-                    .ok_or_else(|| {
-                        SpecError::ParsingError(
-                            "the node Name is not optional in the spec".to_string(),
-                        )
-                    })?
-                    .text()
-                    .to_string();
-                let fields = definition
-                    .input_fields_definition()
-                    .iter()
-                    .flat_map(|x| x.input_value_definitions())
-                    .map(|x| {
-                        let name = x
-                            .name()
-                            .ok_or_else(|| {
-                                SpecError::ParsingError(
-                                    "the node Name is not optional in the spec".to_string(),
-                                )
-                            })?
-                            .text()
-                            .to_string();
-                        let ty = x
-                            .ty()
-                            .ok_or_else(|| {
-                                SpecError::ParsingError(
-                                    "the node Name is not optional in the spec".to_string(),
-                                )
-                            })?
-                            .try_into()?;
-                        let default = x.default_value().and_then(|v| v.value()).as_ref().and_then(parse_value);
-                        Ok((name, (ty, default)))
-                    })
-                    .collect::<Result<_,_>>()?;
-
-                Ok($name {
-                    name,
-                    fields,
-                })
-            }
-        }
-        )+
-    };
+#[derive(Debug, Clone)]
+pub(crate) struct InputObjectType {
+    pub(crate) fields: HashMap<String, (FieldType, Option<Value>)>,
 }
 
-implement_input_object_type_or_interface!(
-    pub(crate) InputObjectType =>
-    ast::InputObjectTypeDefinition,
-    ast::InputObjectTypeExtension,
-);
+impl InputObjectType {
+    pub(crate) fn validate_object(
+        &self,
+        object: &Object,
+        schema: &Schema,
+    ) -> Result<(), InvalidObject> {
+        self.fields
+            .iter()
+            .try_for_each(|(name, (ty, default_value))| {
+                let value = match object.get(name.as_str()) {
+                    Some(&Value::Null) | None => default_value.as_ref().unwrap_or(&Value::Null),
+                    Some(value) => value,
+                };
+                ty.validate_input_value(value, schema)
+            })
+            .map_err(|_| InvalidObject)
+    }
+}
 
 impl From<&'_ hir::InputObjectTypeDefinition> for InputObjectType {
     fn from(def: &'_ hir::InputObjectTypeDefinition) -> Self {
         InputObjectType {
-            name: def.name().to_owned(),
             fields: def
                 .input_fields_definition()
                 .iter()

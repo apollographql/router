@@ -21,7 +21,7 @@ app.post("/", (req, res) => {
   // let's add a context key so that the subgraph_http_service displays the headers it's about to send!
   const context = request.context || {};
   const entries = context.entries || {};
-  entries["apollo_telemetry::logging::display_headers"] = true;
+  entries["apollo_authentication::JWT::claims"] = true;
   context.entries = entries;
   request.context = context;
 

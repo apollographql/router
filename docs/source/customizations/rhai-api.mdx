@@ -89,22 +89,46 @@ fn supergraph_service(service) {
 }
 ```
 
-If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+You can also `throw` a valid GraphQL response, which will be deserialized and dealt with by the router.
 
-Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something goes wrong during request processing...
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](https://www.apollographql.com/docs/router/configuration/rhai).
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
 ## Timing execution
 
-Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
+Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         // highlight-start
-        let start = apollo_start.elapsed;
+        let start = Router.APOLLO_START.elapsed;
         // Do some processing here...
-        let duration = apollo_start.elapsed - start;
+        let duration = Router.APOLLO_START.elapsed - start;
         print(`response processing took: ${duration}`);
         // highlight-end
 
@@ -118,11 +142,11 @@ fn supergraph_service(service) {
 
 ## Accessing the SDL
 
-Your Rhai customization can use the global `apollo_sdl` constant to examine the supergraph.
+Your Rhai customization can use the global `Router.APOLLO_SDL` constant to examine the supergraph.
 
 ```rhai
 fn supergraph_service(service) {
-    print(`${apollo_sdl}`);
+    print(`${Router.APOLLO_SDL}`);
 }
 ```
 
@@ -195,6 +219,26 @@ The simple get/set api for dealing with single value headers is sufficient for m
 If you wish to get multiple values for a header key, then you must use the `values()` fn, NOT the indexed accessor. If you do use the indexed accessor, it will only return the first value (as a string) associated with the key.
 
 Look at the examples to see how this works in practice.
+
+## Unix timestamp
+
+Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_now();
+}
+```
+
+## Unique IDs (UUID)
+
+Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
+ 
+```rhai
+fn supergraph_service(service) {
+    let id = uuid_v4();
+}
+```
 
 ## `Request` interface
 

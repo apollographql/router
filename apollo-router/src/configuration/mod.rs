@@ -1,5 +1,6 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Logic for loading configuration in to an object model
-// This entire file is license key functionality
 pub(crate) mod cors;
 mod expansion;
 mod experimental;
@@ -11,22 +12,33 @@ mod yaml;
 
 use std::collections::HashMap;
 use std::fmt;
+use std::io;
+use std::io::BufReader;
+use std::iter;
 use std::net::IpAddr;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use derivative::Derivative;
 use displaydoc::Display;
 use itertools::Itertools;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use rustls::Certificate;
+use rustls::PrivateKey;
+use rustls::ServerConfig;
+use rustls_pemfile::certs;
+use rustls_pemfile::read_one;
+use rustls_pemfile::Item;
 use schemars::gen::SchemaGenerator;
 use schemars::schema::ObjectValidation;
 use schemars::schema::Schema;
 use schemars::schema::SchemaObject;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
 use serde_json::Map;
 use serde_json::Value;
@@ -40,6 +52,7 @@ pub(crate) use self::schema::generate_upgrade;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::plugin::plugins;
+use crate::ApolloRouterError;
 
 static SUPERGRAPH_ENDPOINT_REGEX: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?P<first_path>.*/)(?P<sub_path>.+)\*$")
@@ -609,7 +622,7 @@ impl Default for InMemoryCache {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// Redis cache configuration
 pub(crate) struct RedisCache {
@@ -622,7 +635,127 @@ pub(crate) struct RedisCache {
 #[serde(deny_unknown_fields)]
 #[serde(default)]
 pub(crate) struct Tls {
+    /// TLS server configuration
+    ///
+    /// this will affect the GraphQL endpoint and any other endpoint targeting the same listen address
+    pub(crate) supergraph: Option<TlsSupergraph>,
     pub(crate) subgraph: TlsSubgraphWrapper,
+}
+
+/// Configuration options pertaining to the supergraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TlsSupergraph {
+    /// server certificate in PEM format
+    #[serde(deserialize_with = "deserialize_certificate", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) certificate: Certificate,
+    /// server key in PEM format
+    #[serde(deserialize_with = "deserialize_key", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) key: PrivateKey,
+    /// list of certificate authorities in PEM format
+    #[serde(deserialize_with = "deserialize_certificate_chain", skip_serializing)]
+    #[schemars(with = "String")]
+    pub(crate) certificate_chain: Vec<Certificate>,
+}
+
+impl TlsSupergraph {
+    pub(crate) fn tls_config(&self) -> Result<Arc<rustls::ServerConfig>, ApolloRouterError> {
+        let mut certificates = vec![self.certificate.clone()];
+        certificates.extend(self.certificate_chain.iter().cloned());
+
+        let mut config = ServerConfig::builder()
+            .with_safe_defaults()
+            .with_no_client_auth()
+            .with_single_cert(certificates, self.key.clone())
+            .map_err(ApolloRouterError::Rustls)?;
+        config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+        Ok(Arc::new(config))
+    }
+}
+
+fn deserialize_certificate<'de, D>(deserializer: D) -> Result<Certificate, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data = String::deserialize(deserializer)?;
+
+    load_certs(&data)
+        .map_err(serde::de::Error::custom)
+        .and_then(|mut certs| {
+            if certs.len() > 1 {
+                Err(serde::de::Error::custom(
+                    "expected exactly one server certificate",
+                ))
+            } else {
+                certs.pop().ok_or(serde::de::Error::custom(
+                    "expected exactly one server certificate",
+                ))
+            }
+        })
+}
+
+fn deserialize_certificate_chain<'de, D>(deserializer: D) -> Result<Vec<Certificate>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data = String::deserialize(deserializer)?;
+
+    load_certs(&data).map_err(serde::de::Error::custom)
+}
+
+fn deserialize_key<'de, D>(deserializer: D) -> Result<PrivateKey, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let data = String::deserialize(deserializer)?;
+
+    load_keys(&data).map_err(serde::de::Error::custom)
+}
+
+fn load_certs(data: &str) -> io::Result<Vec<Certificate>> {
+    certs(&mut BufReader::new(data.as_bytes()))
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid cert"))
+        .map(|mut certs| certs.drain(..).map(Certificate).collect())
+}
+
+fn load_keys(data: &str) -> io::Result<PrivateKey> {
+    let mut reader = BufReader::new(data.as_bytes());
+    let mut key_iterator = iter::from_fn(|| read_one(&mut reader).transpose());
+
+    let private_key = match key_iterator.next() {
+        Some(Ok(Item::RSAKey(key))) => PrivateKey(key),
+        Some(Ok(Item::PKCS8Key(key))) => PrivateKey(key),
+        Some(Ok(Item::ECKey(key))) => PrivateKey(key),
+        Some(Err(e)) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("could not parse the key: {e}"),
+            ))
+        }
+        Some(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a private key",
+            ))
+        }
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "could not find a private key",
+            ))
+        }
+    };
+
+    if key_iterator.next().is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "expected exactly one private key",
+        ));
+    }
+    Ok(private_key)
 }
 
 /// Configuration options pertaining to the subgraph server component.

@@ -26,14 +26,9 @@ expression: "&schema"
               "description": "The JWT configuration",
               "type": "object",
               "required": [
-                "jwks_urls"
+                "jwks"
               ],
               "properties": {
-                "cooldown": {
-                  "description": "JWKS retrieval cooldown",
-                  "default": null,
-                  "type": "string"
-                },
                 "header_name": {
                   "description": "HTTP header expected to contain JWT",
                   "default": "authorization",
@@ -44,11 +39,25 @@ expression: "&schema"
                   "default": "Bearer",
                   "type": "string"
                 },
-                "jwks_urls": {
-                  "description": "Retrieve our JWK Sets from these locations",
+                "jwks": {
+                  "description": "List of JWKS used to verify tokens",
                   "type": "array",
                   "items": {
-                    "type": "string"
+                    "type": "object",
+                    "required": [
+                      "url"
+                    ],
+                    "properties": {
+                      "issuer": {
+                        "description": "Expected issuer for tokens verified by that JWKS",
+                        "type": "string",
+                        "nullable": true
+                      },
+                      "url": {
+                        "description": "Retrieve the JWK Set",
+                        "type": "string"
+                      }
+                    }
                   }
                 }
               }
@@ -639,6 +648,19 @@ expression: "&schema"
       "description": "Plugin configuration",
       "default": null,
       "properties": {
+        "experimental.broken": {
+          "description": "This is a broken plugin for testing purposes only.",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the broken plugin.",
+              "type": "boolean"
+            }
+          }
+        },
         "experimental.expose_query_plan": {
           "description": "Expose query plan",
           "type": "boolean"
@@ -905,6 +927,19 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "experimental.restricted": {
+          "description": "Restricted plugin (for testing purposes only)",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the restricted plugin (for testing purposes only)",
+              "type": "boolean"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -4326,7 +4361,7 @@ expression: "&schema"
                 },
                 "service_name": {
                   "description": "The trace service name",
-                  "default": "${env.OTEL_SERVICE_NAME:-router}",
+                  "default": "router",
                   "type": "string"
                 },
                 "service_namespace": {
@@ -4443,6 +4478,7 @@ expression: "&schema"
     "tls": {
       "description": "TLS related configuration options.",
       "default": {
+        "supergraph": null,
         "subgraph": {
           "all": {
             "certificate_authorities": null
@@ -4498,6 +4534,35 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
+        },
+        "supergraph": {
+          "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
+          "default": null,
+          "type": "object",
+          "required": [
+            "certificate",
+            "certificate_chain",
+            "key"
+          ],
+          "properties": {
+            "certificate": {
+              "description": "server certificate in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "certificate_chain": {
+              "description": "list of certificate authorities in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "key": {
+              "description": "server key in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
         }
       },
       "additionalProperties": false
@@ -4540,6 +4605,26 @@ expression: "&schema"
             "deduplicate_query": {
               "description": "Enable query deduplication",
               "type": "boolean",
+              "nullable": true
+            },
+            "experimental_enable_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "type": "boolean",
+              "nullable": true
+            },
+            "experimental_entity_caching": {
+              "description": "Enable entity caching",
+              "type": "object",
+              "required": [
+                "ttl"
+              ],
+              "properties": {
+                "ttl": {
+                  "description": "expiration for all keys",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
               "nullable": true
             },
             "experimental_retry": {
@@ -4599,6 +4684,25 @@ expression: "&schema"
               "description": "Enable timeout for incoming requests",
               "default": null,
               "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        },
+        "cache": {
+          "description": "URLs of Redis cache used for query planning",
+          "default": null,
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
             }
           },
           "additionalProperties": false,
@@ -4682,6 +4786,26 @@ expression: "&schema"
               "deduplicate_query": {
                 "description": "Enable query deduplication",
                 "type": "boolean",
+                "nullable": true
+              },
+              "experimental_enable_http2": {
+                "description": "Enable HTTP2 for subgraphs",
+                "type": "boolean",
+                "nullable": true
+              },
+              "experimental_entity_caching": {
+                "description": "Enable entity caching",
+                "type": "object",
+                "required": [
+                  "ttl"
+                ],
+                "properties": {
+                  "ttl": {
+                    "description": "expiration for all keys",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "experimental_retry": {
