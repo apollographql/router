@@ -166,6 +166,96 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "external": {
+      "description": "Configures the externalization plugin",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "stages": {
+          "description": "The stages request/response configuration",
+          "default": null,
+          "type": "object",
+          "properties": {
+            "router": {
+              "description": "The router stage",
+              "default": null,
+              "type": "object",
+              "properties": {
+                "request": {
+                  "description": "The request configuration",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "description": "Send the body",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "context": {
+                      "description": "Send the context",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "headers": {
+                      "description": "Send the headers",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "sdl": {
+                      "description": "Send the SDL",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "nullable": true
+                },
+                "response": {
+                  "description": "The response configuration",
+                  "default": null,
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "description": "Send the body",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "context": {
+                      "description": "Send the context",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "headers": {
+                      "description": "Send the headers",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "sdl": {
+                      "description": "Send the SDL",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "nullable": true
+                }
+              },
+              "nullable": true
+            }
+          },
+          "nullable": true
+        },
+        "timeout": {
+          "description": "The timeout for external requests",
+          "default": null,
+          "type": "string"
+        },
+        "url": {
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
+        }
+      }
+    },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
       "type": "boolean"
@@ -655,96 +745,6 @@ expression: "&schema"
         "experimental.expose_query_plan": {
           "description": "Expose query plan",
           "type": "boolean"
-        },
-        "experimental.external": {
-          "description": "Configures the externalization plugin",
-          "type": "object",
-          "required": [
-            "url"
-          ],
-          "properties": {
-            "stages": {
-              "description": "The stages request/response configuration",
-              "default": null,
-              "type": "object",
-              "properties": {
-                "router": {
-                  "description": "The router stage",
-                  "default": null,
-                  "type": "object",
-                  "properties": {
-                    "request": {
-                      "description": "The request configuration",
-                      "default": null,
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "description": "Send the SDL",
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "nullable": true
-                    },
-                    "response": {
-                      "description": "The response configuration",
-                      "default": null,
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "description": "Send the SDL",
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "nullable": true
-                    }
-                  },
-                  "nullable": true
-                }
-              },
-              "nullable": true
-            },
-            "timeout": {
-              "description": "The timeout for external requests",
-              "default": null,
-              "type": "string"
-            },
-            "url": {
-              "description": "The url you'd like to offload processing to",
-              "type": "string"
-            }
-          }
         },
         "experimental.restricted": {
           "description": "Restricted plugin (for testing purposes only)",

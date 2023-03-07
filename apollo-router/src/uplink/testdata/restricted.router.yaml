@@ -8,6 +8,9 @@ authentication:
     jwks:
       - url: https://example.com
 
+external:
+  url: https://example.com
+
 plugins:
   experimental.restricted:
     enabled: true

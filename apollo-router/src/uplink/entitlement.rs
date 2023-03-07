@@ -133,6 +133,10 @@ impl EntitlementReport {
                 .path("$.authentication")
                 .name("Authentication plugin")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.external")
+                .name("External plugin")
+                .build(),
         ]
     }
 }
