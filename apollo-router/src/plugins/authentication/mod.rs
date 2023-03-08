@@ -52,9 +52,6 @@ pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication
 
 #[derive(Debug, Display, Error)]
 enum AuthenticationError<'a> {
-    /// Missing {0} header
-    MissingHeader(&'a str),
-
     /// Configured header is not convertible to a string
     CannotConvertToString,
 
@@ -392,11 +389,7 @@ fn authenticate(
     let jwt_value_result = match request.router_request.headers().get(&config.header_name) {
         Some(value) => value.to_str(),
         None => {
-            return failure_message(
-                request.context,
-                AuthenticationError::MissingHeader(&config.header_name),
-                StatusCode::UNAUTHORIZED,
-            );
+            return Ok(ControlFlow::Continue(request));
         }
     };
 
