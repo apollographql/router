@@ -27,6 +27,14 @@ supergraph:
       in_memory:
         limit: 1000
 
+traffic_shaping:
+  subgraphs:
+    products:
+      experimental_entity_caching:
+        ttl: 2s
+  experimental_cache:
+    urls:
+      - https://example.com
 
 plugins:
   experimental.restricted:

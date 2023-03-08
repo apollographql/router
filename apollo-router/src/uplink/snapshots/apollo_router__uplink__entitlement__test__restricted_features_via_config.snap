@@ -17,3 +17,9 @@ Configuration yaml:
 
 * APQ caching
   .supergraph.apq.cache.redis
+
+* Subgraph caching
+  .traffic_shaping.experimental_cache
+
+* Subgraph entity caching
+  .traffic_shaping..experimental_entity_caching

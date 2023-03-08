@@ -145,6 +145,14 @@ impl EntitlementReport {
                 .path("$.supergraph.apq.cache.redis")
                 .name("APQ caching")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.traffic_shaping.experimental_cache")
+                .name("Subgraph caching")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.traffic_shaping..experimental_entity_caching")
+                .name("Subgraph entity caching")
+                .build(),
         ]
     }
 }
