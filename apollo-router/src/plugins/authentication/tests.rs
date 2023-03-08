@@ -298,7 +298,9 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("'header.payload' is not a valid JWT header: InvalidToken")
+        .message(format!(
+            "'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: InvalidToken"
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -338,7 +340,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-            .message("'header.payload.signature' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
+            .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
             .extension_code("AUTH_ERROR")
             .build();
 

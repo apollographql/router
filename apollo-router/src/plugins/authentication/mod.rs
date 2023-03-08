@@ -49,6 +49,7 @@ mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
+const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
 enum AuthenticationError<'a> {
@@ -440,9 +441,11 @@ fn authenticate(
     let jwt_header = match decode_header(jwt) {
         Ok(h) => h,
         Err(e) => {
+            // Don't reflect the jwt on error, just reply with a fixed
+            // error message.
             return failure_message(
                 request.context,
-                AuthenticationError::InvalidHeader(jwt, e),
+                AuthenticationError::InvalidHeader(HEADER_TOKEN_TRUNCATED, e),
                 StatusCode::BAD_REQUEST,
             );
         }
@@ -492,7 +495,8 @@ fn authenticate(
             }
         };
 
-        let validation = Validation::new(algorithm);
+        let mut validation = Validation::new(algorithm);
+        validation.validate_nbf = true;
 
         let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
             Ok(v) => v,
