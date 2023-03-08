@@ -180,8 +180,12 @@ commands:
             date +%j > ~/.daily_version
             # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild 
             find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
-            # The closest common ancestor to dev, so that test jobs can take advantage previous compiles
-            git merge-base HEAD dev > ~/.merge_version
+            # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
+            # Run this command twice to prevent the log message from ssh from messing with things
+            TARGET_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
+            TARGET_BRANCH=$(git remote show origin | sed -n '/HEAD branch/s/.*: //p')
+            COMMON_ANCESTOR_REF=$(git merge-base HEAD "${TARGET_BRANCH}")
+            echo "${CIRCLE_PROJECT_REPONAME}-${COMMON_ANCESTOR_REF}" > ~/.merge_version
 
   # Linux specific step to install packages that are needed
   install_debian_packages:
