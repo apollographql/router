@@ -5,6 +5,8 @@ use std::ffi::OsStr;
 use std::fmt;
 use std::fmt::Debug;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -27,6 +29,7 @@ use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
+use crate::EntitlementSource;
 
 // Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
 // and variables identically to prevent this from happening.
@@ -128,7 +131,7 @@ enum ConfigSubcommand {
 #[derive(Parser, Debug)]
 #[clap(name = "router", about = "Apollo federation router")]
 #[command(disable_version_flag(true))]
-pub(crate) struct Opt {
+pub struct Opt {
     /// Log level (off|error|warn|info|debug|trace).
     #[clap(
         long = "log",
@@ -189,6 +192,18 @@ pub(crate) struct Opt {
     /// Your Apollo graph reference.
     #[clap(skip = std::env::var("APOLLO_GRAPH_REF").ok())]
     apollo_graph_ref: Option<String>,
+
+    /// Your Apollo Router entitlement.
+    #[clap(skip = std::env::var("APOLLO_ROUTER_ENTITLEMENT").ok())]
+    apollo_router_entitlement: Option<String>,
+
+    /// Entitlement location relative to the current directory.
+    #[clap(
+        long = "entitlement",
+        env = "APOLLO_ROUTER_ENTITLEMENT_PATH",
+        hide(true)
+    )]
+    apollo_router_entitlement_path: Option<PathBuf>,
 
     /// The endpoints (comma separated) polled to fetch the latest supergraph schema.
     #[clap(long, env, action = ArgAction::Append)]
@@ -325,9 +340,11 @@ impl Executable {
     async fn start(
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
+        entitlement: Option<EntitlementSource>,
         config: Option<ConfigurationSource>,
+        cli_args: Option<Opt>,
     ) -> Result<()> {
-        let opt = Opt::parse();
+        let opt = cli_args.unwrap_or_else(Opt::parse);
 
         if opt.version {
             println!("{}", std::env!("CARGO_PKG_VERSION"));
@@ -367,7 +384,7 @@ impl Executable {
                 configuration::print_all_experimental_conf();
                 Ok(())
             }
-            None => Self::inner_start(shutdown, schema, config, opt).await,
+            None => Self::inner_start(shutdown, schema, config, entitlement, opt).await,
         };
 
         //We should be good to shutdown the tracer provider now as the router should have finished everything.
@@ -379,8 +396,25 @@ impl Executable {
         shutdown: Option<ShutdownSource>,
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
+        entitlement: Option<EntitlementSource>,
         mut opt: Opt,
     ) -> Result<()> {
+        let uplink_endpoints: Option<Vec<Url>> = opt
+            .apollo_uplink_endpoints
+            .map(|e| {
+                e.split(',')
+                    .map(|endpoint| Url::parse(endpoint.trim()))
+                    .collect::<Result<Vec<Url>, ParseError>>()
+            })
+            .transpose()
+            .map_err(|err| ConfigurationError::InvalidConfiguration {
+                message:
+                    "invalid apollo-uplink-endpoints, this must be a list of comma separated URLs",
+                error: err.to_string(),
+            })?;
+        if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
+            return Err(anyhow!("apollo-uplink-poll-interval must be at least 10s"));
+        }
         let current_directory = std::env::current_dir()?;
         // Enable hot reload when dev mode is enabled
         opt.hot_reload = opt.hot_reload || opt.dev;
@@ -417,7 +451,7 @@ impl Executable {
         };
 
         let apollo_router_msg = format!("Apollo Router v{} // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)", std::env!("CARGO_PKG_VERSION"));
-        let schema = match (schema, opt.supergraph_path, opt.apollo_key) {
+        let schema = match (schema, &opt.supergraph_path, &opt.apollo_key) {
             (Some(_), Some(_), _) => {
                 return Err(anyhow!(
                     "--supergraph and APOLLO_ROUTER_SUPERGRAPH_PATH cannot be used when a custom schema source is in use"
@@ -431,7 +465,7 @@ impl Executable {
                 let supergraph_path = if supergraph_path.is_relative() {
                     current_directory.join(supergraph_path)
                 } else {
-                    supergraph_path
+                    supergraph_path.clone()
                 };
                 SchemaSource::File {
                     path: supergraph_path,
@@ -443,27 +477,11 @@ impl Executable {
                 tracing::info!("{apollo_router_msg}");
                 tracing::info!("{apollo_telemetry_msg}");
 
-                let apollo_graph_ref = opt.apollo_graph_ref.ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
-                if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
-                    return Err(anyhow!("Apollo poll interval must be at least 10s"));
-                }
-                let uplink_endpoints: Option<Vec<Url>> = opt
-                    .apollo_uplink_endpoints
-                    .map(|e| {
-                        e.split(',')
-                            .map(|endpoint| Url::parse(endpoint.trim()))
-                            .collect::<Result<Vec<Url>, ParseError>>()
-                    })
-                    .transpose()
-                    .map_err(|err| ConfigurationError::InvalidConfiguration {
-                        message: "bad value for apollo_uplink_endpoints, cannot parse to an url",
-                        error: err.to_string(),
-                    })?;
-
+                let apollo_graph_ref = opt.apollo_graph_ref.as_ref().ok_or_else(||anyhow!("cannot fetch the supergraph from Apollo Studio without setting the APOLLO_GRAPH_REF environment variable"))?;
                 SchemaSource::Registry {
-                    apollo_key,
-                    apollo_graph_ref,
-                    urls: uplink_endpoints,
+                    apollo_key: apollo_key.to_string(),
+                    apollo_graph_ref: apollo_graph_ref.to_string(),
+                    urls: uplink_endpoints.clone(),
                     poll_interval: opt.apollo_uplink_poll_interval,
                     timeout: opt.apollo_uplink_timeout
                 }
@@ -503,9 +521,45 @@ impl Executable {
             }
         };
 
+        // Order of precedence:
+        // 1. explicit path from cli
+        // 2. env APOLLO_ROUTER_ENTITLEMENT
+        // 3. uplink
+        let entitlement = entitlement.unwrap_or_else(|| {
+            match (
+                &opt.apollo_router_entitlement,
+                &opt.apollo_router_entitlement_path,
+                &opt.apollo_key,
+                &opt.apollo_graph_ref,
+            ) {
+                (_, Some(entitlement_path), _, _) => {
+                    let entitlement_path = if entitlement_path.is_relative() {
+                        current_directory.join(entitlement_path)
+                    } else {
+                        entitlement_path.clone()
+                    };
+                    EntitlementSource::File {
+                        path: entitlement_path,
+                        watch: opt.hot_reload,
+                    }
+                }
+                (Some(_entitlement), _, _, _) => EntitlementSource::Env,
+                (_, _, Some(apollo_key), Some(apollo_graph_ref)) => EntitlementSource::Registry {
+                    apollo_key: apollo_key.to_string(),
+                    apollo_graph_ref: apollo_graph_ref.to_string(),
+                    urls: uplink_endpoints.clone(),
+                    poll_interval: opt.apollo_uplink_poll_interval,
+                    timeout: opt.apollo_uplink_timeout,
+                },
+
+                _ => EntitlementSource::default(),
+            }
+        });
+
         let router = RouterHttpServer::builder()
             .configuration(configuration)
             .schema(schema)
+            .entitlement(entitlement)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
             .start();
         if let Err(err) = router.await {
@@ -537,7 +591,12 @@ fn setup_panic_handler() {
     }));
 }
 
+static COPIED: AtomicBool = AtomicBool::new(false);
+
 fn copy_args_to_env() {
+    if Ok(false) != COPIED.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed) {
+        panic!("`copy_args_to_env` was called twice: That means `Executable::start` was called twice in the same process, which should not happen");
+    }
     // Copy all the args to env.
     // This way, Clap is still responsible for the definitive view of what the current options are.
     // But if we have code that relies on env variable then it will still work.
