@@ -11,3 +11,15 @@ Configuration yaml:
 
 * External plugin
   .external
+
+* Query plan caching
+  .supergraph.query_planning.cache.redis
+
+* APQ caching
+  .supergraph.apq.cache.redis
+
+* Subgraph caching
+  .traffic_shaping.experimental_cache
+
+* Subgraph entity caching
+  .traffic_shaping..experimental_entity_caching

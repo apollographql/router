@@ -11,6 +11,31 @@ authentication:
 external:
   url: https://example.com
 
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+  apq:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+traffic_shaping:
+  subgraphs:
+    products:
+      experimental_entity_caching:
+        ttl: 2s
+  experimental_cache:
+    urls:
+      - https://example.com
+
 plugins:
   experimental.restricted:
     enabled: true

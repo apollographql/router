@@ -137,6 +137,22 @@ impl EntitlementReport {
                 .path("$.external")
                 .name("External plugin")
                 .build(),
+            ConfigurationRestriction::builder()
+                .path("$.supergraph.query_planning.cache.redis")
+                .name("Query plan caching")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.supergraph.apq.cache.redis")
+                .name("APQ caching")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.traffic_shaping.experimental_cache")
+                .name("Subgraph caching")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.traffic_shaping..experimental_entity_caching")
+                .name("Subgraph entity caching")
+                .build(),
         ]
     }
 }
