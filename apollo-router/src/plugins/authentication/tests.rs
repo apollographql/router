@@ -143,14 +143,12 @@ async fn it_rejects_when_there_is_no_auth_header() {
 
     let config = serde_json::json!({
         "authentication": {
-            "experimental" : {
-                "jwt" : {
-                    "jwks": [
-                        {
-                            "url": &jwks_url
-                        }
-                    ]
-                }
+            "jwt" : {
+                "jwks": [
+                    {
+                        "url": &jwks_url
+                    }
+                ]
             }
         },
         "rhai": {
