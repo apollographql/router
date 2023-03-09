@@ -26,13 +26,11 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::error::LicenseError;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::apollo_graph_reference;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -51,10 +49,6 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init.config.stages != Default::default() {
-            apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-        }
-
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
