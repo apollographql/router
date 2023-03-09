@@ -690,18 +690,16 @@ expression: "&schema"
                   }
                 },
                 "subgraph": {
-                  "request": {
-                    "all": {
+                  "all": {
+                    "request": {
                       "headers": false,
                       "context": false,
                       "body": false,
                       "service": false,
                       "uri": false,
                       "service_name": false
-                    }
-                  },
-                  "response": {
-                    "all": {
+                    },
+                    "response": {
                       "headers": false,
                       "context": false,
                       "body": false,
@@ -803,18 +801,16 @@ expression: "&schema"
                 "subgraph": {
                   "description": "The subgraph stage",
                   "default": {
-                    "request": {
-                      "all": {
+                    "all": {
+                      "request": {
                         "headers": false,
                         "context": false,
                         "body": false,
                         "service": false,
                         "uri": false,
                         "service_name": false
-                      }
-                    },
-                    "response": {
-                      "all": {
+                      },
+                      "response": {
                         "headers": false,
                         "context": false,
                         "body": false,
@@ -826,10 +822,18 @@ expression: "&schema"
                   },
                   "type": "object",
                   "properties": {
-                    "request": {
-                      "description": "What information is passed to all subgraph request/response stages",
+                    "all": {
+                      "description": "What information is passed to a subgraph request/response stage",
                       "default": {
-                        "all": {
+                        "request": {
+                          "headers": false,
+                          "context": false,
+                          "body": false,
+                          "service": false,
+                          "uri": false,
+                          "service_name": false
+                        },
+                        "response": {
                           "headers": false,
                           "context": false,
                           "body": false,
@@ -840,7 +844,7 @@ expression: "&schema"
                       },
                       "type": "object",
                       "properties": {
-                        "all": {
+                        "request": {
                           "description": "What information is passed to a subgraph request/response stage",
                           "default": {
                             "headers": false,
@@ -884,25 +888,8 @@ expression: "&schema"
                             }
                           },
                           "additionalProperties": false
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    "response": {
-                      "description": "What information is passed to all subgraph request/response stages",
-                      "default": {
-                        "all": {
-                          "headers": false,
-                          "context": false,
-                          "body": false,
-                          "service": false,
-                          "uri": false,
-                          "service_name": false
-                        }
-                      },
-                      "type": "object",
-                      "properties": {
-                        "all": {
+                        },
+                        "response": {
                           "description": "What information is passed to a subgraph request/response stage",
                           "default": {
                             "headers": false,
@@ -950,7 +937,8 @@ expression: "&schema"
                       },
                       "additionalProperties": false
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 }
               },
               "additionalProperties": false

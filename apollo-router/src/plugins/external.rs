@@ -147,7 +147,7 @@ where
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        self.configuration.stages.subgraph.as_service(
+        self.configuration.stages.subgraph.all.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -167,13 +167,6 @@ pub(super) struct RouterConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
-}
-
-/// What information is passed to all subgraph request/response stages
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
-pub(super) struct SubgraphConfs {
-    pub(super) all: SubgraphConf,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -201,7 +194,7 @@ struct Stages {
     /// The router stage
     pub(super) router: RouterStage,
     /// The subgraph stage
-    pub(super) subgraph: SubgraphStage,
+    pub(super) subgraph: SubgraphStages,
 }
 
 /// Configures the externalization plugin
@@ -331,12 +324,22 @@ impl RouterStage {
 
 // -----------------------------------------------------------------------------------------
 
+/// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct SubgraphStages {
+    #[serde(default)]
+    pub(super) all: SubgraphStage,
+}
+
+/// What information is passed to a subgraph request/response stage
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStage {
     #[serde(default)]
-    pub(super) request: SubgraphConfs,
+    pub(super) request: SubgraphConf,
     #[serde(default)]
-    pub(super) response: SubgraphConfs,
+    pub(super) response: SubgraphConf,
 }
 
 impl SubgraphStage {
@@ -364,7 +367,7 @@ impl SubgraphStage {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
                 let service_name = service_name.clone();
-                let request_config = request_config.all.clone();
+                let request_config = request_config.clone();
 
                 async move {
                     process_subgraph_request_stage(
@@ -391,7 +394,7 @@ impl SubgraphStage {
             MapFutureLayer::new(move |fut| {
                 let http_client = http_client.clone();
                 let coprocessor_url = coprocessor_url.clone();
-                let response_config = response_config.all.clone();
+                let response_config = response_config.clone();
                 let service_name = service_name.clone();
 
                 async move {
