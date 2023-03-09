@@ -627,7 +627,7 @@ impl Default for InMemoryCache {
 /// Redis cache configuration
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
-    pub(crate) urls: Vec<String>,
+    pub(crate) urls: Vec<url::Url>,
 }
 
 /// TLS related configuration options.

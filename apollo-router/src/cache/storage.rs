@@ -59,7 +59,7 @@ where
 {
     pub(crate) async fn new(
         max_capacity: NonZeroUsize,
-        _redis_urls: Option<Vec<String>>,
+        _redis_urls: Option<Vec<url::Url>>,
         caller: &str,
     ) -> Self {
         Self {

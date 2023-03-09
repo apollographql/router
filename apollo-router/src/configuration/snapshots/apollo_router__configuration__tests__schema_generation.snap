@@ -904,7 +904,8 @@ expression: "&schema"
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "format": "uri"
                       }
                     }
                   },
@@ -1046,7 +1047,8 @@ expression: "&schema"
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "format": "uri"
                       }
                     }
                   },
@@ -4525,7 +4527,8 @@ expression: "&schema"
               "description": "List of URLs to the Redis cluster",
               "type": "array",
               "items": {
-                "type": "string"
+                "type": "string",
+                "format": "uri"
               }
             }
           },
