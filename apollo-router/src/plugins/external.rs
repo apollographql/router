@@ -520,12 +520,19 @@ where
             .status_code(code)
             .context(request.context);
 
-        let res = match (graphql_response.label, graphql_response.data) {
+        let mut res = match (graphql_response.label, graphql_response.data) {
             (Some(label), Some(data)) => res.label(label).data(data).build()?,
             (Some(label), None) => res.label(label).build()?,
             (None, Some(data)) => res.data(data).build()?,
             (None, None) => res.build()?,
         };
+        if let Some(headers) = co_processor_output.headers {
+            *res.response.headers_mut() = internalize_header_map(headers)?;
+        }
+
+        if let Some(context) = co_processor_output.context {
+            res.context = context;
+        }
 
         return Ok(ControlFlow::Break(res));
     }
@@ -709,12 +716,23 @@ where
                             .build()
                     });
 
-            subgraph::Response {
-                response: http::Response::builder()
-                    .status(code)
-                    .body(graphql_response)?,
-                context: request.context,
+            let mut http_response = http::Response::builder()
+                .status(code)
+                .body(graphql_response)?;
+            if let Some(headers) = co_processor_output.headers {
+                *http_response.headers_mut() = internalize_header_map(headers)?;
             }
+
+            let mut subgraph_response = subgraph::Response {
+                response: http_response,
+                context: request.context,
+            };
+
+            if let Some(context) = co_processor_output.context {
+                subgraph_response.context = context;
+            }
+
+            subgraph_response
         };
         return Ok(ControlFlow::Break(res));
     }
