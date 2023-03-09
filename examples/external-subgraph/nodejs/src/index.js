@@ -5,6 +5,7 @@ const port = 3000;
 app.use(express.json());
 
 app.post("/", (req, res) => {
+  console.log(`request headers ${JSON.stringify(req.headers, null, 2)}`);
   const request = req.body;
   console.log("📞 received request");
   console.log("JSON context:");

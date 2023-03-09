@@ -10,6 +10,7 @@ use http::header::CONTENT_TYPE;
 use http::Method;
 use http::StatusCode;
 use hyper::Body;
+use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -17,6 +18,7 @@ use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
 use tower::Service;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::Context;
 
@@ -93,12 +95,19 @@ where
     {
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
 
-        let request = hyper::Request::builder()
+        let mut request = hyper::Request::builder()
             .uri(uri)
             .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
             .body(serde_json::to_vec(&self)?.into())?;
+
+        get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &tracing::span::Span::current().context(),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+            );
+        });
 
         let response = client.call(request).await?;
         hyper::body::to_bytes(response.into_body())
