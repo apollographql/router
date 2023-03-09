@@ -481,6 +481,14 @@ mod tests {
                                 },
                                 "body": {
                                     "errors": [{ "message": "my error message" }]
+                                },
+                                "context": {
+                                    "entries": {
+                                        "testKey": true
+                                    }
+                                },
+                                "headers": {
+                                    "aheader": ["a value"]
                                 }
                             }"##,
                     ))
@@ -497,10 +505,18 @@ mod tests {
 
         let request = subgraph::Request::fake_builder().build();
 
+        let crate::services::subgraph::Response { response, context } =
+            service.oneshot(request).await.unwrap();
+
+        assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
+
+        let value = response.headers().get("aheader").unwrap();
+
+        assert_eq!("a value", value);
+
         assert_eq!(
-            serde_json::json!({ "errors": [{ "message": "my error message" }] }),
-            serde_json::to_value(service.oneshot(request).await.unwrap().response.into_body())
-                .unwrap()
+            "my error message",
+            response.into_body().errors[0].message.as_str()
         );
     }
 
@@ -760,16 +776,24 @@ mod tests {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
                         r##"{
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": {
-                        "Break": 200
-                    },
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": {
-                      "errors": [{ "message": "my error message" }]
-                    }
-                  }"##,
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "control": {
+                                "Break": 200
+                            },
+                            "id": "1b19c05fdafc521016df33148ad63c1b",
+                            "body": {
+                            "errors": [{ "message": "my error message" }]
+                            },
+                            "context": {
+                                "entries": {
+                                    "testKey": true
+                                }
+                            },
+                            "headers": {
+                                "aheader": ["a value"]
+                            }
+                        }"##,
                     ))
                     .unwrap())
             })
@@ -784,17 +808,17 @@ mod tests {
 
         let request = supergraph::Request::canned_builder().build().unwrap();
 
+        let crate::services::router::Response { response, context } =
+            service.oneshot(request.try_into().unwrap()).await.unwrap();
+
+        assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
+
+        let value = response.headers().get("aheader").unwrap();
+
+        assert_eq!("a value", value);
+
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(
-                service
-                    .oneshot(request.try_into().unwrap())
-                    .await
-                    .unwrap()
-                    .response
-                    .into_body(),
-            )
-            .await
-            .unwrap(),
+            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
         )
         .unwrap();
 
