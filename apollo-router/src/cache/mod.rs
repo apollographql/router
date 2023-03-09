@@ -33,7 +33,7 @@ where
 {
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
-        redis_urls: Option<Vec<String>>,
+        redis_urls: Option<Vec<url::Url>>,
         caller: &str,
     ) -> Self {
         Self {

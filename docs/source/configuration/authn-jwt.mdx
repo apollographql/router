@@ -22,7 +22,7 @@ These are the high-level steps of JWT-based authentication with the Apollo Route
 
 1. Whenever a client authenticates with your system, your IdP issues that client a valid JSON Web Token (JWT).
 2. In its subsequent requests to your router, the authenticated client provides its JWT in a designated HTTP header.
-3. Whenever your router receives a client request, its authentication plugin extracts the JWT from the designated header (if present).
+3. Whenever your router receives a client request, its authentication plugin extracts the JWT from the designated header, if present. **If no JWT was presented, the request goes through, so rejecting requests based on authentication status is done at a later phase** ([see below](#working-with-jwt-claims))
 4. The authentication plugin validates the extracted JWT using a corresponding [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**).
     - The plugin obtains all of its known JWKs from URLs that you specify in your router's configuration file. Each URL provides its keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
     - Validation fails if the JWT is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
@@ -143,7 +143,45 @@ The authentication plugin performs validation in the `RouterService`, which is t
 
 > **Important:** You _cannot_ build a router customization that interacts with an incoming JWT _before_ the authentication plugin validates it. Plugins that hook into the `RouterService` execute in an undefined order and might even execute in parallel.
 
-Below are two example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
+Below are three example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
+
+
+### Example: Rejecting unauthenticated requests
+
+Below is an example [Rhai script](../customizations/rhai/) that will reject requests which do not present a valid JWT.
+
+> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/overview#service-descriptions)
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="require_authentication.rhai"
+fn supergraph_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+}
+
+// This will examine our context to determine if our user is authenticated.
+fn process_request(request) {
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims == () {
+        throw #{
+            status: 401,
+            body: #{
+                errors: [#{
+                    message: "The request is not authenticated",
+                    extensions: #{
+                        code: "AUTH_ERROR"
+                    }
+                }]
+            }
+        };
+    }
+    // We are happy we are authenticated.
+}
+```
+
+</ExpansionPanel>
+
 
 ### Example: Validating claims
 
@@ -168,7 +206,11 @@ fn process_request(request) {
         if claims == () {
             throw #{
                 status: 401,
-                message: "No claims presented in this request"
+                body: #{
+                    errors: [#{
+                        message: "No claims presented in this request"
+                    }]
+                }
             };
         }
         if !claims.contains("iss") {
@@ -180,7 +222,11 @@ fn process_request(request) {
         if claims["iss"] != "https://idp.local" {
             throw #{
                 status: 401,
-                message: `Issuer ${claims.iss} is not accepted here`
+                body: #{
+                    errors: [#{
+                        message: `Issuer ${claims.iss} is not accepted here`
+                    }]
+                }
             };
         }
         // Happy path: We have valid claims from the correct idP.
