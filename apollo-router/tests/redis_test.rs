@@ -29,7 +29,7 @@ mod test {
             .configuration_json(json!({
                 "supergraph": {
                     "query_planning": {
-                        "experimental_cache": {
+                        "cache": {
                             "in_memory": {
                                 "limit": 2
                             },
@@ -90,7 +90,7 @@ mod test {
         let config = json!({
             "supergraph": {
                 "apq": {
-                    "experimental_cache": {
+                    "cache": {
                         "in_memory": {
                             "limit": 2
                         },

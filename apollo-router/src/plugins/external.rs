@@ -87,11 +87,7 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!(
-    "experimental",
-    "external",
-    ExternalPlugin<HTTPClientService>
-);
+register_plugin!("apollo", "external", ExternalPlugin<HTTPClientService>);
 
 // -------------------------------------------------------------------------------------------------------
 

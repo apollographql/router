@@ -538,7 +538,7 @@ pub(crate) struct Apq {
     pub(crate) enabled: bool,
     /// Cache configuration
     #[serde(default)]
-    pub(crate) experimental_cache: Cache,
+    pub(crate) cache: Cache,
 
     #[serde(default)]
     pub(crate) subgraph: ApqSubgraphWrapper,
@@ -577,7 +577,7 @@ impl Default for Apq {
     fn default() -> Self {
         Self {
             enabled: default_apq(),
-            experimental_cache: Default::default(),
+            cache: Default::default(),
             subgraph: Default::default(),
         }
     }
@@ -588,7 +588,7 @@ impl Default for Apq {
 #[serde(deny_unknown_fields)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) experimental_cache: Cache,
+    pub(crate) cache: Cache,
     /// Warm up the cache on reloads by running the query plan over
     /// a list of the most used queries
     /// Defaults to 0 (do not warm up the cache)

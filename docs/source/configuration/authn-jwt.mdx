@@ -40,15 +40,14 @@ You enable JWT authentication for your router with the following steps:
 
     ```yaml title="router.yaml"
     authentication:
-      experimental:
-        jwt:
-          jwks: # This key is required.
-            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-              issuer: <optional name of issuer>
+     jwt:
+       jwks: # This key is required.
+         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+           issuer: <optional name of issuer>
 
-          # These keys are optional. Default values are shown.
-          header_name: Authorization
-          header_value_prefix: Bearer
+       # These keys are optional. Default values are shown.
+       header_name: Authorization
+       header_value_prefix: Bearer
     ```
 
     These options are documented [below](#configuration-options).
@@ -91,7 +90,7 @@ The following configuration options are supported:
 <td>
 
 **Required.** a list of JWK Set (JWKS) configuration options:
-- `url`: **required** URL from which the JWKS file will be read. It can be an `https://` or a `file://` URL.
+- `url`: **required** URL from which the JWKS file will be read. It must be a valid URL.
   - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.

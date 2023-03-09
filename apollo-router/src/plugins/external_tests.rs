@@ -29,10 +29,8 @@ mod tests {
     #[tokio::test]
     async fn load_plugin() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081"
-                }
+            "external": {
+                "url": "http://127.0.0.1:8081"
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
@@ -49,11 +47,9 @@ mod tests {
     #[tokio::test]
     async fn unknown_fields_are_denied() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081",
-                    "thisFieldDoesntExist": true
-                }
+            "external": {
+                "url": "http://127.0.0.1:8081",
+                "thisFieldDoesntExist": true
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
@@ -70,17 +66,15 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_with_stages_wont_load_without_graph_ref() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081",
-                    "stages": {
-                        "subgraph": {
-                            "request": {
-                                "uri": true
-                            }
+            "external": {
+                "url": "http://127.0.0.1:8081",
+                "stages": {
+                    "subgraph": {
+                        "request": {
+                            "uri": true
                         }
-                    },
-                }
+                    }
+                },
             }
         });
         // Build a test harness. Usually we'd use this and send requests to

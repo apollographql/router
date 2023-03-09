@@ -483,11 +483,8 @@ where
         let static_page = StaticPageLayer::new(configuration);
         let apq_layer = if configuration.supergraph.apq.enabled {
             APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(
-                    &configuration.supergraph.apq.experimental_cache,
-                    "APQ",
-                )
-                .await,
+                DeduplicatingCache::from_configuration(&configuration.supergraph.apq.cache, "APQ")
+                    .await,
             )
         } else {
             APQLayer::disabled()
