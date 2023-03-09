@@ -168,27 +168,26 @@ A POST reply from a co-processor to a router containing information about a rout
 The plugin is configured like other plugins. The typical configuration would look something like this. This is sending all available data related to a router request to a co-processor at the router stage and also sending the headers and context at the router response stage. A timeout is always in force for all co-processor requests.
 
 ```yaml title="typical.yaml"
-plugins:
-  experimental.external:
-    url: http://127.0.0.1:8081 # mandatory URL which is the address of the co-processor
-    timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
-    stages: # In future, multiple stages may be configurable
-      router: # Currently, the only valid value is router
-        request: # What data should we transmit to the co-processor from the router request?
-          headers: true # All of these data content attributes are optional and false by default.
-          context: true
-          body: true
-          sdl: true
-        response: # What data should we transmit to the co-processor from the router response?
-          headers: true
-          context: true
+external:
+  url: http://127.0.0.1:8081 # mandatory URL which is the address of the co-processor
+  timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
+  stages: # In future, multiple stages may be configurable
+    router: # Currently, the only valid value is router
+      request: # What data should we transmit to the co-processor from the router request?
+        headers: true # All of these data content attributes are optional and false by default.
+        context: true
+        body: true
+        sdl: true
+      response: # What data should we transmit to the co-processor from the router response?
+        headers: true
+        context: true
 ```
 
 The minimal data to transfer would be nothing on every router request. This is sending no data from the router request (just the control data) to a co-processor. This probably wouldn't be very useful in production, but could be in testing.
 
 ```yaml title="minimal.yaml"
 plugins:
-  experimental.external:
+  external:
     url: http://127.0.0.1:8081 # mandatory URL which is the POST target
     stages: # In future, multiple stages may be configurable
       router: # Currently, the only valid value is router
@@ -314,7 +313,7 @@ Control field changes are ignored with the exception of the control field. The c
 
 If the value of the "control" field is "Continue", then processing will continue as normal through the router. If the value is a map with a key of "Break" and a numeric status code, then the router will stop processing and return a response to the client. The data returned to the client is the "body" of the co-processor response to the router.
 
-If the Break code is a "success" code (2xx), then the body of the co-processor response should be valid data that the client is expecting. If the Break code is a "failure" code, then the body of the co-processor response will be formatted into an error response for the client.
+The body of the co-processor response should be valid GraphQL data that the client is expecting. If the Break code is a "failure" code, then the body of the co-processor response should contain a GraphQL errors array as shown in the following code snippet.
 
 > In the case of an externalized response, the router is already returning to the client, so the flow isn't altered, but the status code may still be changed.
 
@@ -327,12 +326,14 @@ For example, if the co-processor updated a received request so that the control 
   "stage": "RouterRequest",
   "control": { "Break": 403 },
   "id": "1b19c05fdafc521016df33148ad63c1b",
-  "body": "You are not allowed to do this",
+  "body": {
+    "errors": [{ "message": "You are not allowed to do this" }]
+   },
   (etc...)
 }
 ```
 
-then the router would stop processing the request and return a response to the client with an HTTP status code of 403 and the error message "You are not allowed to do this" (read from the body).
+then the router would stop processing the request and return a response to the client with an HTTP status code of 403 and GraphQL response defined in the body.
 
 ### Data
 
