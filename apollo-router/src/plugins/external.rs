@@ -179,8 +179,6 @@ pub(super) struct SubgraphConf {
     pub(super) context: bool,
     /// Send the body
     pub(super) body: bool,
-    /// Send the service name
-    pub(super) service: bool,
     /// Send the subgraph URI
     pub(super) uri: bool,
     /// Send the service name
