@@ -196,7 +196,6 @@ expression: "&schema"
                   "headers": false,
                   "context": false,
                   "body": false,
-                  "service": false,
                   "uri": false,
                   "service_name": false
                 },
@@ -204,7 +203,6 @@ expression: "&schema"
                   "headers": false,
                   "context": false,
                   "body": false,
-                  "service": false,
                   "uri": false,
                   "service_name": false
                 }
@@ -307,7 +305,6 @@ expression: "&schema"
                     "headers": false,
                     "context": false,
                     "body": false,
-                    "service": false,
                     "uri": false,
                     "service_name": false
                   },
@@ -315,7 +312,6 @@ expression: "&schema"
                     "headers": false,
                     "context": false,
                     "body": false,
-                    "service": false,
                     "uri": false,
                     "service_name": false
                   }
@@ -330,7 +326,6 @@ expression: "&schema"
                       "headers": false,
                       "context": false,
                       "body": false,
-                      "service": false,
                       "uri": false,
                       "service_name": false
                     },
@@ -338,7 +333,6 @@ expression: "&schema"
                       "headers": false,
                       "context": false,
                       "body": false,
-                      "service": false,
                       "uri": false,
                       "service_name": false
                     }
@@ -351,7 +345,6 @@ expression: "&schema"
                         "headers": false,
                         "context": false,
                         "body": false,
-                        "service": false,
                         "uri": false,
                         "service_name": false
                       },
@@ -369,11 +362,6 @@ expression: "&schema"
                         },
                         "headers": {
                           "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service": {
-                          "description": "Send the service name",
                           "default": false,
                           "type": "boolean"
                         },
@@ -396,7 +384,6 @@ expression: "&schema"
                         "headers": false,
                         "context": false,
                         "body": false,
-                        "service": false,
                         "uri": false,
                         "service_name": false
                       },
@@ -414,11 +401,6 @@ expression: "&schema"
                         },
                         "headers": {
                           "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service": {
-                          "description": "Send the service name",
                           "default": false,
                           "type": "boolean"
                         },
@@ -948,281 +930,6 @@ expression: "&schema"
         "experimental.expose_query_plan": {
           "description": "Expose query plan",
           "type": "boolean"
-        },
-        "experimental.external": {
-          "description": "Configures the externalization plugin",
-          "type": "object",
-          "required": [
-            "url"
-          ],
-          "properties": {
-            "stages": {
-              "description": "The stages request/response configuration",
-              "default": {
-                "router": {
-                  "request": {
-                    "headers": false,
-                    "context": false,
-                    "body": false,
-                    "sdl": false
-                  },
-                  "response": {
-                    "headers": false,
-                    "context": false,
-                    "body": false,
-                    "sdl": false
-                  }
-                },
-                "subgraph": {
-                  "all": {
-                    "request": {
-                      "headers": false,
-                      "context": false,
-                      "body": false,
-                      "uri": false,
-                      "service_name": false
-                    },
-                    "response": {
-                      "headers": false,
-                      "context": false,
-                      "body": false,
-                      "uri": false,
-                      "service_name": false
-                    }
-                  }
-                }
-              },
-              "type": "object",
-              "properties": {
-                "router": {
-                  "description": "The router stage",
-                  "default": {
-                    "request": {
-                      "headers": false,
-                      "context": false,
-                      "body": false,
-                      "sdl": false
-                    },
-                    "response": {
-                      "headers": false,
-                      "context": false,
-                      "body": false,
-                      "sdl": false
-                    }
-                  },
-                  "type": "object",
-                  "properties": {
-                    "request": {
-                      "description": "The request configuration",
-                      "default": {
-                        "headers": false,
-                        "context": false,
-                        "body": false,
-                        "sdl": false
-                      },
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "description": "Send the SDL",
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "additionalProperties": false
-                    },
-                    "response": {
-                      "description": "The response configuration",
-                      "default": {
-                        "headers": false,
-                        "context": false,
-                        "body": false,
-                        "sdl": false
-                      },
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "description": "Send the SDL",
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  }
-                },
-                "subgraph": {
-                  "description": "The subgraph stage",
-                  "default": {
-                    "all": {
-                      "request": {
-                        "headers": false,
-                        "context": false,
-                        "body": false,
-                        "uri": false,
-                        "service_name": false
-                      },
-                      "response": {
-                        "headers": false,
-                        "context": false,
-                        "body": false,
-                        "uri": false,
-                        "service_name": false
-                      }
-                    }
-                  },
-                  "type": "object",
-                  "properties": {
-                    "all": {
-                      "description": "What information is passed to a subgraph request/response stage",
-                      "default": {
-                        "request": {
-                          "headers": false,
-                          "context": false,
-                          "body": false,
-                          "uri": false,
-                          "service_name": false
-                        },
-                        "response": {
-                          "headers": false,
-                          "context": false,
-                          "body": false,
-                          "uri": false,
-                          "service_name": false
-                        }
-                      },
-                      "type": "object",
-                      "properties": {
-                        "request": {
-                          "description": "What information is passed to a subgraph request/response stage",
-                          "default": {
-                            "headers": false,
-                            "context": false,
-                            "body": false,
-                            "uri": false,
-                            "service_name": false
-                          },
-                          "type": "object",
-                          "properties": {
-                            "body": {
-                              "description": "Send the body",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "context": {
-                              "description": "Send the context",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "headers": {
-                              "description": "Send the headers",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "service_name": {
-                              "description": "Send the service name",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "uri": {
-                              "description": "Send the subgraph URI",
-                              "default": false,
-                              "type": "boolean"
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        "response": {
-                          "description": "What information is passed to a subgraph request/response stage",
-                          "default": {
-                            "headers": false,
-                            "context": false,
-                            "body": false,
-                            "uri": false,
-                            "service_name": false
-                          },
-                          "type": "object",
-                          "properties": {
-                            "body": {
-                              "description": "Send the body",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "context": {
-                              "description": "Send the context",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "headers": {
-                              "description": "Send the headers",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "service_name": {
-                              "description": "Send the service name",
-                              "default": false,
-                              "type": "boolean"
-                            },
-                            "uri": {
-                              "description": "Send the subgraph URI",
-                              "default": false,
-                              "type": "boolean"
-                            }
-                          },
-                          "additionalProperties": false
-                        }
-                      },
-                      "additionalProperties": false
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              },
-              "additionalProperties": false
-            },
-            "timeout": {
-              "description": "The timeout for external requests",
-              "default": {
-                "secs": 1,
-                "nanos": 0
-              },
-              "type": "string"
-            },
-            "url": {
-              "description": "The url you'd like to offload processing to",
-              "type": "string"
-            }
-          },
-          "additionalProperties": false
         },
         "experimental.restricted": {
           "description": "Restricted plugin (for testing purposes only)",
