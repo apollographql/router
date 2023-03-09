@@ -544,6 +544,10 @@ fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
                     {"__typename": "Product", "upc": "2", "name": "Couch"},
                     {"__typename": "Product", "upc": "3", "name": "Chair"}
                 ]},
+                "errors": [
+                    {"message": "", "path": ["topProducts"]},
+                    {"message": "", "path": ["topProducts"]},
+                ],
                 "extensions": {"ftv1": encode_ftv1(trace)}
             }),
         )
@@ -912,6 +916,9 @@ fn subgraph_mocks(subgraph: &str) -> subgraph::BoxService {
                     {"name": "Ada Lovelace"},
                     {"name": "Alan Turing"},
                 ]},
+                "errors": [
+                    {"message": "", "path": ["_entities", 1, "name"]},
+                ],
                 "extensions": {"ftv1": encode_ftv1(trace)}
             })
         )

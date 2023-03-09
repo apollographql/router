@@ -37,7 +37,7 @@ query_latency_stats:
         requests_with_errors_count: 0
     errors_count: 0
     requests_with_errors_count: 0
-  requests_with_errors_count: 0
+  requests_with_errors_count: 1
   public_cache_ttl_count:
     - 0
   private_cache_ttl_count:
