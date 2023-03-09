@@ -71,13 +71,21 @@ impl Control {
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) control: Option<Control>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) body: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context: Option<Context>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sdl: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) service_name: Option<String>,
 }
 
