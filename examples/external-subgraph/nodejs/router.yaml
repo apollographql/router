@@ -14,9 +14,10 @@ plugins:
     timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
     stages:
       subgraph: # router or subgraph
-        request: # What data should we transmit to the co-processor from the router request?
-          headers: true # All of these data content attributes are optional and false by default.
-          context: true
-          uri: true
-          service_name: true
-          body: true
+        all:
+          request: # What data should we transmit to the co-processor from the router request?
+            headers: true # All of these data content attributes are optional and false by default.
+            context: true
+            uri: true
+            service_name: true
+            body: true

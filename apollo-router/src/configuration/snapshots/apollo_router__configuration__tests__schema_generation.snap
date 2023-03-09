@@ -691,20 +691,24 @@ expression: "&schema"
                 },
                 "subgraph": {
                   "request": {
-                    "headers": false,
-                    "context": false,
-                    "body": false,
-                    "service": false,
-                    "uri": false,
-                    "service_name": false
+                    "all": {
+                      "headers": false,
+                      "context": false,
+                      "body": false,
+                      "service": false,
+                      "uri": false,
+                      "service_name": false
+                    }
                   },
                   "response": {
-                    "headers": false,
-                    "context": false,
-                    "body": false,
-                    "service": false,
-                    "uri": false,
-                    "service_name": false
+                    "all": {
+                      "headers": false,
+                      "context": false,
+                      "body": false,
+                      "service": false,
+                      "uri": false,
+                      "service_name": false
+                    }
                   }
                 }
               },
@@ -800,110 +804,148 @@ expression: "&schema"
                   "description": "The subgraph stage",
                   "default": {
                     "request": {
-                      "headers": false,
-                      "context": false,
-                      "body": false,
-                      "service": false,
-                      "uri": false,
-                      "service_name": false
+                      "all": {
+                        "headers": false,
+                        "context": false,
+                        "body": false,
+                        "service": false,
+                        "uri": false,
+                        "service_name": false
+                      }
                     },
                     "response": {
-                      "headers": false,
-                      "context": false,
-                      "body": false,
-                      "service": false,
-                      "uri": false,
-                      "service_name": false
+                      "all": {
+                        "headers": false,
+                        "context": false,
+                        "body": false,
+                        "service": false,
+                        "uri": false,
+                        "service_name": false
+                      }
                     }
                   },
                   "type": "object",
                   "properties": {
                     "request": {
-                      "description": "What information is passed to a subgraph request/response stage",
+                      "description": "What information is passed to all subgraph request/response stages",
                       "default": {
-                        "headers": false,
-                        "context": false,
-                        "body": false,
-                        "service": false,
-                        "uri": false,
-                        "service_name": false
+                        "all": {
+                          "headers": false,
+                          "context": false,
+                          "body": false,
+                          "service": false,
+                          "uri": false,
+                          "service_name": false
+                        }
                       },
                       "type": "object",
                       "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service": {
-                          "description": "Send the service name",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service_name": {
-                          "description": "Send the service name",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "uri": {
-                          "description": "Send the subgraph URI",
-                          "default": false,
-                          "type": "boolean"
+                        "all": {
+                          "description": "What information is passed to a subgraph request/response stage",
+                          "default": {
+                            "headers": false,
+                            "context": false,
+                            "body": false,
+                            "service": false,
+                            "uri": false,
+                            "service_name": false
+                          },
+                          "type": "object",
+                          "properties": {
+                            "body": {
+                              "description": "Send the body",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "context": {
+                              "description": "Send the context",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "headers": {
+                              "description": "Send the headers",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "service": {
+                              "description": "Send the service name",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "service_name": {
+                              "description": "Send the service name",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "uri": {
+                              "description": "Send the subgraph URI",
+                              "default": false,
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
                     },
                     "response": {
-                      "description": "What information is passed to a subgraph request/response stage",
+                      "description": "What information is passed to all subgraph request/response stages",
                       "default": {
-                        "headers": false,
-                        "context": false,
-                        "body": false,
-                        "service": false,
-                        "uri": false,
-                        "service_name": false
+                        "all": {
+                          "headers": false,
+                          "context": false,
+                          "body": false,
+                          "service": false,
+                          "uri": false,
+                          "service_name": false
+                        }
                       },
                       "type": "object",
                       "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service": {
-                          "description": "Send the service name",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service_name": {
-                          "description": "Send the service name",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "uri": {
-                          "description": "Send the subgraph URI",
-                          "default": false,
-                          "type": "boolean"
+                        "all": {
+                          "description": "What information is passed to a subgraph request/response stage",
+                          "default": {
+                            "headers": false,
+                            "context": false,
+                            "body": false,
+                            "service": false,
+                            "uri": false,
+                            "service_name": false
+                          },
+                          "type": "object",
+                          "properties": {
+                            "body": {
+                              "description": "Send the body",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "context": {
+                              "description": "Send the context",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "headers": {
+                              "description": "Send the headers",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "service": {
+                              "description": "Send the service name",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "service_name": {
+                              "description": "Send the service name",
+                              "default": false,
+                              "type": "boolean"
+                            },
+                            "uri": {
+                              "description": "Send the subgraph URI",
+                              "default": false,
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false

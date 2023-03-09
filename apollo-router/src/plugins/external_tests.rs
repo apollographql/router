@@ -267,13 +267,15 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_subgraph_with_invalid_response_body_should_fail() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
-                headers: false,
-                context: false,
-                body: true,
-                uri: false,
-                service: false,
-                service_name: false,
+            request: SubgraphConfs {
+                all: SubgraphConf {
+                    headers: false,
+                    context: false,
+                    body: true,
+                    uri: false,
+                    service: false,
+                    service_name: false,
+                },
             },
             response: Default::default(),
         };
@@ -329,13 +331,15 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_subgraph_request() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
-                headers: false,
-                context: false,
-                body: true,
-                uri: false,
-                service: false,
-                service_name: false,
+            request: SubgraphConfs {
+                all: SubgraphConf {
+                    headers: false,
+                    context: false,
+                    body: true,
+                    uri: false,
+                    service: false,
+                    service_name: false,
+                },
             },
             response: Default::default(),
         };
@@ -458,13 +462,15 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_subgraph_request_controlflow_break() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
-                headers: false,
-                context: false,
-                body: true,
-                uri: false,
-                service: false,
-                service_name: false,
+            request: SubgraphConfs {
+                all: SubgraphConf {
+                    headers: false,
+                    context: false,
+                    body: true,
+                    uri: false,
+                    service: false,
+                    service_name: false,
+                },
             },
             response: Default::default(),
         };
@@ -511,13 +517,15 @@ mod tests {
     async fn external_plugin_subgraph_response() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
-            response: SubgraphConf {
-                headers: false,
-                context: false,
-                body: true,
-                uri: false,
-                service: false,
-                service_name: false,
+            response: SubgraphConfs {
+                all: SubgraphConf {
+                    headers: false,
+                    context: false,
+                    body: true,
+                    uri: false,
+                    service: false,
+                    service_name: false,
+                },
             },
         };
 
