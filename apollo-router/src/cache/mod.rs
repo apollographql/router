@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::Mutex;
 
-use tokio::sync::broadcast;
 use tokio::sync::oneshot;
-use tokio::sync::Mutex;
+use tokio::sync::watch;
+use tracing::Instrument;
 
 use self::storage::CacheStorage;
 use self::storage::KeyType;
@@ -13,7 +14,7 @@ use self::storage::ValueType;
 pub(crate) mod redis;
 pub(crate) mod storage;
 
-type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
+type WaitMap<K, V> = Arc<Mutex<HashMap<K, watch::Receiver<Option<V>>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
     Some(v) => v,
     None => unreachable!(),
@@ -61,18 +62,15 @@ where
         // If the data is present, it is sent directly to all the tasks that were waiting for it.
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
-        let mut locked_wait_map = self.wait_map.lock().await;
-        match locked_wait_map.get(key) {
-            Some(waiter) => {
+        match self.get_or_insert_wait_map(key) {
+            Err(waiter) => {
                 // Register interest in key
-                let receiver = waiter.subscribe();
+                let receiver = waiter.clone();
                 Entry {
                     inner: EntryInner::Receiver { receiver },
                 }
             }
-            None => {
-                let (sender, _receiver) = broadcast::channel(1);
-
+            Ok(sender) => {
                 let k = key.clone();
                 // when _drop_signal is dropped, either by getting out of the block, returning
                 // the error from ready_oneshot or by cancellation, the drop_sentinel future will
@@ -81,16 +79,9 @@ where
                 let wait_map = self.wait_map.clone();
                 tokio::task::spawn(async move {
                     let _ = drop_sentinel.await;
-                    let mut locked_wait_map = wait_map.lock().await;
+                    let mut locked_wait_map = wait_map.lock().unwrap();
                     let _ = locked_wait_map.remove(&k);
                 });
-
-                locked_wait_map.insert(key.clone(), sender.clone());
-
-                // we must not hold a lock over the wait map while we are waiting for a value from the
-                // cache. This way, other tasks can come and register interest in the same key, or
-                // request other keys independently
-                drop(locked_wait_map);
 
                 if let Some(value) = self.storage.get(key).await {
                     self.send(sender, key, value.clone()).await;
@@ -112,16 +103,47 @@ where
         }
     }
 
+    fn get_or_insert_wait_map(
+        &self,
+        key: &K,
+    ) -> Result<watch::Sender<Option<V>>, watch::Receiver<Option<V>>> {
+        let mut locked_wait_map = match self.wait_map.lock() {
+            Ok(guard) => guard,
+            Err(_e) => panic!(),
+        };
+        match locked_wait_map.get_mut(key) {
+            Some(waiter) => {
+                // Register interest in key
+                let receiver = waiter.clone();
+                drop(waiter);
+                drop(locked_wait_map);
+
+                return Err(receiver);
+            }
+            None => {
+                let (tx, rx) = watch::channel(None);
+
+                locked_wait_map.insert(key.clone(), rx);
+                drop(locked_wait_map);
+
+                return Ok(tx);
+            }
+        }
+    }
+
     pub(crate) async fn insert(&self, key: K, value: V) {
         self.storage.insert(key, value).await;
     }
 
-    async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {
-        // Lock the wait map to prevent more subscribers racing with our send
-        // notification
-        let mut locked_wait_map = self.wait_map.lock().await;
-        let _ = locked_wait_map.remove(key);
-        let _ = sender.send(value);
+    async fn send(&self, sender: watch::Sender<Option<V>>, key: &K, value: V) {
+        let _ = sender.send(Some(value));
+
+        {
+            // Lock the wait map to prevent more subscribers racing with our send
+            // notification
+            let mut locked_wait_map = self.wait_map.lock().unwrap();
+            let _ = locked_wait_map.remove(key);
+        }
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
@@ -135,12 +157,12 @@ pub(crate) struct Entry<K: KeyType, V: ValueType> {
 enum EntryInner<K: KeyType, V: ValueType> {
     First {
         key: K,
-        sender: broadcast::Sender<V>,
+        sender: watch::Sender<Option<V>>,
         cache: DeduplicatingCache<K, V>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
-        receiver: broadcast::Receiver<V>,
+        receiver: watch::Receiver<Option<V>>,
     },
     Value(V),
 }
@@ -165,7 +187,15 @@ where
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
             EntryInner::Receiver { mut receiver } => {
-                receiver.recv().await.map_err(|_| EntryError::Closed)
+                receiver
+                    .changed()
+                    .instrument(tracing::info_span!("dedupcache entry wait for receiver"))
+                    .await
+                    .map_err(|_| EntryError::Closed)?;
+                match receiver.borrow().clone() {
+                    None => panic!(),
+                    Some(value) => Ok(value),
+                }
             }
             _ => Err(EntryError::IsFirst),
         }

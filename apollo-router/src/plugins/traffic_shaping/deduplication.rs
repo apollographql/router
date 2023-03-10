@@ -4,16 +4,15 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
-use futures::lock::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::watch;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
-use tracing::{instrument, Instrument};
 
 use crate::graphql::Request;
 use crate::http_ext;
@@ -78,13 +77,8 @@ where
         request: SubgraphRequest,
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
-            let mut locked_wait_map = wait_map.lock().await;
-            match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
-                Some(waiter) => {
-                    // Register interest in key
-                    let mut receiver = waiter.clone();
-                    drop(locked_wait_map);
-
+            match get_or_insert_wait_map(&wait_map, &request) {
+                Err(mut receiver) => {
                     match receiver.changed().await {
                         Ok(()) => match receiver.borrow().clone() {
                             None => continue,
@@ -103,12 +97,7 @@ where
                         Err(_) => continue,
                     }
                 }
-                None => {
-                    let (tx, rx) = watch::channel(None);
-
-                    locked_wait_map.insert((&request.subgraph_request).into(), rx);
-                    drop(locked_wait_map);
-
+                Ok(tx) => {
                     let context = request.context.clone();
                     let http_request = (&request.subgraph_request).into();
                     let res = {
@@ -118,8 +107,12 @@ where
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                         tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
-                            let mut locked_wait_map = wait_map.lock().await;
-                            locked_wait_map.remove(&http_request);
+                            match wait_map.lock() {
+                                Ok(mut locked_wait_map) => {
+                                    locked_wait_map.remove(&http_request);
+                                }
+                                Err(_e) => {}
+                            };
                         });
 
                         service
@@ -138,17 +131,44 @@ where
 
                     // We may get errors here, for instance if a task is cancelled,
                     // so just ignore the result of send
-                    //let _ = tokio::task::spawn_blocking(move || {
                     let _ = tx.send(Some(broadcast_value));
-                    //});
-                    /*.instrument(tracing::info_span!("traffic_shaping::dedup: wait for broadcast")).await
-                    .expect("can only fail if the task is aborted or if the internal code panics, neither is possible here; qed");*/
 
                     return res.map(|response| {
                         SubgraphResponse::new_from_response(response.0.response, context)
                     });
                 }
             }
+        }
+    }
+}
+
+fn get_or_insert_wait_map(
+    wait_map: &WaitMap,
+    request: &SubgraphRequest,
+) -> Result<
+    watch::Sender<Option<Result<CloneSubgraphResponse, String>>>,
+    watch::Receiver<Option<Result<CloneSubgraphResponse, String>>>,
+> {
+    let mut locked_wait_map = match wait_map.lock() {
+        Ok(guard) => guard,
+        Err(_e) => panic!(),
+    };
+    match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
+        Some(waiter) => {
+            // Register interest in key
+            let mut receiver = waiter.clone();
+            drop(waiter);
+            drop(locked_wait_map);
+
+            return Err(receiver);
+        }
+        None => {
+            let (tx, rx) = watch::channel(None);
+
+            locked_wait_map.insert((&request.subgraph_request).into(), rx);
+            drop(locked_wait_map);
+
+            return Ok(tx);
         }
     }
 }
