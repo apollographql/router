@@ -9,7 +9,7 @@ Configuration yaml:
 * Authentication plugin
   .authentication
 
-* External extensibility plugin
+* Coprocessor plugin
   .coprocessor
 
 * Query plan caching

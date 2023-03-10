@@ -135,7 +135,7 @@ impl EntitlementReport {
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.coprocessor")
-                .name("External extensibility plugin")
+                .name("Coprocessor plugin")
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.supergraph.query_planning.cache.redis")
