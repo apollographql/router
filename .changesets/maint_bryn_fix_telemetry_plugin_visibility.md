@@ -1,4 +1,4 @@
-### Brief but complete sentence that stands on its own ([Issue #2739](https://github.com/apollographql/router/issues/2739))
+### Fix visibility of telemetry plugin ([Issue #2739](https://github.com/apollographql/router/issues/2739))
 
 The telemetry plugin is currently pub. However, since the refactor of the Telemetry plugin and associated tests this doesn't need to be.
 
