@@ -9,8 +9,8 @@ Configuration yaml:
 * Authentication plugin
   .authentication
 
-* External plugin
-  .external
+* External extensibility plugin
+  .coprocessor
 
 * Query plan caching
   .supergraph.query_planning.cache.redis

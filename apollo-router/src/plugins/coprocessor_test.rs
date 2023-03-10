@@ -15,7 +15,7 @@ mod tests {
     use tower::BoxError;
     use tower::ServiceExt;
 
-    use super::super::external::*;
+    use super::super::coprocessor::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -29,7 +29,7 @@ mod tests {
     #[tokio::test]
     async fn load_plugin() {
         let config = serde_json::json!({
-            "external": {
+            "coprocessor": {
                 "url": "http://127.0.0.1:8081"
             }
         });
@@ -47,7 +47,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_fields_are_denied() {
         let config = serde_json::json!({
-            "external": {
+            "coprocessor": {
                 "url": "http://127.0.0.1:8081",
                 "thisFieldDoesntExist": true
             }
@@ -66,7 +66,7 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_with_stages_wont_load_without_graph_ref() {
         let config = serde_json::json!({
-            "external": {
+            "coprocessor": {
                 "url": "http://127.0.0.1:8081",
                 "stages": {
                     "subgraph": {

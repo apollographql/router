@@ -8,7 +8,7 @@ authentication:
     jwks:
       - url: https://example.com
 
-external:
+coprocessor:
   url: https://example.com
 
 supergraph:
