@@ -13,7 +13,7 @@ external:
 
 supergraph:
   query_planning:
-    cache:
+    experimental_cache:
       redis:
         urls:
           - https://example.com

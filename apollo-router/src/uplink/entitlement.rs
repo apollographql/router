@@ -138,7 +138,7 @@ impl EntitlementReport {
                 .name("External plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.query_planning.cache.redis")
+                .path("$.supergraph.query_planning.experimental_cache.redis")
                 .name("Query plan caching")
                 .build(),
             ConfigurationRestriction::builder()

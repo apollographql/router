@@ -13,7 +13,7 @@ Configuration yaml:
   .external
 
 * Query plan caching
-  .supergraph.query_planning.cache.redis
+  .supergraph.query_planning.experimental_cache.redis
 
 * APQ caching
   .supergraph.apq.cache.redis

@@ -12,7 +12,7 @@ supergraph:
       in_memory:
         limit: 512
   query_planning:
-    cache:
+    experimental_cache:
       in_memory:
         limit: 512
 ```
@@ -34,7 +34,7 @@ supergraph:
       redis:
         urls: ["redis://..."]
   query_planning:
-    cache:
+    experimental_cache:
       in_memory:
         limit: 512
       redis:

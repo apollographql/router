@@ -585,10 +585,10 @@ impl Default for Apq {
 
 /// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
-    pub(crate) cache: Cache,
+    pub(crate) experimental_cache: Cache,
     /// Warm up the cache on reloads by running the query plan over
     /// a list of the most used queries
     /// Defaults to 0 (do not warm up the cache)
@@ -598,7 +598,7 @@ pub(crate) struct QueryPlanning {
 
 /// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,

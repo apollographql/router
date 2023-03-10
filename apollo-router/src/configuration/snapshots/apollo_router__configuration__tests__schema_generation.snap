@@ -1019,7 +1019,7 @@ expression: "&schema"
           }
         },
         "query_planning": {
-          "cache": {
+          "experimental_cache": {
             "in_memory": {
               "limit": 512
             },
@@ -1058,12 +1058,12 @@ expression: "&schema"
                 "redis": null
               },
               "type": "object",
-              "required": [
-                "in_memory"
-              ],
               "properties": {
                 "in_memory": {
                   "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
                   "type": "object",
                   "required": [
                     "limit"
@@ -1080,6 +1080,7 @@ expression: "&schema"
                 },
                 "redis": {
                   "description": "Configures and activates the Redis cache",
+                  "default": null,
                   "type": "object",
                   "required": [
                     "urls"
@@ -1185,7 +1186,7 @@ expression: "&schema"
         "query_planning": {
           "description": "Query planning options",
           "default": {
-            "cache": {
+            "experimental_cache": {
               "in_memory": {
                 "limit": 512
               },
@@ -1194,19 +1195,22 @@ expression: "&schema"
             "warmed_up_queries": 0
           },
           "type": "object",
-          "required": [
-            "cache"
-          ],
           "properties": {
-            "cache": {
+            "experimental_cache": {
               "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
               "type": "object",
-              "required": [
-                "in_memory"
-              ],
               "properties": {
                 "in_memory": {
                   "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
                   "type": "object",
                   "required": [
                     "limit"
@@ -1223,6 +1227,7 @@ expression: "&schema"
                 },
                 "redis": {
                   "description": "Configures and activates the Redis cache",
+                  "default": null,
                   "type": "object",
                   "required": [
                     "urls"
