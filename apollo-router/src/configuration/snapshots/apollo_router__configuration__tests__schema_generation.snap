@@ -8,6 +8,130 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "apq": {
+      "description": "Configures automatic persisted queries",
+      "default": {
+        "enabled": true,
+        "cache": {
+          "in_memory": {
+            "limit": 512
+          },
+          "redis": null
+        },
+        "subgraph": {
+          "all": {
+            "enabled": false
+          },
+          "subgraphs": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "cache": {
+          "description": "Cache configuration",
+          "default": {
+            "in_memory": {
+              "limit": 512
+            },
+            "redis": null
+          },
+          "type": "object",
+          "properties": {
+            "in_memory": {
+              "description": "Configures the in memory cache (always active)",
+              "default": {
+                "limit": 512
+              },
+              "type": "object",
+              "required": [
+                "limit"
+              ],
+              "properties": {
+                "limit": {
+                  "description": "Number of entries in the Least Recently Used cache",
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 1.0
+                }
+              },
+              "additionalProperties": false
+            },
+            "redis": {
+              "description": "Configures and activates the Redis cache",
+              "default": null,
+              "type": "object",
+              "required": [
+                "urls"
+              ],
+              "properties": {
+                "urls": {
+                  "description": "List of URLs to the Redis cluster",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uri"
+                  }
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "enabled": {
+          "description": "Activates Automatic Persisted Queries (enabled by default)",
+          "default": true,
+          "type": "boolean"
+        },
+        "subgraph": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": {
+            "all": {
+              "enabled": false
+            },
+            "subgraphs": {}
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "enabled": false
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "description": "Enable",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Enable",
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "authentication": {
       "description": "Authentication",
       "type": "object",
@@ -962,21 +1086,6 @@ expression: "&schema"
         "path": "/",
         "introspection": false,
         "defer_support": true,
-        "apq": {
-          "enabled": true,
-          "cache": {
-            "in_memory": {
-              "limit": 512
-            },
-            "redis": null
-          },
-          "subgraph": {
-            "all": {
-              "enabled": false
-            },
-            "subgraphs": {}
-          }
-        },
         "query_planning": {
           "experimental_cache": {
             "in_memory": {
@@ -989,130 +1098,6 @@ expression: "&schema"
       },
       "type": "object",
       "properties": {
-        "apq": {
-          "description": "Configures automatic persisted queries",
-          "default": {
-            "enabled": true,
-            "cache": {
-              "in_memory": {
-                "limit": 512
-              },
-              "redis": null
-            },
-            "subgraph": {
-              "all": {
-                "enabled": false
-              },
-              "subgraphs": {}
-            }
-          },
-          "type": "object",
-          "properties": {
-            "cache": {
-              "description": "Cache configuration",
-              "default": {
-                "in_memory": {
-                  "limit": 512
-                },
-                "redis": null
-              },
-              "type": "object",
-              "properties": {
-                "in_memory": {
-                  "description": "Configures the in memory cache (always active)",
-                  "default": {
-                    "limit": 512
-                  },
-                  "type": "object",
-                  "required": [
-                    "limit"
-                  ],
-                  "properties": {
-                    "limit": {
-                      "description": "Number of entries in the Least Recently Used cache",
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 1.0
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "redis": {
-                  "description": "Configures and activates the Redis cache",
-                  "default": null,
-                  "type": "object",
-                  "required": [
-                    "urls"
-                  ],
-                  "properties": {
-                    "urls": {
-                      "description": "List of URLs to the Redis cluster",
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "format": "uri"
-                      }
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false
-            },
-            "enabled": {
-              "description": "Activates Automatic Persisted Queries (enabled by default)",
-              "default": true,
-              "type": "boolean"
-            },
-            "subgraph": {
-              "description": "Configuration options pertaining to the subgraph server component.",
-              "default": {
-                "all": {
-                  "enabled": false
-                },
-                "subgraphs": {}
-              },
-              "type": "object",
-              "properties": {
-                "all": {
-                  "description": "options applying to all subgraphs",
-                  "default": {
-                    "enabled": false
-                  },
-                  "type": "object",
-                  "properties": {
-                    "enabled": {
-                      "description": "Enable",
-                      "default": false,
-                      "type": "boolean"
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "subgraphs": {
-                  "description": "per subgraph options",
-                  "default": {},
-                  "type": "object",
-                  "additionalProperties": {
-                    "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
-                    "type": "object",
-                    "properties": {
-                      "enabled": {
-                        "description": "Enable",
-                        "default": false,
-                        "type": "boolean"
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
-        },
         "defer_support": {
           "description": "Set to false to disable defer support",
           "default": true,

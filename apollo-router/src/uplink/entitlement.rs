@@ -142,7 +142,7 @@ impl EntitlementReport {
                 .name("Query plan caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.apq.cache.redis")
+                .path("$.apq.cache.redis")
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()
