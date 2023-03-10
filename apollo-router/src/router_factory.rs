@@ -174,13 +174,12 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         SubgraphService::new(
                             name,
                             configuration
-                                .supergraph
                                 .apq
                                 .subgraph
                                 .subgraphs
                                 .get(name)
                                 .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
+                                .unwrap_or(configuration.apq.subgraph.all.enabled),
                             subgraph_root_store,
                             shaping.enable_subgraph_http2(name),
                         ),
@@ -262,13 +261,12 @@ impl YamlRouterFactory {
                         SubgraphService::new(
                             name,
                             configuration
-                                .supergraph
                                 .apq
                                 .subgraph
                                 .subgraphs
                                 .get(name)
                                 .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
+                                .unwrap_or(configuration.apq.subgraph.all.enabled),
                             subgraph_root_store,
                             shaping.enable_subgraph_http2(name),
                         ),
