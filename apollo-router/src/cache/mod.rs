@@ -63,9 +63,8 @@ where
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
         match self.get_or_insert_wait_map(key) {
-            Err(waiter) => {
+            Err(receiver) => {
                 // Register interest in key
-                let receiver = waiter.clone();
                 Entry {
                     inner: EntryInner::Receiver { receiver },
                 }
@@ -103,6 +102,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn get_or_insert_wait_map(
         &self,
         key: &K,
@@ -115,10 +115,9 @@ where
             Some(waiter) => {
                 // Register interest in key
                 let receiver = waiter.clone();
-                drop(waiter);
                 drop(locked_wait_map);
 
-                return Err(receiver);
+                Err(receiver)
             }
             None => {
                 let (tx, rx) = watch::channel(None);
@@ -126,7 +125,7 @@ where
                 locked_wait_map.insert(key.clone(), rx);
                 drop(locked_wait_map);
 
-                return Ok(tx);
+                Ok(tx)
             }
         }
     }

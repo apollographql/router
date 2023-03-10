@@ -142,6 +142,7 @@ where
     }
 }
 
+#[allow(clippy::type_complexity)]
 fn get_or_insert_wait_map(
     wait_map: &WaitMap,
     request: &SubgraphRequest,
@@ -156,11 +157,10 @@ fn get_or_insert_wait_map(
     match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
         Some(waiter) => {
             // Register interest in key
-            let mut receiver = waiter.clone();
-            drop(waiter);
+            let receiver = waiter.clone();
             drop(locked_wait_map);
 
-            return Err(receiver);
+            Err(receiver)
         }
         None => {
             let (tx, rx) = watch::channel(None);
@@ -168,7 +168,7 @@ fn get_or_insert_wait_map(
             locked_wait_map.insert((&request.subgraph_request).into(), rx);
             drop(locked_wait_map);
 
-            return Ok(tx);
+            Ok(tx)
         }
     }
 }
