@@ -45,7 +45,7 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
 #[async_trait::async_trait]
-impl Plugin for ExternalPlugin<HTTPClientService> {
+impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
@@ -70,7 +70,7 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
             .layer(TimeoutLayer::new(init.config.timeout))
             .service(hyper::Client::builder().build(connector));
 
-        ExternalPlugin::new(http_client, init.config, init.supergraph_sdl)
+        CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -87,7 +87,11 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
 //
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
-register_plugin!("apollo", "external", ExternalPlugin<HTTPClientService>);
+register_plugin!(
+    "apollo",
+    "coprocessor",
+    CoprocessorPlugin<HTTPClientService>
+);
 
 // -------------------------------------------------------------------------------------------------------
 
@@ -96,7 +100,7 @@ register_plugin!("apollo", "external", ExternalPlugin<HTTPClientService>);
 ///
 /// This structure is generic over the HTTP Service so we can test the plugin seamlessly.
 #[derive(Debug)]
-struct ExternalPlugin<C>
+struct CoprocessorPlugin<C>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
         + Clone
@@ -110,7 +114,7 @@ where
     sdl: Arc<String>,
 }
 
-impl<C> ExternalPlugin<C>
+impl<C> CoprocessorPlugin<C>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
         + Clone
@@ -128,7 +132,7 @@ where
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        self.configuration.stages.router.as_service(
+        self.configuration.router.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -137,7 +141,7 @@ where
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        self.configuration.stages.subgraph.all.as_service(
+        self.configuration.subgraph.all.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -175,16 +179,6 @@ pub(super) struct SubgraphConf {
     pub(super) service_name: bool,
 }
 
-/// The stages request/response configuration
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
-struct Stages {
-    /// The router stage
-    pub(super) router: RouterStage,
-    /// The subgraph stage
-    pub(super) subgraph: SubgraphStages,
-}
-
 /// Configures the externalization plugin
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -196,9 +190,12 @@ struct Conf {
     #[schemars(with = "String", default = "default_timeout")]
     #[serde(default = "default_timeout")]
     timeout: Duration,
-    /// The stages request/response configuration
+    /// The router stage request/response configuration
     #[serde(default)]
-    stages: Stages,
+    router: RouterStage,
+    /// The subgraph stage request/response configuration
+    #[serde(default)]
+    subgraph: SubgraphStages,
 }
 
 fn default_timeout() -> Duration {

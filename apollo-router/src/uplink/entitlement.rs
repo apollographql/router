@@ -134,8 +134,8 @@ impl EntitlementReport {
                 .name("Authentication plugin")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.external")
-                .name("External plugin")
+                .path("$.coprocessor")
+                .name("Coprocessor plugin")
                 .build(),
             ConfigurationRestriction::builder()
                 .path("$.supergraph.query_planning.experimental_cache.redis")
