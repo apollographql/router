@@ -196,7 +196,6 @@ expression: "&schema"
                   "headers": false,
                   "context": false,
                   "body": false,
-                  "service": false,
                   "uri": false,
                   "service_name": false
                 },
@@ -204,7 +203,6 @@ expression: "&schema"
                   "headers": false,
                   "context": false,
                   "body": false,
-                  "service": false,
                   "uri": false,
                   "service_name": false
                 }
@@ -307,7 +305,6 @@ expression: "&schema"
                     "headers": false,
                     "context": false,
                     "body": false,
-                    "service": false,
                     "uri": false,
                     "service_name": false
                   },
@@ -315,7 +312,6 @@ expression: "&schema"
                     "headers": false,
                     "context": false,
                     "body": false,
-                    "service": false,
                     "uri": false,
                     "service_name": false
                   }
@@ -330,7 +326,6 @@ expression: "&schema"
                       "headers": false,
                       "context": false,
                       "body": false,
-                      "service": false,
                       "uri": false,
                       "service_name": false
                     },
@@ -338,7 +333,6 @@ expression: "&schema"
                       "headers": false,
                       "context": false,
                       "body": false,
-                      "service": false,
                       "uri": false,
                       "service_name": false
                     }
@@ -351,7 +345,6 @@ expression: "&schema"
                         "headers": false,
                         "context": false,
                         "body": false,
-                        "service": false,
                         "uri": false,
                         "service_name": false
                       },
@@ -369,11 +362,6 @@ expression: "&schema"
                         },
                         "headers": {
                           "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service": {
-                          "description": "Send the service name",
                           "default": false,
                           "type": "boolean"
                         },
@@ -396,7 +384,6 @@ expression: "&schema"
                         "headers": false,
                         "context": false,
                         "body": false,
-                        "service": false,
                         "uri": false,
                         "service_name": false
                       },
@@ -414,11 +401,6 @@ expression: "&schema"
                         },
                         "headers": {
                           "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "service": {
-                          "description": "Send the service name",
                           "default": false,
                           "type": "boolean"
                         },

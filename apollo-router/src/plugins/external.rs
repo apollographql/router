@@ -26,13 +26,11 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::error::LicenseError;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::apollo_graph_reference;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -51,10 +49,6 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init.config.stages != Default::default() {
-            apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-        }
-
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -175,8 +169,6 @@ pub(super) struct SubgraphConf {
     pub(super) context: bool,
     /// Send the body
     pub(super) body: bool,
-    /// Send the service name
-    pub(super) service: bool,
     /// Send the subgraph URI
     pub(super) uri: bool,
     /// Send the service name
@@ -518,12 +510,19 @@ where
             .status_code(code)
             .context(request.context);
 
-        let res = match (graphql_response.label, graphql_response.data) {
+        let mut res = match (graphql_response.label, graphql_response.data) {
             (Some(label), Some(data)) => res.label(label).data(data).build()?,
             (Some(label), None) => res.label(label).build()?,
             (None, Some(data)) => res.data(data).build()?,
             (None, None) => res.build()?,
         };
+        if let Some(headers) = co_processor_output.headers {
+            *res.response.headers_mut() = internalize_header_map(headers)?;
+        }
+
+        if let Some(context) = co_processor_output.context {
+            res.context = context;
+        }
 
         return Ok(ControlFlow::Break(res));
     }
@@ -707,12 +706,23 @@ where
                             .build()
                     });
 
-            subgraph::Response {
-                response: http::Response::builder()
-                    .status(code)
-                    .body(graphql_response)?,
-                context: request.context,
+            let mut http_response = http::Response::builder()
+                .status(code)
+                .body(graphql_response)?;
+            if let Some(headers) = co_processor_output.headers {
+                *http_response.headers_mut() = internalize_header_map(headers)?;
             }
+
+            let mut subgraph_response = subgraph::Response {
+                response: http_response,
+                context: request.context,
+            };
+
+            if let Some(context) = co_processor_output.context {
+                subgraph_response.context = context;
+            }
+
+            subgraph_response
         };
         return Ok(ControlFlow::Break(res));
     }
