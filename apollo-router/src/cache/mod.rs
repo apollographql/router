@@ -209,7 +209,10 @@ where
         } = self.inner
         {
             cache.insert(key.clone(), value.clone()).await;
-            cache.send(sender, &key, value).await;
+            cache
+                .send(sender, &key, value)
+                .instrument(tracing::info_span!("dedupcache entry send"))
+                .await;
         }
     }
 

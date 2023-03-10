@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use static_assertions::assert_impl_all;
 use tower::BoxError;
+use tracing::Instrument;
 
 use crate::graphql;
 use crate::spec::Schema;
@@ -47,7 +48,8 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.uncached_compiler(None).snapshot();
+        let compiler = tracing::info_span!("snapshot uncached_compiler")
+            .in_scope(|| query_plan.query.uncached_compiler(None).snapshot());
         Self {
             supergraph_request,
             query_plan,
@@ -64,7 +66,15 @@ impl Request {
         schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
+        let compiler = {
+            let compiler1 = query_plan
+                .query
+                .compiler(Some(schema))
+                .instrument(tracing::info_span!("waiting for compiler"))
+                .await;
+
+            tracing::info_span!("snapshot").in_scope(|| compiler1.snapshot())
+        };
         Self {
             supergraph_request,
             query_plan,
