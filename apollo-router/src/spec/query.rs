@@ -5,6 +5,8 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Mutex;
+use std::sync::MutexGuard;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
@@ -16,8 +18,6 @@ use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
 use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
@@ -343,7 +343,7 @@ impl Query {
             .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
             .await
             .lock()
-            .await
+            .unwrap()
     }
 
     /// Create a new compiler for this query, without caching it
