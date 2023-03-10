@@ -169,6 +169,11 @@ commands:
                 name: Write arch
                 command: |
                   echo 'windows' >> ~/.arch
+            - run:
+                name: Disable windows defender
+                shell: powershell.exe -ExecutionPolicy Bypass
+                command: |
+                  Add-MpPreference -ExclusionPath "C:\\"
 
   # Create files that are useful for cache keys
   create_cache_keys:
