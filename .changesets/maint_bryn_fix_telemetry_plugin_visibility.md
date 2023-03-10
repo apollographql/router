@@ -4,4 +4,4 @@ The telemetry plugin is currently pub. However, since the refactor of the Teleme
 
 It is not a breaking change to fix this as the plugin was exported under the _private module which was clearly marked as internal. However, this can be removed altogether.
 
-By [@AUTHOR](https://github.com/AUTHOR) in https://github.com/apollographql/router/pull/2740
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2740
