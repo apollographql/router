@@ -9,7 +9,6 @@ members = [
     "examples/context/rust",
     "examples/cookies-to-headers/rhai",
     "examples/data-response-mutate/rhai",
-    "examples/embedded/rust",
     "examples/error-response-mutate/rhai",
     "examples/forbid-anonymous-operations/rhai",
     "examples/forbid-anonymous-operations/rust",
