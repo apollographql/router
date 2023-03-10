@@ -88,15 +88,13 @@ mod test {
             .expect("got redis connection");
 
         let config = json!({
-            "supergraph": {
-                "apq": {
-                    "cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            "urls": ["redis://127.0.0.1:6379"]
-                        }
+            "apq": {
+                "cache": {
+                    "in_memory": {
+                        "limit": 2
+                    },
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"]
                     }
                 }
             }

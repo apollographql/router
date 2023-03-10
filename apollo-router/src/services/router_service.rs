@@ -483,10 +483,9 @@ where
 {
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
-        let apq_layer = if configuration.supergraph.apq.enabled {
+        let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(&configuration.supergraph.apq.cache, "APQ")
-                    .await,
+                DeduplicatingCache::from_configuration(&configuration.apq.cache, "APQ").await,
             )
         } else {
             APQLayer::disabled()
