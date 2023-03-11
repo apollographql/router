@@ -77,7 +77,7 @@ directories = "4.0.1"
 displaydoc = "0.2"
 flate2 = "1.0.25"
 fred = { version = "6.0.0-beta.2", features = ["enable-rustls"] }
-futures = { version = "0.3.26", features = ["thread-pool"] }
+futures = { version = "0.3.27", features = ["thread-pool"] }
 graphql_client = "0.11.0"
 hex = "0.4.3"
 http = "0.2.9"
@@ -85,7 +85,7 @@ http-body = "0.4.5"
 heck = "0.4.1"
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
-hyper = { version = "0.14.24", features = ["server", "client"] }
+hyper = { version = "0.14.25", features = ["server", "client"] }
 hyper-rustls = { version = "0.23.2", features = ["http1", "http2"] }
 indexmap = { version = "1.9.2", features = ["serde-1"] }
 itertools = "0.10.5"
@@ -93,7 +93,7 @@ jsonpath_lib = "0.3.0"
 jsonschema = { version = "0.16.1", default-features = false }
 jsonwebtoken = "8.2.0"
 lazy_static = "1.4.0"
-libc = "0.2.139"
+libc = "0.2.140"
 linkme = "0.3.8"
 lru = "0.8.1"
 mediatype = "0.19.13"
@@ -157,7 +157,7 @@ reqwest = { version = "0.11.14", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "0.1.16+v2.3.2"
+router-bridge = "0.1.19+v2.4.0-alpha.1"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
@@ -214,7 +214,7 @@ uname = "0.1.1"
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
 fred = "6.0.0-beta.2"
 redis = { version = "0.21.7", features = ["tokio-comp"] }
-futures-test = "0.3.26"
+futures-test = "0.3.27"
 insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
 introspector-gadget = "0.2.0"
 maplit = "1.0.2"
