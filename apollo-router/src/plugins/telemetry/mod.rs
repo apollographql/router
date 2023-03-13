@@ -2,10 +2,10 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
+use std::{fmt, thread};
 
 use ::tracing::field;
 use ::tracing::info_span;
@@ -189,7 +189,12 @@ impl Drop for Telemetry {
         if let Some(tracer_provider) = self.tracer_provider.take() {
             // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
             if Handle::try_current().is_ok() {
-                tokio::task::spawn_blocking(move || drop(tracer_provider));
+                // This is a thread for a reason!
+                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
+                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
+                // By using a thread it doesn't matter if the tokio runtime is shut down.
+                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
+                thread::spawn(move || drop(tracer_provider));
             }
         }
     }
