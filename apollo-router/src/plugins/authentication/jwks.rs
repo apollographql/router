@@ -21,7 +21,6 @@ use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-use crate::configuration::ConfigurationError;
 #[cfg(not(test))]
 use crate::error::LicenseError;
 use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
@@ -65,7 +64,7 @@ impl JwksManager {
             .filter_map(|v| v)
             .collect();
 
-        let jwks_map = Arc::new(RwLock::new(map));
+        let jwks_map = Arc::new(RwLock::new(jwks_map));
         let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
         tokio::task::spawn(poll(list.clone(), jwks_map.clone(), drop_receiver));
