@@ -135,7 +135,7 @@ impl Default for Sandbox {
 
 #[derive(Template)]
 #[template(path = "sandbox_index.html")]
-struct SandboxTemplate<'a> {
+struct SandboxTemplate {
     apollo_router_version: &'static str,
 }
 
