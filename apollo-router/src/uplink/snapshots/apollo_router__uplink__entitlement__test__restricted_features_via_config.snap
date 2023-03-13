@@ -16,7 +16,7 @@ Configuration yaml:
   .supergraph.query_planning.experimental_cache.redis
 
 * APQ caching
-  .apq.cache.redis
+  .apq.router.cache.redis
 
 * Subgraph caching
   .traffic_shaping.experimental_cache

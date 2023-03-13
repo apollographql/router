@@ -7,9 +7,10 @@ This is a Least Recently Used (LRU) cache, that can be configured as follows:
 
 ```yaml title="router.yaml"
 apq:
-  cache:
-    in_memory:
-      limit: 512
+  router:
+    cache:
+      in_memory:
+        limit: 512
       
 supergraph:
   query_planning:
@@ -29,10 +30,11 @@ This will activate a configuration option to connect to a Redis Cluster:
 ```yaml
 apq:
   cache:
-    in_memory:
-      limit: 512
-    redis:
-      urls: ["redis://..."]
+    router:
+      in_memory:
+        limit: 512
+      redis:
+        urls: ["redis://..."]
 supergraph:
   query_planning:
     experimental_cache:

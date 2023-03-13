@@ -485,7 +485,8 @@ where
         let static_page = StaticPageLayer::new(configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(&configuration.apq.cache, "APQ").await,
+                DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
+                    .await,
             )
         } else {
             APQLayer::disabled()

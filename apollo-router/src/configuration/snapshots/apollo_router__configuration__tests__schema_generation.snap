@@ -12,11 +12,13 @@ expression: "&schema"
       "description": "Configures automatic persisted queries",
       "default": {
         "enabled": true,
-        "cache": {
-          "in_memory": {
-            "limit": 512
-          },
-          "redis": null
+        "router": {
+          "cache": {
+            "in_memory": {
+              "limit": 512
+            },
+            "redis": null
+          }
         },
         "subgraph": {
           "all": {
@@ -27,62 +29,77 @@ expression: "&schema"
       },
       "type": "object",
       "properties": {
-        "cache": {
-          "description": "Cache configuration",
-          "default": {
-            "in_memory": {
-              "limit": 512
-            },
-            "redis": null
-          },
-          "type": "object",
-          "properties": {
-            "in_memory": {
-              "description": "Configures the in memory cache (always active)",
-              "default": {
-                "limit": 512
-              },
-              "type": "object",
-              "required": [
-                "limit"
-              ],
-              "properties": {
-                "limit": {
-                  "description": "Number of entries in the Least Recently Used cache",
-                  "type": "integer",
-                  "format": "uint",
-                  "minimum": 1.0
-                }
-              },
-              "additionalProperties": false
-            },
-            "redis": {
-              "description": "Configures and activates the Redis cache",
-              "default": null,
-              "type": "object",
-              "required": [
-                "urls"
-              ],
-              "properties": {
-                "urls": {
-                  "description": "List of URLs to the Redis cluster",
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "format": "uri"
-                  }
-                }
-              },
-              "additionalProperties": false,
-              "nullable": true
-            }
-          },
-          "additionalProperties": false
-        },
         "enabled": {
           "description": "Activates Automatic Persisted Queries (enabled by default)",
           "default": true,
           "type": "boolean"
+        },
+        "router": {
+          "description": "Router level (APQ) configuration",
+          "default": {
+            "cache": {
+              "in_memory": {
+                "limit": 512
+              },
+              "redis": null
+            }
+          },
+          "type": "object",
+          "properties": {
+            "cache": {
+              "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
+              "type": "object",
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 1.0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "redis": {
+                  "description": "Configures and activates the Redis cache",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "urls"
+                  ],
+                  "properties": {
+                    "urls": {
+                      "description": "List of URLs to the Redis cluster",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         },
         "subgraph": {
           "description": "Configuration options pertaining to the subgraph server component.",

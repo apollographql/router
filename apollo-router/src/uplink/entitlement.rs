@@ -142,7 +142,7 @@ impl EntitlementReport {
                 .name("Query plan caching")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.apq.cache.redis")
+                .path("$.apq.router.cache.redis")
                 .name("APQ caching")
                 .build(),
             ConfigurationRestriction::builder()

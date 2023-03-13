@@ -89,12 +89,14 @@ mod test {
 
         let config = json!({
             "apq": {
-                "cache": {
-                    "in_memory": {
-                        "limit": 2
-                    },
-                    "redis": {
-                        "urls": ["redis://127.0.0.1:6379"]
+                "router": {
+                    "cache": {
+                        "in_memory": {
+                            "limit": 2
+                        },
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"]
+                        }
                     }
                 }
             }

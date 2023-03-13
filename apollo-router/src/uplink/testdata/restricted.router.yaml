@@ -21,12 +21,13 @@ supergraph:
         limit: 1000
 
 apq:
-  cache:
-    redis:
-      urls:
-        - https://example.com
-    in_memory:
-      limit: 1000
+  router:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
 
 traffic_shaping:
   subgraphs:
