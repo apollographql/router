@@ -58,11 +58,7 @@ impl JwksManager {
             })
             .collect::<Vec<_>>();
 
-        let jwks_map: HashMap<_, _> = join_all(downloads)
-            .await
-            .into_iter()
-            .filter_map(|v| v)
-            .collect();
+        let jwks_map: HashMap<_, _> = join_all(downloads).await.into_iter().flatten().collect();
 
         let jwks_map = Arc::new(RwLock::new(jwks_map));
         let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
