@@ -29,8 +29,6 @@ use tower::ServiceExt;
 use url::Url;
 
 use self::jwks::JwksManager;
-#[cfg(not(test))]
-use crate::error::LicenseError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -38,8 +36,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::register_plugin;
-#[cfg(not(test))]
-use crate::services::apollo_graph_reference;
 use crate::services::router;
 use crate::Context;
 
@@ -93,11 +89,7 @@ enum AuthenticationError<'a> {
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL: Duration = Duration::from_secs(60);
 
-static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
-    #[cfg(not(test))]
-    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    Ok(Client::new())
-});
+static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| Ok(Client::new()));
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
