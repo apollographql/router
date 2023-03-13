@@ -9,7 +9,8 @@ use std::task::Poll;
 
 use futures::future::BoxFuture;
 use tokio::sync::oneshot;
-use tokio::sync::watch;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
@@ -39,7 +40,7 @@ type WaitMap = Arc<
     Mutex<
         HashMap<
             http_ext::Request<Request>,
-            watch::Receiver<Option<Result<CloneSubgraphResponse, String>>>,
+            Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
         >,
     >,
 >;
@@ -79,32 +80,25 @@ where
     ) -> Result<SubgraphResponse, BoxError> {
         loop {
             match get_or_insert_wait_map(&wait_map, &request) {
-                Err(mut receiver) => {
-                    match receiver
-                        .changed()
+                Err(receiver) => {
+                    let r = receiver
+                        .read()
                         .instrument(tracing::info_span!(
-                            "traffic_shaping::dedupc wait for receiver"
+                            "traffic_shaping::dedup wait for receiver"
                         ))
-                        .await
-                    {
-                        Ok(()) => match receiver.borrow().clone() {
-                            None => continue,
-                            Some(value) => {
-                                return value
-                                    .map(|response| {
-                                        SubgraphResponse::new_from_response(
-                                            response.0.response,
-                                            request.context,
-                                        )
-                                    })
-                                    .map_err(|e| e.into())
-                            }
-                        },
-                        // there was an issue with the broadcast channel, retry fetching
-                        Err(_) => continue,
-                    }
+                        .await;
+                    return (*r)
+                        .clone()
+                        .unwrap()
+                        .map(|response| {
+                            SubgraphResponse::new_from_response(
+                                response.0.response,
+                                request.context,
+                            )
+                        })
+                        .map_err(|e| e.into());
                 }
-                Ok(tx) => {
+                Ok(mut tx) => {
                     let context = request.context.clone();
                     let http_request = (&request.subgraph_request).into();
                     let res = {
@@ -126,6 +120,9 @@ where
                             .ready_oneshot()
                             .await?
                             .call(request)
+                            .instrument(tracing::info_span!(
+                                "traffic_shaping::dedup wait for service call"
+                            ))
                             .await
                             .map(CloneSubgraphResponse)
                     };
@@ -139,7 +136,8 @@ where
 
                         // We may get errors here, for instance if a task is cancelled,
                         // so just ignore the result of send
-                        let _ = tx.send(Some(broadcast_value));
+                        //let _ = tx.send(Some(broadcast_value));
+                        *tx = Some(broadcast_value);
                     });
 
                     return res.map(|response| {
@@ -156,8 +154,8 @@ fn get_or_insert_wait_map(
     wait_map: &WaitMap,
     request: &SubgraphRequest,
 ) -> Result<
-    watch::Sender<Option<Result<CloneSubgraphResponse, String>>>,
-    watch::Receiver<Option<Result<CloneSubgraphResponse, String>>>,
+    OwnedRwLockWriteGuard<Option<Result<CloneSubgraphResponse, String>>>,
+    Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
 > {
     let mut locked_wait_map = match wait_map.lock() {
         Ok(guard) => guard,
@@ -172,12 +170,13 @@ fn get_or_insert_wait_map(
             Err(receiver)
         }
         None => {
-            let (tx, rx) = watch::channel(None);
+            let value = Arc::new(RwLock::new(None));
+            let w = value.clone().try_write_owned().unwrap();
 
-            locked_wait_map.insert((&request.subgraph_request).into(), rx);
+            locked_wait_map.insert((&request.subgraph_request).into(), value);
             drop(locked_wait_map);
 
-            Ok(tx)
+            Ok(w)
         }
     }
 }

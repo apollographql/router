@@ -4,12 +4,11 @@ use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use lru::LruCache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use super::redis::*;
@@ -84,42 +83,15 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
-        let mut guard = self.inner.lock().await;
-        let instant_memory = Instant::now();
-        match guard.get(key) {
-            Some(v) => {
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_hit_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-                Some(v.clone())
-            }
+        match self.get_in_memory(key) {
+            Some(v) => Some(v),
             None => {
-                let duration = instant_memory.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo_router_cache_miss_time = duration,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-                tracing::info!(
-                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
-                    kind = %self.caller,
-                    storage = &tracing::field::display(CacheStorageName::Memory),
-                );
-
                 let instant_redis = Instant::now();
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
                     match redis.get::<K, V>(inner_key).await {
                         Some(v) => {
-                            guard.put(key.clone(), v.0.clone());
+                            self.insert_in_memory(key.clone(), v.0.clone());
                             tracing::info!(
                                 monotonic_counter.apollo_router_cache_hit_count = 1u64,
                                 kind = %self.caller,
@@ -155,6 +127,41 @@ where
         }
     }
 
+    fn get_in_memory(&self, key: &K) -> Option<V> {
+        let mut guard = self.inner.lock().unwrap();
+        let instant_memory = Instant::now();
+        match guard.get(key) {
+            Some(v) => {
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_hit_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                Some(v.clone())
+            }
+            None => {
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_miss_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                None
+            }
+        }
+    }
+
     pub(crate) async fn insert(&self, key: K, value: V) {
         if let Some(redis) = self.redis.as_ref() {
             redis
@@ -162,7 +169,11 @@ where
                 .await;
         }
 
-        let mut in_memory = self.inner.lock().await;
+        self.insert_in_memory(key, value);
+    }
+
+    fn insert_in_memory(&self, key: K, value: V) {
+        let mut in_memory = self.inner.lock().unwrap();
         in_memory.put(key, value);
         let size = in_memory.len() as u64;
         tracing::info!(
@@ -172,18 +183,18 @@ where
         );
     }
 
-    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+    pub(crate) fn in_memory_keys(&self) -> Vec<K> {
         self.inner
             .lock()
-            .await
+            .unwrap()
             .iter()
             .map(|(k, _)| k.clone())
             .collect()
     }
 
     #[cfg(test)]
-    pub(crate) async fn len(&self) -> usize {
-        self.inner.lock().await.len()
+    pub(crate) fn len(&self) -> usize {
+        self.inner.lock().unwrap().len()
     }
 }
 

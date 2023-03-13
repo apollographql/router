@@ -4,7 +4,8 @@ use std::sync::Arc;
 use std::sync::Mutex;
 
 use tokio::sync::oneshot;
-use tokio::sync::watch;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::RwLock;
 use tracing::Instrument;
 
 use self::storage::CacheStorage;
@@ -14,7 +15,7 @@ use self::storage::ValueType;
 pub(crate) mod redis;
 pub(crate) mod storage;
 
-type WaitMap<K, V> = Arc<Mutex<HashMap<K, watch::Receiver<Option<V>>>>>;
+type WaitMap<K, V> = Arc<Mutex<HashMap<K, Arc<RwLock<Option<V>>>>>>;
 pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(512) {
     Some(v) => v,
     None => unreachable!(),
@@ -82,8 +83,14 @@ where
                     let _ = locked_wait_map.remove(&k);
                 });
 
-                if let Some(value) = self.storage.get(key).await {
-                    self.send(sender, key, value.clone()).await;
+                if let Some(value) = self
+                    .storage
+                    .get(key)
+                    .instrument(tracing::info_span!("dedupcache storage get"))
+                    .await
+                {
+                    tracing::info_span!("dedupcache cache send")
+                        .in_scope(|| self.send(sender, key, value.clone()));
 
                     return Entry {
                         inner: EntryInner::Value(value),
@@ -106,7 +113,7 @@ where
     fn get_or_insert_wait_map(
         &self,
         key: &K,
-    ) -> Result<watch::Sender<Option<V>>, watch::Receiver<Option<V>>> {
+    ) -> Result<OwnedRwLockWriteGuard<Option<V>>, Arc<RwLock<Option<V>>>> {
         let mut locked_wait_map = match self.wait_map.lock() {
             Ok(guard) => guard,
             Err(_e) => panic!(),
@@ -120,22 +127,27 @@ where
                 Err(receiver)
             }
             None => {
-                let (tx, rx) = watch::channel(None);
+                let value = Arc::new(RwLock::new(None));
+                let w = value.clone().try_write_owned().unwrap();
 
-                locked_wait_map.insert(key.clone(), rx);
+                locked_wait_map.insert(key.clone(), value);
                 drop(locked_wait_map);
 
-                Ok(tx)
+                Ok(w)
             }
         }
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.storage.insert(key, value).await;
+        self.storage
+            .insert(key, value)
+            .instrument(tracing::info_span!("dedupcache storage insert"))
+            .await;
     }
 
-    async fn send(&self, sender: watch::Sender<Option<V>>, key: &K, value: V) {
-        let _ = sender.send(Some(value));
+    fn send(&self, mut sender: OwnedRwLockWriteGuard<Option<V>>, key: &K, value: V) {
+        *sender = Some(value);
+        drop(sender);
 
         {
             // Lock the wait map to prevent more subscribers racing with our send
@@ -146,7 +158,7 @@ where
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        self.storage.in_memory_keys().await
+        self.storage.in_memory_keys()
     }
 }
 
@@ -156,19 +168,18 @@ pub(crate) struct Entry<K: KeyType, V: ValueType> {
 enum EntryInner<K: KeyType, V: ValueType> {
     First {
         key: K,
-        sender: watch::Sender<Option<V>>,
+        sender: OwnedRwLockWriteGuard<Option<V>>,
         cache: DeduplicatingCache<K, V>,
         _drop_signal: oneshot::Sender<()>,
     },
     Receiver {
-        receiver: watch::Receiver<Option<V>>,
+        receiver: Arc<RwLock<Option<V>>>,
     },
     Value(V),
 }
 
 #[derive(Debug)]
 pub(crate) enum EntryError {
-    Closed,
     IsFirst,
 }
 
@@ -185,16 +196,12 @@ where
         match self.inner {
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
-            EntryInner::Receiver { mut receiver } => {
-                receiver
-                    .changed()
+            EntryInner::Receiver { receiver } => {
+                let r = receiver
+                    .read()
                     .instrument(tracing::info_span!("dedupcache entry wait for receiver"))
-                    .await
-                    .map_err(|_| EntryError::Closed)?;
-                match receiver.borrow().clone() {
-                    None => panic!(),
-                    Some(value) => Ok(value),
-                }
+                    .await;
+                Ok((*r).clone().unwrap())
             }
             _ => Err(EntryError::IsFirst),
         }
@@ -208,11 +215,12 @@ where
             _drop_signal,
         } = self.inner
         {
-            cache.insert(key.clone(), value.clone()).await;
             cache
-                .send(sender, &key, value)
-                .instrument(tracing::info_span!("dedupcache entry send"))
+                .insert(key.clone(), value.clone())
+                .instrument(tracing::info_span!("dedupcache cache insert"))
                 .await;
+            tracing::info_span!("dedupcache entry send")
+                .in_scope(|| cache.send(sender, &key, value));
         }
     }
 
@@ -223,7 +231,8 @@ where
             sender, cache, key, ..
         } = self.inner
         {
-            cache.send(sender, &key, value).await;
+            tracing::info_span!("dedupcache entry send2")
+                .in_scope(|| cache.send(sender, &key, value));
         }
     }
 }
@@ -267,7 +276,7 @@ mod tests {
             entry.insert(i).await;
         }
 
-        assert_eq!(cache.storage.len().await, 13);
+        assert_eq!(cache.storage.len(), 13);
     }
 
     mock! {
@@ -303,6 +312,6 @@ mod tests {
         while let Some(_result) = computations.next().await {}
 
         // To be really sure, check there is only one value in the cache
-        assert_eq!(cache.storage.len().await, 1);
+        assert_eq!(cache.storage.len(), 1);
     }
 }
