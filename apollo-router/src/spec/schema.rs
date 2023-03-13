@@ -29,7 +29,7 @@ pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
     subtype_map: Arc<HashMap<String, HashSet<String>>>,
-    subgraphs: HashMap<String, Uri>,
+    pub(crate) subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) input_types: HashMap<String, InputObjectType>,
