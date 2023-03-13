@@ -840,6 +840,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "cache-control"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "http",
+ "serde_json",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "cargo-scaffold"
 version = "0.8.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
