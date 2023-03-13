@@ -63,7 +63,9 @@ where
         // If the data is present, it is sent directly to all the tasks that were waiting for it.
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
-        match self.get_or_insert_wait_map(key) {
+        match tracing::info_span!("cache get_or_insert_wait_map")
+            .in_scope(|| self.get_or_insert_wait_map(key))
+        {
             Err(receiver) => {
                 // Register interest in key
                 Entry {
@@ -77,10 +79,12 @@ where
                 // return with Err(), then we remove the entry from the wait map
                 let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                 let wait_map = self.wait_map.clone();
-                tokio::task::spawn(async move {
-                    let _ = drop_sentinel.await;
-                    let mut locked_wait_map = wait_map.lock().unwrap();
-                    let _ = locked_wait_map.remove(&k);
+                tracing::info_span!("dedupcache cache spawn").in_scope(|| {
+                    tokio::task::spawn(async move {
+                        let _ = drop_sentinel.await;
+                        let mut locked_wait_map = wait_map.lock().unwrap();
+                        let _ = locked_wait_map.remove(&k);
+                    })
                 });
 
                 if let Some(value) = self

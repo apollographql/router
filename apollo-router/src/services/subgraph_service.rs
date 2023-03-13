@@ -258,7 +258,7 @@ async fn call_http(
 
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
     let compressed_body = compress(body, &parts.headers)
-        .instrument(tracing::debug_span!("body_compression"))
+        .instrument(tracing::info_span!("body_compression"))
         .await
         .map_err(|err| {
             tracing::error!(compress_error = format!("{err:?}").as_str());
@@ -321,9 +321,10 @@ async fn call_http(
     let cloned_service_name = service_name.clone();
     let cloned_context = context.clone();
     let (parts, body) = async move {
-        cloned_context.enter_active_request().await;
+        cloned_context.enter_active_request().instrument(tracing::info_span!("enter active request")).await;
         let response = match client
-            .call(request)
+            .call(request).instrument(tracing::info_span!("HTTP req"))
+
             .await {
                 Err(err) => {
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
@@ -373,7 +374,7 @@ async fn call_http(
         }
 
         let body = match hyper::body::to_bytes(body)
-            .instrument(tracing::debug_span!("aggregate_response_data"))
+            .instrument(tracing::info_span!("aggregate_response_data"))
             .await {
                 Err(err) => {
                     cloned_context.leave_active_request().await;
@@ -388,7 +389,7 @@ async fn call_http(
                 }, Ok(body) => body,
             };
 
-            cloned_context.leave_active_request().await;
+            cloned_context.leave_active_request().instrument(tracing::info_span!("leave active request")).await;
 
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;
@@ -400,7 +401,7 @@ async fn call_http(
     }
 
     let graphql: graphql::Response =
-        tracing::debug_span!("parse_subgraph_response").in_scope(|| {
+        tracing::info_span!("parse_subgraph_response").in_scope(|| {
             graphql::Response::from_bytes(&cloned_service_name, body).map_err(|error| {
                 FetchError::SubrequestMalformedResponse {
                     service: cloned_service_name.clone(),

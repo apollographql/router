@@ -139,7 +139,11 @@ where
             };
 
             let context = request.context.clone();
-            let entry = qp.cache.get(&caching_key).await;
+            let entry = qp
+                .cache
+                .get(&caching_key)
+                .instrument(tracing::info_span!("query_planning cache get"))
+                .await;
             if entry.is_first() {
                 // some clients might timeout and cancel the request before query planning is finished,
                 // so we execute it in a task that can continue even after the request was canceled and
@@ -156,7 +160,12 @@ where
                                 errors,
                             }) => {
                                 if let Some(content) = &content {
-                                    entry.insert(Ok(content.clone())).await;
+                                    entry
+                                        .insert(Ok(content.clone()))
+                                        .instrument(tracing::info_span!(
+                                            "query_planning cache entry insert"
+                                        ))
+                                        .await;
                                 }
 
                                 if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
@@ -187,6 +196,7 @@ where
                     }
                     .in_current_span(),
                 )
+                .instrument(tracing::info_span!("query_planning delegate call"))
                 .await
                 .map_err(|e| {
                     CacheResolverError::RetrievalError(Arc::new(QueryPlannerError::JoinError(
@@ -196,6 +206,9 @@ where
             } else {
                 let res = entry
                     .get()
+                    .instrument(tracing::info_span!(
+                        "query_planning cache wait for entry result"
+                    ))
                     .await
                     .map_err(|_| QueryPlannerError::UnhandledPlannerResult)?;
 
