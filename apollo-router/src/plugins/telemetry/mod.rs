@@ -2,10 +2,11 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
-use std::{fmt, thread};
 
 use ::tracing::field;
 use ::tracing::info_span;
