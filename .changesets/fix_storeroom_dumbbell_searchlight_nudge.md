@@ -18,6 +18,6 @@ After this change the latest information is used to restart the router always:
 2. Router config is set to something invalid and restart doesn't happen. 
 3. Router receives a new schema, but the router fails to restart because of config is still invalid.
 
-It is important not to reload on inconsistant states because the use of a new schema may directyly rely on changes in config to work correctly.
+It is important not to reload on inconsistant states because the use of a new schema may directly rely on changes in config to work correctly.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2753
