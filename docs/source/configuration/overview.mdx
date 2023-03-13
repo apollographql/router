@@ -449,9 +449,8 @@ The Apollo Router automatically supports APQ with clients via its in-memory cach
 You can _disable_ this APQ support like so:
 
 ```yaml
-supergraph:
-  apq:
-    enabled: false
+apq:
+  enabled: false
 ```
 
 #### APQ with subgraphs
@@ -461,16 +460,15 @@ By default, the Apollo Router does _not_ use APQ when sending queries to its sub
 You can configure this APQ support with a combination of global and per-subgraph settings:
 
 ```yaml title="router.yaml"
-supergraph:
-  apq:
-    subgraph:
-      # Disable subgraph APQ globally unless overridden per-subgraph
-      all:
-        enabled: false
-      # Override global APQ setting for individual subgraphs
-      subgraphs:
-        products:
-          enabled: true
+apq:
+  subgraph:
+    # Disable subgraph APQ globally unless overridden per-subgraph
+    all:
+      enabled: false
+    # Override global APQ setting for individual subgraphs
+    subgraphs:
+      products:
+        enabled: true
 ```
 
 In the example above, subgraph APQ is disabled _except for_ the `products` subgraph.

@@ -110,5 +110,4 @@ github = ["open-telemetry", "apollographql", "tokio-rs"]
 [deny]
 name = "openssl-sys"
 # scaffold uses openssl for some reason
-# TODO: Remove the redis wrappers from this list once we move to rustls
-wrappers = ["apollo-router-scaffold", "redis", "redis-cluster-async"]
+wrappers = ["apollo-router-scaffold"]
