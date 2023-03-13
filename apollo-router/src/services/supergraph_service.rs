@@ -23,7 +23,6 @@ use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
-use crate::_private::TelemetryPlugin;
 use crate::error::CacheResolverError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -32,6 +31,7 @@ use crate::introspection::Introspection;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
+use crate::plugins::telemetry::Telemetry;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
@@ -341,7 +341,7 @@ impl PluggableSupergraphServiceBuilder {
         // Activate the telemetry plugin.
         // We must NOT fail to go live with the new router from this point as the telemetry plugin activate interacts with globals.
         for (_, plugin) in plugins.iter_mut() {
-            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<TelemetryPlugin>() {
+            if let Some(telemetry) = plugin.as_any_mut().downcast_mut::<Telemetry>() {
                 telemetry.activate();
             }
         }

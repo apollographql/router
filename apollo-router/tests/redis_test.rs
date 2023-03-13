@@ -22,9 +22,7 @@ mod test {
             .expect("got redis connection");
 
         connection
-        .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
-          .await
-          .unwrap();
+        .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-").await.unwrap();
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -90,15 +88,13 @@ mod test {
             .expect("got redis connection");
 
         let config = json!({
-            "supergraph": {
-                "apq": {
-                    "experimental_cache": {
-                        "in_memory": {
-                            "limit": 2
-                        },
-                        "redis": {
-                            "urls": ["redis://127.0.0.1:6379"]
-                        }
+            "apq": {
+                "experimental_cache": {
+                    "in_memory": {
+                        "limit": 2
+                    },
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"]
                     }
                 }
             }

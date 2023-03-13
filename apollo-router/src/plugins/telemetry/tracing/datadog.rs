@@ -30,7 +30,7 @@ pub(crate) struct Config {
 
 impl TracingConfigurator for Config {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError> {
-        tracing::info!("configuring Datadog tracing: {}", self.batch_processor);
+        tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
         let url = match &self.endpoint {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(s) => Some(s),

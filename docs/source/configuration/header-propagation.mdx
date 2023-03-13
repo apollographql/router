@@ -226,14 +226,10 @@ rhai:
 Example Rhai script that collects `set-cookie` headers from subgraphs and merges them into a single client response header.
 
 ```rhai title="./rhai/main.rhai"
-fn router_service(service) {
+fn supergraph_service(service) {
   let add_cookies_to_response = |response| {
     if response.context["set_cookie_headers"]?.len > 0 {
-      let cookie = "";
-      for header in response.context["set_cookie_headers"] {
-        cookie += header + "; ";
-      }
-      response.headers["set-cookie"] = cookie;
+      response.headers["set-cookie"] = response.context["set_cookie_headers"];
     }
   };
 
@@ -241,17 +237,17 @@ fn router_service(service) {
 }
 
 fn subgraph_service(service, subgraph) {
-    let store_cookies_from_subgraphs = |response| {
-      if response.headers["set-cookie"] != () {
-        if response.context["set_cookie_headers"] == () {
-          response.context.set_cookie_headers = []
-        }
-
-        response.context.set_cookie_headers += response.headers["set-cookie"]
+  let store_cookies_from_subgraphs = |response| {
+    if "set-cookie" in response.headers {
+      if response.context["set_cookie_headers"] == () {
+        response.context.set_cookie_headers = []
       }
-    };
 
-    service.map_response(store_cookies_from_subgraphs);
+      response.context.set_cookie_headers += response.headers.values("set-cookie");
+    }
+  };
+
+  service.map_response(store_cookies_from_subgraphs);
 }
 ```
 
