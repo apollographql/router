@@ -40,6 +40,7 @@ pub(crate) enum PipelineStep {
 }
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum Control {
     Continue,
     Break(u16),
