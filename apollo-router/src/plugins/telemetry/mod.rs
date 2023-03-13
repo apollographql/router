@@ -132,7 +132,7 @@ const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 
 #[doc(hidden)] // Only public for integration tests
-pub struct Telemetry {
+pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
     metrics: BasicMetrics,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
