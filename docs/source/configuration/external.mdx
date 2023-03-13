@@ -9,16 +9,14 @@ description: Configure external co-processing for the router
 > To provide feedback or otherwise participate in this feature, join [this GitHub discussion](https://github.com/apollographql/router/discussions/2266).
 
 The router provides extensive in-process customization functionality:
-
-- configuration
-- rhai script
-- rust plugin
+ - configuration
+ - rhai script
+ - rust plugin
 
 However, you may find that you have existing components in your system which can't be re-worked to any of these options for a variety of reasons, including, but not limited to:
-
-- choice of implementation language
-- bespoke packages/libs
-- access to existing services/infrastructure
+ - choice of implementation language
+ - bespoke packages/libs
+ - access to existing services/infrastructure
 
 For these situations, you can use external extensibility to interact with data flowing through the router.
 
@@ -50,13 +48,13 @@ sequenceDiagram
     SupergraphService->>ExecutionService: Initiates query<br/>plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
-    SubgraphService(s)-->>ExecutionService:
+    SubgraphService(s)-->>ExecutionService: 
     and
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
-    SubgraphService(s)-->>ExecutionService:
+    SubgraphService(s)-->>ExecutionService: 
     and
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
-    SubgraphService(s)-->>ExecutionService:
+    SubgraphService(s)-->>ExecutionService: 
     end
     ExecutionService-->>SupergraphService: Assembles and<br/>returns response
     SupergraphService-->>RouterService: Returns response
@@ -71,16 +69,16 @@ sequenceDiagram
 
 The external interface makes the following data available in the HTTP Post request:
 
-- control
-  - control
-  - stage
-  - trace id
-  - version
-- data
-  - body
-  - context
-  - headers
-  - sdl (schema)
+ - control
+     - control
+     - stage
+     - trace id
+     - version
+ - data
+     - body
+     - context
+     - headers
+     - sdl (schema)
 
 The "control" attributes, provide information about the context of the specific router request or response and provide a mechanism to influence the flow of data within the router.
 
@@ -207,14 +205,30 @@ The data is encoded into JSON. Here's what the data would look like for a reques
   "control": "continue",
   "id": "1b19c05fdafc521016df33148ad63c1b",
   "headers": {
-    "cookie": ["tasty_cookie=strawberry"],
-    "content-type": ["application/json"],
-    "host": ["127.0.0.1:4000"],
-    "apollo-federation-include-trace": ["ftv1"],
-    "apollographql-client-name": ["manual"],
-    "accept": ["*/*"],
-    "user-agent": ["curl/7.79.1"],
-    "content-length": ["46"]
+    "cookie": [
+      "tasty_cookie=strawberry"
+    ],
+    "content-type": [
+      "application/json"
+    ],
+    "host": [
+      "127.0.0.1:4000"
+    ],
+    "apollo-federation-include-trace": [
+      "ftv1"
+    ],
+    "apollographql-client-name": [
+      "manual"
+    ],
+    "accept": [
+      "*/*"
+    ],
+    "user-agent": [
+      "curl/7.79.1"
+    ],
+    "content-length": [
+      "46"
+    ]
   },
   "body": {
     "query": "query Long {\n  me {\n  name\n}\n}"
@@ -239,8 +253,12 @@ And here's what a router stage response may look like:
   "control": "continue",
   "id": "1b19c05fdafc521016df33148ad63c1b",
   "headers": {
-    "vary": ["origin"],
-    "content-type": ["application/json"]
+    "vary": [
+      "origin"
+    ],
+    "content-type": [
+      "application/json"
+    ]
   },
   "body": {
     "data": {
@@ -259,11 +277,15 @@ And here's what a router stage response may look like:
         "statsReportKey": "# Long\nquery Long{me{name}}",
         "referencedFieldsByType": {
           "User": {
-            "fieldNames": ["name"],
+            "fieldNames": [
+              "name"
+            ],
             "isInterface": false
           },
           "Query": {
-            "fieldNames": ["me"],
+            "fieldNames": [
+              "me"
+            ],
             "isInterface": false
           }
         }
@@ -286,14 +308,15 @@ The protocol is very simple. A payload is transmitted to a co-processor and a re
 
 Control field changes are ignored with the exception of the control field. The control field indicates to the router how processing of a request/response should proceed. Valid values are:
 
-- "continue"
-- { "break": &lt;status code&gt; }
+ - "continue"
+ - { "break": &lt;status code&gt; }
 
 If the value of the "control" field is "continue", then processing will continue as normal through the router. If the value is a map with a key of "break" and a numeric status code, then the router will stop processing and return a response to the client. The data returned to the client is the "body" of the co-processor response to the router.
 
 The body of the co-processor response should be valid GraphQL data that the client is expecting. If the Break code is a "failure" code, then the body of the co-processor response should contain a GraphQL errors array as shown in the following code snippet.
 
 > In the case of an externalized response, the router is already returning to the client, so the flow isn't altered, but the status code may still be changed.
+
 
 For example, if the co-processor updated a received request so that the control block of the co-processor response data looked like this:
 
