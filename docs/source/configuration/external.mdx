@@ -343,8 +343,3 @@ The router will read back the values of "body", "headers" and "context" and assi
 
 The router is written to try and maintain the highest standards of fidelity as a federated GraphQL processor. Externalization weakens that guarantee to some extent, since the responsibility for formatting data/errors is now partially devolved to a co-processor. It is the responsibility of the co-processor author to ensure that the externalization protocol is followed carefully to minimize the opportunity for unexpected failures.
 
-## Performance
-
-There is a cost to sending data from the router to a co-processor and waiting for the response and then processing any changes. We've done some basic benchmarking where we externalized all data on a request to a co-processor which was on the same machine and simply echoed back the data to the router. This reduced performance of the router (in terms of transaction throughput) by ~33%. If we then did the same thing and also called the co-processor with the router response, transaction throughput was reduced by ~50%.
-
-Most co-processors will do substantially more than just echo a response back to a router, so expect the performance impact to be proportionately greater.
