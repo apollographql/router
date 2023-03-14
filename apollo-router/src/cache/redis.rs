@@ -87,7 +87,7 @@ where
                     )
                 })
             }
-            res => Err(RedisError::new(
+            _res => Err(RedisError::new(
                 RedisErrorKind::Parse,
                 "the data is the wrong type",
             )),
