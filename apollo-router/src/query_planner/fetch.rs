@@ -98,7 +98,7 @@ struct Variables {
 }
 
 impl Variables {
-    #[instrument(skip_all, level = "debug", name = "make_variables")]
+    #[instrument(skip_all, level = "info", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
     async fn new(
         requires: &[Selection],

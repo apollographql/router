@@ -141,7 +141,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument(skip_all, level = "trace")]
+    #[tracing::instrument(skip_all, level = "info")]
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
@@ -780,6 +780,7 @@ impl Query {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, level = "info")]
     fn apply_root_selection_set(
         &self,
         operation: &Operation,
@@ -954,7 +955,7 @@ impl Query {
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
-    #[tracing::instrument(skip_all, level = "trace")]
+    #[tracing::instrument(skip_all, level = "info")]
     pub(crate) fn validate_variables(
         &self,
         request: &Request,

@@ -288,7 +288,7 @@ where
                                     CONTENT_TYPE,
                                     HeaderValue::from_static(APPLICATION_JSON.essence_str()),
                                 );
-                                tracing::trace_span!("serialize_response").in_scope(|| {
+                                tracing::info_span!("serialize_response").in_scope(|| {
                                     let body = serde_json::to_string(&response)?;
                                     Ok(router::Response {
                                         response: http::Response::from_parts(
