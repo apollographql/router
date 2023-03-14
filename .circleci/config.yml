@@ -511,7 +511,6 @@ jobs:
                 condition:
                   equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - install_extra_tools
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
