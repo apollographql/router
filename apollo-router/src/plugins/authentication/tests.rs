@@ -22,28 +22,10 @@ fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
 
     let jwks_path = jwks_base.join("fixtures").join(filename);
-    #[cfg(target_os = "windows")]
-    let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
-    #[cfg(not(target_os = "windows"))]
-    let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
 
-    #[cfg(target_os = "windows")]
-    {
-        // We need to manipulate our canonicalized file if we are on Windows.
-        // We replace windows path separators with posix path separators
-        // We also drop the first 3 characters from the path since they will be
-        // something like (drive letter may vary) '\\?\C:' and that isn't
-        // a valid URI
-        let mut file_string = jwks_file.display().to_string();
-        file_string = file_string.replace("\\", "/");
-        let len = file_string
-            .char_indices()
-            .nth(3)
-            .map_or(0, |(idx, _ch)| idx);
-        jwks_file = file_string[len..].into();
-    }
+    let jwks_absolute_path = std::fs::canonicalize(jwks_path).unwrap();
 
-    format!("file://{}", jwks_file.display())
+    Url::from_file_path(jwks_absolute_path).unwrap().to_string()
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
