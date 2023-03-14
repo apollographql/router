@@ -87,13 +87,10 @@ where
                     )
                 })
             }
-            res => {
-                println!("got redisvalue: {res:?}");
-                Err(RedisError::new(
-                    RedisErrorKind::Parse,
-                    "the data is the wrong type",
-                ))
-            }
+            res => Err(RedisError::new(
+                RedisErrorKind::Parse,
+                "the data is the wrong type",
+            )),
         }
     }
 }
