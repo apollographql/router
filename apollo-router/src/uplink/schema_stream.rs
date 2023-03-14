@@ -36,7 +36,7 @@ impl From<UplinkRequest> for supergraph_sdl_query::Variables {
 impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
     fn from(response: supergraph_sdl_query::ResponseData) -> Self {
         match response.router_config {
-            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::Result {
+            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
                 response: result.supergraph_sdl,
                 id: result.id,
                 // this will truncate the number of seconds to under u64::MAX, which should be

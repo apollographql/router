@@ -1,7 +1,7 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::fmt::Debug;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures::Stream;
 use graphql_client::QueryBody;
@@ -45,9 +45,9 @@ pub(crate) struct UplinkRequest {
 #[derive(Debug)]
 pub(crate) enum UplinkResponse<Response>
 where
-    Response: Send + 'static + std::fmt::Debug,
+    Response: Send + Debug + 'static,
 {
-    Result {
+    New {
         response: Response,
         id: String,
         delay: u64,
@@ -144,12 +144,11 @@ where
                 .into(),
             );
 
-            match fetch::<Query>(&query_body, &mut endpoints.iter(), timeout).await {
-                Ok(value) => {
-                    let response: UplinkResponse<Response> = value.into();
+            match fetch::<Query, Response>(&query_body, &mut endpoints.iter(), timeout).await {
+                Ok(response) => {
                     tracing::debug!("uplink response {:?}", response);
                     match response {
-                        UplinkResponse::Result {
+                        UplinkResponse::New {
                             id,
                             response,
                             delay,
@@ -162,7 +161,7 @@ where
                             interval = Duration::from_secs(delay);
                         }
                         UplinkResponse::Unchanged { id, delay } => {
-                            tracing::trace!("uplink response did not change");
+                            tracing::debug!("uplink response did not change");
                             // Preserve behavior for schema uplink errors where id and delay are not reset if they are not provided on error.
                             if let Some(id) = id {
                                 last_id = Some(id);
@@ -205,23 +204,45 @@ where
     ReceiverStream::new(receiver)
 }
 
-pub(crate) async fn fetch<Query>(
+pub(crate) async fn fetch<Query, Response>(
     request_body: &QueryBody<Query::Variables>,
     urls: &mut impl Iterator<Item = &Url>,
     timeout: Duration,
-) -> Result<Query::ResponseData, Error>
+) -> Result<UplinkResponse<Response>, Error>
 where
     Query: graphql_client::GraphQLQuery,
+    <Query as graphql_client::GraphQLQuery>::ResponseData: Into<UplinkResponse<Response>> + Send,
+    <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
+    Response: Send + Debug + 'static,
 {
     for url in urls {
+        let now = Instant::now();
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
             Ok(response) => {
-                return match response.data {
+                let response = response.data.map(Into::into);
+
+                match &response {
+                    None => {
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="empty")
+                    }
+                    Some(UplinkResponse::New { .. }) => {
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="new")
+                    }
+                    Some(UplinkResponse::Unchanged { .. }) => {
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="unchanged")
+                    }
+                    Some(UplinkResponse::Error { message, code, .. }) => {
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="uplink_error", error=message, code)
+                    }
+                }
+
+                return match response {
                     None => Err(Error::EmptyResponse),
                     Some(response_data) => Ok(response_data),
-                }
+                };
             }
             Err(e) => {
+                tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="http_error", error=e.to_string(), code=e.status().unwrap_or_default().as_str());
                 tracing::warn!("failed to fetch from Uplink endpoint {}: {}", url, e);
             }
         };
@@ -264,7 +285,7 @@ mod test {
     use wiremock::ResponseTemplate;
 
     use crate::uplink::entitlement::Entitlement;
-    use crate::uplink::entitlement_stream::EntitlementRequest;
+    use crate::uplink::entitlement_stream::EntitlementQuery;
     use crate::uplink::stream_from_uplink;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
@@ -339,7 +360,7 @@ mod test {
             .build()
             .await;
 
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2])),
@@ -368,7 +389,7 @@ mod test {
             .build()
             .await;
 
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2])),
@@ -391,7 +412,7 @@ mod test {
             .response(response_ok())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2])),
@@ -413,7 +434,7 @@ mod test {
             .response(response_fetch_error_no_retry())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2])),
@@ -447,7 +468,7 @@ mod test {
             .endpoint(&url3)
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2, url3])),
@@ -481,7 +502,7 @@ mod test {
             .response(response_ok())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -503,7 +524,7 @@ mod test {
             .response(response_invalid_entitlement())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -527,7 +548,7 @@ mod test {
             .response(response_ok())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -555,7 +576,7 @@ mod test {
             .response(response_fetch_error_http())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementRequest, Entitlement>(
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2])),
