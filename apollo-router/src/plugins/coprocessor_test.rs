@@ -8,6 +8,7 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::StatusCode;
     use hyper::Body;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
@@ -111,7 +112,7 @@ mod tests {
                         r##"{
                     "version": 2,
                     "stage": "RouterRequest",
-                    "control": "Continue",
+                    "control": "continue",
                     "id": "1b19c05fdafc521016df33148ad63c1b",
                     "body": {
                       "query": "query Long {\n  me {\n  name\n}\n}"
@@ -168,7 +169,7 @@ mod tests {
                         r##"{
                             "version": 1,
                             "stage": "RouterResponse",
-                            "control": "Continue",
+                            "control": "continue",
                             "id": "1b19c05fdafc521016df33148ad63c1b",
                             "body": {
                             "query": "query Long {\n  me {\n  name\n}\n}"
@@ -282,7 +283,7 @@ mod tests {
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
-                                    "Break": 200
+                                    "break": 200
                                 },
                                 "id": "3a67e2dd75e8777804e4a8f42b971df7",
                                 "body": {
@@ -379,7 +380,7 @@ mod tests {
                         r##"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
-                                "control": "Continue",
+                                "control": "continue",
                                 "headers": {
                                     "cookie": [
                                       "tasty_cookie=strawberry"
@@ -471,7 +472,7 @@ mod tests {
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
-                                    "Break": 200
+                                    "break": 200
                                 },
                                 "body": {
                                     "errors": [{ "message": "my error message" }]
@@ -683,7 +684,7 @@ mod tests {
                         r##"{
                     "version": 1,
                     "stage": "RouterRequest",
-                    "control": "Continue",
+                    "control": "continue",
                     "id": "1b19c05fdafc521016df33148ad63c1b",
                     "headers": {
                       "cookie": [
@@ -773,7 +774,7 @@ mod tests {
                             "version": 1,
                             "stage": "RouterRequest",
                             "control": {
-                                "Break": 200
+                                "break": 200
                             },
                             "id": "1b19c05fdafc521016df33148ad63c1b",
                             "body": {
@@ -869,6 +870,9 @@ mod tests {
                         r##"{
                     "version": 1,
                     "stage": "RouterResponse",
+                    "control": {
+                        "break": 400 
+                    },
                     "id": "1b19c05fdafc521016df33148ad63c1b",
                     "headers": {
                       "cookie": [
@@ -926,6 +930,7 @@ mod tests {
         let res = service.oneshot(request.try_into().unwrap()).await.unwrap();
 
         // Let's assert that the router request has been transformed as it should have.
+        assert_eq!(res.response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
             res.response.headers().get("cookie").unwrap(),
             "tasty_cookie=strawberry"

@@ -612,6 +612,9 @@ where
     };
 
     response.response = http::Response::from_parts(parts, new_body);
+    if let Some(control) = co_processor_output.control {
+        *response.response.status_mut() = control.get_http_status()?
+    }
 
     if let Some(context) = co_processor_output.context {
         response.context = context;
@@ -817,6 +820,10 @@ where
     };
 
     response.response = http::Response::from_parts(parts, new_body);
+
+    if let Some(control) = co_processor_output.control {
+        *response.response.status_mut() = control.get_http_status()?
+    }
 
     if let Some(context) = co_processor_output.context {
         response.context = context;

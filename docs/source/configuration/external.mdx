@@ -202,7 +202,7 @@ The data is encoded into JSON. Here's what the data would look like for a reques
 {
   "version": 1,
   "stage": "RouterRequest",
-  "control": "Continue",
+  "control": "continue",
   "id": "1b19c05fdafc521016df33148ad63c1b",
   "headers": {
     "cookie": [
@@ -250,7 +250,7 @@ And here's what a router stage response may look like:
 {
   "version": 1,
   "stage": "RouterResponse",
-  "control": "Continue",
+  "control": "continue",
   "id": "1b19c05fdafc521016df33148ad63c1b",
   "headers": {
     "vary": [
@@ -308,10 +308,10 @@ The protocol is very simple. A payload is transmitted to a co-processor and a re
 
 Control field changes are ignored with the exception of the control field. The control field indicates to the router how processing of a request/response should proceed. Valid values are:
 
- - "Continue"
- - { "Break": &lt;status code&gt; }
+ - "continue"
+ - { "break": &lt;status code&gt; }
 
-If the value of the "control" field is "Continue", then processing will continue as normal through the router. If the value is a map with a key of "Break" and a numeric status code, then the router will stop processing and return a response to the client. The data returned to the client is the "body" of the co-processor response to the router.
+If the value of the "control" field is "continue", then processing will continue as normal through the router. If the value is a map with a key of "break" and a numeric status code, then the router will stop processing and return a response to the client. The data returned to the client is the "body" of the co-processor response to the router.
 
 The body of the co-processor response should be valid GraphQL data that the client is expecting. If the Break code is a "failure" code, then the body of the co-processor response should contain a GraphQL errors array as shown in the following code snippet.
 
@@ -324,7 +324,7 @@ For example, if the co-processor updated a received request so that the control 
 {
   "version": 1,
   "stage": "RouterRequest",
-  "control": { "Break": 403 },
+  "control": { "break": 403 },
   "id": "1b19c05fdafc521016df33148ad63c1b",
   "body": {
     "errors": [{ "message": "You are not allowed to do this" }]
