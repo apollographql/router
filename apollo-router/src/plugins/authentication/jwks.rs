@@ -21,7 +21,6 @@ use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-use crate::configuration::ConfigurationError;
 use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
 
 #[derive(Clone)]
@@ -55,27 +54,18 @@ impl JwksManager {
             })
             .collect::<Vec<_>>();
 
-        let jwks_map: Option<_> = join_all(downloads).await.into_iter().collect();
+        let jwks_map: HashMap<_, _> = join_all(downloads).await.into_iter().flatten().collect();
 
-        match jwks_map {
-            None => Err(ConfigurationError::InvalidConfiguration {
-                message: "bad configuration for the JWT authentication plugin",
-                error: "could not download or parse some of the JWKS".to_string(),
-            }
-            .into()),
-            Some(map) => {
-                let jwks_map = Arc::new(RwLock::new(map));
-                let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
+        let jwks_map = Arc::new(RwLock::new(jwks_map));
+        let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
-                tokio::task::spawn(poll(list.clone(), jwks_map.clone(), drop_receiver));
+        tokio::task::spawn(poll(list.clone(), jwks_map.clone(), drop_receiver));
 
-                Ok(JwksManager {
-                    list,
-                    jwks_map,
-                    _drop_signal: Arc::new(_drop_signal),
-                })
-            }
-        }
+        Ok(JwksManager {
+            list,
+            jwks_map,
+            _drop_signal: Arc::new(_drop_signal),
+        })
     }
 
     #[cfg(test)]

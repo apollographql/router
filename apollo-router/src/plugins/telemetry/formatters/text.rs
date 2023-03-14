@@ -34,8 +34,8 @@ impl Default for TextFormatter {
 impl TextFormatter {
     const TRACE_STR: &'static str = "TRACE";
     const DEBUG_STR: &'static str = "DEBUG";
-    const INFO_STR: &'static str = " INFO";
-    const WARN_STR: &'static str = " WARN";
+    const INFO_STR: &'static str = "INFO";
+    const WARN_STR: &'static str = "WARN";
     const ERROR_STR: &'static str = "ERROR";
 
     pub(crate) fn new() -> Self {

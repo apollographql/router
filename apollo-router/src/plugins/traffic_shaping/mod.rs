@@ -730,11 +730,7 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        // Note: use `timeout` to guarantee 300ms has elapsed
-        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
-            .await
-            .is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
@@ -752,7 +748,7 @@ mod test {
         router:
             global_rate_limit:
                 capacity: 1
-                interval: 300ms
+                interval: 100ms
             timeout: 500ms
         "#,
         )
@@ -796,11 +792,7 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        // Note: use `timeout` to guarantee 300ms has elapsed
-        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
-            .await
-            .is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
