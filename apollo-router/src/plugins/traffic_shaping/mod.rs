@@ -6,7 +6,8 @@
 //! * Compression
 //! * Rate limiting
 //!
-
+// With regards to ELv2 licensing, this entire file is license key functionality
+mod cache;
 mod deduplication;
 mod rate;
 mod retry;
@@ -30,12 +31,15 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use self::cache::SubgraphCacheLayer;
 use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 use self::retry::RetryPolicy;
 pub(crate) use self::timeout::Elapsed;
 use self::timeout::TimeoutLayer;
+use crate::cache::redis::RedisCacheStorage;
+use crate::configuration::RedisCache;
 use crate::error::ConfigurationError;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -69,6 +73,8 @@ struct Shaping {
     /// Retry configuration
     //  *experimental feature*: Enables request retry
     experimental_retry: Option<RetryConfig>,
+    /// Enable HTTP2 for subgraphs
+    experimental_enable_http2: Option<bool>,
 }
 
 impl Merge for Shaping {
@@ -88,6 +94,11 @@ impl Merge for Shaping {
                     .experimental_retry
                     .as_ref()
                     .or(fallback.experimental_retry.as_ref())
+                    .cloned(),
+                experimental_enable_http2: self
+                    .experimental_enable_http2
+                    .as_ref()
+                    .or(fallback.experimental_enable_http2.as_ref())
                     .cloned(),
             },
         }
@@ -130,6 +141,50 @@ impl Merge for RetryConfig {
     }
 }
 
+// this is a wrapper struct to add subgraph specific options over Shaping
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SubgraphShaping {
+    #[serde(flatten)]
+    shaping: Shaping,
+    /// Enable entity caching
+    experimental_entity_caching: Option<SubgraphEntityCaching>,
+}
+
+impl Merge for SubgraphShaping {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => SubgraphShaping {
+                shaping: self.shaping.merge(Some(&fallback.shaping)),
+                experimental_entity_caching: self
+                    .experimental_entity_caching
+                    .as_ref()
+                    .or(fallback.experimental_entity_caching.as_ref())
+                    .cloned(),
+            },
+        }
+    }
+}
+
+#[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SubgraphEntityCaching {
+    /// expiration for all keys
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
+    #[schemars(with = "String")]
+    pub(crate) ttl: Duration,
+}
+
+impl Merge for SubgraphEntityCaching {
+    fn merge(&self, fallback: Option<&Self>) -> Self {
+        match fallback {
+            None => self.clone(),
+            Some(fallback) => fallback.clone(),
+        }
+    }
+}
+
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RouterShaping {
@@ -150,11 +205,13 @@ pub(crate) struct Config {
     /// Applied at the router level
     router: Option<RouterShaping>,
     /// Applied on all subgraphs
-    all: Option<Shaping>,
+    all: Option<SubgraphShaping>,
     /// Applied on specific subgraphs
-    subgraphs: HashMap<String, Shaping>,
+    subgraphs: HashMap<String, SubgraphShaping>,
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
+    /// Experimental URLs of Redis cache used for subgraph response caching
+    pub(crate) experimental_cache: Option<RedisCache>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -186,6 +243,7 @@ pub(crate) struct TrafficShaping {
     config: Config,
     rate_limit_router: Option<RateLimitLayer>,
     rate_limit_subgraphs: Mutex<HashMap<String, RateLimitLayer>>,
+    storage: Option<RedisCacheStorage>,
 }
 
 #[async_trait::async_trait]
@@ -216,11 +274,24 @@ impl Plugin for TrafficShaping {
             })
             .transpose()?;
 
-        Ok(Self {
-            config: init.config,
-            rate_limit_router,
-            rate_limit_subgraphs: Mutex::new(HashMap::new()),
-        })
+        {
+            let storage = if let Some(urls) = init
+                .config
+                .experimental_cache
+                .as_ref()
+                .map(|cache| cache.urls.clone())
+            {
+                Some(RedisCacheStorage::new(urls, None).await?)
+            } else {
+                None
+            };
+            Ok(Self {
+                config: init.config,
+                rate_limit_router,
+                rate_limit_subgraphs: Mutex::new(HashMap::new()),
+                storage,
+            })
+        }
     }
 }
 
@@ -275,16 +346,19 @@ impl TrafficShaping {
         subgraph::Request,
         Response = subgraph::Response,
         Error = BoxError,
-        Future = tower::util::Either<
-            tower::util::Either<
+        Future = Either<
+            Either<
                 BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-                timeout::future::ResponseFuture<
-                    Oneshot<
-                        tower::util::Either<
-                            Retry<RetryPolicy, tower::util::Either<rate::service::RateLimit<S>, S>>,
-                            tower::util::Either<rate::service::RateLimit<S>, S>,
+                Either<
+                    BoxFuture<'static, Result<subgraph::Response, BoxError>>,
+                    timeout::future::ResponseFuture<
+                        Oneshot<
+                            Either<
+                                Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
+                                Either<rate::service::RateLimit<S>, S>,
+                            >,
+                            subgraph::Request,
                         >,
-                        subgraph::Request,
                     >,
                 >,
             >,
@@ -307,19 +381,38 @@ impl TrafficShaping {
         let subgraph_config = self.config.subgraphs.get(name);
         let final_config = Self::merge_config(all_config, subgraph_config);
 
-        if let Some(config) = final_config {
-            let rate_limit = config.global_rate_limit.as_ref().map(|rate_limit_conf| {
-                self.rate_limit_subgraphs
-                    .lock()
-                    .unwrap()
-                    .entry(name.to_string())
-                    .or_insert_with(|| {
-                        RateLimitLayer::new(rate_limit_conf.capacity, rate_limit_conf.interval)
-                    })
-                    .clone()
-            });
+        let entity_caching = if let (Some(storage), Some(caching_config)) = (
+            self.storage.clone(),
+            subgraph_config
+                .as_ref()
+                .and_then(|c| c.experimental_entity_caching.as_ref()),
+        ) {
+            Some(SubgraphCacheLayer::new_with_storage(
+                name.to_string(),
+                storage,
+                caching_config.ttl,
+            ))
+        } else {
+            None
+        };
 
-            let retry = config.experimental_retry.as_ref().map(|config| {
+        if let Some(config) = final_config {
+            let rate_limit = config
+                .shaping
+                .global_rate_limit
+                .as_ref()
+                .map(|rate_limit_conf| {
+                    self.rate_limit_subgraphs
+                        .lock()
+                        .unwrap()
+                        .entry(name.to_string())
+                        .or_insert_with(|| {
+                            RateLimitLayer::new(rate_limit_conf.capacity, rate_limit_conf.interval)
+                        })
+                        .clone()
+                });
+
+            let retry = config.shaping.experimental_retry.as_ref().map(|config| {
                 let retry_policy = RetryPolicy::new(
                     config.ttl,
                     config.min_per_sec,
@@ -330,11 +423,13 @@ impl TrafficShaping {
             });
 
             Either::A(ServiceBuilder::new()
-                .option_layer(config.deduplicate_query.unwrap_or_default().then(
+            .option_layer(entity_caching)
+
+                .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
                     .layer(TimeoutLayer::new(
-                        config
+                        config.shaping
                         .timeout
                         .unwrap_or(DEFAULT_TIMEOUT),
                     ))
@@ -342,7 +437,7 @@ impl TrafficShaping {
                     .option_layer(rate_limit)
                 .service(service)
                 .map_request(move |mut req: SubgraphRequest| {
-                    if let Some(compression) = config.compression {
+                    if let Some(compression) = config.shaping.compression {
                         let compression_header_val = HeaderValue::from_str(&compression.to_string()).expect("compression is manually implemented and already have the right values; qed");
                         req.subgraph_request.headers_mut().insert(CONTENT_ENCODING, compression_header_val);
                     }
@@ -352,6 +447,14 @@ impl TrafficShaping {
         } else {
             Either::B(service)
         }
+    }
+
+    pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> bool {
+        self.config
+            .subgraphs
+            .get(service_name)
+            .and_then(|subgraph| subgraph.shaping.experimental_enable_http2)
+            .unwrap_or(true)
     }
 }
 
@@ -627,11 +730,7 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        // Note: use `timeout` to guarantee 300ms has elapsed
-        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
-            .await
-            .is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
@@ -649,7 +748,7 @@ mod test {
         router:
             global_rate_limit:
                 capacity: 1
-                interval: 300ms
+                interval: 100ms
             timeout: 500ms
         "#,
         )
@@ -693,11 +792,7 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        // Note: use `timeout` to guarantee 300ms has elapsed
-        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
-            .await
-            .is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()

@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 #![allow(deprecated)]
 #![allow(missing_docs)]
 

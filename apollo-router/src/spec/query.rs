@@ -10,7 +10,6 @@ use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
-use apollo_parser::ast;
 use derivative::Derivative;
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -42,7 +41,7 @@ pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
 #[derive(Derivative, Default, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq)]
+#[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
@@ -54,37 +53,6 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
-}
-
-impl std::fmt::Debug for Query {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use super::schema::sorted_map;
-        let Query {
-            string,
-            compiler: _,
-            fragments,
-            operations,
-            subselections,
-        } = self;
-        writeln!(f, "Query:")?;
-        writeln!(f, "  string: {string:?}")?;
-        sorted_map(f, "  ", "fragments", &fragments.map)?;
-        writeln!(f, "  operations:")?;
-        for operation in operations {
-            let Operation {
-                name,
-                kind,
-                selection_set,
-                variables,
-            } = operation;
-            writeln!(f, "    - name: {name:?}")?;
-            writeln!(f, "      kind: {kind:?}")?;
-            writeln!(f, "      selection_set: {selection_set:#?}")?;
-            sorted_map(f, "      ", "variables", variables)?;
-        }
-        writeln!(f, "  subselections: {subselections:#?}")?;
-        Ok(())
-    }
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -298,14 +266,6 @@ impl Query {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
-        Self::parse_with_hir(query, schema, configuration)
-    }
-
-    pub(crate) fn parse_with_hir(
-        query: impl Into<String>,
-        schema: &Schema,
-        configuration: &Configuration,
-    ) -> Result<Self, SpecError> {
         let query = query.into();
         let mut compiler = ApolloCompiler::with_recursion_limit(
             configuration.server.experimental_parser_recursion_limit,
@@ -340,55 +300,6 @@ impl Query {
         Ok(Query {
             string: query,
             compiler: OnceCell::from(Mutex::new(compiler)),
-            fragments,
-            operations,
-            subselections: HashMap::new(),
-        })
-    }
-
-    pub(crate) fn parse_with_ast(
-        query: impl Into<String>,
-        schema: &Schema,
-        configuration: &Configuration,
-    ) -> Result<Self, SpecError> {
-        let query = query.into();
-        let parser = apollo_parser::Parser::new(query.as_str())
-            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
-        let tree = parser.parse();
-
-        // Trace log recursion limit data
-        let recursion_limit = tree.recursion_limit();
-        tracing::trace!(?recursion_limit, "recursion limit data");
-
-        let errors = tree
-            .errors()
-            .map(|err| format!("{err:?}"))
-            .collect::<Vec<_>>();
-
-        if !errors.is_empty() {
-            let errors = errors.join(", ");
-            failfast_debug!("parsing error(s): {}", errors);
-            return Err(SpecError::ParsingError(errors));
-        }
-
-        let document = tree.document();
-        let fragments = Fragments::from_ast(&document, schema)?;
-
-        let operations: Vec<Operation> = document
-            .definitions()
-            .filter_map(|definition| {
-                if let ast::Definition::OperationDefinition(operation) = definition {
-                    Some(operation)
-                } else {
-                    None
-                }
-            })
-            .map(|operation| Operation::from_ast(operation, schema))
-            .collect::<Result<Vec<_>, SpecError>>()?;
-
-        Ok(Query {
-            compiler: OnceCell::new(),
-            string: query,
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -656,15 +567,10 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -725,15 +631,10 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     known_type,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -771,30 +672,14 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment
-                            .skip
-                            .should_skip(parameters.variables)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if !fragment
-                            .include
-                            .should_include(parameters.variables)
-                            .unwrap_or(true)
-                        {
+                        if fragment.include_skip.should_skip(parameters.variables) {
                             continue;
                         }
 
@@ -852,17 +737,9 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -918,8 +795,7 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     ..
                 } => {
                     // top level objects will not provide a __typename field
@@ -929,11 +805,7 @@ impl Query {
                         return Err(InvalidValue);
                     }
 
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -949,30 +821,14 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment
-                            .skip
-                            .should_skip(parameters.variables)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if !fragment
-                            .include
-                            .should_include(parameters.variables)
-                            .unwrap_or(true)
-                        {
+                        if fragment.include_skip.should_skip(parameters.variables) {
                             continue;
                         }
 
@@ -1214,84 +1070,6 @@ impl Operation {
         })
     }
 
-    // clippy false positive due to the bytes crate
-    // ref: https://rust-lang.github.io/rust-clippy/master/index.html#mutable_key_type
-    #[allow(clippy::mutable_key_type)]
-    // Spec: https://spec.graphql.org/draft/#sec-Language.Operations
-    fn from_ast(operation: ast::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
-        let name = operation.name().map(|x| x.text().to_string());
-
-        let kind = operation
-            .operation_type()
-            .and_then(|op| {
-                op.query_token()
-                    .map(|_| OperationKind::Query)
-                    .or_else(|| op.mutation_token().map(|_| OperationKind::Mutation))
-                    .or_else(|| op.subscription_token().map(|_| OperationKind::Subscription))
-            })
-            .unwrap_or(OperationKind::Query);
-
-        if kind == OperationKind::Subscription {
-            return Err(SpecError::SubscriptionNotSupported);
-        }
-        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
-
-        let selection_set = operation
-            .selection_set()
-            .ok_or_else(|| {
-                SpecError::ParsingError(
-                    "the node SelectionSet is not optional in the spec".to_string(),
-                )
-            })?
-            .selections()
-            .map(|selection| Selection::from_ast(selection, &current_field_type, schema, 0))
-            .collect::<Result<Vec<Option<_>>, _>>()?
-            .into_iter()
-            .flatten()
-            .collect::<Vec<Selection>>();
-
-        let variables = operation
-            .variable_definitions()
-            .iter()
-            .flat_map(|x| x.variable_definitions())
-            .map(|definition| {
-                let name = definition
-                    .variable()
-                    .ok_or_else(|| {
-                        SpecError::ParsingError(
-                            "the node Variable is not optional in the spec".to_string(),
-                        )
-                    })?
-                    .name()
-                    .ok_or_else(|| {
-                        SpecError::ParsingError(
-                            "the node Name is not optional in the spec".to_string(),
-                        )
-                    })?
-                    .text()
-                    .to_string();
-                let ty = FieldType::try_from(definition.ty().ok_or_else(|| {
-                    SpecError::ParsingError("the node Type is not optional in the spec".to_string())
-                })?)?;
-
-                Ok((
-                    name.into(),
-                    Variable {
-                        field_type: ty,
-                        default_value: parse_default_value(&definition),
-                    },
-                ))
-            })
-            .collect::<Result<_, _>>()?;
-
-        Ok(Operation {
-            selection_set,
-            name,
-            variables,
-            kind,
-        })
-    }
-
     /// A query or mutation containing only `__typename` at the root level
     fn is_only_typename(&self) -> bool {
         self.selection_set.len() == 1
@@ -1333,31 +1111,6 @@ impl From<hir::OperationType> for OperationKind {
     }
 }
 
-impl From<ast::OperationType> for OperationKind {
-    // Spec: https://spec.graphql.org/draft/#OperationType
-    fn from(operation_type: ast::OperationType) -> Self {
-        if operation_type.query_token().is_some() {
-            Self::Query
-        } else if operation_type.mutation_token().is_some() {
-            Self::Mutation
-        } else if operation_type.subscription_token().is_some() {
-            Self::Subscription
-        } else {
-            unreachable!(
-                "either the `query` token is provided, either the `mutation` token, \
-                either the `subscription` token; qed"
-            )
-        }
-    }
-}
-
-fn parse_default_value(definition: &ast::VariableDefinition) -> Option<Value> {
-    definition
-        .default_value()
-        .and_then(|v| v.value())
-        .and_then(|value| parse_value(&value))
-}
-
 pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
     match value {
         hir::Value::Variable(_) => None,
@@ -1372,40 +1125,6 @@ pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
             .iter()
             .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
             .collect(),
-    }
-}
-
-pub(crate) fn parse_value(value: &ast::Value) -> Option<Value> {
-    match value {
-        ast::Value::Variable(_) => None,
-        ast::Value::StringValue(s) => String::try_from(s).ok().map(Into::into),
-        ast::Value::FloatValue(f) => f64::try_from(f).ok().map(Into::into),
-        ast::Value::IntValue(i) => {
-            let token = i.int_token()?;
-            let s = token.text();
-            s.parse::<i64>()
-                .ok()
-                .map(Into::into)
-                .or_else(|| s.parse::<u64>().ok().map(Into::into))
-        }
-        ast::Value::BooleanValue(b) => bool::try_from(b).ok().map(Into::into),
-        ast::Value::NullValue(_) => Some(Value::Null),
-        ast::Value::EnumValue(e) => e.name().map(|n| n.text().to_string().into()),
-        ast::Value::ListValue(l) => l
-            .values()
-            .map(|v| parse_value(&v))
-            .collect::<Option<_>>()
-            .map(Value::Array),
-        ast::Value::ObjectValue(o) => o
-            .object_fields()
-            .map(|field| match (field.name(), field.value()) {
-                (Some(name), Some(value)) => {
-                    parse_value(&value).map(|v| (name.text().to_string().into(), v))
-                }
-                _ => None,
-            })
-            .collect::<Option<_>>()
-            .map(Value::Object),
     }
 }
 

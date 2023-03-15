@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
@@ -111,8 +113,9 @@ pub(crate) struct SubgraphService {
 impl SubgraphService {
     pub(crate) fn new(
         service: impl Into<String>,
-        apq_enabled: bool,
+        enable_apq: bool,
         tls_cert_store: Option<RootCertStore>,
+        enable_http2: bool,
     ) -> Self {
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
@@ -128,19 +131,23 @@ impl SubgraphService {
                 .with_root_certificates(store)
                 .with_no_client_auth(),
         };
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http_connector);
+            .enable_http1();
+
+        let connector = if enable_http2 {
+            builder.enable_http2().wrap_connector(http_connector)
+        } else {
+            builder.wrap_connector(http_connector)
+        };
 
         Self {
             client: ServiceBuilder::new()
                 .layer(DecompressionLayer::new())
                 .service(hyper::Client::builder().build(connector)),
             service: Arc::new(service.into()),
-            apq: Arc::new(<AtomicBool>::new(apq_enabled)),
+            apq: Arc::new(<AtomicBool>::new(enable_apq)),
         }
     }
 }
@@ -970,7 +977,7 @@ mod tests {
     async fn test_bad_status_code_should_not_fail() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2626").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_request(socket_addr));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let response = subgraph_service
@@ -1004,7 +1011,7 @@ mod tests {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2525").unwrap();
         tokio::task::spawn(emulate_subgraph_bad_response_format(socket_addr));
 
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let err = subgraph_service
@@ -1037,7 +1044,7 @@ mod tests {
     async fn test_compressed_request_response_body() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2727").unwrap();
         tokio::task::spawn(emulate_subgraph_compressed_response(socket_addr));
-        let subgraph_service = SubgraphService::new("test", false, None);
+        let subgraph_service = SubgraphService::new("test", false, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -1074,7 +1081,7 @@ mod tests {
     async fn test_unauthorized() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2828").unwrap();
         tokio::task::spawn(emulate_subgraph_unauthorized(socket_addr));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let err = subgraph_service
@@ -1107,7 +1114,7 @@ mod tests {
     async fn test_persisted_query_not_supported_message() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:2929").unwrap();
         tokio::task::spawn(emulate_persisted_query_not_supported_message(socket_addr));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -1149,7 +1156,7 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_supported_extension_code(
             socket_addr,
         ));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         assert!(subgraph_service.clone().apq.as_ref().load(Relaxed));
 
@@ -1189,7 +1196,7 @@ mod tests {
     async fn test_persisted_query_not_found_message() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3131").unwrap();
         tokio::task::spawn(emulate_persisted_query_not_found_message(socket_addr));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -1228,7 +1235,7 @@ mod tests {
         tokio::task::spawn(emulate_persisted_query_not_found_extension_code(
             socket_addr,
         ));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -1265,7 +1272,7 @@ mod tests {
     async fn test_apq_enabled_subgraph_configuration() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3333").unwrap();
         tokio::task::spawn(emulate_expected_apq_enabled_configuration(socket_addr));
-        let subgraph_service = SubgraphService::new("test", true, None);
+        let subgraph_service = SubgraphService::new("test", true, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service
@@ -1302,7 +1309,7 @@ mod tests {
     async fn test_apq_disabled_subgraph_configuration() {
         let socket_addr = SocketAddr::from_str("127.0.0.1:3434").unwrap();
         tokio::task::spawn(emulate_expected_apq_disabled_configuration(socket_addr));
-        let subgraph_service = SubgraphService::new("test", false, None);
+        let subgraph_service = SubgraphService::new("test", false, None, true);
 
         let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
         let resp = subgraph_service

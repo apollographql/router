@@ -12,16 +12,16 @@ use std::task::Poll;
 use std::time::Instant;
 use std::time::SystemTime;
 
-use displaydoc::Display;
+use futures::stream::Fuse;
 use futures::Stream;
+use futures::StreamExt;
 use graphql_client::GraphQLQuery;
 use pin_project_lite::pin_project;
-use thiserror::Error;
 use tokio_util::time::DelayQueue;
 
 use crate::router::Event;
 use crate::uplink::entitlement::Entitlement;
-use crate::uplink::entitlement::EntitlementReport;
+use crate::uplink::entitlement::EntitlementState;
 use crate::uplink::entitlement_stream::entitlement_request::EntitlementRequestRouterEntitlements;
 use crate::uplink::entitlement_stream::entitlement_request::FetchErrorCode;
 use crate::uplink::UplinkRequest;
@@ -97,83 +97,105 @@ impl From<entitlement_request::ResponseData> for UplinkResponse<Entitlement> {
     }
 }
 
-#[derive(Error, Display, Debug)]
-pub(crate) enum Error {
-    /// invalid entitlement: {0}
-    InvalidEntitlement(jsonwebtoken::errors::Error),
-
-    /// entitlement violations: {0}
-    EntitlementViolations(EntitlementReport),
-}
-
 pin_project! {
     /// This stream wrapper will cause check the current entitlement at the point of warn_at or halt_at.
     /// This means that the state machine can be kept clean, and not have to deal with setting it's own timers and also avoids lots of racy scenarios as entitlement checks are guaranteed to happen after an entitlement update even if they were in the past.
-    struct EntitlementExpander<Upstream>
+    #[must_use = "streams do nothing unless polled"]
+    #[project = EntitlementExpanderProj]
+    pub(crate) struct EntitlementExpander<Upstream>
     where
-        Upstream: Stream<Item = Event>,
+        Upstream: Stream<Item = Entitlement>,
     {
         #[pin]
         checks: DelayQueue<Event>,
         #[pin]
-        upstream: Upstream,
+        upstream: Fuse<Upstream>,
     }
 }
 
 impl<Upstream> Stream for EntitlementExpander<Upstream>
 where
-    Upstream: Stream<Item = Event>,
+    Upstream: Stream<Item = Entitlement>,
 {
     type Item = Event;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut this = self.project();
-        let active_checks = !this.checks.is_empty();
-        match this.checks.poll_expired(cx) {
-            // We have an expired claim that needs checking
-            Poll::Ready(Some(item)) => Poll::Ready(Some(item.into_inner())),
+        let checks = this.checks.poll_expired(cx);
+        // Only check downstream if checks was not Some
+        let next = if matches!(checks, Poll::Ready(Some(_))) {
+            None
+        } else {
+            // Poll upstream. Note that it is OK for this to be called again after it has finished as the stream is fused and if it is exhausted it will return Poll::Ready(None).
+            Some(this.upstream.poll_next(cx))
+        };
 
-            // No expired claim is ready so go for upstream
-            Poll::Pending | Poll::Ready(None) => {
-                let next = this.upstream.poll_next(cx);
-                match (&next, active_checks) {
-                    // Upstream has a new event with a claim
-                    (
-                        Poll::Ready(Some(Event::UpdateEntitlement(Entitlement {
-                            claims: Some(claim),
-                            ..
-                        }))),
-                        _,
-                    ) => {
-                        // We got a new claim, so clear the previous checks.
-                        this.checks.clear();
-                        // Insert the new checks.
-                        this.checks.insert_at(
-                            Event::WarnEntitlement,
-                            (to_positive_instant(claim.warn_at)).into(),
-                        );
-                        this.checks.insert_at(
-                            Event::HaltEntitlement,
-                            (to_positive_instant(claim.halt_at)).into(),
-                        );
-                        next
-                    }
-                    // Upstream has a new event with no claim
-                    (Poll::Ready(Some(_)), _) => {
-                        // As we have no claim clear the checks
-                        this.checks.clear();
-                        next
-                    }
-                    // There were still active checks, so go for pending
-                    (Poll::Ready(None), true) => Poll::Pending,
-                    // Upstream is exhausted and there are no checks left
-                    (Poll::Ready(None), false) => Poll::Ready(None),
-                    // Upstream not exhausted
-                    (Poll::Pending, _) => Poll::Pending,
-                }
+        match (checks, next) {
+            // Checks has an expired claim that needs checking.
+            // This is the ONLY arm where upstream.poll_next has not been called, and this is OK because we are not returning pending.
+            (Poll::Ready(Some(item)), _) => Poll::Ready(Some(item.into_inner())),
+            // Upstream has a new entitlement with a claim
+            (_, Some(Poll::Ready(Some(entitlement)))) if entitlement.claims.is_some() => {
+                // If we got a new entitlement then we need to reset the stream of events and return the new entitlement event.
+                reset_checks_for_entitlement(&mut this.checks, entitlement)
+            }
+            // Upstream has a new entitlement with no claim
+            (_, Some(Poll::Ready(Some(_)))) => {
+                // As we have no claim clear the checks
+                this.checks.clear();
+                Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
+            }
+            // If either checks or upstream returned pending then we need to return pending.
+            // It is the responsibility of upstream and checks to schedule wakeup.
+            // If we have got to this line then checks.poll_expired and upstream.poll_next *will* have been called.
+            (Poll::Pending, _) | (_, Some(Poll::Pending)) => Poll::Pending,
+            // If both stream are exhausted then return none.
+            (Poll::Ready(None), Some(Poll::Ready(None))) => Poll::Ready(None),
+            (Poll::Ready(None), None) => {
+                unreachable!("upstream will have been called as checks did not have a value")
             }
         }
     }
+}
+
+/// This function takes an entitlement and returns the appropriate event for that entitlement.
+/// If warn at or halt at are in the future it will register appropriate checks to trigger at such times.
+fn reset_checks_for_entitlement(
+    checks: &mut DelayQueue<Event>,
+    entitlement: Entitlement,
+) -> Poll<Option<Event>> {
+    // We got a new claim, so clear the previous checks.
+    checks.clear();
+    let claims = entitlement.claims.as_ref().expect("claims is gated, qed");
+    let halt_at = to_positive_instant(claims.halt_at);
+    let warn_at = to_positive_instant(claims.warn_at);
+    let now = Instant::now();
+    // Insert the new checks. If any of the boundaries are in the past then just return the immediate result
+    if halt_at > now {
+        // Only add halt if it isn't immediately going to be triggered.
+        checks.insert_at(
+            Event::UpdateEntitlement(EntitlementState::EntitledHalt),
+            (halt_at).into(),
+        );
+    } else {
+        return Poll::Ready(Some(Event::UpdateEntitlement(
+            EntitlementState::EntitledHalt,
+        )));
+    }
+    if warn_at > now {
+        // Only add warn if it isn't immediately going to be triggered and halt is not already set.
+        // Something that is halted is by definition also warn.
+        checks.insert_at(
+            Event::UpdateEntitlement(EntitlementState::EntitledWarn),
+            (warn_at).into(),
+        );
+    } else {
+        return Poll::Ready(Some(Event::UpdateEntitlement(
+            EntitlementState::EntitledWarn,
+        )));
+    }
+
+    Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Entitled)))
 }
 
 /// This function exists to generate an approximate Instant from a `SystemTime`. We have externally generated unix timestamps that need to be scheduled, but anything time related to scheduling must be an `Instant`.
@@ -193,38 +215,39 @@ fn to_positive_instant(system_time: SystemTime) -> Instant {
     }
 }
 
-trait EventStreamExt: Stream<Item = Event> {
+pub(crate) trait EntitlementStreamExt: Stream<Item = Entitlement> {
     fn expand_entitlements(self) -> EntitlementExpander<Self>
     where
         Self: Sized,
     {
         EntitlementExpander {
             checks: Default::default(),
-            upstream: self,
+            upstream: self.fuse(),
         }
     }
 }
 
-impl<T: Stream<Item = Event>> EventStreamExt for T {}
+impl<T: Stream<Item = Entitlement>> EntitlementStreamExt for T {}
 
 #[cfg(test)]
 mod test {
-
     use std::time::Duration;
     use std::time::Instant;
     use std::time::SystemTime;
 
     use futures::SinkExt;
     use futures::StreamExt;
+    use futures_test::stream::StreamTestExt;
 
     use crate::router::Event;
     use crate::uplink::entitlement::Audience;
     use crate::uplink::entitlement::Claims;
     use crate::uplink::entitlement::Entitlement;
+    use crate::uplink::entitlement::EntitlementState;
     use crate::uplink::entitlement::OneOrMany;
     use crate::uplink::entitlement_stream::to_positive_instant;
     use crate::uplink::entitlement_stream::EntitlementRequest;
-    use crate::uplink::entitlement_stream::EventStreamExt;
+    use crate::uplink::entitlement_stream::EntitlementStreamExt;
     use crate::uplink::stream_from_uplink;
 
     #[tokio::test]
@@ -271,8 +294,8 @@ mod test {
     }
 
     #[tokio::test]
-    async fn entitlement_expander_claim() {
-        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 15)])
+    async fn entitlement_expander() {
+        let events_stream = futures::stream::iter(vec![entitlement_with_claim(15, 30)])
             .expand_entitlements()
             .map(SimpleEvent::from);
 
@@ -288,8 +311,34 @@ mod test {
     }
 
     #[tokio::test]
+    async fn entitlement_expander_warn_now() {
+        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 15)])
+            .interleave_pending()
+            .expand_entitlements()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(
+            events,
+            &[SimpleEvent::WarnEntitlement, SimpleEvent::HaltEntitlement]
+        );
+    }
+
+    #[tokio::test]
+    async fn entitlement_expander_halt_now() {
+        let events_stream = futures::stream::iter(vec![entitlement_with_claim(0, 0)])
+            .interleave_pending()
+            .expand_entitlements()
+            .map(SimpleEvent::from);
+
+        let events = events_stream.collect::<Vec<_>>().await;
+        assert_eq!(events, &[SimpleEvent::HaltEntitlement]);
+    }
+
+    #[tokio::test]
     async fn entitlement_expander_no_claim() {
         let events_stream = futures::stream::iter(vec![entitlement_with_no_claim()])
+            .interleave_pending()
             .expand_entitlements()
             .map(SimpleEvent::from);
 
@@ -303,6 +352,7 @@ mod test {
             entitlement_with_claim(10, 10),
             entitlement_with_no_claim(),
         ])
+        .interleave_pending()
         .expand_entitlements()
         .map(SimpleEvent::from);
 
@@ -320,8 +370,9 @@ mod test {
     async fn entitlement_expander_no_claim_claim() {
         let events_stream = futures::stream::iter(vec![
             entitlement_with_no_claim(),
-            entitlement_with_claim(0, 15),
+            entitlement_with_claim(15, 30),
         ])
+        .interleave_pending()
         .expand_entitlements()
         .map(SimpleEvent::from);
 
@@ -337,16 +388,16 @@ mod test {
         );
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn entitlement_expander_claim_pause_claim() {
         let (mut tx, rx) = futures::channel::mpsc::channel(10);
         let events_stream = rx.expand_entitlements().map(SimpleEvent::from);
 
         tokio::task::spawn(async move {
             // This simulates a new claim coming in before in between the warning and halt
-            let _ = tx.send(entitlement_with_claim(0, 30)).await;
-            tokio::time::sleep(Duration::from_millis(5)).await;
-            let _ = tx.send(entitlement_with_claim(0, 30)).await;
+            let _ = tx.send(entitlement_with_claim(15, 45)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            let _ = tx.send(entitlement_with_claim(15, 30)).await;
         });
         let events = events_stream.collect::<Vec<_>>().await;
         assert_eq!(
@@ -361,9 +412,9 @@ mod test {
         );
     }
 
-    fn entitlement_with_claim(warn_delta: u64, halt_delta: u64) -> Event {
+    fn entitlement_with_claim(warn_delta: u64, halt_delta: u64) -> Entitlement {
         let now = SystemTime::now();
-        Event::UpdateEntitlement(Entitlement {
+        Entitlement {
             claims: Some(Claims {
                 iss: "".to_string(),
                 sub: "".to_string(),
@@ -371,15 +422,11 @@ mod test {
                 warn_at: now + Duration::from_millis(warn_delta),
                 halt_at: now + Duration::from_millis(halt_delta),
             }),
-            configuration_restrictions: vec![],
-        })
+        }
     }
 
-    fn entitlement_with_no_claim() -> Event {
-        Event::UpdateEntitlement(Entitlement {
-            claims: None,
-            configuration_restrictions: vec![],
-        })
+    fn entitlement_with_no_claim() -> Entitlement {
+        Entitlement { claims: None }
     }
 
     #[derive(Eq, PartialEq, Debug)]
@@ -402,9 +449,13 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
+                Event::UpdateEntitlement(EntitlementState::EntitledHalt) => {
+                    SimpleEvent::HaltEntitlement
+                }
+                Event::UpdateEntitlement(EntitlementState::EntitledWarn) => {
+                    SimpleEvent::WarnEntitlement
+                }
                 Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
-                Event::WarnEntitlement => SimpleEvent::WarnEntitlement,
-                Event::HaltEntitlement => SimpleEvent::HaltEntitlement,
                 Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }

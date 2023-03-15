@@ -47,6 +47,18 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
+    /// request was malformed: {reason}
+    MalformedRequest {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
+    /// response was malformed: {reason}
+    MalformedResponse {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
     /// service '{service}' response was malformed: {reason}
     SubrequestMalformedResponse {
         /// The service that responded with the malformed response.
@@ -158,6 +170,8 @@ impl ErrorExtension for FetchError {
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             #[cfg(test)]
             FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
+            FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
+            FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
         .to_string()
     }
@@ -447,13 +461,4 @@ impl ParseErrors {
             });
         };
     }
-}
-
-/// Error types for licensing.
-#[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum LicenseError {
-    /// Apollo graph reference is missing
-    MissingGraphReference,
-    /// Apollo key is missing
-    MissingKey,
 }

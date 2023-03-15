@@ -54,7 +54,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 /// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Conf {
+pub(crate) struct Conf {
     /// Logging configuration
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,
@@ -340,8 +340,8 @@ fn default_sampler() -> SamplerOption {
 impl Default for Trace {
     fn default() -> Self {
         Self {
-            service_name: default_service_name(),
-            service_namespace: default_service_namespace(),
+            service_name: "router".to_string(),
+            service_namespace: Default::default(),
             sampler: default_sampler(),
             parent_based_sampler: default_parent_based_sampler(),
             max_events_per_span: default_max_events_per_span(),
@@ -354,12 +354,6 @@ impl Default for Trace {
     }
 }
 
-fn default_service_name() -> String {
-    "${env.OTEL_SERVICE_NAME:-router}".to_string()
-}
-fn default_service_namespace() -> String {
-    "".to_string()
-}
 fn default_max_events_per_span() -> u32 {
     SpanLimits::default().max_events_per_span
 }

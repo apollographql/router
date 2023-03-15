@@ -65,7 +65,7 @@ impl MetricsConfigurator for Config {
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
             tracing::info!(
-                "prometheus endpoint exposed at {}{}",
+                "Prometheus endpoint exposed at {}{}",
                 self.listen,
                 self.path
             );
@@ -128,6 +128,7 @@ impl Service<router::Request> for PrometheusService {
             Ok(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
+                    .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
                     .body::<hyper::Body>(result.into())
                     .map_err(BoxError::from)?,
                 context: req.context,

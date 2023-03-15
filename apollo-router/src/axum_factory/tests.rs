@@ -46,6 +46,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 #[cfg(unix)]
 use tokio::io::BufReader;
+use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
 use tower::BoxError;
@@ -82,6 +83,7 @@ use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
+use crate::uplink::entitlement::EntitlementState;
 use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::Context;
@@ -183,6 +185,8 @@ async fn init(
             }
         }
     });
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+
     let server = server_factory
         .create(
             TestRouterFactory {
@@ -211,6 +215,8 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::Unentitled,
+            all_connections_stopped_sender,
         )
         .await
         .expect("Failed to create server factory");
@@ -245,6 +251,7 @@ pub(super) async fn init_with_config(
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
     tokio::spawn(async move {
         loop {
@@ -265,6 +272,8 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
+            EntitlementState::Unentitled,
+            all_connections_stopped_sender,
         )
         .await?;
     let mut default_headers = HeaderMap::new();
@@ -298,6 +307,7 @@ async fn init_unix(
 ) -> HttpServerHandle {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
     tokio::spawn(async move {
         loop {
@@ -328,6 +338,8 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::Unentitled,
+            all_connections_stopped_sender,
         )
         .await
         .expect("Failed to create server factory")
@@ -1745,6 +1757,8 @@ async fn it_supports_server_restart() {
         inner: service.into_inner(),
     };
 
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+
     let server = server_factory
         .create(
             supergraph_service_factory.clone(),
@@ -1752,6 +1766,8 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::default(),
+            all_connections_stopped_sender,
         )
         .await
         .expect("Failed to create server factory");
@@ -1779,6 +1795,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
+            EntitlementState::default(),
         )
         .await
         .unwrap();
