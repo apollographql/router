@@ -9,7 +9,7 @@ This article documents symbols and behaviors that are specific to [Rhai customiz
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn supergraph_service(service) {}
@@ -89,9 +89,33 @@ fn supergraph_service(service) {
 }
 ```
 
-If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+You can also `throw` a valid GraphQL response, which will be deserialized and dealt with by the router.
 
-Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something goes wrong during request processing...
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](https://www.apollographql.com/docs/router/configuration/rhai).
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
 ## Timing execution
 
@@ -250,8 +274,6 @@ These additional fields are shared across all subgraph invocations and are thus 
 The context is a generic key/value store that exists for the entire lifespan of a particular client request. You can use this to share information between multiple callbacks throughout the request's lifespan.
 
 Keys must be strings, but values can be any Rhai object.
-
-For more information, see [Define necessary context](./native#5-define-necessary-context).
 
 ```rhai
 // You can interact with request.context as an indexed variable

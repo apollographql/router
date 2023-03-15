@@ -462,12 +462,3 @@ impl ParseErrors {
         };
     }
 }
-
-/// Error types for licensing.
-#[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum LicenseError {
-    /// Apollo graph reference is missing
-    MissingGraphReference,
-    /// Apollo key is missing
-    MissingKey,
-}

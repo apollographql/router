@@ -64,6 +64,7 @@ use crate::json_ext::Value;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::register_plugin;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -631,14 +632,27 @@ macro_rules! gen_map_request {
                         error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$base::Response, $base::Request>, BoxError>
                     {
-                        let res = $base::Response::error_builder()
-                            .errors(vec![Error {
-                                message: error_details.message,
-                                ..Default::default()
-                            }])
-                            .status_code(error_details.status)
-                            .context(context)
-                            .build()?;
+                        let res = if let Some(body) = error_details.body {
+                            $base::Response::builder()
+                                .extensions(body.extensions)
+                                .errors(body.errors)
+                                .status_code(error_details.status)
+                                .context(context)
+                                .and_data(body.data)
+                                .and_label(body.label)
+                                .and_path(body.path)
+                                .build()
+                        } else {
+                            $base::Response::error_builder()
+                                .errors(vec![Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                }])
+                                .context(context)
+                                .status_code(error_details.status)
+                                .build()?
+                        };
+
                         Ok(ControlFlow::Break(res))
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
@@ -659,7 +673,7 @@ macro_rules! gen_map_request {
                     };
                     if let Err(error) = result {
                         let error_details = process_error(error);
-                        tracing::error!("map_request callback failed: {error_details}");
+                        tracing::error!("map_request callback failed: {error_details:#?}");
                         let mut guard = shared_request.lock().unwrap();
                         let request_opt = guard.take();
                         return failure_message(request_opt.unwrap().context, error_details);
@@ -695,14 +709,27 @@ macro_rules! gen_map_deferred_request {
                         context: Context,
                         error_details: ErrorDetails,
                     ) -> Result<ControlFlow<$response, $request>, BoxError> {
-                        let res = $response::error_builder()
-                            .errors(vec![Error {
-                                message: error_details.message,
-                                ..Default::default()
-                            }])
-                            .status_code(error_details.status)
-                            .context(context)
-                            .build()?;
+                        let res = if let Some(body) = error_details.body {
+                            $response::builder()
+                                .extensions(body.extensions)
+                                .errors(body.errors)
+                                .status_code(error_details.status)
+                                .context(context)
+                                .and_data(body.data)
+                                .and_label(body.label)
+                                .and_path(body.path)
+                                .build()?
+                        } else {
+                            $response::error_builder()
+                                .errors(vec![Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                }])
+                                .context(context)
+                                .status_code(error_details.status)
+                                .build()?
+                        };
+
                         Ok(ControlFlow::Break(res))
                     }
                     let shared_request = Shared::new(Mutex::new(Some(request)));
@@ -741,7 +768,8 @@ macro_rules! gen_map_response {
                     ) -> $base::Response {
                         let res = $base::Response::error_builder()
                             .errors(vec![Error {
-                                message: error_details.message,
+                                // TODO
+                                message: error_details.message.unwrap_or_default(),
                                 ..Default::default()
                             }])
                             .status_code(error_details.status)
@@ -798,8 +826,10 @@ macro_rules! gen_map_deferred_response {
                         error_details: ErrorDetails,
                     ) -> $response {
                         let res = $response::error_builder()
-                            .errors(vec![Error {
-                                message: error_details.message,
+
+                        .errors(vec![Error {
+                                // TODO
+                                message: error_details.message.unwrap_or_default(),
                                 ..Default::default()
                             }])
                             .status_code(error_details.status)
@@ -818,8 +848,9 @@ macro_rules! gen_map_deferred_response {
                     if first.is_none() {
                         let error_details = ErrorDetails {
                             status: StatusCode::INTERNAL_SERVER_ERROR,
-                            message: "rhai execution error: empty response".to_string(),
-                            position: None
+                            message: Some("rhai execution error: empty response".to_string()),
+                            position: None,
+                            body: None
                         };
                         return Ok(failure_message(
                             context,
@@ -1093,31 +1124,58 @@ impl ServiceStep {
     }
 }
 
-struct ErrorDetails {
-    status: StatusCode,
-    message: String,
-    position: Option<Position>,
-    // Add support for extension_code ?
+#[derive(Deserialize, Debug)]
+struct Position {
+    line: Option<usize>,
+    pos: Option<usize>,
 }
 
-impl fmt::Display for ErrorDetails {
+impl fmt::Display for Position {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.position {
-            Some(pos) => {
-                write!(f, "{}: {}({})", self.status, self.message, pos)
-            }
-            None => {
-                write!(f, "{}: {}", self.status, self.message)
-            }
+        if self.line.is_none() || self.pos.is_none() {
+            write!(f, "none")
+        } else {
+            write!(
+                f,
+                "line {}, position {}",
+                self.line.expect("checked above;qed"),
+                self.pos.expect("checked above;qed")
+            )
         }
     }
+}
+
+impl From<&rhai::Position> for Position {
+    fn from(value: &rhai::Position) -> Self {
+        Self {
+            line: value.line(),
+            pos: value.position(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+struct ErrorDetails {
+    #[serde(
+        with = "http_serde::status_code",
+        default = "default_thrown_status_code"
+    )]
+    status: StatusCode,
+    message: Option<String>,
+    position: Option<Position>,
+    body: Option<crate::graphql::Response>,
+}
+
+fn default_thrown_status_code() -> StatusCode {
+    StatusCode::INTERNAL_SERVER_ERROR
 }
 
 fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
     let mut error_details = ErrorDetails {
         status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: format!("rhai execution error: '{error}'"),
+        message: Some(format!("rhai execution error: '{error}'")),
         position: None,
+        body: None,
     };
 
     // We only want to process errors raised in functions
@@ -1125,47 +1183,14 @@ fn process_error(error: Box<EvalAltResult>) -> ErrorDetails {
         let inner_error = error.unwrap_inner();
         // We only want to process runtime errors raised in functions
         if let EvalAltResult::ErrorRuntime(obj, pos) = inner_error {
-            error_details.position = Some(*pos);
-            // If we have a dynamic map, try to process it
-            if obj.is_map() {
-                // Clone is annoying, but we only have a reference, so...
-                let map = obj.clone().cast::<Map>();
-
-                let mut ed_status: Option<StatusCode> = None;
-                let mut ed_message: Option<String> = None;
-
-                let status_opt = map.get("status");
-                let message_opt = map.get("message");
-
-                // Now we have optional Dynamics
-                // Try to process each independently
-                if let Some(status_dyn) = status_opt {
-                    if let Ok(value) = status_dyn.as_int() {
-                        if let Ok(status) = StatusCode::try_from(value as u16) {
-                            ed_status = Some(status);
-                        }
-                    }
-                }
-
-                if let Some(message_dyn) = message_opt {
-                    let cloned = message_dyn.clone();
-                    if let Ok(value) = cloned.into_string() {
-                        ed_message = Some(value);
-                    }
-                }
-
-                if let Some(status) = ed_status {
-                    // Decide in future if returning a 200 here is ok.
-                    // If it is, we can simply remove this check
-                    if status != StatusCode::OK {
-                        error_details.status = status;
-                    }
-                }
-
-                if let Some(message) = ed_message {
-                    error_details.message = message;
+            if let Ok(temp_error_details) = rhai::serde::from_dynamic::<ErrorDetails>(obj) {
+                if temp_error_details.message.is_some() || temp_error_details.body.is_some() {
+                    error_details = temp_error_details;
+                } else {
+                    error_details.status = temp_error_details.status;
                 }
             }
+            error_details.position = Some(pos.into());
         }
     }
     error_details
@@ -1660,7 +1685,7 @@ impl Rhai {
         global_variables.insert("APOLLO_START".into(), Instant::now().into());
         global_variables.insert(
             "APOLLO_AUTHENTICATION_JWT_CLAIMS".into(),
-            "apollo_authentication::JWT::claims".to_string().into(),
+            APOLLO_AUTHENTICATION_JWT_CLAIMS.to_string().into(),
         );
 
         let shared_globals = Arc::new(global_variables);

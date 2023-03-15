@@ -1,4 +1,18 @@
+use std::collections::HashMap;
 use std::path::Path;
+
+use jsonwebtoken::encode;
+use jsonwebtoken::get_current_timestamp;
+use jsonwebtoken::jwk::CommonParameters;
+use jsonwebtoken::jwk::EllipticCurveKeyParameters;
+use jsonwebtoken::jwk::EllipticCurveKeyType;
+use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::EncodingKey;
+use p256::ecdsa::SigningKey;
+use p256::pkcs8::EncodePrivateKey;
+use rand_core::OsRng;
+use serde::Serialize;
+use serde_json::Value;
 
 use super::*;
 use crate::plugin::test;
@@ -8,28 +22,10 @@ fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
 
     let jwks_path = jwks_base.join("fixtures").join(filename);
-    #[cfg(target_os = "windows")]
-    let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
-    #[cfg(not(target_os = "windows"))]
-    let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
 
-    #[cfg(target_os = "windows")]
-    {
-        // We need to manipulate our canonicalized file if we are on Windows.
-        // We replace windows path separators with posix path separators
-        // We also drop the first 3 characters from the path since they will be
-        // something like (drive letter may vary) '\\?\C:' and that isn't
-        // a valid URI
-        let mut file_string = jwks_file.display().to_string();
-        file_string = file_string.replace("\\", "/");
-        let len = file_string
-            .char_indices()
-            .nth(3)
-            .map_or(0, |(idx, _ch)| idx);
-        jwks_file = file_string[len..].into();
-    }
+    let jwks_absolute_path = std::fs::canonicalize(jwks_path).unwrap();
 
-    format!("file://{}", jwks_file.display())
+    Url::from_file_path(jwks_absolute_path).unwrap().to_string()
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
@@ -68,33 +64,38 @@ async fn build_a_test_harness(
     let mut config = if multiple_jwks {
         serde_json::json!({
             "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks_urls": [&jwks_url, &jwks_url]
-                    }
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        },
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
                 }
             }
         })
     } else {
         serde_json::json!({
             "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks_urls": [&jwks_url]
-                    }
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
                 }
             }
         })
     };
 
     if let Some(hn) = header_name {
-        config["authentication"]["experimental"]["jwt"]["header_name"] =
-            serde_json::Value::String(hn);
+        config["authentication"]["jwt"]["header_name"] = serde_json::Value::String(hn);
     }
 
     if let Some(hp) = header_value_prefix {
-        config["authentication"]["experimental"]["jwt"]["header_value_prefix"] =
-            serde_json::Value::String(hp);
+        config["authentication"]["jwt"]["header_value_prefix"] = serde_json::Value::String(hp);
     }
 
     crate::TestHarness::builder()
@@ -113,7 +114,37 @@ async fn load_plugin() {
 
 #[tokio::test]
 async fn it_rejects_when_there_is_no_auth_header() {
-    let test_harness = build_a_default_test_harness().await;
+    let mut mock_service = test::MockSupergraphService::new();
+    mock_service.expect_clone().return_once(move || {
+        println!("cloned to supergraph mock");
+        let mut mock_service = test::MockSupergraphService::new();
+        mock_service.expect_call().never();
+        mock_service
+    });
+    let jwks_url = create_an_url("jwks.json");
+
+    let config = serde_json::json!({
+        "authentication": {
+            "jwt" : {
+                "jwks": [
+                    {
+                        "url": &jwks_url
+                    }
+                ]
+            }
+        },
+        "rhai": {
+            "scripts":"tests/fixtures",
+            "main":"require_authentication.rhai"
+        }
+    });
+    let test_harness = crate::TestHarness::builder()
+        .configuration_json(config)
+        .unwrap()
+        .supergraph_hook(move |_| mock_service.clone().boxed())
+        .build_router()
+        .await
+        .unwrap();
 
     // Let's create a request with our operation name
     let request_with_appropriate_name = supergraph::Request::canned_builder()
@@ -138,7 +169,7 @@ async fn it_rejects_when_there_is_no_auth_header() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("Missing authorization header")
+        .message("The request is not authenticated")
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -249,7 +280,9 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("'header.payload' is not a valid JWT header: InvalidToken")
+        .message(format!(
+            "'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: InvalidToken"
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -289,7 +322,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-            .message("'header.payload.signature' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
+            .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
             .extension_code("AUTH_ERROR")
             .build();
 
@@ -516,7 +549,7 @@ async fn build_jwks_search_components() -> JwksManager {
 
     for s_url in &sets {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
-        urls.push(url);
+        urls.push(JwksConfig { url, issuer: None });
     }
 
     JwksManager::new(urls).await.unwrap()
@@ -531,7 +564,7 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
@@ -547,7 +580,7 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
@@ -577,7 +610,7 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
         alg: Algorithm::ES256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
@@ -596,7 +629,7 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         alg: Algorithm::RS256,
     };
 
-    let key = search_jwks(&jwks_manager, &criteria)
+    let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
         .expect("search worked")
         .expect("found a key");
     assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
@@ -604,4 +637,205 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
         "022516583d56b68faf40260fda72978a",
         key.common.key_id.unwrap()
     );
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: u64,
+    iss: Option<String>,
+}
+
+fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
+    let jwks = JwkSet {
+        keys: vec![jwk.clone()],
+    };
+
+    let url = Url::from_str("file:///jwks.json").unwrap();
+    let list = vec![JwksConfig {
+        url: url.clone(),
+        issuer,
+    }];
+    let map = HashMap::from([(url, jwks); 1]);
+
+    JwksManager::new_test(list, map)
+}
+
+#[tokio::test]
+async fn issuer_check() {
+    let signing_key = SigningKey::random(&mut OsRng);
+    let verifying_key = signing_key.verifying_key();
+    let point = verifying_key.to_encoded_point(false);
+
+    let encoding_key = EncodingKey::from_ec_der(&signing_key.to_pkcs8_der().unwrap().to_bytes());
+
+    let url_safe_engine = base64::engine::fast_portable::FastPortable::from(
+        &base64::alphabet::URL_SAFE,
+        base64::engine::fast_portable::NO_PAD,
+    );
+    let jwk = Jwk {
+        common: CommonParameters {
+            public_key_use: Some(PublicKeyUse::Signature),
+            key_operations: Some(vec![KeyOperations::Verify]),
+            algorithm: Some(Algorithm::ES256),
+            key_id: Some("hello".to_string()),
+            ..Default::default()
+        },
+        algorithm: AlgorithmParameters::EllipticCurve(EllipticCurveKeyParameters {
+            key_type: EllipticCurveKeyType::EC,
+            curve: EllipticCurve::P256,
+            x: base64::encode_engine(point.x().unwrap(), &url_safe_engine),
+            y: base64::encode_engine(point.y().unwrap(), &url_safe_engine),
+        }),
+    };
+
+    let manager = make_manager(&jwk, Some("hello".to_string()));
+
+    // No issuer
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: None,
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            panic!("unexpected response: {res:?}");
+        }
+        ControlFlow::Continue(req) => {
+            println!("got req with issuer check");
+            let claims: Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+            println!("claims: {claims:?}");
+        }
+    }
+
+    // Valid issuer
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: Some("hello".to_string()),
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
+        }
+        ControlFlow::Continue(req) => {
+            println!("got req with issuer check");
+            let claims: Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+            println!("claims: {claims:?}");
+        }
+    }
+
+    // Invalid issuer
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: Some("AAAA".to_string()),
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+            .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+        }
+        ControlFlow::Continue(_) => {
+            panic!("issuer check should have failed")
+        }
+    }
+
+    // no issuer check
+    let manager = make_manager(&jwk, None);
+    let token = encode(
+        &jsonwebtoken::Header::new(Algorithm::ES256),
+        &Claims {
+            sub: "test".to_string(),
+            exp: get_current_timestamp(),
+            iss: Some("hello".to_string()),
+        },
+        &encoding_key,
+    )
+    .unwrap();
+
+    let request = supergraph::Request::canned_builder()
+        .operation_name("me".to_string())
+        .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
+        .build()
+        .unwrap();
+
+    match authenticate(&JWTConf::default(), &manager, request.try_into().unwrap()).unwrap() {
+        ControlFlow::Break(res) => {
+            let response: graphql::Response = serde_json::from_slice(
+                &hyper::body::to_bytes(res.response.into_body())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(response, graphql::Response::builder()
+        .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
+        }
+        ControlFlow::Continue(req) => {
+            println!("got req with issuer check");
+            let claims: Value = req
+                .context
+                .get(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                .unwrap()
+                .unwrap();
+            println!("claims: {claims:?}");
+        }
+    }
 }

@@ -100,6 +100,5 @@ pub mod _private {
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
     // For tests
-    pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }

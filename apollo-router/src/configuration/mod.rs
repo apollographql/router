@@ -131,6 +131,10 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) tls: Tls,
 
+    /// Configures automatic persisted queries
+    #[serde(default)]
+    pub(crate) apq: Apq,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -161,6 +165,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             #[serde(flatten)]
             apollo_plugins: ApolloPlugins,
             tls: Tls,
+            apq: Apq,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -174,6 +179,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .plugins(ad_hoc.plugins.plugins.unwrap_or_default())
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
+            .apq(ad_hoc.apq)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -204,6 +210,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
+        apq: Option<Apq>,
     ) -> Result<Self, ConfigurationError> {
         let conf = Self {
             validated_yaml: Default::default(),
@@ -213,6 +220,7 @@ impl Configuration {
             sandbox: sandbox.unwrap_or_default(),
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
+            apq: apq.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -270,6 +278,7 @@ impl Configuration {
         plugins: Map<String, Value>,
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
+        apq: Option<Apq>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -286,6 +295,7 @@ impl Configuration {
                 plugins: apollo_plugins,
             },
             tls: tls.unwrap_or_default(),
+            apq: apq.unwrap_or_default(),
         };
 
         configuration.validate()
@@ -450,9 +460,6 @@ pub(crate) struct Supergraph {
     /// Set to false to disable defer support
     pub(crate) defer_support: bool,
 
-    /// Configures automatic persisted queries
-    pub(crate) apq: Apq,
-
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
 }
@@ -469,7 +476,6 @@ impl Supergraph {
         path: Option<String>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
-        apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
         Self {
@@ -477,7 +483,6 @@ impl Supergraph {
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
-            apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
     }
@@ -492,7 +497,6 @@ impl Supergraph {
         path: Option<String>,
         introspection: Option<bool>,
         defer_support: Option<bool>,
-        apq: Option<Apq>,
         query_planning: Option<QueryPlanning>,
     ) -> Self {
         Self {
@@ -500,7 +504,6 @@ impl Supergraph {
             path: path.unwrap_or_else(default_graphql_path),
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
-            apq: apq.unwrap_or_default(),
             query_planning: query_planning.unwrap_or_default(),
         }
     }
@@ -529,6 +532,14 @@ impl Supergraph {
     }
 }
 
+/// Router level (APQ) configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Router {
+    #[serde(default)]
+    pub(crate) cache: Cache,
+}
+
 /// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -536,9 +547,9 @@ pub(crate) struct Apq {
     /// Activates Automatic Persisted Queries (enabled by default)
     #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
-    /// Cache configuration
+
     #[serde(default)]
-    pub(crate) experimental_cache: Cache,
+    pub(crate) router: Router,
 
     #[serde(default)]
     pub(crate) subgraph: ApqSubgraphWrapper,
@@ -577,7 +588,7 @@ impl Default for Apq {
     fn default() -> Self {
         Self {
             enabled: default_apq(),
-            experimental_cache: Default::default(),
+            router: Default::default(),
             subgraph: Default::default(),
         }
     }
@@ -585,7 +596,7 @@ impl Default for Apq {
 
 /// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
     pub(crate) experimental_cache: Cache,
@@ -598,7 +609,7 @@ pub(crate) struct QueryPlanning {
 
 /// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,
@@ -627,7 +638,7 @@ impl Default for InMemoryCache {
 /// Redis cache configuration
 pub(crate) struct RedisCache {
     /// List of URLs to the Redis cluster
-    pub(crate) urls: Vec<String>,
+    pub(crate) urls: Vec<url::Url>,
 }
 
 /// TLS related configuration options.

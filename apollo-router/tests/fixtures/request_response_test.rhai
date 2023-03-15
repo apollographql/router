@@ -120,6 +120,31 @@ fn process_subgraph_response_om_forbidden(response) {
     };
 }
 
+fn process_subgraph_response_om_forbidden_graphql(response) {
+    throw #{
+        status: 403,
+        body: #{
+            errors: [#{
+                message: `I have raised a 403`,
+                extensions: #{
+                    code: "ACCESS_DENIED"
+                }
+            }]
+        }
+    };
+}
+
+
+fn process_subgraph_response_om_200_graphql(response) {
+    throw #{
+        status: 200,
+        body: #{
+            data: #{
+                name: "Ada Lovelace"
+            }
+        }
+    };
+}
 fn process_subgraph_response_string(response) {
     throw "I have raised an error";
 }

@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 #![allow(missing_docs)] // FIXME
 
 use std::sync::Arc;
