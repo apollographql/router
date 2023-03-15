@@ -4,6 +4,8 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+> :balloon: This is a fast-follow to v1.12.0 which included many new updates and new GraphOS Enterprise features.  Be sure to check that (longer, more detailed!) changelog for the full details.  Thanks!
+
 # [1.12.1] - 2023-03-15
 
 ## 🐛 Fixes
@@ -13,7 +15,6 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 Our end-to-end integration testing revealed a newly-introduced bug in v1.12.0 which could affect requests to Apollo Uplink endpoints which are located in different data centers, when those results yield differing responses.  This only impacted a very small number of cases, but retaining previous fetched values is undeniably more durable and will fix this so we're expediting a fix.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2781
-
 
 
 # [1.12.0] - 2023-03-15
@@ -83,7 +84,7 @@ By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollo
 
 ### In-flight requests will terminate before shutdown is completed ([Issue #2539](https://github.com/apollographql/router/issues/2539))
 
-In-flight client requests will now be completed when the router is asked to shutdown gracefully. 
+In-flight client requests will now be completed when the router is asked to shutdown gracefully.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2610
 
