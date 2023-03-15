@@ -330,7 +330,7 @@ impl IntegrationTest {
     pub async fn assert_metrics_contains(&self, text: &str) {
         let now = Instant::now();
         let mut last_metrics = String::new();
-        while now.elapsed() < Duration::from_secs(5) {
+        while now.elapsed() < Duration::from_secs(10) {
             if let Ok(metrics) = self
                 .get_metrics_response()
                 .await
