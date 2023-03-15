@@ -209,21 +209,21 @@ headers:
 
 ## Response header propagation
 
-It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. It can however be achieved using [Rhai scripting](../customizations/rhai).
+It is not currently possible to propagate response headers from subgraphs to clients using YAML configuration alone. However, you _can_ achieve this using [Rhai scripting](../customizations/rhai).
 
-This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
+This approach relies on the fact that each request has a `context` object that can store data for the duration of that request:
 
 1. For each subgraph response, copy header values into context.
 2. For the supergraph response, copy header values from the context onto the response.
 
-Example router.yaml that will use the Rhai script:
+Example `router.yaml` that will use the Rhai script:
 
 ```yaml title="router.yaml"
 rhai:
   main: "main.rhai"
 ```
 
-Example Rhai script that collects `set-cookie` headers from subgraphs and merges them into a single client response header.
+Example Rhai script that collects `set-cookie` headers from subgraphs and merges them into a single client response header:
 
 ```rhai title="./rhai/main.rhai"
 fn supergraph_service(service) {
@@ -251,18 +251,18 @@ fn subgraph_service(service, subgraph) {
 }
 ```
 
-If you would like to see a YAML based solution then [please leave us a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
+> If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/1284).
 
 ## Propagation between subgraphs
 
-It is not currently possible to propagate headers between subgraphs using yaml config alone. It can however be achieved using [Rhai scripting](../customizations/rhai).
+It is not currently possible to propagate headers between subgraphs using YAML config alone. However, you _can_ achieve this using [Rhai scripting](../customizations/rhai).
 
-This approach relies on the fact that all requests have context that can be used to store data for the duration of the request:
+This approach relies on the fact that each request has a `context` object that can store data for the duration of that request:
 
 1. For each subgraph response, copy header values into context.
 2. For each subgraph request, copy header values from context into the subgraph request.
 
-Example router.yaml that will use the Rhai script:
+Example `router.yaml` that will use the Rhai script:
 
 ```yaml title="router.yaml"
 rhai:
@@ -300,4 +300,4 @@ fn subgraph_service(service, subgraph) {
 }
 ```
 
-If you would like to see a YAML based solution then [please leave us a comment on our issue tracker](https://github.com/apollographql/router/issues/2444).
+> If you require a configuration-based solution for response header propagation, [please leave a comment on our issue tracker](https://github.com/apollographql/router/issues/2444).

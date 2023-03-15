@@ -1,6 +1,4 @@
 ###
-# This feature is experimental and subject to change without notice.
-#
 # The only mandatory parameter is the url, which specifies the target of an HTTP post payload
 # 
 # optional parameters:
