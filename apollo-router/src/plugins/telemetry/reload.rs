@@ -1,3 +1,4 @@
+use crate::plugins::telemetry::metrics;
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -93,6 +94,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
 pub(super) fn reload_metrics(layer: MetricsLayer) {
     if let Some(handle) = METRICS_LAYER_HANDLE.get() {
+        // If we are now going live with a new controller then maybe stash it.
+        metrics::prometheus::commit_new_controller();
         handle
             .reload(layer)
             .expect("metrics layer reload must succeed");
