@@ -532,6 +532,14 @@ impl Supergraph {
     }
 }
 
+/// Router level (APQ) configuration
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Router {
+    #[serde(default)]
+    pub(crate) cache: Cache,
+}
+
 /// Automatic Persisted Queries (APQ) configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -539,9 +547,9 @@ pub(crate) struct Apq {
     /// Activates Automatic Persisted Queries (enabled by default)
     #[serde(default = "default_apq")]
     pub(crate) enabled: bool,
-    /// Cache configuration
+
     #[serde(default)]
-    pub(crate) experimental_cache: Cache,
+    pub(crate) router: Router,
 
     #[serde(default)]
     pub(crate) subgraph: ApqSubgraphWrapper,
@@ -580,7 +588,7 @@ impl Default for Apq {
     fn default() -> Self {
         Self {
             enabled: default_apq(),
-            experimental_cache: Default::default(),
+            router: Default::default(),
             subgraph: Default::default(),
         }
     }
@@ -588,7 +596,7 @@ impl Default for Apq {
 
 /// Query planning cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
     pub(crate) experimental_cache: Cache,
@@ -601,7 +609,7 @@ pub(crate) struct QueryPlanning {
 
 /// Cache configuration
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Cache {
     /// Configures the in memory cache (always active)
     pub(crate) in_memory: InMemoryCache,

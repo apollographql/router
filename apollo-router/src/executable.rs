@@ -194,6 +194,7 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// Your Apollo Router entitlement.
+    /// EXPERIMENTAL and not subject to semver.
     #[clap(skip = std::env::var("APOLLO_ROUTER_ENTITLEMENT").ok())]
     apollo_router_entitlement: Option<String>,
 

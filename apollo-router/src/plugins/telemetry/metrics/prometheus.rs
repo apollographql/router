@@ -65,7 +65,7 @@ impl MetricsConfigurator for Config {
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
             tracing::info!(
-                "prometheus endpoint exposed at {}{}",
+                "Prometheus endpoint exposed at {}{}",
                 self.listen,
                 self.path
             );

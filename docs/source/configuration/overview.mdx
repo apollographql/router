@@ -411,6 +411,18 @@ In this example, the `accounts` subgraph URL is overridden to point to `http://l
 
 Any subgraphs that are _omitted_ from `override_subgraph_url` continue to use the routing URL specified in the supergraph schema.
 
+### Caching
+
+By default, the Apollo Router stores the following data in its in-memory cache to improve performance:
+
+- Generated query plans
+- Automatic persisted queries (APQ)
+- Introspection responses
+
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-memory caching in the Apollo Router](./in-memory-caching/).
+
+**If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/)
+
 ### HTTP header rules
 
 See [Sending HTTP headers to subgraphs](./header-propagation/).
@@ -423,57 +435,13 @@ See [Configuring CORS in the Apollo Router](./cors).
 
 See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
 
-### External extensibility
+### External coprocessing
 
-See [External extensibility in the Apollo Router](./external).
+See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
 
 ### OpenTelemetry tracing
 
 See [Tracing in the Apollo Router](./tracing/).
-
-### Automatic persisted queries (APQ)
-
-Automatic Persisted Queries (APQ) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
-
-The Apollo Router supports using APQ in its communications with both clients _and_ subgraphs:
-
-- **In its communications with clients,** the router acts as a GraphQL server, because it receives queries from clients.
-- **In its communications with subgraphs,** the router acts as a GraphQL _client_, because it _sends_ queries to subgraphs.
-
-Because the router's role differs between these two interactions, you configure these APQ settings separately.
-
-#### APQ with clients
-
-The Apollo Router automatically supports APQ with clients via its in-memory cache. See the [caching documentation](./caching) for related options.
-
-You can _disable_ this APQ support like so:
-
-```yaml
-apq:
-  enabled: false
-```
-
-#### APQ with subgraphs
-
-By default, the Apollo Router does _not_ use APQ when sending queries to its subgraphs.
-
-You can configure this APQ support with a combination of global and per-subgraph settings:
-
-```yaml title="router.yaml"
-apq:
-  subgraph:
-    # Disable subgraph APQ globally unless overridden per-subgraph
-    all:
-      enabled: false
-    # Override global APQ setting for individual subgraphs
-    subgraphs:
-      products:
-        enabled: true
-```
-
-In the example above, subgraph APQ is disabled _except for_ the `products` subgraph.
-
-> For more information on APQ, including client configuration, see [this article](/apollo-server/performance/apq/).
 
 ### TLS
 
@@ -504,7 +472,7 @@ plugins:
 
 ### Variable expansion
 
-You can reference variables directly in your YAML file. This is useful for referencing secrets without including them in the file.
+You can reference variables directly in your YAML config file. This is useful for referencing secrets without including them in the file.
 
 Currently, the Apollo Router supports expansion of environment variables and file paths. Corresponding variables must be prefixed with `env.` or `file.`
 

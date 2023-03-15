@@ -5,10 +5,11 @@ expression: new_config
 ---
 supergraph: {}
 apq:
-  experimental_cache:
-    in_memory:
-      limit: 2000
-    redis:
-      urls:
-        - "http://example.com"
+  router:
+    cache:
+      in_memory:
+        limit: 2000
+      redis:
+        urls:
+          - "http://example.com"
 
