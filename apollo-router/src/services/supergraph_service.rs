@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;

@@ -1,6 +1,4 @@
 ###
-# This feature is experimental and subject to change without notice.
-#
 # The only mandatory parameter is the url, which specifies the target of an HTTP post payload
 # 
 # optional parameters:
@@ -18,16 +16,14 @@
 #       - body: the body of the client response
 #       - sdl: the sdl (schema) of the router
 ###
-plugins:
-  experimental.external:
-    url: http://127.0.0.1:8081
-    timeout: 5s
-    stages:
-      router:
-        request:
-          headers: true
-          context: true
-          body: true
-          sdl: true
-        response:
-          headers: true
+coprocessor:
+  url: http://127.0.0.1:8081
+  timeout: 5s
+  router:
+    request:
+      headers: true
+      context: true
+      body: true
+      sdl: true
+    response:
+      headers: true

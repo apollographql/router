@@ -263,15 +263,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 tracing::debug!("A valid Apollo entitlement has been detected.");
             }
             EntitlementState::EntitledWarn if report.uses_restricted_features() => {
-                tracing::error!("Your Apollo entitlement has expired, and the Router will soon stop serving requests. Currently you are benefiting from the following features that require an Apollo entitlement:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                tracing::error!("Entitlement has expired. The Router will soon stop serving requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
             }
             EntitlementState::EntitledHalt if report.uses_restricted_features() => {
-                tracing::error!("Your Apollo entitlement has expired, and the Router will no longer serve requests. You were benefiting from the following features that require an Apollo entitlement:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                tracing::error!("Entitlement has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
             }
             EntitlementState::Unentitled
                 if report.uses_restricted_features() && entitlement_loss =>
             {
-                tracing::error!("Your Apollo entitlement has been revoked, and the Router will shut down. You were benefiting from the following features that require an Apollo entitlement:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                tracing::error!("Entitlement not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
                 server_handle.take();
                 return Err(ApolloRouterError::EntitlementViolation);
             }
@@ -279,9 +279,9 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 // This is OSS, so fail to reload or start.
                 if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok()
                 {
-                    tracing::error!("An Apollo entitlement is required to benefit from certain features of the Router:\n\n{}\n\nIf you have a entitlement then set APOLLO_KEY and APOLLO_GRAPH_REF environment variables and you’re good to go!\n\nAlternatively, if you manually manage your entitlement token then set the APOLLO_ROUTER_ENTITLEMENT env variable.\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                    tracing::error!("Entitlement not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
                 } else {
-                    tracing::error!("An Apollo entitlement is required to benefit from certain features of the Router:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
+                    tracing::error!("Not connected to GraphOS. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS (using APOLLO_KEY and APOLLO_GRAPH_REF) that provides an entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
                 }
 
                 return Err(ApolloRouterError::EntitlementViolation);

@@ -21,11 +21,7 @@ use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-#[cfg(not(test))]
-use crate::error::LicenseError;
 use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
-#[cfg(not(test))]
-use crate::services::apollo_graph_reference;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
@@ -136,14 +132,6 @@ async fn poll(
 // scattered through the processing.
 pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
     let data = if url.scheme() == "file" {
-        #[cfg(not(test))]
-        apollo_graph_reference()
-            .ok_or(LicenseError::MissingGraphReference)
-            .map_err(|e| {
-                tracing::error!(%e, "could not activate authentication feature");
-                e
-            })
-            .ok()?;
         let path = url
             .to_file_path()
             .map_err(|e| {

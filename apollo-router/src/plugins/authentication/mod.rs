@@ -29,8 +29,6 @@ use tower::ServiceExt;
 use url::Url;
 
 use self::jwks::JwksManager;
-#[cfg(not(test))]
-use crate::error::LicenseError;
 use crate::graphql;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -38,8 +36,6 @@ use crate::plugin::PluginInit;
 use crate::plugins::authentication::jwks::JwkSetInfo;
 use crate::plugins::authentication::jwks::JwksConfig;
 use crate::register_plugin;
-#[cfg(not(test))]
-use crate::services::apollo_graph_reference;
 use crate::services::router;
 use crate::Context;
 
@@ -49,6 +45,7 @@ mod tests;
 
 pub(crate) const AUTHENTICATION_SPAN_NAME: &str = "authentication_plugin";
 pub(crate) const APOLLO_AUTHENTICATION_JWT_CLAIMS: &str = "apollo_authentication::JWT::claims";
+const HEADER_TOKEN_TRUNCATED: &str = "(truncated)";
 
 #[derive(Debug, Display, Error)]
 enum AuthenticationError<'a> {
@@ -92,11 +89,7 @@ enum AuthenticationError<'a> {
 const DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL: Duration = Duration::from_secs(60);
 
-static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
-    #[cfg(not(test))]
-    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    Ok(Client::new())
-});
+static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| Ok(Client::new()));
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -139,22 +132,14 @@ impl Default for JWTConf {
     }
 }
 
-// This is temporary. It will be removed when the plugin is promoted
-// from experimental.
-#[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
-struct ExperimentalConf {
-    /// The JWT configuration
-    jwt: JWTConf,
-}
-
 // We may support additional authentication mechanisms in future, so all
 // configuration (which is currently JWT specific) is isolated to the
 // JWTConf structure.
 /// Authentication
 #[derive(Clone, Debug, Default, Deserialize, JsonSchema)]
 struct Conf {
-    /// The experimental configuration
-    experimental: ExperimentalConf,
+    /// The JWT configuration
+    jwt: JWTConf,
 }
 
 fn default_header_name() -> String {
@@ -308,7 +293,6 @@ impl Plugin for AuthenticationPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         if init
             .config
-            .experimental
             .jwt
             .header_value_prefix
             .as_bytes()
@@ -318,7 +302,7 @@ impl Plugin for AuthenticationPlugin {
             return Err(Error::BadHeaderValuePrefix.into());
         }
         let mut list = vec![];
-        for jwks_conf in &init.config.experimental.jwt.jwks {
+        for jwks_conf in &init.config.jwt.jwks {
             let url: Url = Url::from_str(jwks_conf.url.as_str())?;
             list.push(JwksConfig {
                 url,
@@ -326,12 +310,12 @@ impl Plugin for AuthenticationPlugin {
             });
         }
 
-        tracing::info!(jwks=?init.config.experimental.jwt.jwks, "JWT authentication using JWKSets from");
+        tracing::info!(jwks=?init.config.jwt.jwks, "JWT authentication using JWKSets from");
 
         let jwks_manager = JwksManager::new(list).await?;
 
         Ok(AuthenticationPlugin {
-            configuration: init.config.experimental.jwt,
+            configuration: init.config.jwt,
             jwks_manager,
         })
     }
@@ -449,9 +433,11 @@ fn authenticate(
     let jwt_header = match decode_header(jwt) {
         Ok(h) => h,
         Err(e) => {
+            // Don't reflect the jwt on error, just reply with a fixed
+            // error message.
             return failure_message(
                 request.context,
-                AuthenticationError::InvalidHeader(jwt, e),
+                AuthenticationError::InvalidHeader(HEADER_TOKEN_TRUNCATED, e),
                 StatusCode::BAD_REQUEST,
             );
         }
@@ -501,7 +487,8 @@ fn authenticate(
             }
         };
 
-        let validation = Validation::new(algorithm);
+        let mut validation = Validation::new(algorithm);
+        validation.validate_nbf = true;
 
         let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
             Ok(v) => v,

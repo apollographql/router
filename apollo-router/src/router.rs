@@ -414,18 +414,19 @@ type EntitlementStream = Pin<Box<dyn Stream<Item = Entitlement> + Send>>;
 #[derivative(Debug)]
 #[non_exhaustive]
 pub enum EntitlementSource {
-    /// A static entitlement.
+    /// A static entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Static")]
     Static { entitlement: Entitlement },
 
+    /// An entitlement supplied via APOLLO_ROUTER_ENTITLEMENT. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Env")]
     Env,
 
-    /// A stream of entitlement.
+    /// A stream of entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Stream")]
     Stream(#[derivative(Debug = "ignore")] EntitlementStream),
 
-    /// A raw file that may be watched for changes.
+    /// A raw file that may be watched for changes. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "File")]
     File {
         /// The path of the entitlement file.
@@ -548,6 +549,7 @@ impl EntitlementSource {
             })
             .boxed(),
             EntitlementSource::Env => {
+                // EXPERIMENTAL and not subject to semver.
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
                     Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),

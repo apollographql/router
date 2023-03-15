@@ -8,6 +8,7 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::StatusCode;
     use hyper::Body;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
@@ -15,7 +16,7 @@ mod tests {
     use tower::BoxError;
     use tower::ServiceExt;
 
-    use super::super::external::*;
+    use super::super::coprocessor::*;
     use crate::plugin::test::MockHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
@@ -29,10 +30,8 @@ mod tests {
     #[tokio::test]
     async fn load_plugin() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081"
-                }
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081"
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
@@ -49,11 +48,9 @@ mod tests {
     #[tokio::test]
     async fn unknown_fields_are_denied() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081",
-                    "thisFieldDoesntExist": true
-                }
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081",
+                "thisFieldDoesntExist": true
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
@@ -70,17 +67,15 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_with_stages_wont_load_without_graph_ref() {
         let config = serde_json::json!({
-            "plugins": {
-                "experimental.external": {
-                    "url": "http://127.0.0.1:8081",
-                    "stages": {
-                        "subgraph": {
-                            "request": {
-                                "uri": true
-                            }
+            "coprocessor": {
+                "url": "http://127.0.0.1:8081",
+                "stages": {
+                    "subgraph": {
+                        "request": {
+                            "uri": true
                         }
-                    },
-                }
+                    }
+                },
             }
         });
         // Build a test harness. Usually we'd use this and send requests to
@@ -117,7 +112,7 @@ mod tests {
                         r##"{
                     "version": 2,
                     "stage": "RouterRequest",
-                    "control": "Continue",
+                    "control": "continue",
                     "id": "1b19c05fdafc521016df33148ad63c1b",
                     "body": {
                       "query": "query Long {\n  me {\n  name\n}\n}"
@@ -174,7 +169,7 @@ mod tests {
                         r##"{
                             "version": 1,
                             "stage": "RouterResponse",
-                            "control": "Continue",
+                            "control": "continue",
                             "id": "1b19c05fdafc521016df33148ad63c1b",
                             "body": {
                             "query": "query Long {\n  me {\n  name\n}\n}"
@@ -272,7 +267,6 @@ mod tests {
                 context: false,
                 body: true,
                 uri: false,
-                service: false,
                 service_name: false,
             },
             response: Default::default(),
@@ -289,7 +283,7 @@ mod tests {
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
-                                    "Break": 200
+                                    "break": 200
                                 },
                                 "id": "3a67e2dd75e8777804e4a8f42b971df7",
                                 "body": {
@@ -334,7 +328,6 @@ mod tests {
                 context: false,
                 body: true,
                 uri: false,
-                service: false,
                 service_name: false,
             },
             response: Default::default(),
@@ -387,7 +380,7 @@ mod tests {
                         r##"{
                                 "version": 1,
                                 "stage": "SubgraphRequest",
-                                "control": "Continue",
+                                "control": "continue",
                                 "headers": {
                                     "cookie": [
                                       "tasty_cookie=strawberry"
@@ -463,7 +456,6 @@ mod tests {
                 context: false,
                 body: true,
                 uri: false,
-                service: false,
                 service_name: false,
             },
             response: Default::default(),
@@ -480,10 +472,18 @@ mod tests {
                                 "version": 1,
                                 "stage": "SubgraphRequest",
                                 "control": {
-                                    "Break": 200
+                                    "break": 200
                                 },
                                 "body": {
                                     "errors": [{ "message": "my error message" }]
+                                },
+                                "context": {
+                                    "entries": {
+                                        "testKey": true
+                                    }
+                                },
+                                "headers": {
+                                    "aheader": ["a value"]
                                 }
                             }"##,
                     ))
@@ -500,10 +500,18 @@ mod tests {
 
         let request = subgraph::Request::fake_builder().build();
 
+        let crate::services::subgraph::Response { response, context } =
+            service.oneshot(request).await.unwrap();
+
+        assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
+
+        let value = response.headers().get("aheader").unwrap();
+
+        assert_eq!("a value", value);
+
         assert_eq!(
-            serde_json::json!({ "errors": [{ "message": "my error message" }] }),
-            serde_json::to_value(service.oneshot(request).await.unwrap().response.into_body())
-                .unwrap()
+            "my error message",
+            response.into_body().errors[0].message.as_str()
         );
     }
 
@@ -516,7 +524,6 @@ mod tests {
                 context: false,
                 body: true,
                 uri: false,
-                service: false,
                 service_name: false,
             },
         };
@@ -677,7 +684,7 @@ mod tests {
                         r##"{
                     "version": 1,
                     "stage": "RouterRequest",
-                    "control": "Continue",
+                    "control": "continue",
                     "id": "1b19c05fdafc521016df33148ad63c1b",
                     "headers": {
                       "cookie": [
@@ -764,16 +771,24 @@ mod tests {
                 Ok(hyper::Response::builder()
                     .body(Body::from(
                         r##"{
-                    "version": 1,
-                    "stage": "RouterRequest",
-                    "control": {
-                        "Break": 200
-                    },
-                    "id": "1b19c05fdafc521016df33148ad63c1b",
-                    "body": {
-                      "errors": [{ "message": "my error message" }]
-                    }
-                  }"##,
+                            "version": 1,
+                            "stage": "RouterRequest",
+                            "control": {
+                                "break": 200
+                            },
+                            "id": "1b19c05fdafc521016df33148ad63c1b",
+                            "body": {
+                            "errors": [{ "message": "my error message" }]
+                            },
+                            "context": {
+                                "entries": {
+                                    "testKey": true
+                                }
+                            },
+                            "headers": {
+                                "aheader": ["a value"]
+                            }
+                        }"##,
                     ))
                     .unwrap())
             })
@@ -788,17 +803,17 @@ mod tests {
 
         let request = supergraph::Request::canned_builder().build().unwrap();
 
+        let crate::services::router::Response { response, context } =
+            service.oneshot(request.try_into().unwrap()).await.unwrap();
+
+        assert!(context.get::<_, bool>("testKey").unwrap().unwrap());
+
+        let value = response.headers().get("aheader").unwrap();
+
+        assert_eq!("a value", value);
+
         let actual_response = serde_json::from_slice::<serde_json::Value>(
-            &hyper::body::to_bytes(
-                service
-                    .oneshot(request.try_into().unwrap())
-                    .await
-                    .unwrap()
-                    .response
-                    .into_body(),
-            )
-            .await
-            .unwrap(),
+            &hyper::body::to_bytes(response.into_body()).await.unwrap(),
         )
         .unwrap();
 
@@ -855,6 +870,9 @@ mod tests {
                         r##"{
                     "version": 1,
                     "stage": "RouterResponse",
+                    "control": {
+                        "break": 400 
+                    },
                     "id": "1b19c05fdafc521016df33148ad63c1b",
                     "headers": {
                       "cookie": [
@@ -912,6 +930,7 @@ mod tests {
         let res = service.oneshot(request.try_into().unwrap()).await.unwrap();
 
         // Let's assert that the router request has been transformed as it should have.
+        assert_eq!(res.response.status(), StatusCode::BAD_REQUEST);
         assert_eq!(
             res.response.headers().get("cookie").unwrap(),
             "tasty_cookie=strawberry"

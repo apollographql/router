@@ -26,13 +26,11 @@ use tower::ServiceBuilder;
 use tower::ServiceExt;
 
 use crate::error::Error;
-use crate::error::LicenseError;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
-use crate::services::apollo_graph_reference;
 use crate::services::external::Control;
 use crate::services::external::Externalizable;
 use crate::services::external::PipelineStep;
@@ -47,14 +45,10 @@ pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
 
 #[async_trait::async_trait]
-impl Plugin for ExternalPlugin<HTTPClientService> {
+impl Plugin for CoprocessorPlugin<HTTPClientService> {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if init.config.stages != Default::default() {
-            apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-        }
-
         let mut http_connector = HttpConnector::new();
         http_connector.set_nodelay(true);
         http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
@@ -76,7 +70,7 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
             .layer(TimeoutLayer::new(init.config.timeout))
             .service(hyper::Client::builder().build(connector));
 
-        ExternalPlugin::new(http_client, init.config, init.supergraph_sdl)
+        CoprocessorPlugin::new(http_client, init.config, init.supergraph_sdl)
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
@@ -94,9 +88,9 @@ impl Plugin for ExternalPlugin<HTTPClientService> {
 // In order to keep the plugin names consistent,
 // we use using the `Reverse domain name notation`
 register_plugin!(
-    "experimental",
-    "external",
-    ExternalPlugin<HTTPClientService>
+    "apollo",
+    "coprocessor",
+    CoprocessorPlugin<HTTPClientService>
 );
 
 // -------------------------------------------------------------------------------------------------------
@@ -106,7 +100,7 @@ register_plugin!(
 ///
 /// This structure is generic over the HTTP Service so we can test the plugin seamlessly.
 #[derive(Debug)]
-struct ExternalPlugin<C>
+struct CoprocessorPlugin<C>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
         + Clone
@@ -120,7 +114,7 @@ where
     sdl: Arc<String>,
 }
 
-impl<C> ExternalPlugin<C>
+impl<C> CoprocessorPlugin<C>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
         + Clone
@@ -138,7 +132,7 @@ where
     }
 
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
-        self.configuration.stages.router.as_service(
+        self.configuration.router.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -147,7 +141,7 @@ where
     }
 
     fn subgraph_service(&self, name: &str, service: subgraph::BoxService) -> subgraph::BoxService {
-        self.configuration.stages.subgraph.all.as_service(
+        self.configuration.subgraph.all.as_service(
             self.http_client.clone(),
             service,
             self.configuration.url.clone(),
@@ -179,22 +173,10 @@ pub(super) struct SubgraphConf {
     pub(super) context: bool,
     /// Send the body
     pub(super) body: bool,
-    /// Send the service name
-    pub(super) service: bool,
     /// Send the subgraph URI
     pub(super) uri: bool,
     /// Send the service name
     pub(super) service_name: bool,
-}
-
-/// The stages request/response configuration
-#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
-#[serde(default, deny_unknown_fields)]
-struct Stages {
-    /// The router stage
-    pub(super) router: RouterStage,
-    /// The subgraph stage
-    pub(super) subgraph: SubgraphStages,
 }
 
 /// Configures the externalization plugin
@@ -208,9 +190,12 @@ struct Conf {
     #[schemars(with = "String", default = "default_timeout")]
     #[serde(default = "default_timeout")]
     timeout: Duration,
-    /// The stages request/response configuration
+    /// The router stage request/response configuration
     #[serde(default)]
-    stages: Stages,
+    router: RouterStage,
+    /// The subgraph stage request/response configuration
+    #[serde(default)]
+    subgraph: SubgraphStages,
 }
 
 fn default_timeout() -> Duration {
@@ -522,12 +507,19 @@ where
             .status_code(code)
             .context(request.context);
 
-        let res = match (graphql_response.label, graphql_response.data) {
+        let mut res = match (graphql_response.label, graphql_response.data) {
             (Some(label), Some(data)) => res.label(label).data(data).build()?,
             (Some(label), None) => res.label(label).build()?,
             (None, Some(data)) => res.data(data).build()?,
             (None, None) => res.build()?,
         };
+        if let Some(headers) = co_processor_output.headers {
+            *res.response.headers_mut() = internalize_header_map(headers)?;
+        }
+
+        if let Some(context) = co_processor_output.context {
+            res.context = context;
+        }
 
         return Ok(ControlFlow::Break(res));
     }
@@ -620,6 +612,9 @@ where
     };
 
     response.response = http::Response::from_parts(parts, new_body);
+    if let Some(control) = co_processor_output.control {
+        *response.response.status_mut() = control.get_http_status()?
+    }
 
     if let Some(context) = co_processor_output.context {
         response.context = context;
@@ -711,12 +706,23 @@ where
                             .build()
                     });
 
-            subgraph::Response {
-                response: http::Response::builder()
-                    .status(code)
-                    .body(graphql_response)?,
-                context: request.context,
+            let mut http_response = http::Response::builder()
+                .status(code)
+                .body(graphql_response)?;
+            if let Some(headers) = co_processor_output.headers {
+                *http_response.headers_mut() = internalize_header_map(headers)?;
             }
+
+            let mut subgraph_response = subgraph::Response {
+                response: http_response,
+                context: request.context,
+            };
+
+            if let Some(context) = co_processor_output.context {
+                subgraph_response.context = context;
+            }
+
+            subgraph_response
         };
         return Ok(ControlFlow::Break(res));
     }
@@ -814,6 +820,10 @@ where
     };
 
     response.response = http::Response::from_parts(parts, new_body);
+
+    if let Some(control) = co_processor_output.control {
+        *response.response.status_mut() = control.get_http_status()?
+    }
 
     if let Some(context) = co_processor_output.context {
         response.context = context;
