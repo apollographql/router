@@ -4,6 +4,299 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.12.0] - 2023-03-15
+
+> :balloon: In this release, we are excited to make three new features **generally available** to GraphOS Enterprise customers running self-hosted routers: JWT Authentication, Distributed APQ Caching, and External Coprocessor support.  Read more about these features below, and see [our documentation](https://www.apollographql.com/docs/router/enterprise-features/) for additional information.
+
+## 🚀 Features
+
+### GraphOS Enterprise: JWT Authentication
+
+> 🎈 JWT Authentication is now _generally available_ to GraphOS Enterprise customers running self-hosted routers.  To fully account for the changes between the initial experimental release and the final generally available implementation, we recommend removing the experimental configuration and re-implementing it following the documentation below to ensure proper configuration and that all security requirements are met.
+
+Router v1.12 adds support for JWT validation, claim extraction, and custom security policies in Rhai scripting to reject bad traffic at the edge of the graph — for enhanced zero-trust and defense-in-depth. Extracting claims one time in the router and securely forwarding them to subgraphs can reduce the operational burden on backend API teams, reduce JWT processing, and speed up response times with improved header matching for increased [query deduplication](https://www.apollographql.com/docs/router/configuration/traffic-shaping/#query-deduplication).
+
+See the [JWT Authentication documentation](https://www.apollographql.com/docs/router/configuration/authn-jwt) for information on setting up this GraphOS Enterprise feature.
+
+### GraphOS Enterprise: Distributed APQ Caching
+
+> 🎈 Distributed APQ Caching is now _generally available_ to GraphOS Enterprise customers running self-hosted routers.  To fully account for the changes between the initial experimental releases and the final generally available implementation, we recommend removing the experimental configuration and re-implementing it following the documentation below to ensure proper configuration.
+
+With Router v1.12, you can now use _distributed APQ caching_ to improve p99 latencies during peak times. A shared Redis instance can now be used by the entire router fleet to build the APQ cache faster and share existing APQ cache with new router instances that are spun up during scaling events – when they need it most. This ensures the fast path to query execution is consistently available to all users even during peak load.
+
+See the [distributed APQ caching documentation](https://www.apollographql.com/docs/router/configuration/distributed-caching) for information on setting up this GraphOS Enterprise feature.
+
+### GraphOS Enterprise: External Coprocessor support
+
+> 🎈 External Coprocessor support is now _generally available_ to GraphOS Enterprise customers running self-hosted routers.  To fully account for the changes between the initial experimental releases and the final generally available implementation, we recommend removing the experimental configuration and re-implementing it following the documentation below to ensure proper configuration.
+
+Router now supports _external coprocessors_ written in your programming language of choice. Coprocessors run with full isolation and a clean separation of concerns, that decouples delivery and provides fault isolation. Low overhead can be achieved by running coprocessors alongside the router on the same host or in the same Kubernetes Pod as a sidecar. Coprocessors can be used to speed Gateway migrations, support bespoke use cases, or integrate the router with existing network services for custom auth (JWT mapping, claim enrichment), service discovery integration, and more!
+
+See the [external coprocessor documentation](https://www.apollographql.com/docs/router/configuration/external) for information on setting up this GraphOS Enterprise feature.
+
+### TLS termination ([Issue #2615](https://github.com/apollographql/router/issues/2615))
+
+If there is no intermediary proxy or load-balancer present capable of doing it, the router ends up responsible for terminating TLS.  This can be relevant in the case of needing to support HTTP/2, which requires TLS in most implementations. We've introduced TLS termination support for the router using the `rustls` implementation, limited to _one_ server certificate and using safe default ciphers.  We do not support TLS versions prior to v1.2.
+
+If you require more advanced TLS termination than this implementation offers, we recommend using a proxy which supports this (as is the case with most cloud-based proxies today).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2614
+
+### Make `initialDelaySeconds` configurable for health check probes in Helm chart
+
+Currently `initialDelaySeconds` uses the default of `0`. This means that Kubernetes will give router _no additional time_ before it does the first probe.
+
+This can be configured as follows:
+
+```yaml
+probes:
+  readiness:
+    initialDelaySeconds: 1
+  liveness:
+    initialDelaySeconds: 5
+```
+
+By [@Meemaw](https://github.com/meemaw) in https://github.com/apollographql/router/pull/2660
+
+### GraphQL errors can be thrown within Rhai ([PR #2677](https://github.com/apollographql/router/pull/2677))
+
+Up until now rhai script throws would yield an http status code and a message String which would end up as a GraphQL error.
+This change allows users to throw with a valid GraphQL response body, which may include data, as well as errors and extensions.
+
+Refer to the `Terminating client requests` section of the [Rhai api documentation](https://www.apollographql.com/docs/router/configuration/rhai) to learn how to throw GraphQL payloads.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2677
+
+## 🐛 Fixes
+
+### In-flight requests will terminate before shutdown is completed ([Issue #2539](https://github.com/apollographql/router/issues/2539))
+
+In-flight client requests will now be completed when the router is asked to shutdown gracefully. 
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2610
+
+### State machine will retain most recent valid config ([Issue #2752](https://github.com/apollographql/router/issues/2752))
+
+The state machine will retain current state until new state has gone into service.  Previously, if the router failed to reload either the configuration or the supergraph, it would discard the incoming state change even if that state change turned out to be invalid.  It is important to avoid reloading inconsistent state because the a new supergraph may, for example, directly rely on changes in config to work correctly.
+
+Changing this behaviour means that the router must enter a "good" configuration state before it will reload, rather than reloading with potentially inconsistent state.
+
+For example, **previously**:
+
+1. Router starts with valid supergraph and config.
+2. Router config is set to something invalid and restart doesn't happen.
+3. Router receives a new schema, the router restarts with the new supergraph and the original valid config.
+
+**Now**, the latest information is used to restart the router:
+
+1. Router starts with valid schema and config.
+2. Router config is set to something invalid and restart doesn't happen.
+3. Router receives a new schema, but the router fails to restart because of config is still invalid.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2753
+
+### Ability to disable HTTP/2 for subgraphs ([Issue #2063](https://github.com/apollographql/router/issues/2063))
+
+There are cases where the balancing HTTP/2 connections to subgraphs behaves erratically.  While we consider this a bug, users may disable HTTP/2 support to subgraphs in the short-term while we work to find the root cause.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2621
+
+### Tracing default service name restored ([Issue #2641](https://github.com/apollographql/router/issues/2641))
+
+With this fix the default tracing service name is restored to `router`.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2642
+
+### Header plugin now has a static plugin priority ([Issue #2559](https://github.com/apollographql/router/issues/2559))
+
+Execution order of the `headers` plugin which handles header forwarding is now enforced. This ensures reliable behavior with other built-in plugins.
+
+It is now possible to use custom attributes derived from headers within the `telemetry` plugin in addition to using the `headers` plugin to propagate/insert headers for subgraphs.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2670
+
+###  Add `content-type` header when publishing Datadog metrics ([Issue #2697](https://github.com/apollographql/router/issues/2697))
+
+Add the required `content-type` header for publishing Datadog metrics from Prometheus:
+
+```
+content-type: text/plain; version=0.0.4
+```
+
+By [@ShaunPhillips](https://github.com/ShaunPhillips) in https://github.com/apollographql/router/pull/2698
+
+### Sandbox Explorer endpoint URL is no longer editable ([PR #2729](https://github.com/apollographql/router/pull/2729))
+
+The "Endpoint" in the Sandbox Explorer (Which is served by default when running in development mode) is no longer editable, to prevent inadvertent changes.  Sandbox is not generally useful with other endpoints as CORS must be configured on the other host.
+
+A hosted version of Sandbox Explorer without this restriction [is still available](https://studio.apollographql.com/sandbox/explorer) if you necessitate a version which allows editing.
+
+By [@mayakoneval](https://github.com/mayakoneval) in https://github.com/apollographql/router/pull/2729
+
+### Argument parsing is now optional in the `Executable` builder ([PR #2666](https://github.com/apollographql/router/pull/2666))
+
+The `Executable` builder was parsing command-line arguments, which was causing issues when used as part of a larger application with its _own_ set of command-line flags, leading to those arguments not be recognized by the router. This change allows parsing the arguments _separately_, then passing the required ones to the `Executable` builder directly. The default behaviour is still parsing from inside the builder.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2666
+
+### Unnecessary space has been removed from the log formatter ([PR #2755](https://github.com/apollographql/router/pull/2755))
+
+Indentation was being introduced after the log-level annotations in router logs.  We've removed the offending spaces!
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2755
+
+### FTV1 trace sampling is now applied per _supergraph request_ rather than _subgraph request_ ([Issue #2655](https://github.com/apollographql/router/issues/2655))
+
+Because tracing can be costly, it is only enabled for a configurable fraction of requests. Each request is selected for tracing or not with a corresponding probability. This used to be done as part of the _subgraph service_, meaning that when a single supergraph request handled by the Router involves making multiple subgraph requests, it would be possible (and likely) that tracing would only be enabled for some of those sub-requests. If this same supergraph request is repeated enough times the aggregated metrics should be fine, but for smaller sample size this risks giving an unexpectedly partial view of what’s happening.
+
+As of this change, each supergraph request received by the Router is either decided to be _sampled_ or _not sampled_ and all corresponding subgraph requests use that same decision.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2656
+
+### JWKS download failure no longer results in JWT plugin init failure ([Issue #2747](https://github.com/apollographql/router/issues/2747))
+
+> This feature was previously experimental and is now _generally available_ as a GraphOS Enterprise feature.  See the "Features" section above for more detail, and consult the [feature's documentation](https://www.apollographql.com/docs/router/configuration/authn-jwt) for more information.
+
+JWKS download can temporarily fail for the same reasons that any network request fails.  Such an intermittent failure no longer fails plugin initialization, preventing router load or hot-reloads.  We now continue try to download the failed asset during initialization making a reasonable effort to start router with all JWKS.  In the event that one of the configured JWKS does not download, the router will still start with the remaining sets.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2754
+
+### JWKS is now downloaded out of band ([Issue #2647](https://github.com/apollographql/router/issues/2647))
+
+> This feature was previously experimental and is now _generally available_ as a GraphOS Enterprise feature.  See the "Features" section above for more detail, and consult the [feature's documentation](https://www.apollographql.com/docs/router/configuration/authn-jwt) for more information.
+
+The JWKS download in the JWT authentication plugin now lives in a separate task which polls the JWKS URLs asynchronously, rather than downloading them on demand when a JWT is verified. This should reduce the latency for the initial requests received by the router and increase reliability by removing (internal) tower `Buffer` usage.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2648
+
+### Add an issuer check after JWT signature verification ([Issue #2647](https://github.com/apollographql/router/issues/2647))
+
+> This feature was previously experimental and is now _generally available_ as a GraphOS Enterprise feature.  See the "Features" section above for more detail, and consult the [feature's documentation](https://www.apollographql.com/docs/router/configuration/authn-jwt) for more information.
+
+*This is a notable change if you're coming from the experimental implementation.  Experimental features offer no breaking change policy while they are in experimental state.*
+
+A JWKS URL can now be associated with an issuer in the YAML configuration. After verifying the JWT signature, if the issuer **is** configured in YAML and there is an corresponding `iss` claim in the JWT, the router will check that they match, and reject the request if not.
+
+For those coming from experimental, the configuration changes incorporate a map of objects including `url` and an optional `issuer` property:
+
+```diff
+< authentication:
+<   experimental:
+<     jwt:
+<       jwks_urls:
+<         - file:///path/to/jwks.json
+<         - http:///idp.dev/jwks.json
+---
+> authentication:
+>   jwt:
+>     jwks:
+>       - url: file:///path/to/jwks.json
+>         issuer: "http://idp.local" # optional field
+>       - url: http:///idp.dev/jwks.json
+>         issuer: http://idp.dev # optional field
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2672
+
+## 📃 Configuration
+
+> :warning: Configuration changes are **non-breaking in the current minor version**, but we recommend making these changes as soon as possible since they will become breaking changes in a future major version.
+
+### `apq` has been moved to the top level of configuration ([Issue #2744](https://github.com/apollographql/router/issues/2744))
+
+For improved usability, we will be moving items out of `supergraph` in the router configuration file.  This is because various plugins use router pipeline stages as part of their YAML config, of which `supergraph` is one.
+
+You may not have this option in your configuration since APQ is on by default, but if you're using this option, the appropriate change will look like this:
+
+```diff
+< supergraph:
+<   apq:
+<     enabled: true
+---
+> apq:
+>   enabled: true
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2745
+
+## 🛠 Maintenance
+
+### Correct visibility of telemetry plugin ([Issue #2739](https://github.com/apollographql/router/issues/2739))
+
+The telemetry plugin code _itself_ was previously marked `pub`. However, due to the recent refactor of the `telemetry` plugin and its associated tests this is no longer the case.  This does not manifest as a breaking change since the plugin was exported under the `_private` module which itself was marked as internal.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2740
+
+### Jaeger integration tests have been improved in CircleCI ([Issue #2675](https://github.com/apollographql/router/issues/2675))
+
+We now use a Jaeger Docker image rather than downloading the binaries directly, improving the overall reliability since the artifacts themselves were previously being pulled from GitHub artifacts and failed regularly.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2673
+
+### Clean up `trace_providers` on a thread rather than in a Tokio `blocking_task` ([Issue #2668](https://github.com/apollographql/router/issues/2668))
+
+OpenTelemetry shutdown occasionally hangs due to `Telemetry::Drop` using a `tokio::spawn_blocking` to flush the `trace_provider`.  However, Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
+
+This means that if the Tokio runtime itself is shutdown, there is a potential race where `trace_provider` may not be flushed.
+
+We can mitigate this by using a thread so that task flush will always be completed even if the Tokio runtime is shut down.  Hangs were most likely to happen in tests due to the Tokio runtime being destroyed when the test method exits.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2757
+
+### Tweak the rate limit test times to prevent sporadic CI failures ([Issue #2667](https://github.com/apollographql/router/issues/2667))
+
+A slight adjustment to the timing should make this less likely to cause flakes.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2758
+
+### Remove "dead" parsing code still using the `apollo-parser` AST ([Issue #2636](https://github.com/apollographql/router/issues/2636))
+
+Now that `apollo-compiler` HIR has been used for long enough, the now-unused version of parsing code that was still based on `apollo-parser`'s AST has been removed.  We had previously left this code intentionally to make it easy to roll-back to.
+
+This removal will unlock further refactoring in the upcoming https://github.com/apollographql/router/issues/2483.
+
+By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollographql/router/pull/2637
+
+### Use the `fred` Redis client ([Issue #2623](https://github.com/apollographql/router/issues/2623))
+
+Use the `fred` Redis client instead of the `redis` and `redis-cluster-async` crates. Overall, this adds necessary support for TLS in Redis "cluster" mode, removes OpenSSL usage entirely (this was our only dependency which used OpenSSL, so this means that our router can install _without friction_ on the newest Ubuntu version again) and overall cleans up the code.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2689
+
+### Update local development `docker-compose` configuration  ([Issue #2680](https://github.com/apollographql/router/issues/2680))
+
+The `federation-demo` was used for testing in early versions of the Router but is no longer used, and we removed most references to it some time ago.  The `docker-compose.yml` (used primarily in the development of this repository) has been updated to reflect this, and now also includes Redis which is required for some tests.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/#2681
+
+### Improve CI time by removing `test-binaries` from build ([Issue #2625](https://github.com/apollographql/router/issues/2625))
+
+We now have an experimental plugin called `broken` that is included in the router.
+This removes the need to use `test-binaries` and avoids a full recompile of the router during integration testing.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2650
+
+### Ban `openssl-sys` using `cargo-deny` ([PR #2510](https://github.com/apollographql/router/pull/2638))
+
+We avoid depending on OpenSSL in the router, instead opting to use `rustls` for various reasons.  This change introduces a _tooling_ "ban" of the `openssl-sys` crate to avoid inadvertently introducing OpenSSL again in the future by signalling this early in our pull-requests.  This will help us avoid mistakenly reintroducing it in the future.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2638
+
+## 📚 Documentation
+
+
+### `Context::get` has been corrected ([Issue #2580](https://github.com/apollographql/router/issues/2580))
+
+If we have an error, it doesn't mean the context entry didn't exist, it generally means it's a deserialization error.  We've updated the `Context::get` documentation to reflect this.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/2669
+
+### Remove "embedded" example ([Issue #2737](https://github.com/apollographql/router/issues/2737))
+
+The "embedded" example in our documentation was a throwback to early days of the Router where "distribution as middleware" was considered more viable.  As development has progressed, this approach has become obsolete, particularly as we have baked some of our functionality into the webserver layer.  In addition, the entire example was still using the `TestHarness` which is designed for _testing_ rather than production traffic.  Overall, we think the rest of our documentation properly represents modern days way of doing this work.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/2738
+
 # [1.11.0] - 2023-02-21
 
 ## 🚀 Features
