@@ -220,19 +220,24 @@ where
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
             Ok(response) => {
                 let response = response.data.map(Into::into);
-
+                let mut query = std::any::type_name::<Query>();
+                query = query
+                    .strip_suffix("Query")
+                    .expect("Uplink structs mut be named xxxQuery")
+                    .get(query.rfind("::").map(|index| index + 2).unwrap_or_default()..)
+                    .expect("cannot fail");
                 match &response {
                     None => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="empty")
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="empty")
                     }
                     Some(UplinkResponse::New { .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="new")
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="new")
                     }
                     Some(UplinkResponse::Unchanged { .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="unchanged")
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="unchanged")
                     }
                     Some(UplinkResponse::Error { message, code, .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="uplink_error", error=message, code)
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="uplink_error", error=message, code)
                     }
                 }
 
