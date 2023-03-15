@@ -1,7 +1,8 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::fmt::Debug;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::time::Instant;
 
 use futures::Stream;
 use graphql_client::QueryBody;
