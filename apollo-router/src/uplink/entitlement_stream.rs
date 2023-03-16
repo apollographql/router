@@ -139,10 +139,9 @@ where
                 // If we got a new entitlement then we need to reset the stream of events and return the new entitlement event.
                 reset_checks_for_entitlement(&mut this.checks, entitlement)
             }
-            // Upstream has a new entitlement with no claim
+            // Upstream has a new entitlement with no claim.
             (_, Some(Poll::Ready(Some(_)))) => {
-                // As we have no claim clear the checks
-                this.checks.clear();
+                // We don't clear the checks if there is an entitlement with no claim.
                 Poll::Ready(Some(Event::UpdateEntitlement(EntitlementState::Unentitled)))
             }
             // If either checks or upstream returned pending then we need to return pending.
@@ -348,6 +347,7 @@ mod test {
 
     #[tokio::test]
     async fn entitlement_expander_claim_no_claim() {
+        // Entitlements with no claim do not clear checks as they are ignored if we move from entitled to unentitled, this is handled at the state machine level.
         let events_stream = futures::stream::iter(vec![
             entitlement_with_claim(10, 10),
             entitlement_with_no_claim(),
@@ -361,7 +361,9 @@ mod test {
             events,
             &[
                 SimpleEvent::UpdateEntitlement,
-                SimpleEvent::UpdateEntitlement
+                SimpleEvent::UpdateEntitlement,
+                SimpleEvent::WarnEntitlement,
+                SimpleEvent::HaltEntitlement
             ]
         );
     }

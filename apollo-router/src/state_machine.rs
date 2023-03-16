@@ -144,7 +144,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             schema.clone(),
                             *entitlement,
                             listen_addresses_guard,
-                            false,
                         )
                         .map_ok_or_else(Errored, |f| f)
                         .await,
@@ -161,8 +160,14 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             } => {
                 tracing::info!("reloading");
 
-                let entitlement_loss = new_entitlement == Some(EntitlementState::Unentitled)
-                    && *entitlement != EntitlementState::Unentitled;
+                if new_entitlement == Some(EntitlementState::Unentitled)
+                    && *entitlement != EntitlementState::Unentitled
+                {
+                    // When we get an unentitled event, if we were entitled before then just carry on.
+                    // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
+                    tracing::debug!("loss of entitlement detected, ignoring");
+                    return self;
+                }
 
                 // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
                 // In the case of a failed reload the server handle is retained, which has the old config/schema/entitlements in.
@@ -185,7 +190,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     schema.clone(),
                     *entitlement,
                     &mut guard,
-                    entitlement_loss,
                 )
                 .await
                 {
@@ -244,7 +248,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         schema: Arc<String>,
         entitlement: EntitlementState,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
-        entitlement_loss: bool,
     ) -> Result<State<FA>, ApolloRouterError>
     where
         S: HttpServerFactory,
@@ -267,13 +270,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             }
             EntitlementState::EntitledHalt if report.uses_restricted_features() => {
                 tracing::error!("Entitlement has expired. The Router will no longer serve requests. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an active entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
-            }
-            EntitlementState::Unentitled
-                if report.uses_restricted_features() && entitlement_loss =>
-            {
-                tracing::error!("Entitlement not found. In order to enable these features for a self-hosted instance of Apollo Router, the Router must be connected to a graph in GraphOS that provides an entitlement for the following features:\n\n{}\n\nSee {ENTITLEMENT_EXPIRED_URL} for more information.", report);
-                server_handle.take();
-                return Err(ApolloRouterError::EntitlementViolation);
             }
             EntitlementState::Unentitled if report.uses_restricted_features() => {
                 // This is OSS, so fail to reload or start.
@@ -608,9 +604,10 @@ mod tests {
 
     #[test(tokio::test)]
     async fn restricted_entitled_unentitled() {
-        let router_factory = create_mock_router_configurator(1);
-        let (server_factory, shutdown_receivers) = create_mock_server_factory(1);
+        let router_factory = create_mock_router_configurator(2);
+        let (server_factory, shutdown_receivers) = create_mock_server_factory(2);
 
+        // The unentitled event is dropped so we should get a reload
         assert_matches!(
             execute(
                 server_factory,
@@ -620,12 +617,14 @@ mod tests {
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     UpdateEntitlement(EntitlementState::Unentitled),
+                    UpdateConfiguration(test_config_restricted()),
+                    Shutdown
                 ],
             )
             .await,
-            Err(ApolloRouterError::EntitlementViolation)
+            Ok(())
         );
-        assert_eq!(shutdown_receivers.lock().unwrap().len(), 1);
+        assert_eq!(shutdown_receivers.lock().unwrap().len(), 2);
     }
 
     #[test(tokio::test)]

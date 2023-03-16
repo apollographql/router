@@ -103,5 +103,14 @@
       "groupSlug": "cargo-tracing-packages",
       "dependencyDashboardApproval": true
     },
+    // We'll review these in a PR of their own since it has the most direct runtime
+    // implications on users that we'd like to be very intentional about.
+    {
+      "matchPackageNames": ["router-bridge"],
+      "groupName": "router-bridge updates (including federation)",
+      "groupSlug": "rust-router-bridge-updates",
+      "matchManagers": ["cargo"],
+      "automerge": false
+    }
   ]
 }
