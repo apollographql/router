@@ -6,7 +6,6 @@ use std::sync::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
-use tracing::Instrument;
 
 use self::storage::CacheStorage;
 use self::storage::KeyType;
@@ -79,8 +78,7 @@ where
                 let wait_map = self.wait_map.clone();
                 tokio::task::spawn(async move {
                     let _ = drop_sentinel.await;
-                    let mut locked_wait_map = wait_map.lock().unwrap();
-                    let _ = locked_wait_map.remove(&k);
+                    Self::remove_from_wait_map(&wait_map, &k);
                 });
 
                 if let Some(value) = self.storage.get(key).await {
@@ -108,10 +106,10 @@ where
         &self,
         key: &K,
     ) -> Result<OwnedRwLockWriteGuard<Option<V>>, Arc<RwLock<Option<V>>>> {
-        let mut locked_wait_map = match self.wait_map.lock() {
-            Ok(guard) => guard,
-            Err(_e) => panic!(),
-        };
+        let mut locked_wait_map = self
+            .wait_map
+            .lock()
+            .expect("only locked in get_or_insert_wait_map or remove_from_wait_map");
         match locked_wait_map.get_mut(key) {
             Some(waiter) => {
                 // Register interest in key
@@ -122,7 +120,10 @@ where
             }
             None => {
                 let value = Arc::new(RwLock::new(None));
-                let w = value.clone().try_write_owned().unwrap();
+                let w = value
+                    .clone()
+                    .try_write_owned()
+                    .expect("the RwLock was just created");
 
                 locked_wait_map.insert(key.clone(), value);
                 drop(locked_wait_map);
@@ -130,6 +131,13 @@ where
                 Ok(w)
             }
         }
+    }
+
+    fn remove_from_wait_map(wait_map: &WaitMap<K, V>, key: &K) {
+        let mut locked_wait_map = wait_map
+            .lock()
+            .expect("only locked in get_or_insert_wait_map or remove_from_wait_map");
+        let _ = locked_wait_map.remove(&key);
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
@@ -140,12 +148,9 @@ where
         *sender = Some(value);
         drop(sender);
 
-        {
-            // Lock the wait map to prevent more subscribers racing with our send
-            // notification
-            let mut locked_wait_map = self.wait_map.lock().unwrap();
-            let _ = locked_wait_map.remove(key);
-        }
+        // Lock the wait map to prevent more subscribers racing with our send
+        // notification
+        Self::remove_from_wait_map(&self.wait_map, key);
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
@@ -172,6 +177,7 @@ enum EntryInner<K: KeyType, V: ValueType> {
 #[derive(Debug)]
 pub(crate) enum EntryError {
     IsFirst,
+    NoValue,
 }
 
 impl<K, V> Entry<K, V>
@@ -189,7 +195,7 @@ where
             EntryInner::Value(v) => Ok(v),
             EntryInner::Receiver { receiver } => {
                 let r = receiver.read().await;
-                Ok((*r).clone().unwrap())
+                (*r).clone().ok_or(EntryError::NoValue)
             }
             _ => Err(EntryError::IsFirst),
         }

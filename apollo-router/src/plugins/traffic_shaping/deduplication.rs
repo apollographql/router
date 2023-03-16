@@ -14,7 +14,6 @@ use tokio::sync::RwLock;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceExt;
-use tracing::Instrument;
 
 use crate::graphql::Request;
 use crate::http_ext;
@@ -84,7 +83,7 @@ where
                     let r = receiver.read().await;
                     return (*r)
                         .clone()
-                        .unwrap()
+                        .ok_or_else(|| "no value".to_string())?
                         .map(|response| {
                             SubgraphResponse::new_from_response(
                                 response.0.response,
@@ -161,7 +160,10 @@ fn get_or_insert_wait_map(
         }
         None => {
             let value = Arc::new(RwLock::new(None));
-            let w = value.clone().try_write_owned().unwrap();
+            let w = value
+                .clone()
+                .try_write_owned()
+                .expect("the lock was just created");
 
             locked_wait_map.insert((&request.subgraph_request).into(), value);
             drop(locked_wait_map);
