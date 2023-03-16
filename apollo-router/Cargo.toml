@@ -157,8 +157,7 @@ reqwest = { version = "0.11.14", default-features = false, features = [
     "json",
     "stream",
 ] }
-#router-bridge = "0.1.16+v2.3.2"
-router-bridge = { git = "https://github.com/apollographql/federation-rs/", branch = "main" }
+router-bridge = "0.1.20+v2.3.5"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
