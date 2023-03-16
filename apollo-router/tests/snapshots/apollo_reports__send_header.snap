@@ -30,6 +30,7 @@ traces_per_query:
           operation_name: ""
         client_name: ""
         client_version: ""
+        agent_version: "[agent_version]"
         http:
           method: 4
           request_headers:
@@ -173,6 +174,7 @@ traces_per_query:
                         details: ~
                         client_name: ""
                         client_version: ""
+                        agent_version: "[agent_version]"
                         http: ~
                         cache_policy: ~
                         query_plan: ~
@@ -414,6 +416,7 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -519,6 +522,7 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~
