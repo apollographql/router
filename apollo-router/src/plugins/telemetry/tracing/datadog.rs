@@ -46,12 +46,8 @@ pub(crate) struct Config {
     pub(crate) batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
-    #[serde(default = "default_enable_span_mapping")]
+    #[serde(default)]
     pub(crate) enable_span_mapping: bool,
-}
-
-fn default_enable_span_mapping() -> bool {
-    false
 }
 
 impl TracingConfigurator for Config {
@@ -61,10 +57,8 @@ impl TracingConfigurator for Config {
             AgentEndpoint::Default(_) => None,
             AgentEndpoint::Url(s) => Some(s),
         };
-        let enable_span_mapping = match &self.enable_span_mapping {
-            true => Some(true),
-            false => None,
-        };
+        let enable_span_mapping = self.enable_span_mapping.then_some(true);
+
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
