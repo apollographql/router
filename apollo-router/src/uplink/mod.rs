@@ -24,9 +24,6 @@ pub(crate) enum Error {
     #[error("http error")]
     Http(#[from] reqwest::Error),
 
-    #[error("empty response")]
-    EmptyResponse,
-
     #[error("fetch failed from all endpoints")]
     FetchFailed,
 
@@ -147,7 +144,6 @@ where
 
             match fetch::<Query, Response>(&query_body, &mut endpoints.iter(), timeout).await {
                 Ok(response) => {
-                    tracing::debug!("uplink response {:?}", response);
                     match response {
                         UplinkResponse::New {
                             id,
@@ -242,14 +238,20 @@ where
                     }
                 }
 
-                return match response {
-                    None => Err(Error::EmptyResponse),
-                    Some(response_data) => Ok(response_data),
+                match response {
+                    None => {
+                        tracing::debug!("empty or malformed response from Uplink endpoint {}. Other endpoints will be tried", url)
+                    }
+                    Some(response_data) => return Ok(response_data),
                 };
             }
             Err(e) => {
                 tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="http_error", error=e.to_string(), code=e.status().unwrap_or_default().as_str());
-                tracing::warn!("failed to fetch from Uplink endpoint {}: {}", url, e);
+                tracing::debug!(
+                    "failed to fetch from Uplink endpoint {}: {}. Other endpoints will be tried",
+                    url,
+                    e
+                );
             }
         };
     }
@@ -266,6 +268,7 @@ where
 {
     let client = reqwest::Client::builder().timeout(timeout).build()?;
     let res = client.post(url).json(request_body).send().await?;
+    tracing::debug!("uplink response {:?}", res);
     let response_body: graphql_client::Response<Query::ResponseData> = res.json().await?;
     Ok(response_body)
 }
@@ -488,12 +491,81 @@ mod test {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_uplink_empty_http_fallback() {
+        let (mock_server, url1, url2, url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_empty())
+            .response(response_empty())
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url2)
+            .response(response_ok())
+            .response(response_ok())
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url3)
+            .build()
+            .await;
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+            "dummy_key".to_string(),
+            "dummy_graph_ref".to_string(),
+            Some(Endpoints::fallback(vec![url1, url2, url3])),
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+        )
+        .take(2)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
     async fn stream_from_uplink_error_http_round_robin() {
         let (mock_server, url1, url2, url3) = init_mock_server().await;
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
             .response(response_fetch_error_http())
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url2)
+            .response(response_ok())
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url3)
+            .response(response_ok())
+            .build()
+            .await;
+        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+            "dummy_key".to_string(),
+            "dummy_graph_ref".to_string(),
+            Some(Endpoints::round_robin(vec![url1, url2, url3])),
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+        )
+        .take(2)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_uplink_empty_http_round_robin() {
+        let (mock_server, url1, url2, url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_empty())
             .build()
             .await;
         MockResponses::builder()
@@ -719,5 +791,9 @@ mod test {
 
     fn response_fetch_error_http() -> ResponseTemplate {
         ResponseTemplate::new(StatusCode::INTERNAL_SERVER_ERROR)
+    }
+
+    fn response_empty() -> ResponseTemplate {
+        ResponseTemplate::new(StatusCode::OK).set_body_json(json!({ "data": null }))
     }
 }

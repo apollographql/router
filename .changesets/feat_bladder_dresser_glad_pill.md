@@ -1,4 +1,4 @@
-### Uplink metrics ([Issue #2769](https://github.com/apollographql/router/issues/2769))
+### Uplink metrics and logging ([Issue #2769](https://github.com/apollographql/router/issues/2769))
 
 Adds metrics for uplink of the format:
 ```
@@ -28,5 +28,7 @@ This is a histogram of duration which contains the following attributes:
 * error: The error message
 
 A limitation of this is that it can't display metrics for the first poll to uplink as telemetry hasn't been set up yet.
+
+Logging messages have also been improved.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2779
