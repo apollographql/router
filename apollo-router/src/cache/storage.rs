@@ -4,7 +4,8 @@ use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use lru::LruCache;
 use serde::de::DeserializeOwned;
