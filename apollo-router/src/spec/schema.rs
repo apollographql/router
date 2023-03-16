@@ -25,10 +25,10 @@ use crate::spec::FieldType;
 use crate::Configuration;
 
 /// A GraphQL schema.
+#[derive(Debug)]
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
-    subtype_map: Arc<HashMap<String, HashSet<String>>>,
     pub(crate) subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
@@ -38,94 +38,6 @@ pub(crate) struct Schema {
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
     root_operations: HashMap<OperationKind, String>,
-}
-
-pub(crate) fn sorted_map<K, V>(
-    f: &mut std::fmt::Formatter<'_>,
-    indent: &str,
-    name: &str,
-    map: &HashMap<K, V>,
-) -> std::fmt::Result
-where
-    K: std::fmt::Debug + Ord,
-    V: std::fmt::Debug,
-{
-    writeln!(f, "{indent}{name}:")?;
-    for (k, v) in map.iter().sorted_by_key(|&(k, _v)| k) {
-        writeln!(f, "{indent}  {k:?}: {v:#?}")?;
-    }
-    Ok(())
-}
-
-/// YAML-like representation with sorted hashmap/sets, more amenable to diffing
-impl std::fmt::Debug for Schema {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fn sorted_map_of_sets(
-            f: &mut std::fmt::Formatter<'_>,
-            name: &str,
-            map: &HashMap<String, HashSet<String>>,
-        ) -> std::fmt::Result {
-            writeln!(f, "  {name}:")?;
-            for (k, set) in map.iter().sorted_by_key(|&(k, _set)| k) {
-                writeln!(f, "    {k:?}:")?;
-                for v in set.iter().sorted() {
-                    writeln!(f, "      {v:?}")?;
-                }
-            }
-            Ok(())
-        }
-
-        // Make sure we consider all fields
-        let Schema {
-            type_system: _,
-            raw_sdl,
-            subtype_map,
-            subgraphs,
-            object_types,
-            interfaces,
-            input_types,
-            custom_scalars,
-            enums,
-            api_schema,
-            schema_id,
-            root_operations,
-        } = self;
-        writeln!(f, "Schema:")?;
-        writeln!(f, "  raw_sdl: {raw_sdl:?}")?;
-        let root = root_operations
-            .iter()
-            .map(|(k, v)| (format!("{k:?}"), v))
-            .collect();
-        sorted_map(f, "  ", "root_operations", &root)?;
-        writeln!(f, "  object_types:")?;
-        for (k, v) in object_types.iter().sorted_by_key(|&(k, _v)| k) {
-            let ObjectType { fields, interfaces } = v;
-            writeln!(f, "    {k:?}:")?;
-            writeln!(f, "      interfaces: {interfaces:?}")?;
-            sorted_map(f, "      ", "fields", fields)?
-        }
-        writeln!(f, "  interfaces:")?;
-        for (k, v) in interfaces.iter().sorted_by_key(|&(k, _v)| k) {
-            let Interface { fields, interfaces } = v;
-            writeln!(f, "    {k:?}:")?;
-            writeln!(f, "      interfaces: {interfaces:?}")?;
-            sorted_map(f, "      ", "fields", fields)?
-        }
-        writeln!(f, "  input_types:")?;
-        for (k, v) in input_types.iter().sorted_by_key(|&(k, _v)| k) {
-            let InputObjectType { fields } = v;
-            writeln!(f, "    {k:?}:")?;
-            sorted_map(f, "      ", "fields", fields)?
-        }
-        let scalars = custom_scalars.iter().sorted().collect::<Vec<_>>();
-        writeln!(f, "  custom_scalars: {scalars:?}")?;
-        sorted_map_of_sets(f, "enums", enums)?;
-        sorted_map_of_sets(f, "subtype_map", subtype_map)?;
-        sorted_map(f, "  ", "subgraphs", subgraphs)?;
-        writeln!(f, "  schema_id: {schema_id:?}")?;
-        writeln!(f, "  api_schema: {api_schema:?}")?;
-        Ok(())
-    }
 }
 
 fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
@@ -274,7 +186,6 @@ impl Schema {
             Ok(Schema {
                 raw_sdl: Arc::new(schema.into()),
                 type_system: compiler.db.type_system(),
-                subtype_map: compiler.db.subtype_map(),
                 subgraphs,
                 object_types,
                 interfaces,
@@ -296,7 +207,8 @@ impl Schema {
     }
 
     pub(crate) fn is_subtype(&self, abstract_type: &str, maybe_subtype: &str) -> bool {
-        self.subtype_map
+        self.type_system
+            .subtype_map
             .get(abstract_type)
             .map(|x| x.contains(maybe_subtype))
             .unwrap_or(false)
@@ -325,20 +237,18 @@ impl Schema {
 #[derive(Debug)]
 pub(crate) struct InvalidObject;
 
+#[derive(Debug, Clone)]
+pub(crate) struct ObjectType {
+    pub(crate) fields: HashMap<String, FieldType>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct Interface {
+    pub(crate) fields: HashMap<String, FieldType>,
+}
+
 macro_rules! implement_object_type_or_interface {
-    ($visibility:vis $name:ident => $hir_ty:ty $(,)?) => {
-        #[derive(Debug, Clone)]
-        $visibility struct $name {
-            fields: HashMap<String, FieldType>,
-            interfaces: Vec<String>,
-        }
-
-        impl $name {
-            pub(crate) fn field(&self, name: &str) -> Option<&FieldType> {
-                self.fields.get(name)
-            }
-        }
-
+    ($name:ident => $hir_ty:ty $(,)?) => {
         impl From<&'_ $hir_ty> for $name {
             fn from(def: &'_ $hir_ty) -> Self {
                 Self {
@@ -352,16 +262,6 @@ macro_rules! implement_object_type_or_interface {
                         )
                         .map(|field| (field.name().to_owned(), field.ty().into()))
                         .collect(),
-                    interfaces: def
-                        .implements_interfaces()
-                        .iter()
-                        .chain(
-                            def.extensions()
-                                .iter()
-                                .flat_map(|ext| ext.implements_interfaces()),
-                        )
-                        .map(|imp| imp.interface().to_owned())
-                        .collect(),
                 }
             }
         }
@@ -371,13 +271,13 @@ macro_rules! implement_object_type_or_interface {
 // Spec: https://spec.graphql.org/draft/#sec-Objects
 // Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
 implement_object_type_or_interface!(
-    pub(crate) ObjectType =>
+    ObjectType =>
     hir::ObjectTypeDefinition,
 );
 // Spec: https://spec.graphql.org/draft/#sec-Interfaces
 // Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
 implement_object_type_or_interface!(
-    pub(crate) Interface =>
+    Interface =>
     hir::InterfaceTypeDefinition,
 );
 

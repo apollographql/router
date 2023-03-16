@@ -9,7 +9,7 @@ This article documents symbols and behaviors that are specific to [Rhai customiz
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn supergraph_service(service) {}
@@ -274,8 +274,6 @@ These additional fields are shared across all subgraph invocations and are thus 
 The context is a generic key/value store that exists for the entire lifespan of a particular client request. You can use this to share information between multiple callbacks throughout the request's lifespan.
 
 Keys must be strings, but values can be any Rhai object.
-
-For more information, see [Define necessary context](./native#5-define-necessary-context).
 
 ```rhai
 // You can interact with request.context as an indexed variable

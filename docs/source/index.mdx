@@ -5,7 +5,7 @@ description: High-performance routing for self-hosted supergraphs
 
 import { Link } from 'gatsby';
 
-**The Apollo Router** is a configurable, high-performance **graph router** for a [self-hosted supergraph](/graphos/graphs/overview/#self-hosted-supergraphs):
+**The Apollo Router** is a configurable, high-performance router for a [self-hosted supergraph](/graphos/graphs/overview/#self-hosted-supergraphs):
 
 ```mermaid
 flowchart LR;
@@ -44,6 +44,10 @@ If you have an existing self-hosted supergraph that currently uses `@apollo/gate
 
 ## Features
 
-* Full support for [Apollo Federation](/federation/) v1 and v2 (both managed and non-managed)
-* Extensive declarative [configuration options](./configuration/overview) (header propagation, CORS settings, OpenTelemetry support, and more)
-* Support for further [customization](./customizations/overview/) via Rhai scripts and native Rust plugins
+- Full support for [Apollo Federation](/federation/) and supergraph management via [GraphOS](/graphos/)
+- Extensive declarative [configuration options](./configuration/overview) (header propagation, CORS settings, OpenTelemetry support, and more)
+- Support for [scripting](./customizations/rhai/) via the Rhai scripting language
+- Advanced [GraphOS Enterprise features](./enterprise-features), including:
+    - [JWT authentication](./configuration/authn-jwt)
+    - [Distributed caching](./configuration/distributed-caching/) for multi-router fleets
+    - Customization in any language via [external coprocessing](./customizations/coprocessor/)

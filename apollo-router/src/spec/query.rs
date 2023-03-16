@@ -12,7 +12,6 @@ use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::Snapshot;
-use apollo_parser::ast;
 use derivative::Derivative;
 use once_cell::sync::OnceCell;
 use serde::de::Visitor;
@@ -42,7 +41,7 @@ pub(crate) const TYPENAME: &str = "__typename";
 
 /// A GraphQL query.
 #[derive(Derivative, Default, Serialize, Deserialize)]
-#[derivative(PartialEq, Hash, Eq)]
+#[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
@@ -54,37 +53,6 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
-}
-
-impl std::fmt::Debug for Query {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        use super::schema::sorted_map;
-        let Query {
-            string,
-            compiler: _,
-            fragments,
-            operations,
-            subselections,
-        } = self;
-        writeln!(f, "Query:")?;
-        writeln!(f, "  string: {string:?}")?;
-        sorted_map(f, "  ", "fragments", &fragments.map)?;
-        writeln!(f, "  operations:")?;
-        for operation in operations {
-            let Operation {
-                name,
-                kind,
-                selection_set,
-                variables,
-            } = operation;
-            writeln!(f, "    - name: {name:?}")?;
-            writeln!(f, "      kind: {kind:?}")?;
-            writeln!(f, "      selection_set: {selection_set:#?}")?;
-            sorted_map(f, "      ", "variables", variables)?;
-        }
-        writeln!(f, "  subselections: {subselections:#?}")?;
-        Ok(())
-    }
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -600,15 +568,10 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
                     let field_name = alias.as_ref().unwrap_or(name);
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -669,15 +632,10 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     known_type,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -715,30 +673,14 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment
-                            .skip
-                            .should_skip(parameters.variables)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if !fragment
-                            .include
-                            .should_include(parameters.variables)
-                            .unwrap_or(true)
-                        {
+                        if fragment.include_skip.should_skip(parameters.variables) {
                             continue;
                         }
 
@@ -796,17 +738,9 @@ impl Query {
                     alias,
                     selection_set,
                     field_type,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    // Using .unwrap_or is legit here because
-                    // validate_variables should have already checked that
-                    // the variable is present and it is of the correct type
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -862,8 +796,7 @@ impl Query {
                 Selection::InlineFragment {
                     type_condition,
                     selection_set,
-                    skip,
-                    include,
+                    include_skip,
                     ..
                 } => {
                     // top level objects will not provide a __typename field
@@ -873,11 +806,7 @@ impl Query {
                         return Err(InvalidValue);
                     }
 
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
@@ -893,30 +822,14 @@ impl Query {
                 Selection::FragmentSpread {
                     name,
                     known_type: _,
-                    skip,
-                    include,
+                    include_skip,
                 } => {
-                    if skip.should_skip(parameters.variables).unwrap_or(false) {
-                        continue;
-                    }
-
-                    if !include.should_include(parameters.variables).unwrap_or(true) {
+                    if include_skip.should_skip(parameters.variables) {
                         continue;
                     }
 
                     if let Some(fragment) = self.fragments.get(name) {
-                        if fragment
-                            .skip
-                            .should_skip(parameters.variables)
-                            .unwrap_or(false)
-                        {
-                            continue;
-                        }
-                        if !fragment
-                            .include
-                            .should_include(parameters.variables)
-                            .unwrap_or(true)
-                        {
+                        if fragment.include_skip.should_skip(parameters.variables) {
                             continue;
                         }
 
@@ -1195,24 +1108,6 @@ impl From<hir::OperationType> for OperationKind {
             hir::OperationType::Query => Self::Query,
             hir::OperationType::Mutation => Self::Mutation,
             hir::OperationType::Subscription => Self::Subscription,
-        }
-    }
-}
-
-impl From<ast::OperationType> for OperationKind {
-    // Spec: https://spec.graphql.org/draft/#OperationType
-    fn from(operation_type: ast::OperationType) -> Self {
-        if operation_type.query_token().is_some() {
-            Self::Query
-        } else if operation_type.mutation_token().is_some() {
-            Self::Mutation
-        } else if operation_type.subscription_token().is_some() {
-            Self::Subscription
-        } else {
-            unreachable!(
-                "either the `query` token is provided, either the `mutation` token, \
-                either the `subscription` token; qed"
-            )
         }
     }
 }

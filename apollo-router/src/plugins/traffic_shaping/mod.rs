@@ -210,8 +210,8 @@ pub(crate) struct Config {
     subgraphs: HashMap<String, SubgraphShaping>,
     /// DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)
     deduplicate_variables: Option<bool>,
-    /// URLs of Redis cache used for query planning
-    pub(crate) cache: Option<RedisCache>,
+    /// Experimental URLs of Redis cache used for subgraph response caching
+    pub(crate) experimental_cache: Option<RedisCache>,
 }
 
 #[derive(PartialEq, Debug, Clone, Deserialize, JsonSchema)]
@@ -275,12 +275,16 @@ impl Plugin for TrafficShaping {
             .transpose()?;
 
         {
-            let storage =
-                if let Some(urls) = init.config.cache.as_ref().map(|cache| cache.urls.clone()) {
-                    Some(RedisCacheStorage::new(urls, None).await?)
-                } else {
-                    None
-                };
+            let storage = if let Some(urls) = init
+                .config
+                .experimental_cache
+                .as_ref()
+                .map(|cache| cache.urls.clone())
+            {
+                Some(RedisCacheStorage::new(urls, None).await?)
+            } else {
+                None
+            };
             Ok(Self {
                 config: init.config,
                 rate_limit_router,
@@ -726,11 +730,7 @@ mod test {
             .oneshot(SubgraphRequest::fake_builder().build())
             .await
             .unwrap();
-        // Note: use `timeout` to guarantee 300ms has elapsed
-        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
-            .await
-            .is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
@@ -748,7 +748,7 @@ mod test {
         router:
             global_rate_limit:
                 capacity: 1
-                interval: 300ms
+                interval: 100ms
             timeout: 500ms
         "#,
         )
@@ -792,11 +792,7 @@ mod test {
             .oneshot(SupergraphRequest::fake_builder().build().unwrap())
             .await
             .is_err());
-        // Note: use `timeout` to guarantee 300ms has elapsed
-        let big_sleep = tokio::time::sleep(Duration::from_secs(10));
-        assert!(tokio::time::timeout(Duration::from_millis(300), big_sleep)
-            .await
-            .is_err());
+        tokio::time::sleep(Duration::from_millis(300)).await;
         let _response = plugin
             .as_any()
             .downcast_ref::<TrafficShaping>()
