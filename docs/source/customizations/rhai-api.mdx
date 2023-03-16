@@ -52,6 +52,16 @@ log_debug("debug-level log message");
 log_trace("trace-level log message");
 ```
 
+Lastly, you can also pass a second parameter to set the `message` value on logs to specify the source if `rhai_` value isn't sufficient.
+
+```rhai
+log_error("error-level log message", "docs");
+log_warn("warn-level log message", "docs");
+log_info("info-level log message", "docs");
+log_debug("debug-level log message", "docs");
+log_trace("trace-level log message", "docs");
+```
+
 ## Terminating client requests
 
 Your Rhai script can terminate the associated client request that triggered it. To do so, it throws an exception. This returns an `Internal Server Error` to the client with a `500` response code.
