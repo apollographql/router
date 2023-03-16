@@ -66,15 +66,8 @@ impl Request {
         schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = {
-            let compiler1 = query_plan
-                .query
-                .compiler(Some(schema))
-                .instrument(tracing::info_span!("waiting for compiler"))
-                .await;
+        let compiler = query_plan.query.snapshot_compiler(Some(schema));
 
-            tracing::info_span!("snapshot").in_scope(|| compiler1.snapshot())
-        };
         Self {
             supergraph_request,
             query_plan,

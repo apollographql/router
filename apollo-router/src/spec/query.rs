@@ -6,19 +6,19 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Mutex;
-use std::sync::MutexGuard;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::Snapshot;
 use apollo_parser::ast;
 use derivative::Derivative;
+use once_cell::sync::OnceCell;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
@@ -141,7 +141,7 @@ impl Query {
     ///
     /// This will discard unrequested fields and re-order the output to match the order of the
     /// query.
-    #[tracing::instrument(skip_all, level = "info")]
+    #[tracing::instrument(skip_all, level = "trace")]
     pub(crate) fn format_response(
         &self,
         response: &mut Response,
@@ -338,12 +338,13 @@ impl Query {
         })
     }
 
-    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler
-            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
-            .await
+    pub(crate) fn snapshot_compiler(&self, schema: Option<&Schema>) -> Snapshot {
+        let compiler1 = self
+            .compiler
+            .get_or_init(|| Mutex::new(self.uncached_compiler(schema)))
             .lock()
-            .unwrap()
+            .expect("this is only locked from inside this function, and only for the time needed to generate a snapshot");
+        compiler1.snapshot()
     }
 
     /// Create a new compiler for this query, without caching it
@@ -780,7 +781,6 @@ impl Query {
         Ok(())
     }
 
-    #[tracing::instrument(skip_all, level = "info")]
     fn apply_root_selection_set(
         &self,
         operation: &Operation,
@@ -955,7 +955,7 @@ impl Query {
     }
 
     /// Validate a [`Request`]'s variables against this [`Query`] using a provided [`Schema`].
-    #[tracing::instrument(skip_all, level = "info")]
+    #[tracing::instrument(skip_all, level = "trace")]
     pub(crate) fn validate_variables(
         &self,
         request: &Request,
