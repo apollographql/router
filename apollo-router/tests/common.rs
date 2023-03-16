@@ -327,6 +327,28 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                if metrics.contains(text) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{text}' not detected in metrics\n{last_metrics}");
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
         let mut router = self.router.take().expect("router must have been started");
         let now = Instant::now();

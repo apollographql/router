@@ -1,4 +1,4 @@
-query EntitlementRequest($apiKey: String!, $graph_ref: String!, $unlessId: ID) {
+query EntitlementQuery($apiKey: String!, $graph_ref: String!, $unlessId: ID) {
 
     routerEntitlements(unlessId: $unlessId, apiKey: $apiKey, ref: $graph_ref) {
         __typename
