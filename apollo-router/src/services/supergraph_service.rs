@@ -141,10 +141,7 @@ where
         content,
         context,
         errors,
-    } = match plan_query(planning, body, context.clone())
-        .instrument(tracing::info_span!("plan_query"))
-        .await
-    {
+    } = match plan_query(planning, body, context.clone()).await {
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
@@ -217,10 +214,8 @@ where
                             .schema(&schema)
                             .context(context)
                             .build()
-                            .instrument(tracing::info_span!("build execution request"))
                             .await,
                     )
-                    .instrument(tracing::info_span!("execution_service+plugins"))
                     .await?;
 
                 let ExecutionResponse { response, context } = execution_response;

@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use static_assertions::assert_impl_all;
 use tower::BoxError;
-use tracing::Instrument;
 
 use crate::graphql;
 use crate::spec::Schema;

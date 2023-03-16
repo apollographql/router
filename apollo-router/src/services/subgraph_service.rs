@@ -400,7 +400,7 @@ async fn call_http(
     }
 
     let graphql: graphql::Response =
-        tracing::info_span!("parse_subgraph_response").in_scope(|| {
+        tracing::debug_span!("parse_subgraph_response").in_scope(|| {
             graphql::Response::from_bytes(&cloned_service_name, body).map_err(|error| {
                 FetchError::SubrequestMalformedResponse {
                     service: cloned_service_name.clone(),

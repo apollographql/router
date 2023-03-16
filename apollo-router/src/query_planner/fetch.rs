@@ -98,7 +98,7 @@ struct Variables {
 }
 
 impl Variables {
-    #[instrument(skip_all, level = "info", name = "make_variables")]
+    #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
     async fn new(
         requires: &[Selection],
@@ -221,7 +221,6 @@ impl FetchNode {
                         parameters
                             .schema
                             .subgraphs.get(service_name)
-                            //.find_map(|(name, url)| (name == service_name).then_some(url))
                             .unwrap_or_else(|| {
                                 panic!(
                                     "schema uri for subgraph '{service_name}' should already have been checked"

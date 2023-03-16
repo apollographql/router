@@ -81,12 +81,7 @@ where
         loop {
             match get_or_insert_wait_map(&wait_map, &request) {
                 Err(receiver) => {
-                    let r = receiver
-                        .read()
-                        .instrument(tracing::info_span!(
-                            "traffic_shaping::dedup wait for receiver"
-                        ))
-                        .await;
+                    let r = receiver.read().await;
                     return (*r)
                         .clone()
                         .unwrap()
@@ -120,25 +115,20 @@ where
                             .ready_oneshot()
                             .await?
                             .call(request)
-                            .instrument(tracing::info_span!(
-                                "traffic_shaping::dedup wait for service call"
-                            ))
                             .await
                             .map(CloneSubgraphResponse)
                     };
 
-                    tracing::info_span!("traffic_shaping::dedup broadcast").in_scope(|| {
-                        // Let our waiters know
-                        let broadcast_value = res
-                            .as_ref()
-                            .map(|response| response.clone())
-                            .map_err(|e| e.to_string());
+                    // Let our waiters know
+                    let broadcast_value = res
+                        .as_ref()
+                        .map(|response| response.clone())
+                        .map_err(|e| e.to_string());
 
-                        // We may get errors here, for instance if a task is cancelled,
-                        // so just ignore the result of send
-                        //let _ = tx.send(Some(broadcast_value));
-                        *tx = Some(broadcast_value);
-                    });
+                    // We may get errors here, for instance if a task is cancelled,
+                    // so just ignore the result of send
+                    //let _ = tx.send(Some(broadcast_value));
+                    *tx = Some(broadcast_value);
 
                     return res.map(|response| {
                         SubgraphResponse::new_from_response(response.0.response, context)

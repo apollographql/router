@@ -63,9 +63,7 @@ where
         // If the data is present, it is sent directly to all the tasks that were waiting for it.
         // If it is not present, the first task that requested it can perform the work to create
         // the data, store it in the cache and send the value to all the other tasks.
-        match tracing::info_span!("cache get_or_insert_wait_map")
-            .in_scope(|| self.get_or_insert_wait_map(key))
-        {
+        match self.get_or_insert_wait_map(key) {
             Err(receiver) => {
                 // Register interest in key
                 Entry {
@@ -79,22 +77,14 @@ where
                 // return with Err(), then we remove the entry from the wait map
                 let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                 let wait_map = self.wait_map.clone();
-                tracing::info_span!("dedupcache cache spawn").in_scope(|| {
-                    tokio::task::spawn(async move {
-                        let _ = drop_sentinel.await;
-                        let mut locked_wait_map = wait_map.lock().unwrap();
-                        let _ = locked_wait_map.remove(&k);
-                    })
+                tokio::task::spawn(async move {
+                    let _ = drop_sentinel.await;
+                    let mut locked_wait_map = wait_map.lock().unwrap();
+                    let _ = locked_wait_map.remove(&k);
                 });
 
-                if let Some(value) = self
-                    .storage
-                    .get(key)
-                    .instrument(tracing::info_span!("dedupcache storage get"))
-                    .await
-                {
-                    tracing::info_span!("dedupcache cache send")
-                        .in_scope(|| self.send(sender, key, value.clone()));
+                if let Some(value) = self.storage.get(key).await {
+                    self.send(sender, key, value.clone());
 
                     return Entry {
                         inner: EntryInner::Value(value),
@@ -143,10 +133,7 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.storage
-            .insert(key, value)
-            .instrument(tracing::info_span!("dedupcache storage insert"))
-            .await;
+        self.storage.insert(key, value).await;
     }
 
     fn send(&self, mut sender: OwnedRwLockWriteGuard<Option<V>>, key: &K, value: V) {
@@ -201,10 +188,7 @@ where
             // there was already a value in cache
             EntryInner::Value(v) => Ok(v),
             EntryInner::Receiver { receiver } => {
-                let r = receiver
-                    .read()
-                    .instrument(tracing::info_span!("dedupcache entry wait for receiver"))
-                    .await;
+                let r = receiver.read().await;
                 Ok((*r).clone().unwrap())
             }
             _ => Err(EntryError::IsFirst),
@@ -219,12 +203,8 @@ where
             _drop_signal,
         } = self.inner
         {
-            cache
-                .insert(key.clone(), value.clone())
-                .instrument(tracing::info_span!("dedupcache cache insert"))
-                .await;
-            tracing::info_span!("dedupcache entry send")
-                .in_scope(|| cache.send(sender, &key, value));
+            cache.insert(key.clone(), value.clone()).await;
+            cache.send(sender, &key, value);
         }
     }
 
@@ -235,8 +215,7 @@ where
             sender, cache, key, ..
         } = self.inner
         {
-            tracing::info_span!("dedupcache entry send2")
-                .in_scope(|| cache.send(sender, &key, value));
+            cache.send(sender, &key, value);
         }
     }
 }
