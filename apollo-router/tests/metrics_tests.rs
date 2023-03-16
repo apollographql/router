@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use tower::BoxError;
 
 use crate::common::IntegrationTest;
@@ -35,23 +37,27 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         router.assert_reloaded().await;
     }
 
-    router.assert_metrics_contains(r#"apollo_router_cache_hit_count{kind="query planner",service_name="apollo-router",storage="memory"} 4"#).await;
-    router.assert_metrics_contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 2"#).await;
+    router.assert_metrics_contains(r#"apollo_router_cache_hit_count{kind="query planner",service_name="apollo-router",storage="memory"} 4"#, None).await;
+    router.assert_metrics_contains(r#"apollo_router_cache_miss_count{kind="query planner",service_name="apollo-router",storage="memory"} 2"#, None).await;
     router
-        .assert_metrics_contains(r#"apollo_router_cache_hit_time"#)
+        .assert_metrics_contains(r#"apollo_router_cache_hit_time"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_cache_miss_time"#)
+        .assert_metrics_contains(r#"apollo_router_cache_miss_time"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_session_count_total"#)
+        .assert_metrics_contains(r#"apollo_router_session_count_total"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"apollo_router_session_count_active"#)
+        .assert_metrics_contains(r#"apollo_router_session_count_active"#, None)
         .await;
     router
-        .assert_metrics_contains(r#"custom_header="test_custom""#)
+        .assert_metrics_contains(r#"custom_header="test_custom""#, None)
         .await;
+
+    if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
+        router.assert_metrics_contains(r#"uplink_count{kind="duration",query="Entitlement",service_name="apollo-router",type="unchanged",url="https://uplink.api.apollographql.com/graphql"}"#, Some(Duration::from_secs(60))).await;
+    }
 
     Ok(())
 }
