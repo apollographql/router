@@ -934,14 +934,6 @@ impl Query {
         }
     }
 
-    pub(crate) fn contains_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
-        if self.operations.len() == 1 {
-            self.operations[0].is_only_typenames_with_output_keys()
-        } else {
-            None
-        }
-    }
-
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
@@ -1078,7 +1070,7 @@ impl Operation {
     /// `__typename` at the root level (possibly more than one time, possibly
     /// with aliases). If so, returns Some with a Vec of the output keys
     /// corresponding.
-    fn is_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
+    pub(crate) fn is_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
         if self.selection_set.is_empty() {
             None
         } else {
