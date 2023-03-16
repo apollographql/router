@@ -65,7 +65,7 @@ impl TracingConfigurator for Config {
             false => None,
         };
         let exporter = opentelemetry_datadog::new_pipeline()
-            .with(&url, |b, e| {
+            .with(&url, |builder, e| {
                 builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
             })
             .with(&enable_span_mapping, |builder, _e| {
