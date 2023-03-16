@@ -10,20 +10,32 @@ executors:
     docker:
       - image: cimg/base:stable
     resource_class: medium
+    environment:
+      CARGO_BUILD_JOBS: 4
+      RUST_TEST_THREADS: 6
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
       - image: cimg/redis:7.0.8
       - image: jaegertracing/all-in-one:1.42.0
     resource_class: xlarge
+    environment:
+      CARGO_BUILD_JOBS: 4
+      RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2022.04.1
     resource_class: arm.large
+    environment:
+      CARGO_BUILD_JOBS: 8
+      RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2022.04.1
     resource_class: arm.xlarge
+    environment:
+      CARGO_BUILD_JOBS: 8
+      RUST_TEST_THREADS: 8
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -351,8 +363,6 @@ commands:
 
   xtask_test:
     parameters:
-      platform:
-        type: executor
       variant:
         type: string
         default: "default"
@@ -360,35 +370,9 @@ commands:
       - restore_cache:
           keys:
             - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-      - when:
-          condition:
-            or:
-              - equal: [ *amd_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *amd_linux_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Run tests
-                command: xtask test --workspace --locked --jobs 4 --test-threads 6
-      - when:
-          condition:
-            or:
-              - equal: [ *arm_linux_build_executor, << parameters.platform >> ]
-              - equal: [ *arm_linux_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Run tests
-                command: xtask test --workspace --locked --jobs 8 --test-threads 8
-      - when:
-          condition:
-            or:
-              - equal: [ *macos_build_executor, << parameters.platform >> ]
-              - equal: [ *macos_test_executor, << parameters.platform >> ]
-              - equal: [ *windows_build_executor, << parameters.platform >> ]
-              - equal: [ *windows_test_executor, << parameters.platform >> ]
-          steps:
-            - run:
-                name: Run tests
-                command: xtask test --workspace --locked
+      - run:
+          name: Run tests
+          command: xtask test --workspace --locked
       - run:
           name: Delete large files from cache
           command: |
@@ -436,8 +420,7 @@ jobs:
       - checkout
       - setup_environment:
           platform: << parameters.platform >>
-      - xtask_test:
-          platform: << parameters.platform >>
+      - xtask_test
 
   test_updated:
     environment:
@@ -457,7 +440,6 @@ jobs:
             cargo fetch
       - xtask_test:
           variant: "updated"
-          platform: << parameters.platform >>
 
   build_release:
     parameters:
@@ -515,7 +497,6 @@ jobs:
                 condition:
                   equal: [ true, << parameters.nightly >> ]
                 steps:
-                  - install_extra_tools
                   - run: cargo xtask release prepare nightly
             - run:
                 command: >
