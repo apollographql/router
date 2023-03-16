@@ -128,9 +128,15 @@ where
     }
 
     fn get_in_memory(&self, key: &K) -> Option<V> {
-        let mut guard = self.inner.lock().unwrap();
         let instant_memory = Instant::now();
-        match guard.get(key) {
+
+        match self
+            .inner
+            .lock()
+            .expect("hashmap operations shouldn't panic")
+            .get(key)
+            .cloned()
+        {
             Some(v) => {
                 tracing::info!(
                     monotonic_counter.apollo_router_cache_hit_count = 1u64,
@@ -143,7 +149,7 @@ where
                     kind = %self.caller,
                     storage = &tracing::field::display(CacheStorageName::Memory),
                 );
-                Some(v.clone())
+                Some(v)
             }
             None => {
                 let duration = instant_memory.elapsed().as_secs_f64();
@@ -173,9 +179,14 @@ where
     }
 
     fn insert_in_memory(&self, key: K, value: V) {
-        let mut in_memory = self.inner.lock().unwrap();
-        in_memory.put(key, value);
-        let size = in_memory.len() as u64;
+        let size = {
+            let mut in_memory = self
+                .inner
+                .lock()
+                .expect("hashmap operations shouldn't panic");
+            in_memory.put(key, value);
+            in_memory.len() as u64
+        };
         tracing::info!(
             value.apollo_router_cache_size = size,
             kind = %self.caller,
@@ -186,7 +197,7 @@ where
     pub(crate) fn in_memory_keys(&self) -> Vec<K> {
         self.inner
             .lock()
-            .unwrap()
+            .expect("hashmap operations shouldn't panic")
             .iter()
             .map(|(k, _)| k.clone())
             .collect()
@@ -194,7 +205,10 @@ where
 
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        self.inner.lock().unwrap().len()
+        self.inner
+            .lock()
+            .expect("hashmap operations shouldn't panic")
+            .len()
     }
 }
 
