@@ -218,12 +218,11 @@ impl BridgeQueryPlanner {
             // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated). (This does mean we fail to properly support
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
-            let output_keys_for_typenames = if selections.operations.len() == 1 {
-                selections.operations[0].is_only_typenames_with_output_keys()
-            } else {
-                None
-            };
-            if let Some(output_keys) = output_keys_for_typenames {
+            if let Some(output_keys) = selections
+                .operations
+                .get(0)
+                .and_then(|op| op.is_only_typenames_with_output_keys())
+            {
                 let operation_name = selections.operations[0].kind().to_string();
                 let data: Value = Value::Object(Map::from_iter(
                     output_keys
