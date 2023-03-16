@@ -17,6 +17,10 @@ use tower::BoxError;
 
 use crate::json_ext::Value;
 
+use self::extensions::Extensions;
+
+pub(crate) mod extensions;
+
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
 
