@@ -6,4 +6,5 @@ There is a [known issue](https://docs.rs/opentelemetry-datadog/latest/openteleme
 To fix, this, open-telemetry-datadog added [custom mapping functions](https://docs.rs/opentelemetry-datadog/0.6.0/opentelemetry_datadog/struct.DatadogPipelineBuilder.html#method.with_resource_mapping).
 
 All this logic is gated behind a yaml configuration boolean `enable_span_mapping` which if enabled will take the values from the span attributes.
+
 By [@samuelAndalon](https://github.com/samuelAndalon) in https://github.com/apollographql/router/pull/2790
