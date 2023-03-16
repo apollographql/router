@@ -1,11 +1,12 @@
 //! Configuration for datadog tracing.
 
-use lazy_static::lazy_static;
 use std::collections::HashMap;
-use opentelemetry::Key;
-use opentelemetry::Value;
+
+use lazy_static::lazy_static;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
+use opentelemetry::Key;
+use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -71,7 +72,7 @@ impl TracingConfigurator for Config {
             .with(&enable_span_mapping, |builder, _e| {
                 builder
                     .with_name_mapping(|span, _model_config| span.name.as_ref())
-                    .with_resource_mapping(|span, _model_config|
+                    .with_resource_mapping(|span, _model_config| {
                         SPAN_RESOURCE_NAME_ATTRIBUTE_MAPPING
                             .get(span.name.as_ref())
                             .and_then(|key| span.attributes.get(&Key::from_static_str(key)))
@@ -80,7 +81,7 @@ impl TracingConfigurator for Config {
                                 _ => None,
                             })
                             .unwrap_or(span.name.as_ref())
-                    )
+                    })
             })
             .with_service_name(trace_config.service_name.clone())
             .with_trace_config(trace_config.into())

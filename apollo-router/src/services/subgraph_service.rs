@@ -256,7 +256,11 @@ async fn call_http(
         subgraph_request, ..
     } = request;
 
-    let operation_name = subgraph_request.body().operation_name.clone().unwrap_or_default();
+    let operation_name = subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
     let (parts, _) = subgraph_request.into_parts();
 
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
