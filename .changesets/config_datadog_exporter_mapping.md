@@ -1,9 +1,9 @@
 ### Custom OpenTelemetry Datadog exporter mapping ([Issue #2228](https://github.com/apollographql/router/issues/2228))
 
-This PR fixes the issue with DD exporter not providing meaningful data in the DD traces.
+This PR fixes the issue with the DataDog exporter not providing meaningful contextual data in the Data Dog traces.
 There is a [known issue](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks) where open telemetry is not fully compatible with datadog.
 
-To fix, this, open-telemetry-datadog added [custom mapping functions](https://docs.rs/opentelemetry-datadog/0.6.0/opentelemetry_datadog/struct.DatadogPipelineBuilder.html#method.with_resource_mapping).
+To fix this, opentelemetry-datadog added [custom mapping functions](https://docs.rs/opentelemetry-datadog/0.6.0/opentelemetry_datadog/struct.DatadogPipelineBuilder.html#method.with_resource_mapping).
 
 when `enable_span_mapping` is set to `true`, the Apollo Router will perform the following mapping:
 
@@ -25,8 +25,10 @@ query to `my-subgraph-name` and the following trace will be created:
                                                         | apollo_router subgraph_request    |
 ```
 
-As you can see, there is no clear information about the name of the Query, the name of the Subgraph, and name of Query
-sent to Subgraph, when `enable_span_mapping` the following trace will be created:
+As you can see, there is no clear information about the name of the query, the name of the subgraph, and the name of query
+sent to the subgraph.
+
+Instead when `enable_span_mapping` is set to `true` the following trace will be created:
 
 ```
     | request /graphql                                                                                   |
@@ -38,10 +40,6 @@ sent to Subgraph, when `enable_span_mapping` the following trace will be created
                                                       | subgraph_request MyQuery__my-subgraph-name__0    |
 ```
 
-
-
-
-
-All this logic is gated behind a yaml configuration boolean `enable_span_mapping` which if enabled will take the values from the span attributes.
+All this logic is gated behind the configuration `enable_span_mapping` which if set to `true` will take the values from the span attributes.
 
 By [@samuelAndalon](https://github.com/samuelAndalon) in https://github.com/apollographql/router/pull/2790

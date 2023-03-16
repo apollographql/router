@@ -158,9 +158,8 @@ telemetry:
 ```
 
 [Given that there are some incompatibilities](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks)
-between Datadog and OpenTelemetry the datadog exporter might not provide
-meaningful information in the exported spans, to fix this you can configure the Apollo Router to perform a mapping for span name
-and span resource name.
+between Datadog and OpenTelemetry, the DataDog exporter might not provide meaningful contextual information in the exported spans.
+To fix this, you can configure the Apollo Router to perform a mapping for the span name and the span resource name.
 
 ```yaml title="router.yaml"
 telemetry:
@@ -190,8 +189,10 @@ query to `my-subgraph-name` and the following trace will be created:
                                                         | apollo_router subgraph_request    |
 ```
 
-As you can see, there is no clear information about the name of the Query, the name of the Subgraph, and name of Query
-sent to Subgraph, when `enable_span_mapping` the following trace will be created:
+As you can see, there is no clear information about the name of the query, the name of the subgraph, and the name of the
+query sent to the subgraph.
+
+Instead when `enable_span_mapping` is set to `true` the following trace will be created:
 
 ```
     | request /graphql                                                                                   |
