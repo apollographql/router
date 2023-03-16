@@ -4,6 +4,7 @@ version: 2.1
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   gh: circleci/github-cli@2.2.0
+  slack: circleci/slack@4.9.3
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -421,6 +422,12 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_test
+      - slack/notify:
+          event: fail
+          template: basic_fail_1
+      - slack/notify:
+          event: pass
+          template: success_tagged_deploy_1
 
   test_updated:
     environment:
@@ -594,6 +601,7 @@ workflows:
       - test:
           requires:
             - lint
+          context: router
           matrix:
             parameters:
               platform:
