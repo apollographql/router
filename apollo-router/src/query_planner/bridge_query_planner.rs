@@ -215,7 +215,7 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            // If we have only one operation containing a only the root field `__typename`
+            // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated)
             if let Some(output_keys) = selections.contains_only_typenames_with_output_keys() {
                 let operation_name = selections.operations[0].kind().to_string();
