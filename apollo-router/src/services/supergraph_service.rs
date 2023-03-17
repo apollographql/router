@@ -19,8 +19,8 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::layers::content_negociation;
-use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
 use super::new_service::ServiceFactory;
+use super::router::ClientRequestAccepts;
 use super::subgraph_service::MakeSubgraphService;
 use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
@@ -189,9 +189,15 @@ where
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
 
-            let accepts_multipart: bool = context
-                .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
-                .unwrap_or_default()
+            let ClientRequestAccepts {
+                multipart: accepts_multipart,
+                ..
+            } = context
+                .private_entries
+                .lock()
+                .unwrap()
+                .get()
+                .cloned()
                 .unwrap_or_default();
 
             if is_deferred && !accepts_multipart {
@@ -1546,7 +1552,15 @@ mod tests {
 
     fn defer_context() -> Context {
         let context = Context::new();
-        context.insert(ACCEPTS_MULTIPART_CONTEXT_KEY, true).unwrap();
+        context
+            .private_entries
+            .lock()
+            .unwrap()
+            .insert(ClientRequestAccepts {
+                multipart: true,
+                ..Default::default()
+            });
+
         context
     }
 

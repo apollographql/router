@@ -192,7 +192,7 @@ mod apq_tests {
     use crate::configuration::Apq;
     use crate::error::Error;
     use crate::graphql::Response;
-    use crate::services::layers::content_negociation::ACCEPTS_JSON_CONTEXT_KEY;
+    use crate::services::router::ClientRequestAccepts;
     use crate::services::router_service::from_supergraph_mock_callback;
     use crate::services::router_service::from_supergraph_mock_callback_and_configuration;
     use crate::Configuration;
@@ -521,7 +521,15 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context.insert(ACCEPTS_JSON_CONTEXT_KEY, true).unwrap();
+        context
+            .private_entries
+            .lock()
+            .unwrap()
+            .insert(ClientRequestAccepts {
+                json: true,
+                ..Default::default()
+            });
+
         context
     }
 }

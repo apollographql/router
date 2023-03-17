@@ -23,15 +23,13 @@ use crate::graphql;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::layers::ServiceExt as _;
 use crate::services::router;
+use crate::services::router::ClientRequestAccepts;
 use crate::services::supergraph;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::services::MULTIPART_DEFER_SPEC_PARAMETER;
 use crate::services::MULTIPART_DEFER_SPEC_VALUE;
 
 pub(crate) const GRAPHQL_JSON_RESPONSE_HEADER_VALUE: &str = "application/graphql-response+json";
-pub(crate) const ACCEPTS_WILDCARD_CONTEXT_KEY: &str = "content-negociation:accepts-wildcard";
-pub(crate) const ACCEPTS_MULTIPART_CONTEXT_KEY: &str = "content-negociation:accepts-multipart";
-pub(crate) const ACCEPTS_JSON_CONTEXT_KEY: &str = "content-negociation:accepts-json";
 
 /// [`Layer`] for Content-Type checks implementation.
 #[derive(Clone, Default)]
@@ -77,14 +75,14 @@ where
 
                 if accepts_wildcard || accepts_multipart || accepts_json {
                     req.context
-                        .insert(ACCEPTS_WILDCARD_CONTEXT_KEY, accepts_wildcard)
-                        .unwrap();
-                    req.context
-                        .insert(ACCEPTS_MULTIPART_CONTEXT_KEY, accepts_multipart)
-                        .unwrap();
-                    req.context
-                        .insert(ACCEPTS_JSON_CONTEXT_KEY, accepts_json)
-                        .unwrap();
+                        .private_entries
+                        .lock()
+                        .unwrap()
+                        .insert(ClientRequestAccepts {
+                            wildcard: accepts_wildcard,
+                            multipart: accepts_multipart,
+                            json: accepts_json,
+                        });
 
                     Ok(ControlFlow::Continue(req))
                 } else {
@@ -128,17 +126,16 @@ where
     fn layer(&self, service: S) -> Self::Service {
         service
             .map_first_graphql_response(|context, mut parts, res| {
-                let accepts_wildcard: bool = context
-                    .get(ACCEPTS_WILDCARD_CONTEXT_KEY)
-                    .unwrap_or_default()
-                    .unwrap_or_default();
-                let accepts_json: bool = context
-                    .get(ACCEPTS_JSON_CONTEXT_KEY)
-                    .unwrap_or_default()
-                    .unwrap_or_default();
-                let accepts_multipart: bool = context
-                    .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
-                    .unwrap_or_default()
+                let ClientRequestAccepts {
+                    wildcard: accepts_wildcard,
+                    json: accepts_json,
+                    multipart: accepts_multipart,
+                } = context
+                    .private_entries
+                    .lock()
+                    .unwrap()
+                    .get()
+                    .cloned()
                     .unwrap_or_default();
 
                 if !res.has_next.unwrap_or_default() && (accepts_json || accepts_wildcard) {
