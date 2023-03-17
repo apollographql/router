@@ -306,6 +306,7 @@ impl Query {
         })
     }
 
+    #[allow(clippy::expect_used)]
     pub(crate) fn snapshot_compiler(&self, schema: Option<&Schema>) -> Snapshot {
         let compiler1 = self
             .compiler
