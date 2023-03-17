@@ -1,5 +1,6 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
+use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
@@ -158,13 +159,17 @@ where
                             interval = Duration::from_secs(delay);
 
                             // If the ordering_id was less than the last then don't bother with this event as one of the uplink replicas is probably behind.
-                            if ordering_id > last_ordering_id {
-                                last_ordering_id = ordering_id;
-                                if sender.send(Ok(response)).await.is_err() {
-                                    break;
+                            match ordering_id.cmp(&last_ordering_id) {
+                                Ordering::Greater => {
+                                    last_ordering_id = ordering_id;
+                                    if sender.send(Ok(response)).await.is_err() {
+                                        break;
+                                    }
                                 }
-                            } else if ordering_id < last_ordering_id {
-                                tracing::debug!("ignoring uplink event as is was older than our last known message");
+                                Ordering::Less => {
+                                    tracing::debug!("ignoring uplink event as is was older than our last known message");
+                                }
+                                _ => {}
                             }
                         }
                         UplinkResponse::Unchanged { id, delay } => {
