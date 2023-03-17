@@ -163,7 +163,7 @@ where
                                 if sender.send(Ok(response)).await.is_err() {
                                     break;
                                 }
-                            } else {
+                            } else if ordering_id < last_ordering_id {
                                 tracing::debug!("ignoring uplink event as is was older than our last known message");
                             }
                         }
