@@ -137,7 +137,7 @@ where
         let mut locked_wait_map = wait_map
             .lock()
             .expect("only locked in get_or_insert_wait_map or remove_from_wait_map");
-        let _ = locked_wait_map.remove(&key);
+        let _ = locked_wait_map.remove(key);
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
