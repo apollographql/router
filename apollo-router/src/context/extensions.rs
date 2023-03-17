@@ -112,6 +112,13 @@ impl Extensions {
             .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
     }
 
+    pub fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
+        self.map
+            .as_ref()
+            .map(|map| map.contains_key(&TypeId::of::<T>()))
+            .unwrap_or_default()
+    }
+
     /// Remove a type from this `Extensions`.
     ///
     /// If a extension of this type existed, it will be returned.
