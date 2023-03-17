@@ -2,6 +2,6 @@
 source: apollo-router/src/uplink/mod.rs
 expression: "results.into_iter().map(to_friendly).collect::<Vec<_>>()"
 ---
-- Ok: response
-- Ok: response
+- Ok: "result QueryResult { name: \"ok\", ordering: 1 }"
+- Ok: "result QueryResult { name: \"ok\", ordering: 2 }"
 

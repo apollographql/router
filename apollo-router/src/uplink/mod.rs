@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
+use std::time::SystemTime;
 
 use futures::Stream;
 use graphql_client::QueryBody;
@@ -49,6 +50,7 @@ where
         response: Response,
         id: String,
         delay: u64,
+        ordering_id: SystemTime,
     },
     Unchanged {
         id: Option<String>,
@@ -131,6 +133,7 @@ where
     let (sender, receiver) = channel(2);
     let task = async move {
         let mut last_id = None;
+        let mut last_ordering_id = SystemTime::UNIX_EPOCH;
         let mut endpoints = endpoints.unwrap_or_default();
         loop {
             let query_body = Query::build_query(
@@ -149,13 +152,20 @@ where
                             id,
                             response,
                             delay,
+                            ordering_id,
                         } => {
                             last_id = Some(id);
-                            if sender.send(Ok(response)).await.is_err() {
-                                break;
-                            }
-
                             interval = Duration::from_secs(delay);
+
+                            // If the ordering_id was less than the last then don't bother with this event as one of the uplink replicas is probably behind.
+                            if ordering_id > last_ordering_id {
+                                last_ordering_id = ordering_id;
+                                if sender.send(Ok(response)).await.is_err() {
+                                    break;
+                                }
+                            } else {
+                                tracing::debug!("ignoring uplink event as is was older than our last known message");
+                            }
                         }
                         UplinkResponse::Unchanged { id, delay } => {
                             tracing::debug!("uplink response did not change");
@@ -278,12 +288,16 @@ mod test {
     use std::collections::VecDeque;
     use std::sync::Mutex;
     use std::time::Duration;
+    use std::time::SystemTime;
 
     use buildstructor::buildstructor;
     use futures::StreamExt;
+    use graphql_client::GraphQLQuery;
     use http::StatusCode;
     use insta::assert_yaml_snapshot;
     use serde_json::json;
+    use test_query::FetchErrorCode;
+    use test_query::TestQueryUplinkQuery;
     use url::Url;
     use wiremock::matchers::method;
     use wiremock::matchers::path;
@@ -293,11 +307,71 @@ mod test {
     use wiremock::Respond;
     use wiremock::ResponseTemplate;
 
-    use crate::uplink::entitlement::Entitlement;
-    use crate::uplink::entitlement_stream::EntitlementQuery;
     use crate::uplink::stream_from_uplink;
     use crate::uplink::Endpoints;
     use crate::uplink::Error;
+    use crate::uplink::UplinkRequest;
+    use crate::uplink::UplinkResponse;
+
+    #[derive(GraphQLQuery)]
+    #[graphql(
+        query_path = "src/uplink/testdata/test_query.graphql",
+        schema_path = "src/uplink/testdata/test_uplink.graphql",
+        request_derives = "Debug",
+        response_derives = "PartialEq, Debug, Deserialize",
+        deprecated = "warn"
+    )]
+    pub(crate) struct TestQuery {}
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct QueryResult {
+        name: String,
+        ordering: i64,
+    }
+
+    impl From<UplinkRequest> for test_query::Variables {
+        fn from(req: UplinkRequest) -> Self {
+            test_query::Variables {
+                api_key: req.api_key,
+                graph_ref: req.graph_ref,
+                if_after_id: req.id,
+            }
+        }
+    }
+
+    impl From<test_query::ResponseData> for UplinkResponse<QueryResult> {
+        fn from(response: test_query::ResponseData) -> Self {
+            match response.uplink_query {
+                TestQueryUplinkQuery::New(response) => UplinkResponse::New {
+                    id: response.id,
+                    delay: response.min_delay_seconds as u64,
+                    ordering_id: SystemTime::UNIX_EPOCH
+                        + Duration::from_secs(response.data.ordering as u64),
+                    response: QueryResult {
+                        name: response.data.name,
+                        ordering: response.data.ordering,
+                    },
+                },
+                TestQueryUplinkQuery::Unchanged(response) => UplinkResponse::Unchanged {
+                    id: Some(response.id),
+                    delay: Some(response.min_delay_seconds as u64),
+                },
+                TestQueryUplinkQuery::FetchError(error) => UplinkResponse::Error {
+                    retry_later: error.code == FetchErrorCode::RETRY_LATER,
+                    code: match error.code {
+                        FetchErrorCode::AUTHENTICATION_FAILED => {
+                            "AUTHENTICATION_FAILED".to_string()
+                        }
+                        FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
+                        FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
+                        FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                        FetchErrorCode::Other(other) => other,
+                    },
+                    message: error.message,
+                },
+            }
+        }
+    }
 
     #[test]
     #[cfg(not(windows))] // Don’t bother with line ending differences
@@ -359,8 +433,8 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
-            .response(response_ok())
-            .response(response_ok())
+            .response(response_ok(1))
+            .response(response_ok(2))
             .build()
             .await;
         MockResponses::builder()
@@ -369,7 +443,7 @@ mod test {
             .build()
             .await;
 
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2])),
@@ -388,17 +462,17 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
-            .response(response_ok())
+            .response(response_ok(1))
             .build()
             .await;
         MockResponses::builder()
             .mock_server(&mock_server)
-            .response(response_ok())
+            .response(response_ok(2))
             .endpoint(&url2)
             .build()
             .await;
 
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2])),
@@ -418,10 +492,10 @@ mod test {
             .mock_server(&mock_server)
             .endpoint(&url1)
             .response(response_fetch_error_retry())
-            .response(response_ok())
+            .response(response_ok(1))
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2])),
@@ -443,7 +517,7 @@ mod test {
             .response(response_fetch_error_no_retry())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2])),
@@ -468,8 +542,8 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url2)
-            .response(response_ok())
-            .response(response_ok())
+            .response(response_ok(1))
+            .response(response_ok(2))
             .build()
             .await;
         MockResponses::builder()
@@ -477,7 +551,7 @@ mod test {
             .endpoint(&url3)
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2, url3])),
@@ -503,8 +577,8 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url2)
-            .response(response_ok())
-            .response(response_ok())
+            .response(response_ok(1))
+            .response(response_ok(2))
             .build()
             .await;
         MockResponses::builder()
@@ -512,7 +586,7 @@ mod test {
             .endpoint(&url3)
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::fallback(vec![url1, url2, url3])),
@@ -537,16 +611,16 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url2)
-            .response(response_ok())
+            .response(response_ok(1))
             .build()
             .await;
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url3)
-            .response(response_ok())
+            .response(response_ok(2))
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -571,16 +645,16 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url2)
-            .response(response_ok())
+            .response(response_ok(1))
             .build()
             .await;
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url3)
-            .response(response_ok())
+            .response(response_ok(2))
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -602,7 +676,7 @@ mod test {
             .response(response_invalid_entitlement())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -621,12 +695,12 @@ mod test {
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
-            .response(response_ok())
+            .response(response_ok(1))
             .response(response_unchanged())
-            .response(response_ok())
+            .response(response_ok(2))
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
@@ -654,7 +728,7 @@ mod test {
             .response(response_fetch_error_http())
             .build()
             .await;
-        let results = stream_from_uplink::<EntitlementQuery, Entitlement>(
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2])),
@@ -667,12 +741,62 @@ mod test {
         assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
     }
 
-    fn to_friendly(r: Result<Entitlement, Error>) -> Result<String, String> {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_with_ordering_skip_old() {
+        let (mock_server, url1, _url2, _url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_ok(2))
+            .response(response_ok(1))
+            .response(response_ok(3))
+            .build()
+            .await;
+
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
+            "dummy_key".to_string(),
+            "dummy_graph_ref".to_string(),
+            Some(Endpoints::round_robin(vec![url1])),
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+        )
+        .take(2)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_with_ordering_skip_epoch() {
+        let (mock_server, url1, _url2, _url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_ok(0))
+            .response(response_ok(1))
+            .build()
+            .await;
+
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
+            "dummy_key".to_string(),
+            "dummy_graph_ref".to_string(),
+            Some(Endpoints::round_robin(vec![url1])),
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+        )
+        .take(1)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    fn to_friendly(r: Result<QueryResult, Error>) -> Result<String, String> {
         match r {
-            Ok(_) => Ok("response".to_string()),
+            Ok(e) => Ok(format!("result {:?}", e)),
             Err(e) => Err(e.to_string()),
         }
     }
+
     async fn init_mock_server() -> (MockServer, Url, Url, Url) {
         let mock_server = MockServer::start().await;
         let url1 =
@@ -694,7 +818,7 @@ mod test {
                 .lock()
                 .expect("lock poisoned")
                 .pop_front()
-                .unwrap_or_else(response_fetch_error_no_retry)
+                .unwrap_or_else(response_fetch_error_test_error)
         }
     }
 
@@ -718,33 +842,32 @@ mod test {
         }
     }
 
-    fn response_ok() -> ResponseTemplate {
+    fn response_ok(ordering: u64) -> ResponseTemplate {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
-            {
-                "data":{
-                    "routerEntitlements": {
-                    "__typename": "RouterEntitlementsResult",
-                    "id": "1",
-                    "minDelaySeconds": 0,
-                    "entitlement": {
-                        "jwt": "eyJhbGciOiJFZERTQSJ9.eyJpc3MiOiJodHRwczovL3d3dy5hcG9sbG9ncmFwaHFsLmNvbS8iLCJzdWIiOiJhcG9sbG8iLCJhdWQiOiJTRUxGX0hPU1RFRCIsIndhcm5BdCI6MTY3NjgwODAwMCwiaGFsdEF0IjoxNjc4MDE3NjAwfQ.tXexfjZ2SQeqSwkWQ7zD4XBoxS_Hc5x7tSNJ3ln-BCL_GH7i3U9hsIgdRQTczCAjA_jjk34w39DeSV0nTc5WBw"
-                        }
+        {
+            "data":{
+                "uplinkQuery": {
+                "__typename": "New",
+                "id": "1",
+                "minDelaySeconds": 0,
+                "data": {
+                    "name": "ok",
+                    "ordering": ordering,
                     }
                 }
-            }))
+            }
+        }))
     }
 
     fn response_invalid_entitlement() -> ResponseTemplate {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
         {
             "data":{
-                "routerEntitlements": {
-                    "__typename": "RouterEntitlementsResult",
-                    "id": "1",
+                "uplinkQuery": {
+                    "__typename": "New",
+                    "id": "3",
                     "minDelaySeconds": 0,
-                    "entitlement": {
-                        "jwt": "invalid"
-                        }
+                    "garbage": "garbage"
                     }
                 }
         }))
@@ -754,7 +877,7 @@ mod test {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
         {
             "data":{
-                "routerEntitlements": {
+                "uplinkQuery": {
                     "__typename": "Unchanged",
                     "id": "2",
                     "minDelaySeconds": 0,
@@ -767,7 +890,7 @@ mod test {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
         {
             "data":{
-                "routerEntitlements": {
+                "uplinkQuery": {
                     "__typename": "FetchError",
                     "code": "RETRY_LATER",
                     "message": "error message",
@@ -780,10 +903,23 @@ mod test {
         ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
         {
             "data":{
-                "routerEntitlements": {
+                "uplinkQuery": {
                     "__typename": "FetchError",
                     "code": "NO_RETRY",
                     "message": "error message",
+                }
+            }
+        }))
+    }
+
+    fn response_fetch_error_test_error() -> ResponseTemplate {
+        ResponseTemplate::new(StatusCode::OK).set_body_json(json!(
+        {
+            "data":{
+                "uplinkQuery": {
+                    "__typename": "FetchError",
+                    "code": "NO_RETRY",
+                    "message": "unexpected mock request, make sure you have set up appropriate responses",
                 }
             }
         }))
