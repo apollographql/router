@@ -40,6 +40,9 @@ pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
+    #[serde(skip, default)]
+    pub(crate) private_entries: Arc<std::sync::Mutex<Extensions>>,
+
     /// Creation time
     #[serde(skip)]
     #[serde(default = "Instant::now")]
@@ -54,6 +57,7 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
+            private_entries: Arc::new(std::sync::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }
