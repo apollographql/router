@@ -81,16 +81,20 @@ where
             match get_or_insert_wait_map(&wait_map, &request) {
                 Err(receiver) => {
                     let r = receiver.read().await;
-                    return (*r)
-                        .clone()
-                        .ok_or_else(|| "no value".to_string())?
-                        .map(|response| {
-                            SubgraphResponse::new_from_response(
-                                response.0.response,
-                                request.context,
-                            )
-                        })
-                        .map_err(|e| e.into());
+                    match (*r).clone() {
+                        // there was an issue with the initial request, retry fetching
+                        None => continue,
+                        Some(res) => {
+                            return res
+                                .map(|response| {
+                                    SubgraphResponse::new_from_response(
+                                        response.0.response,
+                                        request.context,
+                                    )
+                                })
+                                .map_err(|e| e.into())
+                        }
+                    }
                 }
                 Ok(mut tx) => {
                     let context = request.context.clone();
