@@ -527,7 +527,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": ":x: A `nightly` release run has **failed** for << parameters.platform >> on ${CIRCLE_BRANCH}!"
+                          "text": ":x: A `nightly` release run has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_BRANCH}`!"
                         }
                       },
                       {
@@ -555,7 +555,7 @@ jobs:
                         "type": "section",
                         "text": {
                           "type": "mrkdwn",
-                          "text": ":white_check_mark: A `nightly` build has completed for << parameters.platform >> on ${CIRCLE_BRANCH}."
+                          "text": ":white_check_mark: A `nightly` build has completed for `${CIRCLE_JOB}` on `${CIRCLE_BRANCH}`."
                         }
                       },
                       {
