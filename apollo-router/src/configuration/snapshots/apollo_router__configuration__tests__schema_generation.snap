@@ -3805,6 +3805,11 @@ expression: "&schema"
                     }
                   }
                 },
+                "enable_span_mapping": {
+                  "description": "Enable datadog span mapping for span name and resource name.",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
                   "default": "default",
