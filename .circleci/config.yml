@@ -655,7 +655,6 @@ workflows:
       - test:
           requires:
             - lint
-          context: router
           matrix:
             parameters:
               platform:
@@ -666,6 +665,7 @@ workflows:
     jobs:
       - build_release:
           nightly: true
+          context: router
           matrix:
             parameters:
               platform:
