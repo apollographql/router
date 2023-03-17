@@ -936,10 +936,6 @@ impl Query {
         }
     }
 
-    pub(crate) fn contains_only_typename(&self) -> bool {
-        self.operations.len() == 1 && self.operations[0].is_only_typename()
-    }
-
     pub(crate) fn contains_introspection(&self) -> bool {
         self.operations.iter().any(Operation::is_introspection)
     }
@@ -1072,19 +1068,30 @@ impl Operation {
         })
     }
 
-    /// A query or mutation containing only `__typename` at the root level
-    fn is_only_typename(&self) -> bool {
-        self.selection_set.len() == 1
-            && self
+    /// Checks to see if this is a query or mutation containing only
+    /// `__typename` at the root level (possibly more than one time, possibly
+    /// with aliases). If so, returns Some with a Vec of the output keys
+    /// corresponding.
+    pub(crate) fn is_only_typenames_with_output_keys(&self) -> Option<Vec<ByteString>> {
+        if self.selection_set.is_empty() {
+            None
+        } else {
+            let output_keys: Vec<ByteString> = self
                 .selection_set
-                .get(0)
-                .map(|s| s.is_typename_field())
-                .unwrap_or_default()
+                .iter()
+                .filter_map(|s| s.output_key_if_typename_field())
+                .collect();
+            if output_keys.len() == self.selection_set.len() {
+                Some(output_keys)
+            } else {
+                None
+            }
+        }
     }
 
     fn is_introspection(&self) -> bool {
         // If the only field is `__typename` it's considered as an introspection query
-        if self.is_only_typename() {
+        if self.is_only_typenames_with_output_keys().is_some() {
             return true;
         }
         self.selection_set.iter().all(|sel| match sel {
