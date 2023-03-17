@@ -55,6 +55,13 @@ fn process_request(request) {
     log_info("this is info level log message");
     log_debug("this is debug level log message");
     log_trace("this is trace level log message");
+
+    // this logs the messages with the "request" message attribute
+    log_error("this is error level log message", "request");
+    log_warn("this is warn level log message", "request");
+    log_info("this is info level log message", "request");
+    log_debug("this is debug level log message", "request");
+    log_trace("this is trace level log message", "request");
 }
 
 // Generate a log for each response at this stage
@@ -65,4 +72,11 @@ fn process_response(response) {
     log_info("this is info level log message");
     log_debug("this is debug level log message");
     log_trace("this is trace level log message");
+
+    // this logs the messages with the "response" message attribute
+    log_error("this is error level log message", "response");
+    log_warn("this is warn level log message", "response");
+    log_info("this is info level log message", "response");
+    log_debug("this is debug level log message", "response");
+    log_trace("this is trace level log message", "response");
 }

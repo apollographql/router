@@ -987,6 +987,45 @@ fn solve_query_with_single_typename() {
 }
 
 #[test]
+fn solve_query_with_aliased_typename() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }",
+        )
+        .query("{ aliased: __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "aliased": "Query"
+        }})
+        .test();
+}
+
+#[test]
+fn solve_query_with_multiple_typenames() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }",
+        )
+        .query("{ aliased: __typename __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "aliased": "Query",
+            "__typename": "Query"
+        }})
+        .test();
+}
+
+#[test]
 fn reformat_response_query_with_root_typename() {
     FormatTest::builder()
         .schema(
