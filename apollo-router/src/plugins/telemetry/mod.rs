@@ -88,7 +88,6 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
-use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -311,8 +310,8 @@ impl Plugin for Telemetry {
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Ok(Some(usage_reporting)) =
-                    resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
+                if let Some(usage_reporting) =
+                    resp.context.private_entries.lock().unwrap().get::<UsageReporting>()
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -1129,8 +1128,11 @@ impl Telemetry {
         duration: Duration,
     ) {
         let metrics = if let Some(usage_reporting) = context
-            .get::<_, UsageReporting>(USAGE_REPORTING)
-            .unwrap_or_default()
+            .private_entries
+            .lock()
+            .unwrap()
+            .get::<UsageReporting>()
+            .cloned()
         {
             let operation_count = operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
