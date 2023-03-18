@@ -13,7 +13,7 @@ use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 pub struct PackageMacos {
     /// Keychain keychain_password.
     #[structopt(long)]

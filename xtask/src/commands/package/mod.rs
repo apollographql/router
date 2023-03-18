@@ -9,35 +9,28 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use camino::Utf8PathBuf;
-use structopt::StructOpt;
 use xtask::*;
 
 const INCLUDE: &[&str] = &["README.md", "LICENSE", "licenses.html"];
+
 pub(crate) const TARGET_X86_64_MUSL_LINUX: &str = "x86_64-unknown-linux-musl";
 pub(crate) const TARGET_X86_64_GNU_LINUX: &str = "x86_64-unknown-linux-gnu";
 pub(crate) const TARGET_AARCH64_GNU_LINUX: &str = "aarch64-unknown-linux-gnu";
 pub(crate) const TARGET_X86_64_WINDOWS: &str = "x86_64-pc-windows-msvc";
 pub(crate) const TARGET_X86_64_MACOS: &str = "x86_64-apple-darwin";
-pub(crate) const POSSIBLE_TARGETS: [&str; 5] = [
-    TARGET_X86_64_MUSL_LINUX,
-    TARGET_X86_64_GNU_LINUX,
-    TARGET_AARCH64_GNU_LINUX,
-    TARGET_X86_64_WINDOWS,
-    TARGET_X86_64_MACOS,
-];
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Package {
     /// Output tarball.
-    #[structopt(long)]
+    #[clap(long)]
     output: Utf8PathBuf,
 
     #[cfg(target_os = "macos")]
     #[structopt(flatten)]
     macos: macos::PackageMacos,
 
-    #[structopt(long, default_value, possible_values = &POSSIBLE_TARGETS)]
-    target: Target,
+    #[clap(long)]
+    target: Option<Target>,
 }
 
 impl Package {
@@ -59,8 +52,11 @@ impl Package {
             }
             self.output.to_owned()
         } else if self.output.is_dir() {
-            self.output
-                .join(format!("router-v{}-{}.tar.gz", *PKG_VERSION, self.target))
+            self.output.join(format!(
+                "router-v{}-{}.tar.gz",
+                *PKG_VERSION,
+                self.target.clone().unwrap_or_default()
+            ))
         } else {
             self.output.to_owned()
         };
@@ -95,13 +91,19 @@ impl Package {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, clap::ValueEnum)]
 pub(crate) enum Target {
+    #[value(name = "x86_64-unknown-linux-musl")]
     MuslLinux,
+    #[value(name = "x86_64-unknown-linux-gnu")]
     GnuLinux,
+    #[value(name = "aarch64-unknown-linux-gnu")]
     ArmLinux,
+    #[value(name = "x86_64-pc-windows-msvc")]
     Windows,
+    #[value(name = "x86_64-apple-darwin")]
     MacOS,
+    #[value(skip)]
     Other,
 }
 
