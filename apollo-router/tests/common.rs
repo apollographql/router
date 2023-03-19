@@ -1,3 +1,4 @@
+use buildstructor::buildstructor;
 use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
@@ -54,7 +55,7 @@ pub struct IntegrationTest {
     _subgraphs: wiremock::MockServer,
 }
 
-pub(crate) struct TracedResponder(pub(crate) ResponseTemplate);
+struct TracedResponder(pub(crate) ResponseTemplate);
 
 impl Respond for TracedResponder {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
@@ -76,27 +77,23 @@ impl Respond for TracedResponder {
     }
 }
 
-impl IntegrationTest {
-    pub async fn new<P: TextMapPropagator + Send + Sync + 'static>(
-        tracer: opentelemetry::sdk::trace::Tracer,
-        propagator: P,
-        config: &str,
-    ) -> Self {
-        Self::with_mock_responder(tracer, propagator, config,TracedResponder(
-            ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})
-    ))).await
-    }
+#[allow(dead_code)]
+pub enum Telemetry {
+    Jaeger,
+    Otlp,
+    Datadog,
+    Zipkin,
+}
 
-    pub async fn with_mock_responder<
-        P: TextMapPropagator + Send + Sync + 'static,
-        R: Respond + 'static,
-    >(
-        tracer: opentelemetry::sdk::trace::Tracer,
-        propagator: P,
-        config: &str,
-        responder: R,
+#[buildstructor]
+impl IntegrationTest {
+    #[builder]
+    pub async fn new(
+        config: &'static str,
+        telemetry: Option<Telemetry>,
+        responder: Option<ResponseTemplate>,
     ) -> Self {
-        Self::init_telemetry(tracer, propagator);
+        Self::init_telemetry(telemetry);
 
         // Prevent multiple integration tests from running at the same time
         let lock = LOCK
@@ -123,7 +120,8 @@ impl IntegrationTest {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(responder)
+            .respond_with(TracedResponder(responder.unwrap_or_else(||
+                ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})))))
             .mount(&subgraphs)
             .await;
 
@@ -175,21 +173,80 @@ impl IntegrationTest {
         self.router = Some(router);
     }
 
-    fn init_telemetry<P: TextMapPropagator + Send + Sync + 'static>(
-        tracer: opentelemetry::sdk::trace::Tracer,
-        propagator: P,
-    ) {
-        let telemetry = tracing_opentelemetry::layer()
-            .with_tracer(tracer)
-            .with_filter(LevelFilter::INFO);
-        let subscriber = Registry::default().with(telemetry).with(
-            tracing_subscriber::fmt::Layer::default()
-                .compact()
-                .with_filter(EnvFilter::from_default_env()),
-        );
+    fn init_telemetry(telemetry: Option<Telemetry>) {
+        match telemetry {
+            Some(Telemetry::Jaeger) => {
+                let tracer = opentelemetry_jaeger::new_agent_pipeline()
+                    .with_service_name("my_app")
+                    .install_simple()
+                    .expect("jaeger pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
 
-        let _ = tracing::subscriber::set_global_default(subscriber);
-        global::set_text_map_propagator(propagator);
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(opentelemetry_jaeger::Propagator::new());
+            }
+            Some(Telemetry::Datadog) => {
+                let tracer = opentelemetry_datadog::new_pipeline()
+                    .with_service_name("my_app")
+                    .install_simple()
+                    .expect("datadog pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(opentelemetry_datadog::DatadogPropagator::new());
+            }
+            Some(Telemetry::Otlp) => {
+                let tracer = opentelemetry_otlp::new_pipeline()
+                    .tracing()
+                    .install_simple()
+                    .expect("otlp pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(
+                    opentelemetry::sdk::propagation::TraceContextPropagator::new(),
+                );
+            }
+            Some(Telemetry::Zipkin) => {
+                let tracer = opentelemetry_zipkin::new_pipeline()
+                    .with_service_name("my_app")
+                    .install_simple()
+                    .expect("zipkin pipeline failed");
+                let telemetry = tracing_opentelemetry::layer()
+                    .with_tracer(tracer)
+                    .with_filter(LevelFilter::INFO);
+                let subscriber = Registry::default().with(telemetry).with(
+                    tracing_subscriber::fmt::Layer::default()
+                        .compact()
+                        .with_filter(EnvFilter::from_default_env()),
+                );
+
+                let _ = tracing::subscriber::set_global_default(subscriber);
+                global::set_text_map_propagator(opentelemetry_zipkin::Propagator::new());
+            }
+            _ => {}
+        }
     }
 
     #[allow(dead_code)]
@@ -221,36 +278,38 @@ impl IntegrationTest {
             .expect("must be able to write config");
     }
 
-    pub async fn run_query(&self) -> (String, reqwest::Response) {
+    pub fn run_query(&self) -> impl std::future::Future<Output = (String, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
-        let client = reqwest::Client::new();
-        let id = Uuid::new_v4().to_string();
-        let span = info_span!("client_request", unit_test = id.as_str());
-        let _span_guard = span.enter();
+        async {
+            let client = reqwest::Client::new();
+            let id = Uuid::new_v4().to_string();
+            let span = info_span!("client_request", unit_test = id.as_str());
+            let _span_guard = span.enter();
 
-        let mut request = client
-            .post("http://localhost:4000")
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .header("apollographql-client-name", "custom_name")
-            .header("apollographql-client-version", "1.0")
-            .json(&json!({"query":"{topProducts{name}}","variables":{}}))
-            .build()
-            .unwrap();
+            let mut request = client
+                .post("http://localhost:4000")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .header("apollographql-client-name", "custom_name")
+                .header("apollographql-client-version", "1.0")
+                .json(&json!({"query":"{topProducts{name}}","variables":{}}))
+                .build()
+                .unwrap();
 
-        global::get_text_map_propagator(|propagator| {
-            propagator.inject_context(
-                &span.context(),
-                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
-            );
-        });
-        request.headers_mut().remove(ACCEPT);
-        match client.execute(request).await {
-            Ok(response) => (id, response),
-            Err(err) => {
-                panic!("unable to send successful request to router, {err}")
+            global::get_text_map_propagator(|propagator| {
+                propagator.inject_context(
+                    &span.context(),
+                    &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+                );
+            });
+            request.headers_mut().remove(ACCEPT);
+            match client.execute(request).await {
+                Ok(response) => (id, response),
+                Err(err) => {
+                    panic!("unable to send successful request to router, {err}")
+                }
             }
         }
     }
@@ -350,7 +409,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
-        let mut router = self.router.take().expect("router must have been started");
+        let mut router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(3) {
             match router.try_wait() {

@@ -10,7 +10,11 @@ const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() -> Result<(), BoxError> {
-    let mut router = create_router(PROMETHEUS_CONFIG).await?;
+    let mut router = IntegrationTest::builder()
+        .config(PROMETHEUS_CONFIG)
+        .build()
+        .await;
+
     router.start().await;
     router.assert_started().await;
 
@@ -60,12 +64,4 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
     }
 
     Ok(())
-}
-
-async fn create_router(config: &str) -> Result<IntegrationTest, BoxError> {
-    let tracer = opentelemetry_jaeger::new_agent_pipeline()
-        .with_service_name("my_app")
-        .install_simple()?;
-
-    Ok(IntegrationTest::new(tracer, opentelemetry_jaeger::Propagator::new(), config).await)
 }
