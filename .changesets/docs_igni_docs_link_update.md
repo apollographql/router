@@ -1,4 +1,4 @@
-### Update links in docs 
+### Re-point links going via redirect to their true sources 
 
 Some of our documentation links were not quite up to date.
 While the links were not broken (the former links redirect to the new url), this changeset updates the links to prevent the extra hop.
