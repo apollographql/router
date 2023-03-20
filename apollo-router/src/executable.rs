@@ -30,7 +30,7 @@ use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 use crate::EntitlementSource;
-#[cfg(all(feature = "dhat-heap", feature="dhat-heap"))]
+#[cfg(all(feature = "dhat-heap", feature="dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
 
 // Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
