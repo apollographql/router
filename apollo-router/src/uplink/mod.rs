@@ -268,7 +268,7 @@ where
                             "type" = "ignored"
                         );
                         tracing::debug!(
-                            "ignoring uplink event as is was older than our last known message. Other endpoints will be tried"
+                            "ignoring uplink event as is was equal to or older than our last known message. Other endpoints will be tried"
                         );
                     }
                     Some(UplinkResponse::Unchanged { .. }) => {
