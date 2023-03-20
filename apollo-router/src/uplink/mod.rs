@@ -225,6 +225,7 @@ where
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + Debug + 'static,
 {
+    let mut unchanged = None;
     for url in urls {
         let now = Instant::now();
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
@@ -267,6 +268,7 @@ where
                             url = url.to_string(),
                             "kind" = "ignored"
                         );
+
                         tracing::debug!(
                             "ignoring uplink event as is was equal to or older than our last known message. Other endpoints will be tried"
                         );
@@ -279,7 +281,7 @@ where
                             url = url.to_string(),
                             "kind" = "unchanged"
                         );
-                        return Ok(response.expect("we are in the some branch, qed"));
+                        unchanged = response;
                     }
                     Some(UplinkResponse::Error { message, code, .. }) => {
                         tracing::info!(
@@ -312,7 +314,7 @@ where
             }
         };
     }
-    Err(Error::FetchFailed)
+    unchanged.ok_or(Error::FetchFailed)
 }
 
 async fn http_request<Query>(
@@ -751,6 +753,38 @@ mod test {
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
             Some(Endpoints::round_robin(vec![url1, url2, url3])),
+            Duration::from_secs(0),
+            Duration::from_secs(1),
+        )
+        .take(2)
+        .collect::<Vec<_>>()
+        .await;
+        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn stream_from_uplink_unchanged_error() {
+        let (mock_server, url1, url2, url3) = init_mock_server().await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url1)
+            .response(response_ok(1))
+            .response(response_unchanged())
+            .response(response_ok(2))
+            .build()
+            .await;
+
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url2)
+            .response(response_ok(3))
+            .build()
+            .await;
+
+        let results = stream_from_uplink::<TestQuery, QueryResult>(
+            "dummy_key".to_string(),
+            "dummy_graph_ref".to_string(),
+            Some(Endpoints::fallback(vec![url1, url2, url3])),
             Duration::from_secs(0),
             Duration::from_secs(1),
         )
