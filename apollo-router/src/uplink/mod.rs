@@ -244,7 +244,7 @@ where
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
-                            "type" = "empty"
+                            "kind" = "empty"
                         );
                     }
                     Some(UplinkResponse::New { ordering_id, .. })
@@ -255,7 +255,7 @@ where
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
-                            "type" = "new"
+                            "kind" = "new"
                         );
                         return Ok(response.expect("we are in the some branch, qed"));
                     }
@@ -265,7 +265,7 @@ where
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
-                            "type" = "ignored"
+                            "kind" = "ignored"
                         );
                         tracing::debug!(
                             "ignoring uplink event as is was equal to or older than our last known message. Other endpoints will be tried"
@@ -277,7 +277,7 @@ where
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
-                            "type" = "unchanged"
+                            "kind" = "unchanged"
                         );
                         return Ok(response.expect("we are in the some branch, qed"));
                     }
@@ -287,7 +287,7 @@ where
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
-                            "type" = "uplink_error",
+                            "kind" = "uplink_error",
                             error = message,
                             code
                         );
@@ -300,7 +300,7 @@ where
                     histogram.apollo_router_uplink_duration_seconds = now.elapsed().as_secs_f64(),
                     query = std::any::type_name::<Query>(),
                     url = url.to_string(),
-                    "type" = "http_error",
+                    "kind" = "http_error",
                     error = e.to_string(),
                     code = e.status().unwrap_or_default().as_str()
                 );
