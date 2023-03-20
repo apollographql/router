@@ -162,10 +162,6 @@ impl RouterFactory for TestRouterFactory {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
-
-    fn schema(&self) -> Arc<Schema> {
-        unimplemented!()
-    }
 }
 
 async fn init(

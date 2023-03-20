@@ -10,8 +10,6 @@ use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use http::Uri;
-use itertools::Itertools;
-use router_bridge::api_schema;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -38,6 +36,16 @@ pub(crate) struct Schema {
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
     root_operations: HashMap<OperationKind, String>,
+}
+
+#[cfg(test)]
+fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
+    use itertools::Itertools;
+    use router_bridge::api_schema;
+    let s = api_schema::api_schema(schema)
+        .map_err(|e| SchemaError::Api(e.to_string()))?
+        .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
+    Ok(format!("{s}\n"))
 }
 
 impl Schema {

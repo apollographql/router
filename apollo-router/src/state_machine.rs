@@ -962,7 +962,6 @@ mod tests {
             type RouterService = MockMyRouter;
             type Future = <Self::RouterService as Service<RouterRequest>>::Future;
             fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-            fn schema(&self) -> Arc<Schema>;
         }
         impl ServiceFactory<RouterRequest> for MyRouterFactory {
             type Service = MockMyRouter;

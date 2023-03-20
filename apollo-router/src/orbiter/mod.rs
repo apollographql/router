@@ -106,15 +106,17 @@ where
         self.delegate
             .create(
                 configuration.clone(),
-                schema,
+                schema.clone(),
                 previous_router,
                 extra_plugins,
             )
             .await
             .map(|factory| {
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
-                    let schema = factory.schema();
-                    tokio::task::spawn(async {
+                    tokio::task::spawn(async move {
+                        let schema = Arc::new(Schema::parse(&schema, &configuration, None).expect(
+                            "if we get here the schema was already parsed successfully elsewhere",
+                        ));
                         tracing::debug!("sending anonymous usage data to Apollo");
                         let report = create_report(configuration, schema);
                         if let Err(e) = send(report).await {

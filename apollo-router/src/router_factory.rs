@@ -106,7 +106,6 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
-    fn schema(&self) -> Arc<Schema>;
 }
 
 /// Factory for creating a RouterFactory
