@@ -56,8 +56,7 @@ impl Schema {
     ) -> Result<Self, SchemaError> {
         let mut schema = Self::parse_inner(s, configuration)?;
         schema.api_schema = api_schema;
-        //Some(Box::new(parse(&make_api_schema(s)?, configuration)?));
-        return Ok(schema);
+        Ok(schema)
     }
 
     #[cfg(test)]
@@ -67,7 +66,7 @@ impl Schema {
             &make_api_schema(s)?,
             configuration,
         )?));
-        return Ok(schema);
+        Ok(schema)
     }
 
     fn parse_inner(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {

@@ -144,7 +144,7 @@ impl BridgeQueryPlanner {
         match self.introspection.as_ref() {
             Some(introspection) => {
                 let response = introspection
-                    .execute(self.schema.as_string(), query)
+                    .execute(query)
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 

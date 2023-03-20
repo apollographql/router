@@ -48,11 +48,7 @@ impl Introspection {
     }
 
     /// Execute an introspection and cache the response.
-    pub(crate) async fn execute(
-        &self,
-        schema_sdl: &str,
-        query: String,
-    ) -> Result<Response, IntrospectionError> {
+    pub(crate) async fn execute(&self, query: String) -> Result<Response, IntrospectionError> {
         if let Some(response) = self.cache.get(&query).await {
             return Ok(response);
         }
@@ -62,7 +58,7 @@ impl Introspection {
             self.planner
                 .introspect(query.clone())
                 .await
-                .map_err(|e| IntrospectionError {
+                .map_err(|_e| IntrospectionError {
                     message: String::from("cannot find the introspection response").into(),
                 })?;
 
@@ -87,6 +83,11 @@ impl Introspection {
 
 #[cfg(test)]
 mod introspection_tests {
+    use std::sync::Arc;
+
+    use router_bridge::planner::IncrementalDeliverySupport;
+    use router_bridge::planner::QueryPlannerConfig;
+
     use super::*;
 
     #[tokio::test]
@@ -95,16 +96,29 @@ mod introspection_tests {
         let schema = " ";
         let expected_data = Response::builder().data(42).build();
 
+        let planner = Arc::new(
+            Planner::new(
+                schema.to_string(),
+                QueryPlannerConfig {
+                    incremental_delivery: Some(IncrementalDeliverySupport {
+                        enable_defer: Some(true),
+                    }),
+                },
+            )
+            .await
+            .unwrap(),
+        );
+
         let cache = [(query_to_test.to_string(), expected_data.clone())]
             .iter()
             .cloned()
             .collect();
-        let introspection = Introspection::from_cache(&Configuration::default(), cache).await;
+        let introspection = Introspection::from_cache(planner, cache).await;
 
         assert_eq!(
             expected_data,
             introspection
-                .execute(schema, query_to_test.to_string())
+                .execute(query_to_test.to_string())
                 .await
                 .unwrap()
         );
