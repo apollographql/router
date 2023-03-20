@@ -770,14 +770,14 @@ mod test {
             .endpoint(&url1)
             .response(response_ok(1))
             .response(response_unchanged())
-            .response(response_ok(2))
+            .response(response_ok(3))
             .build()
             .await;
 
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url2)
-            .response(response_ok(3))
+            .response(response_ok(2))
             .build()
             .await;
 
@@ -788,7 +788,7 @@ mod test {
             Duration::from_secs(0),
             Duration::from_secs(1),
         )
-        .take(2)
+        .take(3)
         .collect::<Vec<_>>()
         .await;
         assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
