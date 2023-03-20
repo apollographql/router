@@ -56,7 +56,7 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         .await;
 
     if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains(r#"uplink_count{kind="duration",query="Entitlement",service_name="apollo-router",type="unchanged",url="https://uplink.api.apollographql.com/graphql"}"#, Some(Duration::from_secs(60))).await;
+        router.assert_metrics_contains(r#"apollo_router_uplink_duration_seconds_count{query="Entitlement",service_name="apollo-router",type="unchanged",url="https://uplink.api.apollographql.com/graphql"}"#, Some(Duration::from_secs(60))).await;
     }
 
     Ok(())

@@ -239,32 +239,71 @@ where
 
                 match &response {
                     None => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="empty");
+                        tracing::info!(
+                            histogram.apollo_router_uplink_duration_seconds =
+                                now.elapsed().as_secs_f64(),
+                            query,
+                            url = url.to_string(),
+                            "type" = "empty"
+                        );
                     }
                     Some(UplinkResponse::New { ordering_id, .. })
                         if ordering_id > &last_ordering_id =>
                     {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="new");
+                        tracing::info!(
+                            histogram.apollo_router_uplink_duration_seconds =
+                                now.elapsed().as_secs_f64(),
+                            query,
+                            url = url.to_string(),
+                            "type" = "new"
+                        );
                         return Ok(response.expect("we are in the some branch, qed"));
                     }
                     Some(UplinkResponse::New { .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="ignored");
+                        tracing::info!(
+                            histogram.apollo_router_uplink_duration_seconds =
+                                now.elapsed().as_secs_f64(),
+                            query,
+                            url = url.to_string(),
+                            "type" = "ignored"
+                        );
                         tracing::debug!(
                             "ignoring uplink event as is was older than our last known message. Other endpoints will be tried"
                         );
                     }
                     Some(UplinkResponse::Unchanged { .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="unchanged");
+                        tracing::info!(
+                            histogram.apollo_router_uplink_duration_seconds =
+                                now.elapsed().as_secs_f64(),
+                            query,
+                            url = url.to_string(),
+                            "type" = "unchanged"
+                        );
                         return Ok(response.expect("we are in the some branch, qed"));
                     }
                     Some(UplinkResponse::Error { message, code, .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="uplink_error", error=message, code);
+                        tracing::info!(
+                            histogram.apollo_router_uplink_duration_seconds =
+                                now.elapsed().as_secs_f64(),
+                            query,
+                            url = url.to_string(),
+                            "type" = "uplink_error",
+                            error = message,
+                            code
+                        );
                         return Ok(response.expect("we are in the some branch, qed"));
                     }
                 }
             }
             Err(e) => {
-                tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="http_error", error=e.to_string(), code=e.status().unwrap_or_default().as_str());
+                tracing::info!(
+                    histogram.apollo_router_uplink_duration_seconds = now.elapsed().as_secs_f64(),
+                    query = std::any::type_name::<Query>(),
+                    url = url.to_string(),
+                    "type" = "http_error",
+                    error = e.to_string(),
+                    code = e.status().unwrap_or_default().as_str()
+                );
                 tracing::debug!(
                     "failed to fetch from Uplink endpoint {}: {}. Other endpoints will be tried",
                     url,
