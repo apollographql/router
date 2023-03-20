@@ -1,6 +1,5 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
-use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::time::Duration;
 use std::time::Instant;
@@ -146,7 +145,14 @@ where
                 .into(),
             );
 
-            match fetch::<Query, Response>(&query_body, &mut endpoints.iter(), timeout).await {
+            match fetch::<Query, Response>(
+                &query_body,
+                &mut endpoints.iter(),
+                timeout,
+                last_ordering_id,
+            )
+            .await
+            {
                 Ok(response) => {
                     match response {
                         UplinkResponse::New {
@@ -156,20 +162,11 @@ where
                             ordering_id,
                         } => {
                             last_id = Some(id);
+                            last_ordering_id = ordering_id;
                             interval = Duration::from_secs(delay);
 
-                            // If the ordering_id was less than the last then don't bother with this event as one of the uplink replicas is probably behind.
-                            match ordering_id.cmp(&last_ordering_id) {
-                                Ordering::Greater => {
-                                    last_ordering_id = ordering_id;
-                                    if sender.send(Ok(response)).await.is_err() {
-                                        break;
-                                    }
-                                }
-                                Ordering::Less => {
-                                    tracing::debug!("ignoring uplink event as is was older than our last known message");
-                                }
-                                _ => {}
+                            if sender.send(Ok(response)).await.is_err() {
+                                break;
                             }
                         }
                         UplinkResponse::Unchanged { id, delay } => {
@@ -220,6 +217,7 @@ pub(crate) async fn fetch<Query, Response>(
     request_body: &QueryBody<Query::Variables>,
     urls: &mut impl Iterator<Item = &Url>,
     timeout: Duration,
+    last_ordering_id: SystemTime,
 ) -> Result<UplinkResponse<Response>, Error>
 where
     Query: graphql_client::GraphQLQuery,
@@ -238,27 +236,32 @@ where
                     .expect("Uplink structs mut be named xxxQuery")
                     .get(query.rfind("::").map(|index| index + 2).unwrap_or_default()..)
                     .expect("cannot fail");
+
                 match &response {
                     None => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="empty")
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="empty");
+                    }
+                    Some(UplinkResponse::New { ordering_id, .. })
+                        if ordering_id > &last_ordering_id =>
+                    {
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="new");
+                        return Ok(response.expect("we are in the some branch, qed"));
                     }
                     Some(UplinkResponse::New { .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="new")
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="ignored");
+                        tracing::debug!(
+                            "ignoring uplink event as is was older than our last known message. Other endpoints will be tried"
+                        );
                     }
                     Some(UplinkResponse::Unchanged { .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="unchanged")
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="unchanged");
+                        return Ok(response.expect("we are in the some branch, qed"));
                     }
                     Some(UplinkResponse::Error { message, code, .. }) => {
-                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="uplink_error", error=message, code)
+                        tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query, kind = %"duration", url = url.to_string(), "type"="uplink_error", error=message, code);
+                        return Ok(response.expect("we are in the some branch, qed"));
                     }
                 }
-
-                match response {
-                    None => {
-                        tracing::debug!("empty or malformed response from Uplink endpoint {}. Other endpoints will be tried", url)
-                    }
-                    Some(response_data) => return Ok(response_data),
-                };
             }
             Err(e) => {
                 tracing::info!(histogram.uplink = now.elapsed().as_secs_f64(), query=std::any::type_name::<Query>(), kind = %"duration", url = url.to_string(), "type"="http_error", error=e.to_string(), code=e.status().unwrap_or_default().as_str());
@@ -748,20 +751,25 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_with_ordering_skip_old() {
-        let (mock_server, url1, _url2, _url3) = init_mock_server().await;
+        let (mock_server, url1, url2, _url3) = init_mock_server().await;
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
             .response(response_ok(2))
-            .response(response_ok(1))
             .response(response_ok(3))
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url2)
+            .response(response_ok(1))
             .build()
             .await;
 
         let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1])),
+            Some(Endpoints::round_robin(vec![url1, url2])),
             Duration::from_secs(0),
             Duration::from_secs(1),
         )
@@ -773,11 +781,16 @@ mod test {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn stream_with_ordering_skip_epoch() {
-        let (mock_server, url1, _url2, _url3) = init_mock_server().await;
+        let (mock_server, url1, url2, _url3) = init_mock_server().await;
         MockResponses::builder()
             .mock_server(&mock_server)
             .endpoint(&url1)
             .response(response_ok(0))
+            .build()
+            .await;
+        MockResponses::builder()
+            .mock_server(&mock_server)
+            .endpoint(&url2)
             .response(response_ok(1))
             .build()
             .await;
@@ -785,7 +798,7 @@ mod test {
         let results = stream_from_uplink::<TestQuery, QueryResult>(
             "dummy_key".to_string(),
             "dummy_graph_ref".to_string(),
-            Some(Endpoints::round_robin(vec![url1])),
+            Some(Endpoints::round_robin(vec![url1, url2])),
             Duration::from_secs(0),
             Duration::from_secs(1),
         )
@@ -853,7 +866,7 @@ mod test {
             "data":{
                 "uplinkQuery": {
                 "__typename": "New",
-                "id": "1",
+                "id": ordering.to_string(),
                 "minDelaySeconds": 0,
                 "data": {
                     "name": "ok",

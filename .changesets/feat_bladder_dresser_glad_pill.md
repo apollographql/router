@@ -1,4 +1,4 @@
-### Uplink metrics and logging ([Issue #2769](https://github.com/apollographql/router/issues/2769))
+### Uplink metrics and logging ([Issue #2769](https://github.com/apollographql/router/issues/2769), [Issue #2815](https://github.com/apollographql/router/issues/2815))
 
 Adds metrics for uplink of the format:
 ```
@@ -23,7 +23,7 @@ uplink_count{kind="duration",query="SupergraphSdl",service_name="apollo-router",
 This is a histogram of duration which contains the following attributes:
 * url: the url that was polled
 * query: SupergraphSdl|Entitlement
-* type: new|unchanged|http_error|uplink_error
+* type: new|unchanged|http_error|uplink_error|ignored
 * code: The error code depending on type
 * error: The error message
 
