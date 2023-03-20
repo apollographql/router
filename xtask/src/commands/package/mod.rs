@@ -26,7 +26,7 @@ pub struct Package {
     output: Utf8PathBuf,
 
     #[cfg(target_os = "macos")]
-    #[structopt(flatten)]
+    #[clap(flatten)]
     macos: macos::PackageMacos,
 
     #[clap(long)]
