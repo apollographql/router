@@ -1,15 +1,14 @@
 #[cfg(test)]
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 
-use router_bridge::introspect;
 use router_bridge::introspect::IntrospectionError;
-use router_bridge::planner::IncrementalDeliverySupport;
-use router_bridge::planner::QueryPlannerConfig;
+use router_bridge::planner::Planner;
 
 use crate::cache::storage::CacheStorage;
 use crate::graphql::Response;
-use crate::Configuration;
+use crate::query_planner::QueryPlanResult;
 
 const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
     unsafe { NonZeroUsize::new_unchecked(5) };
@@ -17,30 +16,30 @@ const DEFAULT_INTROSPECTION_CACHE_CAPACITY: NonZeroUsize =
 /// A cache containing our well known introspection queries.
 pub(crate) struct Introspection {
     cache: CacheStorage<String, Response>,
-    defer_support: bool,
+    planner: Arc<Planner<QueryPlanResult>>,
 }
 
 impl Introspection {
     pub(crate) async fn with_capacity(
-        configuration: &Configuration,
+        planner: Arc<Planner<QueryPlanResult>>,
         capacity: NonZeroUsize,
     ) -> Self {
         Self {
             cache: CacheStorage::new(capacity, None, "introspection").await,
-            defer_support: configuration.supergraph.defer_support,
+            planner,
         }
     }
 
-    pub(crate) async fn new(configuration: &Configuration) -> Self {
-        Self::with_capacity(configuration, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
+    pub(crate) async fn new(planner: Arc<Planner<QueryPlanResult>>) -> Self {
+        Self::with_capacity(planner, DEFAULT_INTROSPECTION_CACHE_CAPACITY).await
     }
 
     #[cfg(test)]
     pub(crate) async fn from_cache(
-        configuration: &Configuration,
+        planner: Arc<Planner<QueryPlanResult>>,
         cache: HashMap<String, Response>,
     ) -> Self {
-        let this = Self::with_capacity(configuration, cache.len().try_into().unwrap()).await;
+        let this = Self::with_capacity(planner, cache.len().try_into().unwrap()).await;
 
         for (query, response) in cache.into_iter() {
             this.cache.insert(query, response).await;
@@ -59,34 +58,24 @@ impl Introspection {
         }
 
         // Do the introspection query and cache it
-        let mut response = introspect::batch_introspect(
-            schema_sdl,
-            vec![query.to_owned()],
-            QueryPlannerConfig {
-                incremental_delivery: Some(IncrementalDeliverySupport {
-                    enable_defer: Some(self.defer_support),
-                }),
-            },
-        )
-        .map_err(|err| IntrospectionError {
-            message: format!("Deno runtime error: {err:?}").into(),
-        })??;
-        let introspection_result = response
-            .pop()
-            .ok_or_else(|| IntrospectionError {
-                message: String::from("cannot find the introspection response").into(),
-            })?
-            .into_result()
-            .map_err(|err| IntrospectionError {
-                message: format!(
-                    "introspection error : {}",
-                    err.into_iter()
-                        .map(|err| err.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", "),
-                )
-                .into(),
-            })?;
+        let response =
+            self.planner
+                .introspect(query.clone())
+                .await
+                .map_err(|e| IntrospectionError {
+                    message: String::from("cannot find the introspection response").into(),
+                })?;
+
+        let introspection_result = response.into_result().map_err(|err| IntrospectionError {
+            message: format!(
+                "introspection error : {}",
+                err.into_iter()
+                    .map(|err| err.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", "),
+            )
+            .into(),
+        })?;
 
         let response = Response::builder().data(introspection_result).build();
 

@@ -67,7 +67,7 @@ impl BridgeQueryPlanner {
             Some(Box::new(api_schema)),
         )?);
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(&configuration).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await))
         } else {
             None
         };
@@ -104,7 +104,7 @@ impl BridgeQueryPlanner {
         )?);
 
         let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(&configuration).await))
+            Some(Arc::new(Introspection::new(planner.clone()).await))
         } else {
             None
         };
