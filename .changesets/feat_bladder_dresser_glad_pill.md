@@ -31,4 +31,4 @@ A limitation of this is that it can't display metrics for the first poll to upli
 
 Logging messages have also been improved.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2779
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2779, https://github.com/apollographql/router/pull/2817
