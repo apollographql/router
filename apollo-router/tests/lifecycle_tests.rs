@@ -107,7 +107,7 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
     router.start().await;
     router.assert_started().await;
 
-    // Send a request in another thread, it'll take 5 seconds to respond, so we can shut down the router while it is in flight.
+    // Send a request in another thread, it'll take 2 seconds to respond, so we can shut down the router while it is in flight.
     let client_handle = tokio::task::spawn(router.run_query().then(|(_, response)| async {
         serde_json::from_slice::<graphql::Response>(&response.bytes().await.unwrap()).unwrap()
     }));
