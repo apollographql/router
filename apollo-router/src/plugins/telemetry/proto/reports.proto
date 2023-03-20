@@ -240,6 +240,8 @@ message Trace {
   string client_name = 7;
   string client_version = 8;
 
+  // optional: this is populated from the report header when storing trace data, and it is not
+  // expected to be specified in the report's version of a trace
   string agent_version = 34;
 
   HTTP http = 10;
