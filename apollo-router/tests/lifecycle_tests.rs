@@ -1,11 +1,12 @@
-use futures::FutureExt;
 use std::time::Duration;
 
-use crate::common::IntegrationTest;
 use apollo_router::graphql;
+use futures::FutureExt;
 use serde_json::json;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
+
+use crate::common::IntegrationTest;
 
 mod common;
 

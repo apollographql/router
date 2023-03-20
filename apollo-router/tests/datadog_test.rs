@@ -1,7 +1,8 @@
 mod common;
 use tower::BoxError;
 
-use crate::common::{IntegrationTest, Telemetry};
+use crate::common::IntegrationTest;
+use crate::common::Telemetry;
 
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]

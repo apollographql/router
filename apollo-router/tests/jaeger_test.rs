@@ -12,8 +12,9 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
+use crate::common::IntegrationTest;
+use crate::common::Telemetry;
 use crate::common::ValueExt;
-use crate::common::{IntegrationTest, Telemetry};
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jaeger_tracing() -> Result<(), BoxError> {

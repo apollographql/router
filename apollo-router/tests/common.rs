@@ -1,4 +1,3 @@
-use buildstructor::buildstructor;
 use std::collections::HashMap;
 use std::fs;
 use std::net::SocketAddr;
@@ -9,6 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 
+use buildstructor::buildstructor;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use jsonpath_lib::Selector;
@@ -409,7 +409,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn assert_shutdown(&mut self) {
-        let mut router = self.router.as_mut().expect("router must have been started");
+        let router = self.router.as_mut().expect("router must have been started");
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(3) {
             match router.try_wait() {
