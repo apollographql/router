@@ -27,10 +27,8 @@ use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
-use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-use crate::introspection::Introspection;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
@@ -274,21 +272,19 @@ async fn plan_query(
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
-    schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
-    planner: Option<Arc<Planner<QueryPlanResult>>>,
+    planner: BridgeQueryPlanner,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(schema: Arc<Schema>) -> Self {
+    pub(crate) fn new(planner: BridgeQueryPlanner) -> Self {
         Self {
-            schema,
             plugins: Default::default(),
             subgraph_services: Default::default(),
             configuration: None,
-            planner: None,
+            planner,
         }
     }
 
@@ -322,42 +318,13 @@ impl PluggableSupergraphServiceBuilder {
         self
     }
 
-    pub(crate) fn with_planner(
-        mut self,
-        planner: Arc<Planner<QueryPlanResult>>,
-    ) -> PluggableSupergraphServiceBuilder {
-        self.planner = Some(planner);
-        self
-    }
-
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
-        let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(&configuration).await))
-        } else {
-            None
-        };
-
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner = match self.planner {
-            None => {
-                BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration.clone())
-                    .await
-                    .map_err(ServiceBuildError::QueryPlannerError)?
-            }
-            Some(planner) => BridgeQueryPlanner::new_from_planner(
-                planner,
-                self.schema.clone(),
-                introspection,
-                configuration.clone(),
-            )
-            .await
-            .map_err(ServiceBuildError::QueryPlannerError)?,
-        };
+        let schema = self.planner.schema();
         let query_planner_service = CachingQueryPlanner::new(
-            bridge_query_planner,
-            self.schema.schema_id.clone(),
+            self.planner,
+            schema.schema_id.clone(),
             &configuration.supergraph.query_planning,
         )
         .await;
@@ -381,7 +348,7 @@ impl PluggableSupergraphServiceBuilder {
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_service_factory,
-            schema: self.schema,
+            schema,
             plugins,
         })
     }
@@ -516,7 +483,7 @@ impl MockSupergraphCreator {
         use crate::router_factory::create_plugins;
         let plugins = create_plugins(
             &configuration,
-            &Schema::parse(canned_schema, &configuration).unwrap(),
+            &Schema::parse_test(canned_schema, &configuration).unwrap(),
             None,
         )
         .await

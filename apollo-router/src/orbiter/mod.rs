@@ -22,6 +22,7 @@ use uuid::Uuid;
 use crate::configuration::generate_config_schema;
 use crate::executable::Opt;
 use crate::plugin::DynPlugin;
+use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
 use crate::Configuration;
@@ -89,28 +90,30 @@ pub(crate) struct OrbiterRouterSuperServiceFactory<T: RouterSuperServiceFactory>
 }
 
 #[async_trait]
-impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory
-    for OrbiterRouterSuperServiceFactory<T>
+impl<T: RouterSuperServiceFactory> RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory<T>
+where
+    T::RouterFactory: RouterFactory,
 {
     type RouterFactory = T::RouterFactory;
 
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
+        schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
             .create(
                 configuration.clone(),
-                schema.clone(),
+                schema,
                 previous_router,
                 extra_plugins,
             )
             .await
             .map(|factory| {
                 if env::var("APOLLO_TELEMETRY_DISABLED").unwrap_or_default() != "true" {
+                    let schema = factory.schema();
                     tokio::task::spawn(async {
                         tracing::debug!("sending anonymous usage data to Apollo");
                         let report = create_report(configuration, schema);
@@ -380,7 +383,7 @@ mod test {
         let config = Configuration::from_str(include_str!("testdata/redaction.router.yaml"))
             .expect("config must be valid");
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &config, None).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -398,7 +401,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(Value::Null);
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &config, None).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {
@@ -416,7 +419,7 @@ mod test {
             .expect("config must be valid");
         config.validated_yaml = Some(json!({"garbage": "garbage"}));
         let schema_string = include_str!("../testdata/minimal_supergraph.graphql");
-        let schema = crate::spec::Schema::parse(schema_string, &config).unwrap();
+        let schema = crate::spec::Schema::parse(schema_string, &config, None).unwrap();
         let report = create_report(Arc::new(config), Arc::new(schema));
         insta::with_settings!({sort_maps => true}, {
                     assert_yaml_snapshot!(report, {

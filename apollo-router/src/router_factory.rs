@@ -24,6 +24,7 @@ use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
+use crate::query_planner::BridgeQueryPlanner;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
@@ -105,6 +106,7 @@ pub(crate) trait RouterFactory:
     type Future: Send;
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
+    fn schema(&self) -> Arc<Schema>;
 }
 
 /// Factory for creating a RouterFactory
@@ -118,7 +120,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
+        schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError>;
@@ -135,10 +137,21 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
     async fn create<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
+        schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
+        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+        let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
+            None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
+            Some(planner) => {
+                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                    .await?
+            }
+        };
+
+        let schema = bridge_query_planner.schema();
+
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
@@ -149,7 +162,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             .create_certificate_store()
             .transpose()?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
@@ -194,10 +207,6 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        if let Some(router) = previous_router {
-            builder = builder.with_planner(router.planner());
-        }
-
         // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
         let mut supergraph_creator = builder.build().await?;
 
@@ -226,10 +235,21 @@ impl YamlRouterFactory {
     pub(crate) async fn create_supergraph<'a>(
         &'a mut self,
         configuration: Arc<Configuration>,
-        schema: Arc<Schema>,
-        _previous_router: Option<&'a SupergraphCreator>,
+        schema: String,
+        previous_router: Option<&'a SupergraphCreator>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<SupergraphCreator, BoxError> {
+        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
+        let bridge_query_planner = match previous_router.as_ref().map(|router| router.planner()) {
+            None => BridgeQueryPlanner::new(schema.clone(), configuration.clone()).await?,
+            Some(planner) => {
+                BridgeQueryPlanner::new_from_planner(planner, schema.clone(), configuration.clone())
+                    .await?
+            }
+        };
+
+        let schema = bridge_query_planner.schema();
+
         // Process the plugins.
         let plugins = create_plugins(&configuration, &schema, extra_plugins).await?;
 
@@ -240,7 +260,7 @@ impl YamlRouterFactory {
             .create_certificate_store()
             .transpose()?;
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
         builder = builder.with_configuration(configuration.clone());
 
         for (name, _) in schema.subgraphs() {
@@ -341,10 +361,8 @@ fn load_certs(certificates: &str) -> io::Result<Vec<rustls::Certificate>> {
 pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: &str) {
     let config: Configuration = serde_yaml::from_str(configuration).unwrap();
 
-    let schema: Schema = Schema::parse(schema, &Default::default()).unwrap();
-
     let service = YamlRouterFactory::default()
-        .create(Arc::new(config), Arc::new(schema), None, None)
+        .create(Arc::new(config), schema.to_string(), None, None)
         .await;
     assert_eq!(
         service.map(|_| ()).unwrap_err().to_string().as_str(),
@@ -643,10 +661,9 @@ mod test {
 
     async fn create_service(config: Configuration) -> Result<(), BoxError> {
         let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Schema::parse(schema, &config).unwrap();
 
         let service = YamlRouterFactory::default()
-            .create(Arc::new(config), Arc::new(schema), None, None)
+            .create(Arc::new(config), schema.to_string(), None, None)
             .await;
         service.map(|_| ())
     }
@@ -654,7 +671,7 @@ mod test {
     #[test]
     fn test_inject_schema_id() {
         let schema = include_str!("testdata/starstuff@current.graphql");
-        let schema = Schema::parse(schema, &Default::default()).unwrap();
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         let mut config = json!({});
         inject_schema_id(&schema, &mut config);
         let config =

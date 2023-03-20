@@ -55,6 +55,7 @@ use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::Schema;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -472,6 +473,10 @@ where
             .values()
             .for_each(|p| mm.extend(p.web_endpoints()));
         mm
+    }
+
+    fn schema(&self) -> Arc<Schema> {
+        todo!()
     }
 }
 
