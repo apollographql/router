@@ -156,10 +156,8 @@ mod async_checkpoint_tests {
         let expected_label = "from_mock_service";
 
         let mut exec = MockExecutionService::new();
-        /*execution_service.expect_clone().return_once(move || {
-        let mut execution_service = MockExecutionService::new();*/
         exec.expect_call()
-            .times(2)
+            .times(1)
             .returning(move |req: crate::ExecutionRequest| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
@@ -168,20 +166,8 @@ mod async_checkpoint_tests {
                     .unwrap())
             });
 
-        //drop(exec);
-        //panic!();
-        /*execution_service
-        });*/
         let execution_service: MockService<ExecutionRequest, ExecutionResponse, BoxError> =
-            MockService::create(move |req| {
-                exec.call(req)
-
-                /*Ok(ExecutionResponse::fake_builder()
-                .label(expected_label.to_string())
-                .build()
-                .unwrap())*/
-                //panic!();
-            });
+            MockService::create(move |req| exec.call(req));
 
         let service_stack = ServiceBuilder::new()
             .checkpoint_async(|req: crate::ExecutionRequest| async {
@@ -202,7 +188,6 @@ mod async_checkpoint_tests {
             .unwrap();
 
         assert_eq!(actual_label, expected_label);
-        panic!()
     }
 
     #[tokio::test]
