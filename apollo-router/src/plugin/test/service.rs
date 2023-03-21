@@ -11,6 +11,10 @@ use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use futures::SinkExt;
 use futures::StreamExt;
+use tokio::runtime::Handle;
+use tokio::runtime::RuntimeFlavor;
+use tokio::sync;
+use tokio::task::JoinError;
 use tower::Service;
 
 use crate::ExecutionRequest;
@@ -97,6 +101,10 @@ where
     where
         F: FnMut(Request) -> Result<Response, Error> + Send + 'static,
     {
+        if Handle::current().runtime_flavor() != RuntimeFlavor::MultiThread {
+            panic!("this MockService can only work under the 'multi_thread' runtime");
+        }
+
         let (tx, mut rx) = mpsc::channel::<MockServiceMessage<Request, Response, Error>>(100);
 
         let store_sender = Arc::new(Mutex::new(None));
