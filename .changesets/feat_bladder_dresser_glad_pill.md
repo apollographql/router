@@ -2,26 +2,26 @@
 
 Adds metrics for uplink of the format:
 ```
-# HELP apollo_router_uplink_duration_seconds apollo_router_uplink_duration_seconds
-# TYPE apollo_router_uplink_duration_seconds histogram
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.001"} 0
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.005"} 0
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.015"} 0
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.05"} 0
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.1"} 0
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.2"} 0
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.3"} 1
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.4"} 1
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.5"} 1
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="1"} 1
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="5"} 1
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="10"} 1
-apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="+Inf"} 1
-apollo_router_uplink_duration_seconds_sum{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"} 0.228077684
-apollo_router_uplink_duration_seconds_count{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"} 1
 # HELP apollo_router_uplink_fetch_count_total apollo_router_uplink_fetch_count_total
 # TYPE apollo_router_uplink_fetch_count_total gauge
-apollo_router_uplink_fetch_count_total{service_name="apollo-router",status="success"} 1
+apollo_router_uplink_fetch_count_total{query="SupergraphSdl",service_name="apollo-router",status="success"} 1
+# HELP apollo_router_uplink_fetch_duration_seconds apollo_router_uplink_fetch_duration_seconds
+# TYPE apollo_router_uplink_fetch_duration_seconds histogram
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.001"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.005"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.015"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.05"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.1"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.2"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.3"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.4"} 0
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="0.5"} 1
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="1"} 1
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="5"} 1
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="10"} 1
+apollo_router_uplink_fetch_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/",le="+Inf"} 1
+apollo_router_uplink_fetch_duration_seconds_sum{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/"} 0.465257131
+apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/"} 1
 ```
 `apollo_router_uplink_duration_seconds_bucket` is a histogram of duration which contains the following attributes:
 * url: the url that was polled

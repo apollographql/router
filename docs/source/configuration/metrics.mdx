@@ -93,6 +93,7 @@ All cache metrics listed above have the following attributes:
 
 - `apollo_router_uplink_fetch_count_total`
   - `status`: (`success`, `failure`) 
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
 

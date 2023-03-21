@@ -138,6 +138,7 @@ where
     Response: Send + 'static + Debug,
 {
     let (sender, receiver) = channel(2);
+    let query = query_name::<Query>();
     let task = async move {
         let mut last_id = None;
         let mut last_ordering_id = SystemTime::UNIX_EPOCH;
@@ -163,7 +164,8 @@ where
                 Ok(response) => {
                     tracing::info!(
                         counter.apollo_router_uplink_fetch_count_total = 1,
-                        status = "success"
+                        status = "success",
+                        query
                     );
                     match response {
                         UplinkResponse::New {
@@ -214,7 +216,8 @@ where
                 Err(err) => {
                     tracing::info!(
                         counter.apollo_router_uplink_fetch_count_total = 1,
-                        status = "failure"
+                        status = "failure",
+                        query
                     );
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
@@ -243,17 +246,12 @@ where
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + Debug + 'static,
 {
+    let query = query_name::<Query>();
     for url in urls {
         let now = Instant::now();
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
             Ok(response) => {
                 let response = response.data.map(Into::into);
-                let mut query = std::any::type_name::<Query>();
-                query = query
-                    .strip_suffix("Query")
-                    .expect("Uplink structs mut be named xxxQuery")
-                    .get(query.rfind("::").map(|index| index + 2).unwrap_or_default()..)
-                    .expect("cannot fail");
 
                 match &response {
                     None => {
@@ -338,6 +336,16 @@ where
         };
     }
     Err(Error::FetchFailed)
+}
+
+fn query_name<Query>() -> &'static str {
+    let mut query = std::any::type_name::<Query>();
+    query = query
+        .strip_suffix("Query")
+        .expect("Uplink structs mut be named xxxQuery")
+        .get(query.rfind("::").map(|index| index + 2).unwrap_or_default()..)
+        .expect("cannot fail");
+    query
 }
 
 async fn http_request<Query>(
