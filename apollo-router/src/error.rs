@@ -210,10 +210,31 @@ impl From<QueryPlannerError> for CacheResolverError {
 }
 
 /// Error types for service building.
-#[derive(Error, Debug, Display, Clone)]
+#[derive(Error, Debug, Display)]
 pub(crate) enum ServiceBuildError {
     /// couldn't build Router Service: {0}
     QueryPlannerError(QueryPlannerError),
+
+    /// schema error: {0}
+    Schema(SchemaError),
+}
+
+impl From<SchemaError> for ServiceBuildError {
+    fn from(err: SchemaError) -> Self {
+        ServiceBuildError::Schema(err)
+    }
+}
+
+impl From<Vec<PlannerError>> for ServiceBuildError {
+    fn from(errors: Vec<PlannerError>) -> Self {
+        ServiceBuildError::QueryPlannerError(errors.into())
+    }
+}
+
+impl From<router_bridge::error::Error> for ServiceBuildError {
+    fn from(error: router_bridge::error::Error) -> Self {
+        ServiceBuildError::QueryPlannerError(error.into())
+    }
 }
 
 /// Error types for QueryPlanner
@@ -356,6 +377,12 @@ impl From<SpecError> for QueryPlannerError {
     }
 }
 
+impl From<router_bridge::error::Error> for QueryPlannerError {
+    fn from(error: router_bridge::error::Error) -> Self {
+        QueryPlannerError::RouterBridgeError(error)
+    }
+}
+
 impl From<QueryPlannerError> for Response {
     fn from(err: QueryPlannerError) -> Self {
         FetchError::from(err).to_response()
@@ -417,7 +444,7 @@ pub(crate) enum SchemaError {
 }
 
 /// Collection of schema parsing errors.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct ParseErrors {
     pub(crate) raw_schema: String,
     pub(crate) errors: Vec<apollo_parser::Error>,
