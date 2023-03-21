@@ -8,6 +8,7 @@ use std::thread;
 use futures::channel::mpsc;
 use futures::channel::oneshot;
 use futures::future::BoxFuture;
+use futures::future::Future;
 use futures::lock::Mutex;
 use futures::SinkExt;
 use futures::StreamExt;

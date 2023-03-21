@@ -158,7 +158,7 @@ mod async_checkpoint_tests {
         let mut exec = MockExecutionService::new();
         exec.expect_call()
             .times(1)
-            .returning(move |req: crate::ExecutionRequest| {
+            .returning(move |req: ExecutionRequest| {
                 Ok(ExecutionResponse::fake_builder()
                     .label(expected_label.to_string())
                     .context(req.context)
