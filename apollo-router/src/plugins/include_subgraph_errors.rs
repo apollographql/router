@@ -10,18 +10,20 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
-use crate::SubgraphResponse;
+use crate::services::SubgraphResponse;
 
 static REDACTED_ERROR_MESSAGE: &str = "Subgraph errors redacted";
 
 register_plugin!("apollo", "include_subgraph_errors", IncludeSubgraphErrors);
 
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
-#[serde(rename_all = "snake_case", deny_unknown_fields)]
+/// Configuration for exposing errors that originate from subgraphs
+#[derive(Clone, Debug, JsonSchema, Default, Deserialize)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 struct Config {
-    #[serde(default)]
+    /// Include errors from all subgraphs
     all: bool,
-    #[serde(default)]
+
+    /// Include errors from specific subgraphs
     subgraphs: HashMap<String, bool>,
 }
 
@@ -90,10 +92,10 @@ mod test {
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::PluggableSupergraphServiceBuilder;
+    use crate::services::SupergraphRequest;
+    use crate::spec::Schema;
     use crate::Configuration;
-    use crate::PluggableSupergraphServiceBuilder;
-    use crate::Schema;
-    use crate::SupergraphRequest;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
         Bytes::from_static(r#"{"data":{"topProducts":null},"errors":[{"message":"couldn't find mock for query {\"query\":\"query ErrorTopProducts__products__0($first:Int){topProducts(first:$first){__typename upc name}}\",\"operationName\":\"ErrorTopProducts__products__0\",\"variables\":{\"first\":2}}","extensions":{"test":"value","code":"FETCH_ERROR"}}]}"#.as_bytes())
@@ -155,8 +157,8 @@ mod test {
 
         let account_mocks = vec![
             (
-                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"},{"__typename":"User","id":"1"}]}}"#,
-                r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"},{"name":"Ada Lovelace"}]}}"#
+                r#"{"query":"query TopProducts__accounts__3($representations:[_Any!]!){_entities(representations:$representations){...on User{name}}}","operationName":"TopProducts__accounts__3","variables":{"representations":[{"__typename":"User","id":"1"},{"__typename":"User","id":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Ada Lovelace"},{"name":"Alan Turing"}]}}"#
             )
         ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
         let account_service = MockSubgraph::new(account_mocks);
@@ -175,8 +177,8 @@ mod test {
                 r#"{"data":{"topProducts":[{"__typename":"Product","upc":"1","name":"Table"},{"__typename":"Product","upc":"2","name":"Couch"}]}}"#
             ),
             (
-                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
-                r#"{"data":{"_entities":[{"name":"Table"},{"name":"Table"},{"name":"Couch"}]}}"#
+                r#"{"query":"query TopProducts__products__2($representations:[_Any!]!){_entities(representations:$representations){...on Product{name}}}","operationName":"TopProducts__products__2","variables":{"representations":[{"__typename":"Product","upc":"1"},{"__typename":"Product","upc":"2"}]}}"#,
+                r#"{"data":{"_entities":[{"name":"Table"},{"name":"Couch"}]}}"#
             )
             ].into_iter().map(|(query, response)| (serde_json::from_str(query).unwrap(), serde_json::from_str(response).unwrap())).collect();
 

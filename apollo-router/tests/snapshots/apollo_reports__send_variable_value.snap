@@ -32,12 +32,10 @@ traces_per_query:
           operation_name: ""
         client_name: ""
         client_version: ""
+        agent_version: "[agent_version]"
         http:
           method: 4
-          request_headers:
-            content-type:
-              value:
-                - ""
+          request_headers: {}
           response_headers:
             my_trace_id: "[my_trace_id]"
           status_code: 0
@@ -175,6 +173,7 @@ traces_per_query:
                         details: ~
                         client_name: ""
                         client_version: ""
+                        agent_version: "[agent_version]"
                         http: ~
                         cache_policy: ~
                         query_plan: ~
@@ -416,6 +415,7 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -511,46 +511,6 @@ traces_per_query:
                                               ResponseName: name
                                         id:
                                           Index: 1
-                                      - original_field_name: ""
-                                        type: ""
-                                        parent_type: ""
-                                        cache_policy: ~
-                                        start_time: "[start_time]"
-                                        end_time: "[end_time]"
-                                        error: []
-                                        child:
-                                          - original_field_name: ""
-                                            type: String
-                                            parent_type: User
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                        id:
-                                          Index: 2
-                                      - original_field_name: ""
-                                        type: ""
-                                        parent_type: ""
-                                        cache_policy: ~
-                                        start_time: "[start_time]"
-                                        end_time: "[end_time]"
-                                        error: []
-                                        child:
-                                          - original_field_name: ""
-                                            type: String
-                                            parent_type: User
-                                            cache_policy: ~
-                                            start_time: "[start_time]"
-                                            end_time: "[end_time]"
-                                            error: []
-                                            child: []
-                                            id:
-                                              ResponseName: name
-                                        id:
-                                          Index: 3
                                     id:
                                       ResponseName: _entities
                                 id: ~
@@ -561,6 +521,7 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~

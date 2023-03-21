@@ -16,6 +16,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
+use serde_json::Value;
 use tower::BoxError;
 use url::ParseError;
 
@@ -26,22 +27,34 @@ pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
 pub(crate) mod jaeger;
 pub(crate) mod otlp;
+pub(crate) mod reload;
 pub(crate) mod zipkin;
 
 pub(crate) trait TracingConfigurator {
     fn apply(&self, builder: Builder, trace_config: &Trace) -> Result<Builder, BoxError>;
 }
 
+schemar_fn!(
+    agent_endpoint,
+    String,
+    Some(Value::String("default".to_string())),
+    "The agent endpoint to send reports to"
+);
+/// The endpoint to send reports to
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum AgentEndpoint {
+    /// The default agent endpoint
     Default(AgentDefault),
+    /// A custom URL endpoint
     Url(Url),
 }
 
+/// The default agent endpoint
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum AgentDefault {
+    /// The default agent endpoint
     Default,
 }
 
@@ -51,7 +64,7 @@ pub(crate) fn parse_url_for_endpoint(mut s: String) -> Result<Url, ParseError> {
             // support the case of 'collector:4317' where url parses 'collector'
             // as the scheme instead of the host
             if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-                s = format!("http://{}", s);
+                s = format!("http://{s}");
                 Url::parse(&s)
             } else {
                 Ok(url)
@@ -62,7 +75,7 @@ pub(crate) fn parse_url_for_endpoint(mut s: String) -> Result<Url, ParseError> {
                 // support the case of '127.0.0.1:4317' where url is interpreted
                 // as a relative url without a base
                 ParseError::RelativeUrlWithoutBase => {
-                    s = format!("http://{}", s);
+                    s = format!("http://{s}");
                     Url::parse(&s)
                 }
                 _ => Err(err),
@@ -148,12 +161,11 @@ where
     }
 }
 
+/// Batch processor configuration
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(default)]
 pub(crate) struct BatchProcessorConfig {
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "scheduled_delay_default"
-    )]
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     /// The delay interval in milliseconds between two consecutive processing
     /// of batches. The default value is 5 seconds.
@@ -161,20 +173,15 @@ pub(crate) struct BatchProcessorConfig {
 
     /// The maximum queue size to buffer spans for delayed processing. If the
     /// queue gets full it drops the spans. The default value of is 2048.
-    #[serde(default = "max_queue_size_default")]
     pub(crate) max_queue_size: usize,
 
     /// The maximum number of spans to process in a single batch. If there are
     /// more than one batch worth of spans then it processes multiple batches
     /// of spans one batch after the other without any delay. The default value
     /// is 512.
-    #[serde(default = "max_export_batch_size_default")]
     pub(crate) max_export_batch_size: usize,
 
-    #[serde(
-        deserialize_with = "humantime_serde::deserialize",
-        default = "max_export_timeout_default"
-    )]
+    #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String")]
     /// The maximum duration to export a batch of data.
     /// The default value is 30 seconds.
@@ -186,7 +193,6 @@ pub(crate) struct BatchProcessorConfig {
     /// by an exporter. A value of 1 will cause exports to be performed
     /// synchronously on the BatchSpanProcessor task.
     /// The default is 1.
-    #[serde(default = "max_concurrent_exports_default")]
     pub(crate) max_concurrent_exports: usize,
 }
 

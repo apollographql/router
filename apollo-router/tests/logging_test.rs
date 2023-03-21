@@ -1,7 +1,6 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use apollo_router::_private::TelemetryPlugin;
 use apollo_router::graphql;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
@@ -10,6 +9,8 @@ use tracing::field;
 use tracing::Level;
 use tracing::Metadata;
 use tracing::Subscriber;
+use tracing_core::dispatcher;
+use tracing_core::Dispatch;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Registry;
 
@@ -60,30 +61,12 @@ impl<'a> LookupSpan<'a> for TestLogSubscriber {
     }
 }
 
-async fn setup_router(
-    config: serde_json::Value,
-    logging_config: serde_json::Value,
-    subscriber: TestLogSubscriber,
-) -> router::BoxCloneService {
-    let telemetry = TelemetryPlugin::new_with_subscriber(
-        serde_json::json!({
-            "tracing": {},
-            "experimental_logging": logging_config,
-            "apollo": {
-                "schema_id": ""
-            }
-        }),
-        subscriber,
-    )
-    .await
-    .unwrap();
-
+async fn setup_router(config: serde_json::Value) -> router::BoxCloneService {
     apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(config)
         .unwrap()
         .schema(include_str!("fixtures/supergraph.graphql"))
-        .extra_plugin(telemetry)
         .build_router()
         .await
         .unwrap()
@@ -176,14 +159,17 @@ async fn simple_query_should_display_logs_for_subgraph_and_supergraph() {
         .expect("expecting valid request");
 
     let event_store = Arc::new(Mutex::new(Vec::new()));
-    let router = setup_router(
-        serde_json::json!({}),
-        logging_config,
-        TestLogSubscriber {
-            event_metadata: event_store.clone(),
-            registry: Registry::default(),
-        },
-    )
+    dispatcher::set_global_default(Dispatch::new(TestLogSubscriber {
+        event_metadata: event_store.clone(),
+        registry: Registry::default(),
+    }))
+    .expect("subscriber must be set");
+
+    let router = setup_router(serde_json::json!({"telemetry": {"tracing": {},
+    "experimental_logging": logging_config,
+    "apollo": {
+        "schema_id": ""
+    }}}))
     .await;
     let actual = query_with_router(router, request).await;
 

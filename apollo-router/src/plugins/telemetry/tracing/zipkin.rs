@@ -19,10 +19,12 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// The endpoint to send to
     #[schemars(with = "String", default = "default_agent_endpoint")]
     #[serde(deserialize_with = "deser_endpoint")]
     pub(crate) endpoint: AgentEndpoint,
 
+    /// Batch processor configuration
     #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 }
@@ -44,7 +46,7 @@ where
     // support the case of 'collector:4317' where url parses 'collector'
     // as the scheme instead of the host
     if url.host().is_none() && (url.scheme() != "http" || url.scheme() != "https") {
-        s = format!("http://{}/api/v2/spans", s);
+        s = format!("http://{s}/api/v2/spans");
 
         url = Url::parse(&s).map_err(serde::de::Error::custom)?;
     }
@@ -61,9 +63,9 @@ impl TracingConfigurator for Config {
 
         let exporter = opentelemetry_zipkin::new_pipeline()
             .with_trace_config(trace_config.into())
-            .with(&trace_config.service_name, |b, n| b.with_service_name(n))
+            .with_service_name(trace_config.service_name.clone())
             .with(&collector_endpoint, |b, endpoint| {
-                b.with_collector_endpoint(&endpoint.to_string())
+                b.with_collector_endpoint(endpoint.to_string())
             })
             .init_exporter()?;
 

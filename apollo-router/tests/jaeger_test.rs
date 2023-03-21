@@ -1,31 +1,18 @@
+#![cfg(all(target_os = "linux", target_arch = "x86_64"))]
+
+extern crate core;
+
 mod common;
 
-use std::collections::HashMap;
 use std::collections::HashSet;
-use std::convert::Infallible;
-use std::net::SocketAddr;
-use std::path::Path;
 use std::time::Duration;
-use std::time::SystemTime;
 
-use http::header::CONTENT_TYPE;
-use http::Request;
-use http::Response;
-use http::StatusCode;
-use hyper::server::Server;
-use hyper::service::make_service_fn;
-use hyper::service::service_fn;
-use hyper::Body;
-use mime::APPLICATION_JSON;
-use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::trace::Span;
-use opentelemetry::trace::Tracer;
-use opentelemetry::trace::TracerProvider;
+use anyhow::anyhow;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::common::TracingTest;
+use crate::common::IntegrationTest;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -34,15 +21,17 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
         .with_service_name("my_app")
         .install_simple()?;
 
-    let router = TracingTest::new(
+    let mut router = IntegrationTest::new(
         tracer,
         opentelemetry_jaeger::Propagator::new(),
-        Path::new("jaeger.router.yaml"),
-    );
+        include_str!("fixtures/jaeger.router.yaml"),
+    )
+    .await;
 
-    tokio::task::spawn(subgraph());
+    router.start().await;
+    router.assert_started().await;
 
-    for _ in 0..10 {
+    for _ in 0..2 {
         let (id, result) = router.run_query().await;
         assert!(!result
             .headers()
@@ -50,9 +39,10 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
             .unwrap()
             .is_empty());
         query_jaeger_for_trace(id).await?;
-        router.touch_config()?;
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        router.touch_config().await;
+        router.assert_reloaded().await;
     }
+    router.graceful_shutdown().await;
     Ok(())
 }
 
@@ -63,20 +53,15 @@ async fn query_jaeger_for_trace(id: String) -> Result<(), BoxError> {
         .append_pair("tags", &tags.to_string())
         .finish();
 
-    let url = format!("http://localhost:16686/api/traces?{}", params);
+    let url = format!("http://localhost:16686/api/traces?{params}");
     for _ in 0..10 {
-        match find_valid_trace(&url).await {
-            Ok(_) => {
-                return Ok(());
-            }
-            Err(e) => {
-                println!("error: {}", e);
-                tracing::warn!("{}", e);
-            }
+        if find_valid_trace(&url).await.is_ok() {
+            return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    panic!("did not get full otel trace");
+    find_valid_trace(&url).await?;
+    Ok(())
 }
 
 async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
@@ -86,7 +71,11 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
     // * All spans are parented
     // * Required attributes of 'router' span has been set
 
-    let trace: Value = reqwest::get(url).await?.json().await?;
+    let trace: Value = reqwest::get(url)
+        .await
+        .map_err(|e| anyhow!("failed to contact jaeger; {}", e))?
+        .json()
+        .await?;
     tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
 
     // Verify that we got all the participants in the trace
@@ -156,8 +145,7 @@ fn verify_trace_participants(trace: &Value) -> Result<(), BoxError> {
     let expected_services = HashSet::from(["my_app", "router", "products"].map(|s| s.into()));
     if services != expected_services {
         return Err(BoxError::from(format!(
-            "incomplete traces, got {:?} expected {:?}",
-            services, expected_services
+            "incomplete traces, got {services:?} expected {expected_services:?}"
         )));
     }
     Ok(())
@@ -190,8 +178,7 @@ fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
         .collect();
     if !missing_operation_names.is_empty() {
         return Err(BoxError::from(format!(
-            "spans did not match, got {:?}, missing {:?}",
-            operation_names, missing_operation_names
+            "spans did not match, got {operation_names:?}, missing {missing_operation_names:?}"
         )));
     }
     Ok(())
@@ -231,63 +218,10 @@ fn parent_span<'a>(trace: &'a Value, span: &'a Value) -> Option<&'a Value> {
         .filter_map(|id| id.as_str())
         .filter_map(|id| {
             trace
-                .select_path(&format!("$..spans[?(@.spanID == '{}')]", id))
+                .select_path(&format!("$..spans[?(@.spanID == '{id}')]"))
                 .ok()?
                 .into_iter()
                 .next()
         })
         .next()
-}
-
-// starts a local server emulating the products subgraph
-async fn subgraph() {
-    async fn handle(request: Request<Body>) -> Result<Response<Body>, Infallible> {
-        // create the opentelemetry-jaeger tracing infrastructure
-        let tracer_provider = opentelemetry_jaeger::new_agent_pipeline()
-            .with_service_name("products")
-            .build_simple()
-            .unwrap();
-        let tracer = tracer_provider.tracer("products");
-
-        //extract the trace id from headers and create a child span from it
-        assert!(
-            request.headers().get("uber-trace-id").is_some(),
-            "the uber-trace-id is absent, trace propagation is broken"
-        );
-
-        let headers: HashMap<String, String> = request
-            .headers()
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_string(),
-                    value.to_str().unwrap().to_string(),
-                )
-            })
-            .collect();
-        let context = opentelemetry_jaeger::Propagator::new().extract(&headers);
-        let mut span = tracer.start_with_context("HTTP POST", &context);
-        tokio::time::sleep(Duration::from_millis(2)).await;
-        span.end_with_timestamp(SystemTime::now());
-        println!("flush result: {:?}", tracer_provider.force_flush());
-
-        // send the response
-        let body_bytes = hyper::body::to_bytes(request.into_body()).await.unwrap();
-        assert_eq!(
-            r#"{"query":"{topProducts{name}}"}"#,
-            std::str::from_utf8(&body_bytes).unwrap()
-        );
-        Ok(Response::builder()
-            .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-            .status(StatusCode::OK)
-            .body(
-                r#"{"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}}"#
-                    .into(),
-            )
-            .unwrap())
-    }
-
-    let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
-    let server = Server::bind(&SocketAddr::from(([127, 0, 0, 1], 4005))).serve(make_svc);
-    server.await.unwrap();
 }

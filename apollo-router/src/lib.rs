@@ -59,6 +59,7 @@ mod http_ext;
 mod http_server_factory;
 mod introspection;
 pub mod layers;
+mod orbiter;
 mod plugins;
 mod query_planner;
 mod request;
@@ -79,6 +80,7 @@ pub use crate::executable::main;
 pub use crate::executable::Executable;
 pub use crate::router::ApolloRouterError;
 pub use crate::router::ConfigurationSource;
+pub use crate::router::EntitlementSource;
 pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
@@ -98,10 +100,5 @@ pub mod _private {
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
     // For tests
-    pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }
-
-// TODO: clean these up and import from relevant modules instead
-pub(crate) use crate::services::*;
-pub(crate) use crate::spec::*;

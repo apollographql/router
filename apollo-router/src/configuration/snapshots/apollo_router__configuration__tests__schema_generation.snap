@@ -8,6 +8,430 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "apq": {
+      "description": "Configures automatic persisted queries",
+      "default": {
+        "enabled": true,
+        "router": {
+          "cache": {
+            "in_memory": {
+              "limit": 512
+            },
+            "redis": null
+          }
+        },
+        "subgraph": {
+          "all": {
+            "enabled": false
+          },
+          "subgraphs": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Automatic Persisted Queries (enabled by default)",
+          "default": true,
+          "type": "boolean"
+        },
+        "router": {
+          "description": "Router level (APQ) configuration",
+          "default": {
+            "cache": {
+              "in_memory": {
+                "limit": 512
+              },
+              "redis": null
+            }
+          },
+          "type": "object",
+          "properties": {
+            "cache": {
+              "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
+              "type": "object",
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 1.0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "redis": {
+                  "description": "Configures and activates the Redis cache",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "urls"
+                  ],
+                  "properties": {
+                    "urls": {
+                      "description": "List of URLs to the Redis cluster",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "subgraph": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": {
+            "all": {
+              "enabled": false
+            },
+            "subgraphs": {}
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "enabled": false
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "description": "Enable",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Enable",
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "authentication": {
+      "description": "Authentication",
+      "type": "object",
+      "required": [
+        "jwt"
+      ],
+      "properties": {
+        "jwt": {
+          "description": "The JWT configuration",
+          "type": "object",
+          "required": [
+            "jwks"
+          ],
+          "properties": {
+            "header_name": {
+              "description": "HTTP header expected to contain JWT",
+              "default": "authorization",
+              "type": "string"
+            },
+            "header_value_prefix": {
+              "description": "Header value prefix",
+              "default": "Bearer",
+              "type": "string"
+            },
+            "jwks": {
+              "description": "List of JWKS used to verify tokens",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "issuer": {
+                    "description": "Expected issuer for tokens verified by that JWKS",
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "url": {
+                    "description": "Retrieve the JWK Set",
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "coprocessor": {
+      "description": "Configures the externalization plugin",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "router": {
+          "description": "The router stage request/response configuration",
+          "default": {
+            "request": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false
+            },
+            "response": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false
+            }
+          },
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "The request configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "description": "The response configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "subgraph": {
+          "description": "The subgraph stage request/response configuration",
+          "default": {
+            "all": {
+              "request": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "uri": false,
+                "service_name": false
+              },
+              "response": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "uri": false,
+                "service_name": false
+              }
+            }
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "What information is passed to a subgraph request/response stage",
+              "default": {
+                "request": {
+                  "headers": false,
+                  "context": false,
+                  "body": false,
+                  "uri": false,
+                  "service_name": false
+                },
+                "response": {
+                  "headers": false,
+                  "context": false,
+                  "body": false,
+                  "uri": false,
+                  "service_name": false
+                }
+              },
+              "type": "object",
+              "properties": {
+                "request": {
+                  "description": "What information is passed to a subgraph request/response stage",
+                  "default": {
+                    "headers": false,
+                    "context": false,
+                    "body": false,
+                    "uri": false,
+                    "service_name": false
+                  },
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "description": "Send the body",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "context": {
+                      "description": "Send the context",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "headers": {
+                      "description": "Send the headers",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "service_name": {
+                      "description": "Send the service name",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "uri": {
+                      "description": "Send the subgraph URI",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "response": {
+                  "description": "What information is passed to a subgraph request/response stage",
+                  "default": {
+                    "headers": false,
+                    "context": false,
+                    "body": false,
+                    "uri": false,
+                    "service_name": false
+                  },
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "description": "Send the body",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "context": {
+                      "description": "Send the context",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "headers": {
+                      "description": "Send the headers",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "service_name": {
+                      "description": "Send the service name",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "uri": {
+                      "description": "Send the subgraph URI",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "timeout": {
+          "description": "The timeout for external requests",
+          "default": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "type": "string"
+        },
+        "url": {
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "cors": {
       "description": "Cross origin request headers.",
       "default": {
@@ -23,7 +447,8 @@ expression: "&schema"
           "GET",
           "POST",
           "OPTIONS"
-        ]
+        ],
+        "max_age": null
       },
       "type": "object",
       "properties": {
@@ -62,6 +487,11 @@ expression: "&schema"
             "type": "string"
           },
           "nullable": true
+        },
+        "max_age": {
+          "description": "The `Access-Control-Max-Age` header value in time units",
+          "default": null,
+          "type": "string"
         },
         "methods": {
           "description": "Allowed request methods. Defaults to GET, POST, OPTIONS.",
@@ -112,12 +542,15 @@ expression: "&schema"
       "additionalProperties": false
     },
     "forbid_mutations": {
+      "description": "Forbid mutations configuration",
       "type": "boolean"
     },
     "headers": {
+      "description": "Configuration for header propagation",
       "type": "object",
       "properties": {
         "all": {
+          "description": "Rules to apply to all subgraphs",
           "type": "object",
           "required": [
             "request"
@@ -146,9 +579,11 @@ expression: "&schema"
                             ],
                             "properties": {
                               "name": {
+                                "description": "The name of the header",
                                 "type": "string"
                               },
                               "value": {
+                                "description": "The value for the header",
                                 "type": "string"
                               }
                             },
@@ -182,13 +617,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "The default if the path in the body did not resolve to an element",
                                 "type": "string",
                                 "nullable": true
                               },
                               "name": {
+                                "description": "The target header name",
                                 "type": "string"
                               },
                               "path": {
+                                "description": "The path in the request body",
                                 "type": "string"
                               }
                             },
@@ -216,6 +654,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "named": {
+                                "description": "Remove a header given a header name",
                                 "type": "string"
                               }
                             },
@@ -229,6 +668,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "matching": {
+                                "description": "Remove a header given a regex matching against the header name",
                                 "type": "string"
                               }
                             },
@@ -256,13 +696,16 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
+                                "description": "Default value for the header.",
                                 "type": "string",
                                 "nullable": true
                               },
                               "named": {
+                                "description": "The source header name",
                                 "type": "string"
                               },
                               "rename": {
+                                "description": "An optional target header name",
                                 "type": "string",
                                 "nullable": true
                               }
@@ -277,6 +720,7 @@ expression: "&schema"
                             ],
                             "properties": {
                               "matching": {
+                                "description": "The regex on header name",
                                 "type": "string"
                               }
                             },
@@ -295,6 +739,7 @@ expression: "&schema"
           "nullable": true
         },
         "subgraphs": {
+          "description": "Rules to specific subgraphs",
           "type": "object",
           "additionalProperties": {
             "type": "object",
@@ -325,9 +770,11 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "name": {
+                                  "description": "The name of the header",
                                   "type": "string"
                                 },
                                 "value": {
+                                  "description": "The value for the header",
                                   "type": "string"
                                 }
                               },
@@ -361,13 +808,16 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "default": {
+                                  "description": "The default if the path in the body did not resolve to an element",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "name": {
+                                  "description": "The target header name",
                                   "type": "string"
                                 },
                                 "path": {
+                                  "description": "The path in the request body",
                                   "type": "string"
                                 }
                               },
@@ -395,6 +845,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "named": {
+                                  "description": "Remove a header given a header name",
                                   "type": "string"
                                 }
                               },
@@ -408,6 +859,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "matching": {
+                                  "description": "Remove a header given a regex matching against the header name",
                                   "type": "string"
                                 }
                               },
@@ -435,13 +887,16 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "default": {
+                                  "description": "Default value for the header.",
                                   "type": "string",
                                   "nullable": true
                                 },
                                 "named": {
+                                  "description": "The source header name",
                                   "type": "string"
                                 },
                                 "rename": {
+                                  "description": "An optional target header name",
                                   "type": "string",
                                   "nullable": true
                                 }
@@ -456,6 +911,7 @@ expression: "&schema"
                               ],
                               "properties": {
                                 "matching": {
+                                  "description": "The regex on header name",
                                   "type": "string"
                                 }
                               },
@@ -476,8 +932,8 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
-    "health-check": {
-      "description": "Configuration options pertaining to the http server component.",
+    "health_check": {
+      "description": "Health check configuration",
       "default": {
         "listen": "127.0.0.1:8088",
         "enabled": true
@@ -485,6 +941,7 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Set to false to disable the health check endpoint",
           "default": true,
           "type": "boolean"
         },
@@ -506,13 +963,14 @@ expression: "&schema"
       "additionalProperties": false
     },
     "homepage": {
-      "description": "Configuration options pertaining to the home page.",
+      "description": "Homepage configuration",
       "default": {
         "enabled": true
       },
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Set to false to disable the homepage",
           "default": true,
           "type": "boolean"
         }
@@ -520,13 +978,16 @@ expression: "&schema"
       "additionalProperties": false
     },
     "include_subgraph_errors": {
+      "description": "Configuration for exposing errors that originate from subgraphs",
       "type": "object",
       "properties": {
         "all": {
+          "description": "Include errors from all subgraphs",
           "default": false,
           "type": "boolean"
         },
         "subgraphs": {
+          "description": "Include errors from specific subgraphs",
           "default": {},
           "type": "object",
           "additionalProperties": {
@@ -537,91 +998,49 @@ expression: "&schema"
       "additionalProperties": false
     },
     "override_subgraph_url": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "string",
-        "format": "uri"
-      }
+      "description": "Subgraph URL mappings",
+      "anyOf": [
+        {
+          "description": "Subgraph URL mappings",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "format": "uri"
+          }
+        }
+      ]
     },
     "plugins": {
       "description": "Plugin configuration",
       "default": null,
       "properties": {
-        "experimental.expose_query_plan": {
-          "type": "boolean"
-        },
-        "experimental.external": {
+        "experimental.broken": {
+          "description": "This is a broken plugin for testing purposes only.",
           "type": "object",
           "required": [
-            "url"
+            "enabled"
           ],
           "properties": {
-            "stages": {
-              "default": null,
-              "type": "object",
-              "properties": {
-                "router": {
-                  "default": null,
-                  "type": "object",
-                  "properties": {
-                    "request": {
-                      "default": null,
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "nullable": true
-                    },
-                    "response": {
-                      "default": null,
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "nullable": true
-                    }
-                  },
-                  "nullable": true
-                }
-              },
-              "nullable": true
-            },
-            "timeout": {
-              "default": null,
-              "type": "string"
-            },
-            "url": {
-              "type": "string"
+            "enabled": {
+              "description": "Enable the broken plugin.",
+              "type": "boolean"
+            }
+          }
+        },
+        "experimental.expose_query_plan": {
+          "description": "Expose query plan",
+          "type": "boolean"
+        },
+        "experimental.restricted": {
+          "description": "Restricted plugin (for testing purposes only)",
+          "type": "object",
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "description": "Enable the restricted plugin (for testing purposes only)",
+              "type": "boolean"
             }
           }
         }
@@ -633,10 +1052,12 @@ expression: "&schema"
       "type": "object",
       "properties": {
         "main": {
+          "description": "The main entry point for Rhai script evaluation",
           "type": "string",
           "nullable": true
         },
         "scripts": {
+          "description": "The directory where Rhai scripts can be found",
           "type": "string",
           "nullable": true
         }
@@ -644,13 +1065,14 @@ expression: "&schema"
       "additionalProperties": false
     },
     "sandbox": {
-      "description": "Configuration options pertaining to the sandbox page.",
+      "description": "Sandbox configuration",
       "default": {
         "enabled": false
       },
       "type": "object",
       "properties": {
         "enabled": {
+          "description": "Set to true to enable sandbox",
           "default": false,
           "type": "boolean"
         }
@@ -675,71 +1097,28 @@ expression: "&schema"
       "additionalProperties": false
     },
     "supergraph": {
-      "description": "Configuration options pertaining to the supergraph server component.",
+      "description": "Configuration for the supergraph",
       "default": {
         "listen": "127.0.0.1:4000",
         "path": "/",
         "introspection": false,
-        "preview_defer_support": true,
-        "apq": {
-          "experimental_cache": {
-            "in_memory": {
-              "limit": 512
-            }
-          }
-        },
+        "defer_support": true,
         "query_planning": {
           "experimental_cache": {
             "in_memory": {
               "limit": 512
-            }
+            },
+            "redis": null
           },
           "warmed_up_queries": 0
         }
       },
       "type": "object",
       "properties": {
-        "apq": {
-          "description": "Configures automatic persisted queries",
-          "default": {
-            "experimental_cache": {
-              "in_memory": {
-                "limit": 512
-              }
-            }
-          },
-          "type": "object",
-          "required": [
-            "experimental_cache"
-          ],
-          "properties": {
-            "experimental_cache": {
-              "type": "object",
-              "required": [
-                "in_memory"
-              ],
-              "properties": {
-                "in_memory": {
-                  "description": "Configures the in memory cache (always active)",
-                  "type": "object",
-                  "required": [
-                    "limit"
-                  ],
-                  "properties": {
-                    "limit": {
-                      "description": "Number of entries in the Least Recently Used cache",
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 1.0
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
+        "defer_support": {
+          "description": "Set to false to disable defer support",
+          "default": true,
+          "type": "boolean"
         },
         "introspection": {
           "description": "Enable introspection Default: false",
@@ -765,33 +1144,34 @@ expression: "&schema"
           "default": "/",
           "type": "string"
         },
-        "preview_defer_support": {
-          "default": true,
-          "type": "boolean"
-        },
         "query_planning": {
           "description": "Query planning options",
           "default": {
             "experimental_cache": {
               "in_memory": {
                 "limit": 512
-              }
+              },
+              "redis": null
             },
             "warmed_up_queries": 0
           },
           "type": "object",
-          "required": [
-            "experimental_cache"
-          ],
           "properties": {
             "experimental_cache": {
+              "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
               "type": "object",
-              "required": [
-                "in_memory"
-              ],
               "properties": {
                 "in_memory": {
                   "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
                   "type": "object",
                   "required": [
                     "limit"
@@ -805,6 +1185,26 @@ expression: "&schema"
                     }
                   },
                   "additionalProperties": false
+                },
+                "redis": {
+                  "description": "Configures and activates the Redis cache",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "urls"
+                  ],
+                  "properties": {
+                    "urls": {
+                      "description": "List of URLs to the Redis cluster",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
                 }
               },
               "additionalProperties": false
@@ -823,9 +1223,11 @@ expression: "&schema"
       "additionalProperties": false
     },
     "telemetry": {
+      "description": "Telemetry configuration",
       "type": "object",
       "properties": {
         "apollo": {
+          "description": "Apollo reporting configuration",
           "type": "object",
           "properties": {
             "batch_processor": {
@@ -940,19 +1342,28 @@ expression: "&schema"
               "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",
               "oneOf": [
                 {
+                  "description": "Don't send any headers",
                   "type": "string",
                   "enum": [
-                    "none",
+                    "none"
+                  ]
+                },
+                {
+                  "description": "Send all headers",
+                  "type": "string",
+                  "enum": [
                     "all"
                   ]
                 },
                 {
+                  "description": "Send only the headers specified",
                   "type": "object",
                   "required": [
                     "only"
                   ],
                   "properties": {
                     "only": {
+                      "description": "Send only the headers specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -962,12 +1373,14 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 {
+                  "description": "Send all headers except those specified",
                   "type": "object",
                   "required": [
                     "except"
                   ],
                   "properties": {
                     "except": {
+                      "description": "Send all headers except those specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -982,19 +1395,28 @@ expression: "&schema"
               "description": "To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio",
               "oneOf": [
                 {
+                  "description": "Dont send any variables",
                   "type": "string",
                   "enum": [
-                    "none",
+                    "none"
+                  ]
+                },
+                {
+                  "description": "Send all variables",
+                  "type": "string",
+                  "enum": [
                     "all"
                   ]
                 },
                 {
+                  "description": "Send only the variables specified",
                   "type": "object",
                   "required": [
                     "only"
                   ],
                   "properties": {
                     "only": {
+                      "description": "Send only the variables specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -1004,12 +1426,14 @@ expression: "&schema"
                   "additionalProperties": false
                 },
                 {
+                  "description": "Send all variables except those specified",
                   "type": "object",
                   "required": [
                     "except"
                   ],
                   "properties": {
                     "except": {
+                      "description": "Send all variables except those specified",
                       "type": "array",
                       "items": {
                         "type": "string"
@@ -1025,14 +1449,22 @@ expression: "&schema"
           "nullable": true
         },
         "experimental_logging": {
+          "description": "Logging configuration",
           "type": "object",
           "properties": {
             "display_filename": {
-              "default": true,
+              "description": "Display the filename in the logs",
+              "default": false,
               "type": "boolean"
             },
             "display_line_number": {
-              "default": true,
+              "description": "Display the line number in the logs",
+              "default": false,
+              "type": "boolean"
+            },
+            "display_target": {
+              "description": "Display the target in the logs",
+              "default": false,
               "type": "boolean"
             },
             "format": {
@@ -1121,13 +1553,14 @@ expression: "&schema"
               }
             }
           },
-          "additionalProperties": false,
-          "nullable": true
+          "additionalProperties": false
         },
         "metrics": {
+          "description": "Metrics configuration",
           "type": "object",
           "properties": {
             "common": {
+              "description": "Common metrics configuration across all exporters",
               "type": "object",
               "properties": {
                 "attributes": {
@@ -1139,6 +1572,7 @@ expression: "&schema"
                       "type": "object",
                       "properties": {
                         "all": {
+                          "description": "Attributes for all subgraphs",
                           "type": "object",
                           "properties": {
                             "context": {
@@ -1152,13 +1586,70 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
-                                    "type": "string",
+                                    "description": "The optional default value",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "named": {
+                                    "description": "The name of the value in the context",
                                     "type": "string"
                                   },
                                   "rename": {
+                                    "description": "The optional output name",
                                     "type": "string",
                                     "nullable": true
                                   }
@@ -1183,13 +1674,70 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "default": {
-                                        "type": "string",
+                                        "description": "The optional default value",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "name": {
+                                        "description": "The name of the attribute",
                                         "type": "string"
                                       },
                                       "path": {
+                                        "description": "The path in the body",
                                         "type": "string"
                                       }
                                     },
@@ -1222,13 +1770,70 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "default": {
-                                        "type": "string",
+                                        "description": "The optional default value",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "name": {
+                                        "description": "The name of the attribute",
                                         "type": "string"
                                       },
                                       "path": {
+                                        "description": "The path in the body",
                                         "type": "string"
                                       }
                                     },
@@ -1243,20 +1848,77 @@ expression: "&schema"
                                     "description": "Configuration to forward header values in metric labels",
                                     "anyOf": [
                                       {
-                                        "description": "Using a named header",
+                                        "description": "Match via header name",
                                         "type": "object",
                                         "required": [
                                           "named"
                                         ],
                                         "properties": {
                                           "default": {
-                                            "type": "string",
+                                            "description": "The optional default value",
+                                            "anyOf": [
+                                              {
+                                                "description": "bool values",
+                                                "type": "boolean"
+                                              },
+                                              {
+                                                "description": "i64 values",
+                                                "type": "integer",
+                                                "format": "int64"
+                                              },
+                                              {
+                                                "description": "f64 values",
+                                                "type": "number",
+                                                "format": "double"
+                                              },
+                                              {
+                                                "description": "String values",
+                                                "type": "string"
+                                              },
+                                              {
+                                                "description": "Array of homogeneous values",
+                                                "anyOf": [
+                                                  {
+                                                    "description": "Array of bools",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of integers",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "integer",
+                                                      "format": "int64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of floats",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "number",
+                                                      "format": "double"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of strings",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "string"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            ],
                                             "nullable": true
                                           },
                                           "named": {
+                                            "description": "The name of the header",
                                             "type": "string"
                                           },
                                           "rename": {
+                                            "description": "The optional output name",
                                             "type": "string",
                                             "nullable": true
                                           }
@@ -1264,13 +1926,14 @@ expression: "&schema"
                                         "additionalProperties": false
                                       },
                                       {
-                                        "description": "Using a regex on the header name",
+                                        "description": "Match via rgex",
                                         "type": "object",
                                         "required": [
                                           "matching"
                                         ],
                                         "properties": {
                                           "matching": {
+                                            "description": "Using a regex on the header name",
                                             "type": "string"
                                           }
                                         },
@@ -1300,13 +1963,70 @@ expression: "&schema"
                                     ],
                                     "properties": {
                                       "default": {
-                                        "type": "string",
+                                        "description": "The optional default value",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "name": {
+                                        "description": "The name of the attribute",
                                         "type": "string"
                                       },
                                       "path": {
+                                        "description": "The path in the body",
                                         "type": "string"
                                       }
                                     },
@@ -1321,20 +2041,77 @@ expression: "&schema"
                                     "description": "Configuration to forward header values in metric labels",
                                     "anyOf": [
                                       {
-                                        "description": "Using a named header",
+                                        "description": "Match via header name",
                                         "type": "object",
                                         "required": [
                                           "named"
                                         ],
                                         "properties": {
                                           "default": {
-                                            "type": "string",
+                                            "description": "The optional default value",
+                                            "anyOf": [
+                                              {
+                                                "description": "bool values",
+                                                "type": "boolean"
+                                              },
+                                              {
+                                                "description": "i64 values",
+                                                "type": "integer",
+                                                "format": "int64"
+                                              },
+                                              {
+                                                "description": "f64 values",
+                                                "type": "number",
+                                                "format": "double"
+                                              },
+                                              {
+                                                "description": "String values",
+                                                "type": "string"
+                                              },
+                                              {
+                                                "description": "Array of homogeneous values",
+                                                "anyOf": [
+                                                  {
+                                                    "description": "Array of bools",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of integers",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "integer",
+                                                      "format": "int64"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of floats",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "number",
+                                                      "format": "double"
+                                                    }
+                                                  },
+                                                  {
+                                                    "description": "Array of strings",
+                                                    "type": "array",
+                                                    "items": {
+                                                      "type": "string"
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            ],
                                             "nullable": true
                                           },
                                           "named": {
+                                            "description": "The name of the header",
                                             "type": "string"
                                           },
                                           "rename": {
+                                            "description": "The optional output name",
                                             "type": "string",
                                             "nullable": true
                                           }
@@ -1342,13 +2119,14 @@ expression: "&schema"
                                         "additionalProperties": false
                                       },
                                       {
-                                        "description": "Using a regex on the header name",
+                                        "description": "Match via rgex",
                                         "type": "object",
                                         "required": [
                                           "matching"
                                         ],
                                         "properties": {
                                           "matching": {
+                                            "description": "Using a regex on the header name",
                                             "type": "string"
                                           }
                                         },
@@ -1374,10 +2152,66 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "name": {
+                                    "description": "The name of the attribute to insert",
                                     "type": "string"
                                   },
                                   "value": {
-                                    "type": "string"
+                                    "description": "The value of the attribute to insert",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ]
                                   }
                                 },
                                 "additionalProperties": false
@@ -1389,8 +2223,10 @@ expression: "&schema"
                           "nullable": true
                         },
                         "subgraphs": {
+                          "description": "Attributes per subgraph",
                           "type": "object",
                           "additionalProperties": {
+                            "description": "Configuration to add custom attributes/labels on metrics to subgraphs",
                             "type": "object",
                             "properties": {
                               "context": {
@@ -1404,13 +2240,70 @@ expression: "&schema"
                                   ],
                                   "properties": {
                                     "default": {
-                                      "type": "string",
+                                      "description": "The optional default value",
+                                      "anyOf": [
+                                        {
+                                          "description": "bool values",
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "description": "i64 values",
+                                          "type": "integer",
+                                          "format": "int64"
+                                        },
+                                        {
+                                          "description": "f64 values",
+                                          "type": "number",
+                                          "format": "double"
+                                        },
+                                        {
+                                          "description": "String values",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "description": "Array of homogeneous values",
+                                          "anyOf": [
+                                            {
+                                              "description": "Array of bools",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of integers",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "integer",
+                                                "format": "int64"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of floats",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "number",
+                                                "format": "double"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of strings",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ],
                                       "nullable": true
                                     },
                                     "named": {
+                                      "description": "The name of the value in the context",
                                       "type": "string"
                                     },
                                     "rename": {
+                                      "description": "The optional output name",
                                       "type": "string",
                                       "nullable": true
                                     }
@@ -1435,13 +2328,70 @@ expression: "&schema"
                                       ],
                                       "properties": {
                                         "default": {
-                                          "type": "string",
+                                          "description": "The optional default value",
+                                          "anyOf": [
+                                            {
+                                              "description": "bool values",
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "description": "i64 values",
+                                              "type": "integer",
+                                              "format": "int64"
+                                            },
+                                            {
+                                              "description": "f64 values",
+                                              "type": "number",
+                                              "format": "double"
+                                            },
+                                            {
+                                              "description": "String values",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "description": "Array of homogeneous values",
+                                              "anyOf": [
+                                                {
+                                                  "description": "Array of bools",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of integers",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of floats",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "number",
+                                                    "format": "double"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of strings",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "nullable": true
                                         },
                                         "name": {
+                                          "description": "The name of the attribute",
                                           "type": "string"
                                         },
                                         "path": {
+                                          "description": "The path in the body",
                                           "type": "string"
                                         }
                                       },
@@ -1474,13 +2424,70 @@ expression: "&schema"
                                       ],
                                       "properties": {
                                         "default": {
-                                          "type": "string",
+                                          "description": "The optional default value",
+                                          "anyOf": [
+                                            {
+                                              "description": "bool values",
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "description": "i64 values",
+                                              "type": "integer",
+                                              "format": "int64"
+                                            },
+                                            {
+                                              "description": "f64 values",
+                                              "type": "number",
+                                              "format": "double"
+                                            },
+                                            {
+                                              "description": "String values",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "description": "Array of homogeneous values",
+                                              "anyOf": [
+                                                {
+                                                  "description": "Array of bools",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of integers",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of floats",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "number",
+                                                    "format": "double"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of strings",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "nullable": true
                                         },
                                         "name": {
+                                          "description": "The name of the attribute",
                                           "type": "string"
                                         },
                                         "path": {
+                                          "description": "The path in the body",
                                           "type": "string"
                                         }
                                       },
@@ -1495,20 +2502,77 @@ expression: "&schema"
                                       "description": "Configuration to forward header values in metric labels",
                                       "anyOf": [
                                         {
-                                          "description": "Using a named header",
+                                          "description": "Match via header name",
                                           "type": "object",
                                           "required": [
                                             "named"
                                           ],
                                           "properties": {
                                             "default": {
-                                              "type": "string",
+                                              "description": "The optional default value",
+                                              "anyOf": [
+                                                {
+                                                  "description": "bool values",
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "description": "i64 values",
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                },
+                                                {
+                                                  "description": "f64 values",
+                                                  "type": "number",
+                                                  "format": "double"
+                                                },
+                                                {
+                                                  "description": "String values",
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "description": "Array of homogeneous values",
+                                                  "anyOf": [
+                                                    {
+                                                      "description": "Array of bools",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of integers",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "integer",
+                                                        "format": "int64"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of floats",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "number",
+                                                        "format": "double"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of strings",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string"
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              ],
                                               "nullable": true
                                             },
                                             "named": {
+                                              "description": "The name of the header",
                                               "type": "string"
                                             },
                                             "rename": {
+                                              "description": "The optional output name",
                                               "type": "string",
                                               "nullable": true
                                             }
@@ -1516,13 +2580,14 @@ expression: "&schema"
                                           "additionalProperties": false
                                         },
                                         {
-                                          "description": "Using a regex on the header name",
+                                          "description": "Match via rgex",
                                           "type": "object",
                                           "required": [
                                             "matching"
                                           ],
                                           "properties": {
                                             "matching": {
+                                              "description": "Using a regex on the header name",
                                               "type": "string"
                                             }
                                           },
@@ -1552,13 +2617,70 @@ expression: "&schema"
                                       ],
                                       "properties": {
                                         "default": {
-                                          "type": "string",
+                                          "description": "The optional default value",
+                                          "anyOf": [
+                                            {
+                                              "description": "bool values",
+                                              "type": "boolean"
+                                            },
+                                            {
+                                              "description": "i64 values",
+                                              "type": "integer",
+                                              "format": "int64"
+                                            },
+                                            {
+                                              "description": "f64 values",
+                                              "type": "number",
+                                              "format": "double"
+                                            },
+                                            {
+                                              "description": "String values",
+                                              "type": "string"
+                                            },
+                                            {
+                                              "description": "Array of homogeneous values",
+                                              "anyOf": [
+                                                {
+                                                  "description": "Array of bools",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of integers",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "integer",
+                                                    "format": "int64"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of floats",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "number",
+                                                    "format": "double"
+                                                  }
+                                                },
+                                                {
+                                                  "description": "Array of strings",
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "string"
+                                                  }
+                                                }
+                                              ]
+                                            }
+                                          ],
                                           "nullable": true
                                         },
                                         "name": {
+                                          "description": "The name of the attribute",
                                           "type": "string"
                                         },
                                         "path": {
+                                          "description": "The path in the body",
                                           "type": "string"
                                         }
                                       },
@@ -1573,20 +2695,77 @@ expression: "&schema"
                                       "description": "Configuration to forward header values in metric labels",
                                       "anyOf": [
                                         {
-                                          "description": "Using a named header",
+                                          "description": "Match via header name",
                                           "type": "object",
                                           "required": [
                                             "named"
                                           ],
                                           "properties": {
                                             "default": {
-                                              "type": "string",
+                                              "description": "The optional default value",
+                                              "anyOf": [
+                                                {
+                                                  "description": "bool values",
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "description": "i64 values",
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                },
+                                                {
+                                                  "description": "f64 values",
+                                                  "type": "number",
+                                                  "format": "double"
+                                                },
+                                                {
+                                                  "description": "String values",
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "description": "Array of homogeneous values",
+                                                  "anyOf": [
+                                                    {
+                                                      "description": "Array of bools",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of integers",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "integer",
+                                                        "format": "int64"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of floats",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "number",
+                                                        "format": "double"
+                                                      }
+                                                    },
+                                                    {
+                                                      "description": "Array of strings",
+                                                      "type": "array",
+                                                      "items": {
+                                                        "type": "string"
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              ],
                                               "nullable": true
                                             },
                                             "named": {
+                                              "description": "The name of the header",
                                               "type": "string"
                                             },
                                             "rename": {
+                                              "description": "The optional output name",
                                               "type": "string",
                                               "nullable": true
                                             }
@@ -1594,13 +2773,14 @@ expression: "&schema"
                                           "additionalProperties": false
                                         },
                                         {
-                                          "description": "Using a regex on the header name",
+                                          "description": "Match via rgex",
                                           "type": "object",
                                           "required": [
                                             "matching"
                                           ],
                                           "properties": {
                                             "matching": {
+                                              "description": "Using a regex on the header name",
                                               "type": "string"
                                             }
                                           },
@@ -1626,10 +2806,66 @@ expression: "&schema"
                                   ],
                                   "properties": {
                                     "name": {
+                                      "description": "The name of the attribute to insert",
                                       "type": "string"
                                     },
                                     "value": {
-                                      "type": "string"
+                                      "description": "The value of the attribute to insert",
+                                      "anyOf": [
+                                        {
+                                          "description": "bool values",
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "description": "i64 values",
+                                          "type": "integer",
+                                          "format": "int64"
+                                        },
+                                        {
+                                          "description": "f64 values",
+                                          "type": "number",
+                                          "format": "double"
+                                        },
+                                        {
+                                          "description": "String values",
+                                          "type": "string"
+                                        },
+                                        {
+                                          "description": "Array of homogeneous values",
+                                          "anyOf": [
+                                            {
+                                              "description": "Array of bools",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of integers",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "integer",
+                                                "format": "int64"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of floats",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "number",
+                                                "format": "double"
+                                              }
+                                            },
+                                            {
+                                              "description": "Array of strings",
+                                              "type": "array",
+                                              "items": {
+                                                "type": "string"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ]
                                     }
                                   },
                                   "additionalProperties": false
@@ -1660,13 +2896,70 @@ expression: "&schema"
                             ],
                             "properties": {
                               "default": {
-                                "type": "string",
+                                "description": "The optional default value",
+                                "anyOf": [
+                                  {
+                                    "description": "bool values",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "description": "i64 values",
+                                    "type": "integer",
+                                    "format": "int64"
+                                  },
+                                  {
+                                    "description": "f64 values",
+                                    "type": "number",
+                                    "format": "double"
+                                  },
+                                  {
+                                    "description": "String values",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "description": "Array of homogeneous values",
+                                    "anyOf": [
+                                      {
+                                        "description": "Array of bools",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of integers",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "integer",
+                                          "format": "int64"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of floats",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of strings",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ],
                                 "nullable": true
                               },
                               "named": {
+                                "description": "The name of the value in the context",
                                 "type": "string"
                               },
                               "rename": {
+                                "description": "The optional output name",
                                 "type": "string",
                                 "nullable": true
                               }
@@ -1691,13 +2984,70 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
-                                    "type": "string",
+                                    "description": "The optional default value",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "name": {
+                                    "description": "The name of the attribute",
                                     "type": "string"
                                   },
                                   "path": {
+                                    "description": "The path in the body",
                                     "type": "string"
                                   }
                                 },
@@ -1730,13 +3080,70 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
-                                    "type": "string",
+                                    "description": "The optional default value",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "name": {
+                                    "description": "The name of the attribute",
                                     "type": "string"
                                   },
                                   "path": {
+                                    "description": "The path in the body",
                                     "type": "string"
                                   }
                                 },
@@ -1751,20 +3158,77 @@ expression: "&schema"
                                 "description": "Configuration to forward header values in metric labels",
                                 "anyOf": [
                                   {
-                                    "description": "Using a named header",
+                                    "description": "Match via header name",
                                     "type": "object",
                                     "required": [
                                       "named"
                                     ],
                                     "properties": {
                                       "default": {
-                                        "type": "string",
+                                        "description": "The optional default value",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "named": {
+                                        "description": "The name of the header",
                                         "type": "string"
                                       },
                                       "rename": {
+                                        "description": "The optional output name",
                                         "type": "string",
                                         "nullable": true
                                       }
@@ -1772,13 +3236,14 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "Using a regex on the header name",
+                                    "description": "Match via rgex",
                                     "type": "object",
                                     "required": [
                                       "matching"
                                     ],
                                     "properties": {
                                       "matching": {
+                                        "description": "Using a regex on the header name",
                                         "type": "string"
                                       }
                                     },
@@ -1808,13 +3273,70 @@ expression: "&schema"
                                 ],
                                 "properties": {
                                   "default": {
-                                    "type": "string",
+                                    "description": "The optional default value",
+                                    "anyOf": [
+                                      {
+                                        "description": "bool values",
+                                        "type": "boolean"
+                                      },
+                                      {
+                                        "description": "i64 values",
+                                        "type": "integer",
+                                        "format": "int64"
+                                      },
+                                      {
+                                        "description": "f64 values",
+                                        "type": "number",
+                                        "format": "double"
+                                      },
+                                      {
+                                        "description": "String values",
+                                        "type": "string"
+                                      },
+                                      {
+                                        "description": "Array of homogeneous values",
+                                        "anyOf": [
+                                          {
+                                            "description": "Array of bools",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of integers",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "integer",
+                                              "format": "int64"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of floats",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "number",
+                                              "format": "double"
+                                            }
+                                          },
+                                          {
+                                            "description": "Array of strings",
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string"
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    ],
                                     "nullable": true
                                   },
                                   "name": {
+                                    "description": "The name of the attribute",
                                     "type": "string"
                                   },
                                   "path": {
+                                    "description": "The path in the body",
                                     "type": "string"
                                   }
                                 },
@@ -1829,20 +3351,77 @@ expression: "&schema"
                                 "description": "Configuration to forward header values in metric labels",
                                 "anyOf": [
                                   {
-                                    "description": "Using a named header",
+                                    "description": "Match via header name",
                                     "type": "object",
                                     "required": [
                                       "named"
                                     ],
                                     "properties": {
                                       "default": {
-                                        "type": "string",
+                                        "description": "The optional default value",
+                                        "anyOf": [
+                                          {
+                                            "description": "bool values",
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "description": "i64 values",
+                                            "type": "integer",
+                                            "format": "int64"
+                                          },
+                                          {
+                                            "description": "f64 values",
+                                            "type": "number",
+                                            "format": "double"
+                                          },
+                                          {
+                                            "description": "String values",
+                                            "type": "string"
+                                          },
+                                          {
+                                            "description": "Array of homogeneous values",
+                                            "anyOf": [
+                                              {
+                                                "description": "Array of bools",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of integers",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "integer",
+                                                  "format": "int64"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of floats",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "number",
+                                                  "format": "double"
+                                                }
+                                              },
+                                              {
+                                                "description": "Array of strings",
+                                                "type": "array",
+                                                "items": {
+                                                  "type": "string"
+                                                }
+                                              }
+                                            ]
+                                          }
+                                        ],
                                         "nullable": true
                                       },
                                       "named": {
+                                        "description": "The name of the header",
                                         "type": "string"
                                       },
                                       "rename": {
+                                        "description": "The optional output name",
                                         "type": "string",
                                         "nullable": true
                                       }
@@ -1850,13 +3429,14 @@ expression: "&schema"
                                     "additionalProperties": false
                                   },
                                   {
-                                    "description": "Using a regex on the header name",
+                                    "description": "Match via rgex",
                                     "type": "object",
                                     "required": [
                                       "matching"
                                     ],
                                     "properties": {
                                       "matching": {
+                                        "description": "Using a regex on the header name",
                                         "type": "string"
                                       }
                                     },
@@ -1882,10 +3462,66 @@ expression: "&schema"
                             ],
                             "properties": {
                               "name": {
+                                "description": "The name of the attribute to insert",
                                 "type": "string"
                               },
                               "value": {
-                                "type": "string"
+                                "description": "The value of the attribute to insert",
+                                "anyOf": [
+                                  {
+                                    "description": "bool values",
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "description": "i64 values",
+                                    "type": "integer",
+                                    "format": "int64"
+                                  },
+                                  {
+                                    "description": "f64 values",
+                                    "type": "number",
+                                    "format": "double"
+                                  },
+                                  {
+                                    "description": "String values",
+                                    "type": "string"
+                                  },
+                                  {
+                                    "description": "Array of homogeneous values",
+                                    "anyOf": [
+                                      {
+                                        "description": "Array of bools",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of integers",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "integer",
+                                          "format": "int64"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of floats",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "number",
+                                          "format": "double"
+                                        }
+                                      },
+                                      {
+                                        "description": "Array of strings",
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
                               }
                             },
                             "additionalProperties": false
@@ -1923,12 +3559,14 @@ expression: "&schema"
               "nullable": true
             },
             "otlp": {
+              "description": "Open Telemetry native exporter configuration",
               "type": "object",
               "required": [
                 "endpoint"
               ],
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor settings",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -1984,78 +3622,97 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send data to",
                   "type": "string"
                 },
                 "grpc": {
+                  "description": "gRPC configuration settings",
+                  "default": {
+                    "domain_name": null,
+                    "ca": null,
+                    "cert": null,
+                    "key": null,
+                    "metadata": {}
+                  },
                   "type": "object",
                   "properties": {
                     "ca": {
+                      "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
+                      "description": "The optional cert for tls config",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
+                      "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "key": {
+                      "description": "The optional private key file for TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
-                      "default": null,
+                      "description": "gRPC metadata",
+                      "default": {},
                       "type": "object",
-                      "additionalProperties": true,
-                      "nullable": true
+                      "additionalProperties": true
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "http": {
+                  "description": "HTTP configuration settings",
+                  "default": {
+                    "headers": {}
+                  },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "description": "Headers to send on report requests",
+                      "default": {},
                       "type": "object",
                       "additionalProperties": {
                         "type": "string"
-                      },
-                      "nullable": true
+                      }
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "protocol": {
+                  "description": "The protocol to use when sending data",
+                  "default": "grpc",
                   "type": "string",
                   "enum": [
                     "grpc",
                     "http"
-                  ],
-                  "nullable": true
-                },
-                "timeout": {
-                  "default": null,
-                  "type": "string"
+                  ]
                 }
               },
               "additionalProperties": false,
               "nullable": true
             },
             "prometheus": {
+              "description": "Prometheus exporter configuration",
               "type": "object",
               "required": [
                 "enabled"
               ],
               "properties": {
                 "enabled": {
+                  "description": "Set to true to enable",
                   "type": "boolean"
                 },
                 "listen": {
-                  "description": "Listening address.",
+                  "description": "The listen address",
                   "default": "127.0.0.1:9090",
                   "anyOf": [
                     {
@@ -2069,6 +3726,7 @@ expression: "&schema"
                   ]
                 },
                 "path": {
+                  "description": "The path where prometheus will be exposed",
                   "default": "/metrics",
                   "type": "string"
                 }
@@ -2081,12 +3739,18 @@ expression: "&schema"
           "nullable": true
         },
         "tracing": {
+          "description": "Tracing configuration",
           "type": "object",
           "properties": {
             "datadog": {
+              "description": "Datadog exporter configuration",
               "type": "object",
+              "required": [
+                "endpoint"
+              ],
               "properties": {
                 "batch_processor": {
+                  "description": "batch processor configuration",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2141,7 +3805,13 @@ expression: "&schema"
                     }
                   }
                 },
+                "enable_span_mapping": {
+                  "description": "Enable datadog span mapping for span name and resource name.",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "endpoint": {
+                  "description": "The endpoint to send to",
                   "default": "default",
                   "type": "string"
                 }
@@ -2152,12 +3822,10 @@ expression: "&schema"
             "experimental_response_trace_id": {
               "description": "A way to expose trace id in response headers",
               "type": "object",
-              "required": [
-                "enabled"
-              ],
               "properties": {
                 "enabled": {
                   "description": "Expose the trace_id in response headers",
+                  "default": false,
                   "type": "boolean"
                 },
                 "header_name": {
@@ -2169,8 +3837,8 @@ expression: "&schema"
               "additionalProperties": false
             },
             "jaeger": {
-              "type": "object",
-              "oneOf": [
+              "description": "Jaeger exporter configuration",
+              "anyOf": [
                 {
                   "type": "object",
                   "required": [
@@ -2178,9 +3846,14 @@ expression: "&schema"
                   ],
                   "properties": {
                     "agent": {
+                      "description": "Agent configuration",
                       "type": "object",
+                      "required": [
+                        "endpoint"
+                      ],
                       "properties": {
                         "endpoint": {
+                          "description": "The endpoint to send to",
                           "default": "default",
                           "type": "string"
                         }
@@ -2188,6 +3861,20 @@ expression: "&schema"
                       "additionalProperties": false
                     },
                     "batch_processor": {
+                      "description": "Batch processor configuration",
+                      "default": {
+                        "scheduled_delay": {
+                          "secs": 5,
+                          "nanos": 0
+                        },
+                        "max_queue_size": 2048,
+                        "max_export_batch_size": 512,
+                        "max_export_timeout": {
+                          "secs": 30,
+                          "nanos": 0
+                        },
+                        "max_concurrent_exports": 1
+                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -2239,6 +3926,20 @@ expression: "&schema"
                   ],
                   "properties": {
                     "batch_processor": {
+                      "description": "Batch processor configuration",
+                      "default": {
+                        "scheduled_delay": {
+                          "secs": 5,
+                          "nanos": 0
+                        },
+                        "max_queue_size": 2048,
+                        "max_export_batch_size": 512,
+                        "max_export_timeout": {
+                          "secs": 30,
+                          "nanos": 0
+                        },
+                        "max_concurrent_exports": 1
+                      },
                       "type": "object",
                       "properties": {
                         "max_concurrent_exports": {
@@ -2281,19 +3982,24 @@ expression: "&schema"
                       }
                     },
                     "collector": {
+                      "description": "Collector configuration",
                       "type": "object",
                       "required": [
                         "endpoint"
                       ],
                       "properties": {
                         "endpoint": {
-                          "type": "string"
+                          "description": "The endpoint to send reports to",
+                          "type": "string",
+                          "format": "uri"
                         },
                         "password": {
+                          "description": "The optional password",
                           "type": "string",
                           "nullable": true
                         },
                         "username": {
+                          "description": "The optional username",
                           "type": "string",
                           "nullable": true
                         }
@@ -2304,72 +4010,17 @@ expression: "&schema"
                   "additionalProperties": false
                 }
               ],
-              "properties": {
-                "batch_processor": {
-                  "default": {
-                    "scheduled_delay": {
-                      "secs": 5,
-                      "nanos": 0
-                    },
-                    "max_queue_size": 2048,
-                    "max_export_batch_size": 512,
-                    "max_export_timeout": {
-                      "secs": 30,
-                      "nanos": 0
-                    },
-                    "max_concurrent_exports": 1
-                  },
-                  "type": "object",
-                  "properties": {
-                    "max_concurrent_exports": {
-                      "description": "Maximum number of concurrent exports\n\nLimits the number of spawned tasks for exports and thus memory consumed by an exporter. A value of 1 will cause exports to be performed synchronously on the BatchSpanProcessor task. The default is 1.",
-                      "default": 1,
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 0.0
-                    },
-                    "max_export_batch_size": {
-                      "description": "The maximum number of spans to process in a single batch. If there are more than one batch worth of spans then it processes multiple batches of spans one batch after the other without any delay. The default value is 512.",
-                      "default": 512,
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 0.0
-                    },
-                    "max_export_timeout": {
-                      "description": "The maximum duration to export a batch of data. The default value is 30 seconds.",
-                      "default": {
-                        "secs": 30,
-                        "nanos": 0
-                      },
-                      "type": "string"
-                    },
-                    "max_queue_size": {
-                      "description": "The maximum queue size to buffer spans for delayed processing. If the queue gets full it drops the spans. The default value of is 2048.",
-                      "default": 2048,
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 0.0
-                    },
-                    "scheduled_delay": {
-                      "description": "The delay interval in milliseconds between two consecutive processing of batches. The default value is 5 seconds.",
-                      "default": {
-                        "secs": 5,
-                        "nanos": 0
-                      },
-                      "type": "string"
-                    }
-                  }
-                }
-              },
               "nullable": true
             },
             "otlp": {
+              "description": "OpenTelemetry native exporter configuration",
               "type": "object",
               "required": [
                 "endpoint"
               ],
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor settings",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2425,81 +4076,102 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send data to",
                   "type": "string"
                 },
                 "grpc": {
+                  "description": "gRPC configuration settings",
+                  "default": {
+                    "domain_name": null,
+                    "ca": null,
+                    "cert": null,
+                    "key": null,
+                    "metadata": {}
+                  },
                   "type": "object",
                   "properties": {
                     "ca": {
+                      "description": "The optional certificate authority (CA) certificate to be used in TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "cert": {
+                      "description": "The optional cert for tls config",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "domain_name": {
+                      "description": "The optional domain name for tls config. Note that domain name is will be defaulted to match the endpoint is not explicitly set.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "key": {
+                      "description": "The optional private key file for TLS configuration.",
+                      "default": null,
                       "type": "string",
                       "nullable": true
                     },
                     "metadata": {
-                      "default": null,
+                      "description": "gRPC metadata",
+                      "default": {},
                       "type": "object",
-                      "additionalProperties": true,
-                      "nullable": true
+                      "additionalProperties": true
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "http": {
+                  "description": "HTTP configuration settings",
+                  "default": {
+                    "headers": {}
+                  },
                   "type": "object",
                   "properties": {
                     "headers": {
+                      "description": "Headers to send on report requests",
+                      "default": {},
                       "type": "object",
                       "additionalProperties": {
                         "type": "string"
-                      },
-                      "nullable": true
+                      }
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "protocol": {
+                  "description": "The protocol to use when sending data",
+                  "default": "grpc",
                   "type": "string",
                   "enum": [
                     "grpc",
                     "http"
-                  ],
-                  "nullable": true
-                },
-                "timeout": {
-                  "default": null,
-                  "type": "string"
+                  ]
                 }
               },
               "additionalProperties": false,
               "nullable": true
             },
             "propagation": {
+              "description": "Propagation configuration",
               "type": "object",
               "properties": {
                 "baggage": {
-                  "type": "boolean",
-                  "nullable": true
+                  "description": "Propagate baggage https://www.w3.org/TR/baggage/",
+                  "default": false,
+                  "type": "boolean"
                 },
                 "datadog": {
-                  "type": "boolean",
-                  "nullable": true
+                  "description": "Propagate Datadog",
+                  "default": false,
+                  "type": "boolean"
                 },
                 "jaeger": {
-                  "type": "boolean",
-                  "nullable": true
+                  "description": "Propagate Jaeger",
+                  "default": false,
+                  "type": "boolean"
                 },
                 "request": {
                   "description": "Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)",
@@ -2513,25 +4185,29 @@ expression: "&schema"
                       "type": "string"
                     }
                   },
-                  "additionalProperties": false,
-                  "nullable": true
+                  "additionalProperties": false
                 },
                 "trace_context": {
-                  "type": "boolean",
-                  "nullable": true
+                  "description": "Propagate trace context https://www.w3.org/TR/trace-context/",
+                  "default": false,
+                  "type": "boolean"
                 },
                 "zipkin": {
-                  "type": "boolean",
-                  "nullable": true
+                  "description": "Propagate Zipkin",
+                  "default": false,
+                  "type": "boolean"
                 }
               },
               "additionalProperties": false,
               "nullable": true
             },
             "trace_config": {
+              "description": "Common configuration",
               "type": "object",
               "properties": {
                 "attributes": {
+                  "description": "Default attributes",
+                  "default": {},
                   "type": "object",
                   "additionalProperties": {
                     "anyOf": [
@@ -2592,40 +4268,47 @@ expression: "&schema"
                   }
                 },
                 "max_attributes_per_event": {
+                  "description": "The maximum attributes per event before discarding",
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_attributes_per_link": {
+                  "description": "The maximum attributes per link before discarding",
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_attributes_per_span": {
+                  "description": "The maximum attributes per span before discarding",
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_events_per_span": {
+                  "description": "The maximum events per span before discarding",
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "max_links_per_span": {
+                  "description": "The maximum links per span before discarding",
+                  "default": 128,
                   "type": "integer",
                   "format": "uint32",
-                  "minimum": 0.0,
-                  "nullable": true
+                  "minimum": 0.0
                 },
                 "parent_based_sampler": {
+                  "description": "Whether to use parent based sampling",
                   "default": true,
                   "type": "boolean"
                 },
                 "sampler": {
+                  "description": "The sampler, always_on, always_off or a decimal between 0.0 and 1.0",
                   "anyOf": [
                     {
                       "description": "Sample a given fraction. Fractions >= 1 will always sample.",
@@ -2653,21 +4336,25 @@ expression: "&schema"
                   ]
                 },
                 "service_name": {
-                  "type": "string",
-                  "nullable": true
+                  "description": "The trace service name",
+                  "default": "router",
+                  "type": "string"
                 },
                 "service_namespace": {
-                  "type": "string",
-                  "nullable": true
+                  "description": "The trace service namespace",
+                  "default": "",
+                  "type": "string"
                 }
               },
               "additionalProperties": false,
               "nullable": true
             },
             "zipkin": {
+              "description": "Zipkin exporter configuration",
               "type": "object",
               "properties": {
                 "batch_processor": {
+                  "description": "Batch processor configuration",
                   "default": {
                     "scheduled_delay": {
                       "secs": 5,
@@ -2723,6 +4410,7 @@ expression: "&schema"
                   }
                 },
                 "endpoint": {
+                  "description": "The endpoint to send to",
                   "default": "default",
                   "type": "string"
                 }
@@ -2738,28 +4426,125 @@ expression: "&schema"
       "additionalProperties": false
     },
     "test.always_fails_to_start": {
+      "description": "Configuration for the test plugin",
       "type": "object",
       "required": [
         "name"
       ],
       "properties": {
         "name": {
+          "description": "The name of the test",
           "type": "string"
         }
       }
     },
     "test.always_starts_and_stops": {
+      "description": "Configuration for the test plugin",
       "type": "object",
       "required": [
         "name"
       ],
       "properties": {
         "name": {
+          "description": "The name of the test",
           "type": "string"
         }
       }
     },
+    "tls": {
+      "description": "TLS related configuration options.",
+      "default": {
+        "supergraph": null,
+        "subgraph": {
+          "all": {
+            "certificate_authorities": null
+          },
+          "subgraphs": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "subgraph": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": {
+            "all": {
+              "certificate_authorities": null
+            },
+            "subgraphs": {}
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "certificate_authorities": null
+              },
+              "type": "object",
+              "properties": {
+                "certificate_authorities": {
+                  "description": "list of certificate authorities in PEM format",
+                  "default": null,
+                  "type": "string",
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Configuration options pertaining to the subgraph server component.",
+                "type": "object",
+                "properties": {
+                  "certificate_authorities": {
+                    "description": "list of certificate authorities in PEM format",
+                    "default": null,
+                    "type": "string",
+                    "nullable": true
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "supergraph": {
+          "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
+          "default": null,
+          "type": "object",
+          "required": [
+            "certificate",
+            "certificate_chain",
+            "key"
+          ],
+          "properties": {
+            "certificate": {
+              "description": "server certificate in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "certificate_chain": {
+              "description": "list of certificate authorities in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            },
+            "key": {
+              "description": "server key in PEM format",
+              "writeOnly": true,
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "traffic_shaping": {
+      "description": "Configuration for the experimental traffic shaping plugin",
       "type": "object",
       "properties": {
         "all": {
@@ -2798,7 +4583,28 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_enable_http2": {
+              "description": "Enable HTTP2 for subgraphs",
+              "type": "boolean",
+              "nullable": true
+            },
+            "experimental_entity_caching": {
+              "description": "Enable entity caching",
+              "type": "object",
+              "required": [
+                "ttl"
+              ],
+              "properties": {
+                "ttl": {
+                  "description": "expiration for all keys",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "experimental_retry": {
+              "description": "Retry configuration",
               "type": "object",
               "properties": {
                 "min_per_sec": {
@@ -2860,8 +4666,29 @@ expression: "&schema"
           "nullable": true
         },
         "deduplicate_variables": {
-          "description": "Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
+          "default": null,
           "type": "boolean",
+          "nullable": true
+        },
+        "experimental_cache": {
+          "description": "Experimental URLs of Redis cache used for subgraph response caching",
+          "default": null,
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          },
+          "additionalProperties": false,
           "nullable": true
         },
         "router": {
@@ -2903,6 +4730,7 @@ expression: "&schema"
           "description": "Applied on specific subgraphs",
           "type": "object",
           "additionalProperties": {
+            "description": "Traffic shaping options",
             "type": "object",
             "properties": {
               "compression": {
@@ -2937,7 +4765,28 @@ expression: "&schema"
                 "type": "boolean",
                 "nullable": true
               },
+              "experimental_enable_http2": {
+                "description": "Enable HTTP2 for subgraphs",
+                "type": "boolean",
+                "nullable": true
+              },
+              "experimental_entity_caching": {
+                "description": "Enable entity caching",
+                "type": "object",
+                "required": [
+                  "ttl"
+                ],
+                "properties": {
+                  "ttl": {
+                    "description": "expiration for all keys",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
+                "nullable": true
+              },
               "experimental_retry": {
+                "description": "Retry configuration",
                 "type": "object",
                 "properties": {
                   "min_per_sec": {

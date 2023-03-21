@@ -18,8 +18,8 @@ use tower::ServiceExt;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::query_planner::fetch::OperationKind;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 #[derive(Default)]
 pub(crate) struct QueryDeduplicationLayer;

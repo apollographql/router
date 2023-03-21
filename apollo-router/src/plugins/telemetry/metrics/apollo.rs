@@ -75,8 +75,8 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::Sender;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::telemetry::STUDIO_EXCLUDE;
+    use crate::services::SupergraphRequest;
     use crate::Context;
-    use crate::SupergraphRequest;
     use crate::TestHarness;
 
     #[tokio::test]
@@ -251,7 +251,7 @@ mod test {
     ) -> Result<Telemetry, BoxError> {
         Telemetry::new(PluginInit::new(
             config::Conf {
-                logging: None,
+                logging: Default::default(),
                 metrics: None,
                 tracing: None,
                 apollo: Some(apollo_config),

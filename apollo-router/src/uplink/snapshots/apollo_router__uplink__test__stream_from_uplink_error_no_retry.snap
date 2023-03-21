@@ -1,0 +1,6 @@
+---
+source: apollo-router/src/uplink/mod.rs
+expression: "results.into_iter().map(to_friendly).collect::<Vec<_>>()"
+---
+- Err: "uplink error, the request will not be retried: code=NO_RETRY message=error message"
+

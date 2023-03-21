@@ -11,18 +11,21 @@ use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use futures::SinkExt;
 use futures::StreamExt;
+use hyper::Body;
+use hyper::Request as HyperRequest;
+use hyper::Response as HyperResponse;
 use tokio::runtime::Handle;
 use tokio::runtime::RuntimeFlavor;
-use tokio::sync;
-use tokio::task::JoinError;
 use tower::Service;
 
-use crate::ExecutionRequest;
-use crate::ExecutionResponse;
-use crate::SubgraphRequest;
-use crate::SubgraphResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
+use crate::services::ExecutionRequest;
+use crate::services::ExecutionResponse;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 
 /// Build a mock service handler for the router pipeline.
 macro_rules! mock_service {
@@ -60,9 +63,45 @@ macro_rules! mock_service {
     };
 }
 
+macro_rules! mock_async_service {
+    ($name:ident, $request_type:tt < $req_generic:tt > , $response_type:tt < $res_generic:tt >) => {
+        paste::item! {
+            mockall::mock! {
+                #[derive(Debug)]
+                #[allow(dead_code)]
+                pub [<$name Service>] {
+                    pub fn call(&mut self, req: $request_type<$req_generic>) -> impl Future<Output = Result<$response_type<$res_generic>, tower::BoxError>> + Send + 'static;
+                }
+
+                #[allow(dead_code)]
+                impl Clone for [<$name Service>] {
+                    fn clone(&self) -> [<Mock $name Service>];
+                }
+            }
+
+
+            // mockall does not handle well the lifetime on Context
+            impl tower::Service<$request_type<$req_generic>> for [<Mock $name Service>] {
+                type Response = $response_type<$res_generic>;
+                type Error = tower::BoxError;
+                type Future = futures::future::BoxFuture<'static, Result<Self::Response, Self::Error>>;
+
+                fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> std::task::Poll<Result<(), tower::BoxError>> {
+                    std::task::Poll::Ready(Ok(()))
+                }
+                fn call(&mut self, req: $request_type<$req_generic>) -> Self::Future {
+                    let r  = self.call(req);
+                    Box::pin(async move { r.await })
+                }
+            }
+        }
+    };
+}
+mock_service!(Router, RouterRequest, RouterResponse);
 mock_service!(Supergraph, SupergraphRequest, SupergraphResponse);
 mock_service!(Execution, ExecutionRequest, ExecutionResponse);
 mock_service!(Subgraph, SubgraphRequest, SubgraphResponse);
+mock_async_service!(HttpClient, HyperRequest<Body>, HyperResponse<Body>);
 
 type MockServiceMessage<Request, Response, Error> = (
     Request,
@@ -181,7 +220,7 @@ async fn mockservice_catches_panic_on_drop() {
 
     exec.expect_call()
         .times(2)
-        .returning(move |req: crate::ExecutionRequest| {
+        .returning(move |req: ExecutionRequest| {
             Ok(ExecutionResponse::fake_builder()
                 .label(expected_label.to_string())
                 .context(req.context)
@@ -214,7 +253,7 @@ async fn mock_service_requires_multithreaded_runtime() {
 
     exec.expect_call()
         .times(1)
-        .returning(move |req: crate::ExecutionRequest| {
+        .returning(move |req: ExecutionRequest| {
             Ok(ExecutionResponse::fake_builder()
                 .label(expected_label.to_string())
                 .context(req.context)

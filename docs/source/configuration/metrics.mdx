@@ -24,12 +24,13 @@ telemetry:
       path: /metrics
 ```
 
-## Using in a containers environment
+### Using in a containers environment
 
 The prometheus endpoint listens to 127.0.0.1 by default, which won't allow connections issued from a network.
-While this is a safe default, *other containers won't be able to access the prometheus endpoint*, which will disable metric scraping.
+While this is a safe default, _other containers won't be able to access the prometheus endpoint_, which will disable metric scraping.
 
 You can change this by setting:
+
 ```yaml title="router.yaml"
 telemetry:
   metrics:
@@ -40,11 +41,10 @@ telemetry:
       path: /metrics
 ```
 
-
 Assuming you're running locally:
 
 1. Run a query against the router.
-2. Navigate to [http://localhost:4000/plugins/apollo.telemetry/prometheus](http://localhost:4000/plugins/apollo.telemetry/prometheus) to see something like:
+2. Navigate to [http://localhost:9090/metrics](http://localhost:9090/metrics) to see something like:
 
 ```
 # HELP apollo_router_http_request_duration_seconds Total number of HTTP requests made.
@@ -56,11 +56,42 @@ apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 
 > Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
 
-The following metrics are available using Prometheus:
+### Available metrics
+The following metrics are available when using Prometheus. Attributes are listed where applicable.
 
-- HTTP router request duration (`apollo_router_http_request_duration_seconds_bucket`)
-- HTTP request duration by subgraph (`apollo_router_http_request_duration_seconds_bucket` with attribute `subgraph`)
-- Total number of HTTP requests by HTTP Status (`apollo_router_http_requests_total`)
+#### HTTP
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
+- `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
+  - `subgraph`: (Optional) The subgraph being queried.
+- `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status 
+- `apollo_router_timeout` - Number of triggered timeouts
+
+#### Session
+- `apollo_router_session_count_total` - Number of currently connected clients 
+- `apollo_router_session_count_active` - Number of in-flight GraphQL requests 
+
+#### Cache
+- `apollo_router_cache_hit_count` - Number of cache hits 
+- `apollo_router_cache_miss_count` - Number of cache misses 
+- `apollo_router_cache_hit_time` - Time to hit the cache in seconds 
+- `apollo_router_cache_miss_time` - Time to miss the cache in seconds 
+
+All cache metrics listed above have the following attributes:
+- `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
+- `storage`: The backend storage of the cache (`memory`, `redis`)
+
+#### Performance
+- `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
+
+#### Uplink
+- `apollo_router_uplink_duration_seconds_bucket` - Uplink request duration, attributes:
+  - `url`: The Uplink URL that was polled
+  - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
+  - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`, or `ignored`)
+  - `code`: The error code depending on type (if an error occurred)
+  - `error`: The error message (if an error occurred)
+
+Note that the initial call to uplink during router startup will not be reflected in metrics.
 
 ## Using OpenTelemetry Collector
 
@@ -86,8 +117,13 @@ telemetry:
         metadata:
           foo: bar
 
-      # Optional timeout in humatime form
-      timeout: 2s
+      # Optional batch_processor configuration
+      batch_processor:
+        scheduled_delay: 100ms
+        max_concurrent_exports: 1000
+        max_export_batch_size: 10000
+        max_export_timeout: 100s
+        max_queue_size: 10000
 ```
 
 Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.

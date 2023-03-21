@@ -2,6 +2,9 @@
 use std::collections::BTreeMap;
 
 use axum::headers::HeaderName;
+use opentelemetry::sdk::resource::EnvResourceDetector;
+use opentelemetry::sdk::resource::ResourceDetector;
+use opentelemetry::sdk::trace::SpanLimits;
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
 use opentelemetry::KeyValue;
@@ -9,11 +12,11 @@ use opentelemetry::Value;
 use regex::Regex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 
 use super::metrics::MetricsAttributesConf;
 use super::*;
 use crate::configuration::ConfigurationError;
-use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::metrics;
@@ -48,22 +51,31 @@ where
 
 impl<T> GenericWith<T> for T where Self: Sized {}
 
+/// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Conf {
-    #[serde(rename = "experimental_logging")]
-    pub(crate) logging: Option<Logging>,
+pub(crate) struct Conf {
+    /// Logging configuration
+    #[serde(rename = "experimental_logging", default)]
+    pub(crate) logging: Logging,
+    /// Metrics configuration
     pub(crate) metrics: Option<Metrics>,
+    /// Tracing configuration
     pub(crate) tracing: Option<Tracing>,
+    /// Apollo reporting configuration
     pub(crate) apollo: Option<apollo::Config>,
 }
 
+/// Metrics configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 #[allow(dead_code)]
 pub(crate) struct Metrics {
+    /// Common metrics configuration across all exporters
     pub(crate) common: Option<MetricsCommon>,
+    /// Open Telemetry native exporter configuration
     pub(crate) otlp: Option<otlp::Config>,
+    /// Prometheus exporter configuration
     pub(crate) prometheus: Option<metrics::prometheus::Config>,
 }
 
@@ -81,6 +93,7 @@ pub(crate) struct MetricsCommon {
     pub(crate) resources: HashMap<String, String>,
 }
 
+/// Tracing configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) struct Tracing {
@@ -89,35 +102,33 @@ pub(crate) struct Tracing {
     /// A way to expose trace id in response headers
     #[serde(default, rename = "experimental_response_trace_id")]
     pub(crate) response_trace_id: ExposeTraceId,
+    /// Propagation configuration
     pub(crate) propagation: Option<Propagation>,
+    /// Common configuration
     pub(crate) trace_config: Option<Trace>,
+    /// OpenTelemetry native exporter configuration
     pub(crate) otlp: Option<otlp::Config>,
+    /// Jaeger exporter configuration
     pub(crate) jaeger: Option<tracing::jaeger::Config>,
+    /// Zipkin exporter configuration
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
+    /// Datadog exporter configuration
     pub(crate) datadog: Option<tracing::datadog::Config>,
 }
 
-#[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Logging {
     /// Log format
-    #[serde(default)]
     pub(crate) format: LoggingFormat,
-    #[serde(default = "default_display_filename")]
+    /// Display the target in the logs
+    pub(crate) display_target: bool,
+    /// Display the filename in the logs
     pub(crate) display_filename: bool,
-    #[serde(default = "default_display_line_number")]
+    /// Display the line number in the logs
     pub(crate) display_line_number: bool,
     /// Log configuration to log request and response for subgraphs and supergraph
-    #[serde(default)]
     pub(crate) when_header: Vec<HeaderLoggingCondition>,
-}
-
-pub(crate) const fn default_display_filename() -> bool {
-    true
-}
-
-pub(crate) const fn default_display_line_number() -> bool {
-    true
 }
 
 impl Logging {
@@ -161,7 +172,7 @@ pub(crate) enum HeaderLoggingCondition {
         /// Header name
         name: String,
         /// Regex to match the header value
-        #[schemars(schema_with = "string_schema", rename = "match")]
+        #[schemars(with = "String", rename = "match")]
         #[serde(deserialize_with = "deserialize_regex", rename = "match")]
         matching: Regex,
         /// Display request/response headers (default: false)
@@ -254,7 +265,7 @@ impl Default for LoggingFormat {
 }
 
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct ExposeTraceId {
     /// Expose the trace_id in response headers
     pub(crate) enabled: bool,
@@ -264,43 +275,57 @@ pub(crate) struct ExposeTraceId {
     pub(crate) header_name: Option<HeaderName>,
 }
 
+/// Configure propagation of traces. In general you won't have to do this as these are automatically configured
+/// along with any exporter you configure.
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
+#[serde(deny_unknown_fields, rename_all = "snake_case", default)]
 pub(crate) struct Propagation {
     /// Select a custom request header to set your own trace_id (header value must be convertible from hexadecimal to set a correct trace_id)
-    pub(crate) request: Option<PropagationRequestTraceId>,
-    pub(crate) baggage: Option<bool>,
-    pub(crate) trace_context: Option<bool>,
-    pub(crate) jaeger: Option<bool>,
-    pub(crate) datadog: Option<bool>,
-    pub(crate) zipkin: Option<bool>,
+    pub(crate) request: RequestPropagation,
+    /// Propagate baggage https://www.w3.org/TR/baggage/
+    pub(crate) baggage: bool,
+    /// Propagate trace context https://www.w3.org/TR/trace-context/
+    pub(crate) trace_context: bool,
+    /// Propagate Jaeger
+    pub(crate) jaeger: bool,
+    /// Propagate Datadog
+    pub(crate) datadog: bool,
+    /// Propagate Zipkin
+    pub(crate) zipkin: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) struct PropagationRequestTraceId {
+pub(crate) struct RequestPropagation {
     /// Choose the header name to expose trace_id (default: apollo-trace-id)
     #[schemars(with = "String")]
-    #[serde(deserialize_with = "deserialize_header_name")]
-    pub(crate) header_name: HeaderName,
+    #[serde(deserialize_with = "deserialize_option_header_name")]
+    pub(crate) header_name: Option<HeaderName>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 #[non_exhaustive]
 pub(crate) struct Trace {
-    pub(crate) service_name: Option<String>,
-    pub(crate) service_namespace: Option<String>,
-    #[serde(default = "default_sampler")]
+    /// The trace service name
+    pub(crate) service_name: String,
+    /// The trace service namespace
+    pub(crate) service_namespace: String,
+    /// The sampler, always_on, always_off or a decimal between 0.0 and 1.0
     pub(crate) sampler: SamplerOption,
-    #[serde(default = "default_parent_based_sampler")]
+    /// Whether to use parent based sampling
     pub(crate) parent_based_sampler: bool,
-    pub(crate) max_events_per_span: Option<u32>,
-    pub(crate) max_attributes_per_span: Option<u32>,
-    pub(crate) max_links_per_span: Option<u32>,
-    pub(crate) max_attributes_per_event: Option<u32>,
-    pub(crate) max_attributes_per_link: Option<u32>,
-    #[serde(default)]
+    /// The maximum events per span before discarding
+    pub(crate) max_events_per_span: u32,
+    /// The maximum attributes per span before discarding
+    pub(crate) max_attributes_per_span: u32,
+    /// The maximum links per span before discarding
+    pub(crate) max_links_per_span: u32,
+    /// The maximum attributes per event before discarding
+    pub(crate) max_attributes_per_event: u32,
+    /// The maximum attributes per link before discarding
+    pub(crate) max_attributes_per_link: u32,
+    /// Default attributes
     pub(crate) attributes: BTreeMap<String, AttributeValue>,
 }
 
@@ -315,21 +340,37 @@ fn default_sampler() -> SamplerOption {
 impl Default for Trace {
     fn default() -> Self {
         Self {
-            service_name: None,
-            service_namespace: None,
+            service_name: "router".to_string(),
+            service_namespace: Default::default(),
             sampler: default_sampler(),
             parent_based_sampler: default_parent_based_sampler(),
-            max_events_per_span: None,
-            max_attributes_per_span: None,
-            max_links_per_span: None,
-            max_attributes_per_event: None,
-            max_attributes_per_link: None,
+            max_events_per_span: default_max_events_per_span(),
+            max_attributes_per_span: default_max_attributes_per_span(),
+            max_links_per_span: default_max_links_per_span(),
+            max_attributes_per_event: default_max_attributes_per_event(),
+            max_attributes_per_link: default_max_attributes_per_link(),
             attributes: Default::default(),
         }
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+fn default_max_events_per_span() -> u32 {
+    SpanLimits::default().max_events_per_span
+}
+fn default_max_attributes_per_span() -> u32 {
+    SpanLimits::default().max_attributes_per_span
+}
+fn default_max_links_per_span() -> u32 {
+    SpanLimits::default().max_links_per_span
+}
+fn default_max_attributes_per_event() -> u32 {
+    SpanLimits::default().max_attributes_per_event
+}
+fn default_max_attributes_per_link() -> u32 {
+    SpanLimits::default().max_attributes_per_link
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeValue {
     /// bool values
@@ -344,6 +385,54 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl TryFrom<serde_json::Value> for AttributeValue {
+    type Error = ();
+    fn try_from(value: serde_json::Value) -> Result<Self, Self::Error> {
+        match value {
+            serde_json::Value::Null => Err(()),
+            serde_json::Value::Bool(v) => Ok(AttributeValue::Bool(v)),
+            serde_json::Value::Number(v) if v.is_i64() => {
+                Ok(AttributeValue::I64(v.as_i64().expect("i64 checked")))
+            }
+            serde_json::Value::Number(v) if v.is_f64() => {
+                Ok(AttributeValue::F64(v.as_f64().expect("f64 checked")))
+            }
+            serde_json::Value::String(v) => Ok(AttributeValue::String(v)),
+            serde_json::Value::Array(v) => {
+                if v.iter().all(|v| v.is_boolean()) {
+                    Ok(AttributeValue::Array(AttributeArray::Bool(
+                        v.iter()
+                            .map(|v| v.as_bool().expect("all bools checked"))
+                            .collect(),
+                    )))
+                } else if v.iter().all(|v| v.is_f64()) {
+                    Ok(AttributeValue::Array(AttributeArray::F64(
+                        v.iter()
+                            .map(|v| v.as_f64().expect("all f64 checked"))
+                            .collect(),
+                    )))
+                } else if v.iter().all(|v| v.is_i64()) {
+                    Ok(AttributeValue::Array(AttributeArray::I64(
+                        v.iter()
+                            .map(|v| v.as_i64().expect("all i64 checked"))
+                            .collect(),
+                    )))
+                } else if v.iter().all(|v| v.is_string()) {
+                    Ok(AttributeValue::Array(AttributeArray::String(
+                        v.iter()
+                            .map(|v| v.as_str().expect("all strings checked").to_string())
+                            .collect(),
+                    )))
+                } else {
+                    Err(())
+                }
+            }
+            serde_json::Value::Object(_v) => Err(()),
+            _ => Err(()),
+        }
+    }
+}
+
 impl From<AttributeValue> for opentelemetry::Value {
     fn from(value: AttributeValue) -> Self {
         match value {
@@ -356,7 +445,7 @@ impl From<AttributeValue> for opentelemetry::Value {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
 pub(crate) enum AttributeArray {
     /// Array of bools
@@ -427,40 +516,21 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
         }
 
         trace_config = trace_config.with_sampler(sampler);
-        if let Some(n) = config.max_events_per_span {
-            trace_config = trace_config.with_max_events_per_span(n);
-        }
-        if let Some(n) = config.max_attributes_per_span {
-            trace_config = trace_config.with_max_attributes_per_span(n);
-        }
-        if let Some(n) = config.max_links_per_span {
-            trace_config = trace_config.with_max_links_per_span(n);
-        }
-        if let Some(n) = config.max_attributes_per_event {
-            trace_config = trace_config.with_max_attributes_per_event(n);
-        }
-        if let Some(n) = config.max_attributes_per_link {
-            trace_config = trace_config.with_max_attributes_per_link(n);
-        }
+        trace_config = trace_config.with_max_events_per_span(config.max_events_per_span);
+        trace_config = trace_config.with_max_attributes_per_span(config.max_attributes_per_span);
+        trace_config = trace_config.with_max_links_per_span(config.max_links_per_span);
+        trace_config = trace_config.with_max_attributes_per_event(config.max_attributes_per_event);
+        trace_config = trace_config.with_max_attributes_per_link(config.max_attributes_per_link);
 
         let mut resource_defaults = vec![];
-        if let Some(service_name) = &config.service_name {
-            resource_defaults.push(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                service_name.clone(),
-            ));
-        } else if std::env::var("OTEL_SERVICE_NAME").is_err() {
-            resource_defaults.push(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-                "router".to_string(),
-            ));
-        }
-        if let Some(service_namespace) = &config.service_namespace {
-            resource_defaults.push(KeyValue::new(
-                opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
-                service_namespace.clone(),
-            ));
-        }
+        resource_defaults.push(KeyValue::new(
+            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+            config.service_name.clone(),
+        ));
+        resource_defaults.push(KeyValue::new(
+            opentelemetry_semantic_conventions::resource::SERVICE_NAMESPACE,
+            config.service_namespace.clone(),
+        ));
         resource_defaults.push(KeyValue::new(
             opentelemetry_semantic_conventions::resource::SERVICE_VERSION,
             std::env!("CARGO_PKG_VERSION"),
@@ -476,18 +546,22 @@ impl From<&Trace> for opentelemetry::sdk::trace::Config {
             ));
         }
 
-        let resource = Resource::new(resource_defaults).merge(&mut Resource::new(
-            config
-                .attributes
-                .iter()
-                .map(|(k, v)| {
-                    KeyValue::new(
-                        opentelemetry::Key::from(k.clone()),
-                        opentelemetry::Value::from(v.clone()),
-                    )
-                })
-                .collect::<Vec<KeyValue>>(),
-        ));
+        // Take the env variables first, and then layer on the rest of the resources, last entry wins
+        let resource = EnvResourceDetector::default()
+            .detect(Duration::from_secs(0))
+            .merge(&Resource::new(resource_defaults))
+            .merge(&mut Resource::new(
+                config
+                    .attributes
+                    .iter()
+                    .map(|(k, v)| {
+                        KeyValue::new(
+                            opentelemetry::Key::from(k.clone()),
+                            opentelemetry::Value::from(v.clone()),
+                        )
+                    })
+                    .collect::<Vec<KeyValue>>(),
+            ));
 
         trace_config = trace_config.with_resource(resource);
         trace_config
@@ -551,18 +625,17 @@ impl Conf {
     }
 }
 
-fn string_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-    String::json_schema(gen)
-}
-
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::*;
 
     #[test]
     fn test_logging_conf_validation() {
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
@@ -577,6 +650,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
@@ -596,6 +670,7 @@ mod tests {
     fn test_logging_conf_should_log() {
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Matching {
@@ -613,6 +688,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Value {
@@ -626,6 +702,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![
@@ -647,6 +724,7 @@ mod tests {
 
         let logging_conf = Logging {
             format: LoggingFormat::default(),
+            display_target: false,
             display_filename: false,
             display_line_number: false,
             when_header: vec![HeaderLoggingCondition::Matching {
@@ -657,5 +735,52 @@ mod tests {
             }],
         };
         assert_eq!(logging_conf.should_log(&req), (false, false));
+    }
+
+    #[test]
+    fn test_attribute_value_from_json() {
+        assert_eq!(
+            AttributeValue::try_from(json!("foo")),
+            Ok(AttributeValue::String("foo".to_string()))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(1)),
+            Ok(AttributeValue::I64(1))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(1.1)),
+            Ok(AttributeValue::F64(1.1))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(true)),
+            Ok(AttributeValue::Bool(true))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!(["foo", "bar"])),
+            Ok(AttributeValue::Array(AttributeArray::String(vec![
+                "foo".to_string(),
+                "bar".to_string()
+            ])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([1, 2])),
+            Ok(AttributeValue::Array(AttributeArray::I64(vec![1, 2])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([1.1, 1.5])),
+            Ok(AttributeValue::Array(AttributeArray::F64(vec![1.1, 1.5])))
+        );
+        assert_eq!(
+            AttributeValue::try_from(json!([true, false])),
+            Ok(AttributeValue::Array(AttributeArray::Bool(vec![
+                true, false
+            ])))
+        );
+
+        // Mixed array conversions
+        AttributeValue::try_from(json!(["foo", true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([1, true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([1.1, true])).expect_err("mixed conversion must fail");
+        AttributeValue::try_from(json!([true, "bar"])).expect_err("mixed conversion must fail");
     }
 }

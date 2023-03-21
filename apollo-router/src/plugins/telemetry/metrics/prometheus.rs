@@ -1,10 +1,13 @@
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
 use http::StatusCode;
+use once_cell::sync::Lazy;
 use opentelemetry::sdk::export::metrics::aggregation;
 use opentelemetry::sdk::metrics::controllers;
+use opentelemetry::sdk::metrics::controllers::BasicController;
 use opentelemetry::sdk::metrics::processors;
 use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::sdk::Resource;
@@ -25,12 +28,16 @@ use crate::router_factory::Endpoint;
 use crate::services::router;
 use crate::ListenAddr;
 
+/// Prometheus configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
+    /// Set to true to enable
     pub(crate) enabled: bool,
+    /// The listen address
     #[serde(default = "prometheus_default_listen_addr")]
     pub(crate) listen: ListenAddr,
+    /// The path where prometheus will be exposed
     #[serde(default = "prometheus_default_path")]
     pub(crate) path: String,
 }
@@ -53,6 +60,22 @@ impl Default for Config {
     }
 }
 
+// Prometheus metrics are special. We want them to persist between restarts if possible.
+// This means reusing the existing controller if we can.
+// These statics will keep track of new controllers for commit when the telemetry plugin is activated.
+static CONTROLLER: Lazy<Mutex<Option<BasicController>>> = Lazy::new(Default::default);
+static NEW_CONTROLLER: Lazy<Mutex<Option<BasicController>>> = Lazy::new(Default::default);
+
+pub(crate) fn commit_new_controller() {
+    if let Some(controller) = NEW_CONTROLLER.lock().expect("lock poisoned").take() {
+        tracing::debug!("committing prometheus controller");
+        CONTROLLER
+            .lock()
+            .expect("lock poisoned")
+            .replace(controller);
+    }
+}
+
 impl MetricsConfigurator for Config {
     fn apply(
         &self,
@@ -60,12 +83,7 @@ impl MetricsConfigurator for Config {
         metrics_config: &MetricsCommon,
     ) -> Result<MetricsBuilder, BoxError> {
         if self.enabled {
-            tracing::info!(
-                "prometheus endpoint exposed at {}{}",
-                self.listen,
-                self.path
-            );
-            let controller = controllers::basic(
+            let mut controller = controllers::basic(
                 processors::factory(
                     selectors::simple::histogram([
                         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
@@ -82,6 +100,22 @@ impl MetricsConfigurator for Config {
                     .map(|(k, v)| KeyValue::new(k, v)),
             ))
             .build();
+
+            // Check the last controller to see if the resources are the same, if they are we can use it as is.
+            // Otherwise go with the new controller and store it so that it can be committed during telemetry activation.
+            if let Some(last_controller) = CONTROLLER.lock().expect("lock poisoned").clone() {
+                if controller.resource() == last_controller.resource() {
+                    tracing::debug!("prometheus controller can be reused");
+                    controller = last_controller
+                } else {
+                    tracing::debug!("prometheus controller cannot be reused");
+                }
+            }
+            NEW_CONTROLLER
+                .lock()
+                .expect("lock poisoned")
+                .replace(controller.clone());
+
             let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
 
             builder = builder.with_custom_endpoint(
@@ -96,6 +130,11 @@ impl MetricsConfigurator for Config {
             );
             builder = builder.with_meter_provider(exporter.meter_provider()?);
             builder = builder.with_exporter(exporter);
+            tracing::info!(
+                "Prometheus endpoint exposed at {}{}",
+                self.listen,
+                self.path
+            );
         }
         Ok(builder)
     }
@@ -124,6 +163,7 @@ impl Service<router::Request> for PrometheusService {
             Ok(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::OK)
+                    .header(http::header::CONTENT_TYPE, "text/plain; version=0.0.4")
                     .body::<hyper::Body>(result.into())
                     .map_err(BoxError::from)?,
                 context: req.context,

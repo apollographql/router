@@ -1,13 +1,13 @@
 ---
 title: Rhai scripts for the Apollo Router
-description: Extend your router without building a custom binary
+description: Add custom functionality directly to your router
 ---
 
 You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). Rhai is ideal for performing common scripting tasks (manipulating strings, processing headers, etc.) in a Rust-based project.
 
 > To start familiarizing yourself with Rhai, see the [language reference](https://rhai.rs/book/language/) and some basic [syntax examples](https://rhai.rs/book/start/examples/scripts.html).
 
-Rhai scripts can hook into any combination of services in the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work).
+Your Rhai scripts can hook into multiple stages of the Apollo Router's [request-handling lifecycle](#router-request-lifecycle).
 
 ## Use cases
 
@@ -21,11 +21,13 @@ Common use cases for Apollo Router Rhai scripts include:
 * Logging various information throughout the request lifecycle
 * Performing `checkpoint`-style short circuiting of requests
 
-## Configuration
+## Setup
+
+To enable Rhai scripts in your router, you add the following keys to the router's [YAML config file](../configuration/overview/#yaml-config-file):
 
 ```yaml title="config.yaml"
 # This is a top-level key. It MUST define at least one of the two
-# sub-keys shown, even if you don't modify its default value.
+# sub-keys shown, even if you use that subkey's default value.
 rhai:
   # Specify a different Rhai script directory path with this key.
   # The path can be relative or absolute.
@@ -36,32 +38,19 @@ rhai:
   main: "test.rhai"
 ```
 
-To use Rhai scripts with the Apollo Router, you must do the following:
-
-* Add the `rhai` top-level key to your router's [YAML config file](../configuration/overview/#yaml-config-file).
-    * This key must contain at least one of a `scripts` key or a `main` key (see the example above). 
-* Place all of your Rhai script files in a specific directory.
+1. Add the `rhai` top-level key to your router's [YAML config file](../configuration/overview/#yaml-config-file).
+    * This key **must** contain at least one of a `scripts` key or a `main` key (see the example above). 
+2. Place all of your Rhai script files in a specific directory.
     * By default, the Apollo Router looks in the `./rhai` directory (relative to the directory the `router` command is executed from).
     * You can override this default with the `scripts` key (see above).
-* Define a ["main" Rhai file](#the-main-file) in your router project.
+3. Define a ["main" Rhai file](#the-main-file) in your router project.
     * This file defines all of the "entry point" hooks that the Apollo Router uses to call into your script.
     * By default, the Apollo Router looks for `main.rhai` in your Rhai script directory.
     * You can override this default with the `main` key (see above).
 
-## Hot reloading
-
-The router will "watch" your "rhai.scripts" directory for changes and prompt an interpreter re-load if changes are detected. Changes are defined as:
-
- * creating a new file with a ".rhai" suffix
- * modifying or removing an existing file with a ".rhai" suffix
-
-The watch is recursive, so files in sub-directories of the "rhai.scripts" directory are also watched.
-
-The router attempts to identify errors in scripts before applying the changes. If errors are detected, these will be logged and the changes will not be applied to the runtime. Not all classes of error can be reliably detected, so check the log output of your router to make sure that changes have been applied.
-
 ## The main file
 
-Your Rhai script's main file defines whichever combination of supported entry point hooks you want to use. Here's a skeleton `main.rhai` file that includes all available hooks and also registers all available [callbacks](#service-callbacks):
+Your Rhai script's main file defines whichever combination of request lifecycle hooks you want to use. Here's a skeleton `main.rhai` file that includes all available hooks and also registers all available [callbacks](#service-callbacks):
 
 <ExpansionPanel title="Click to expand">
 
@@ -143,7 +132,129 @@ fn supergraph_service(service) {
 
 > [Learn more about Rhai modules.](https://rhai.rs/book/language/modules/export.html)
 
-## Service callbacks
+## Router request lifecycle
+
+Before you build your Rhai script, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, different **services** in the router communicate with each other as shown:
+
+```mermaid
+sequenceDiagram
+    actor Client
+    participant RS as RouterService
+    participant SupergraphService
+    participant ExecutionService
+    participant SubgraphService(s)
+
+    Client->>RS: Sends request
+    RS->>SupergraphService: Transforms raw HTTP<br/>request into GraphQL/JSON<br/>request
+    SupergraphService->>ExecutionService: Initiates query<br/>plan execution
+    par
+    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
+    SubgraphService(s)-->>ExecutionService: 
+    and
+    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
+    SubgraphService(s)-->>ExecutionService: 
+    and
+    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
+    SubgraphService(s)-->>ExecutionService: 
+    end
+    ExecutionService-->>SupergraphService: Assembles and<br/>returns response
+    SupergraphService-->>RS: Returns GraphQL/JSON<br/>response
+    RS-->>Client: Returns HTTP<br/>response
+```
+
+As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
+
+Your Rhai scripts can hook into any combination of the above services _except_ the `RouterService` (which is reserved for built-in features). They can modify the request, response, and/or related metadata as they're passed along.
+
+### Service descriptions
+
+Each Apollo Router service (except `RouterService`) has a corresponding function that a Rhai script can define to hook into that service:
+
+<table class="field-table">
+  <thead>
+    <tr>
+      <th>Service /<br/>Function</th>
+      <th>Description</th>
+    </tr>
+  </thead>
+
+<tbody>
+<tr>
+<td>
+
+##### `RouterService`
+
+</td>
+<td>
+
+**Reserved for built-in functionality.** Runs at the very beginning and very end of the HTTP request lifecycle.
+
+For example, [JWT authentication](../configuration/authn-jwt) is performed within the `RouterService`.
+
+</td>
+</tr>
+<tr>
+<td>
+
+##### `SupergraphService`
+
+`supergraph_service`
+</td>
+<td>
+
+Runs at the very beginning and very end of the GraphQL request lifecycle.
+
+Define `supergraph_service` if your customization needs to interact with the GraphQL request or the GraphQL response. For example, you can add a check for anonymous queries.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `ExecutionService`
+
+`execution_service`
+</td>
+<td>
+
+Handles initiating the execution of a query plan after it's been generated.
+
+Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
+
+</td>
+</tr>
+
+
+<tr>
+<td>
+
+##### `SubgraphService`
+
+`subgraph_service`
+</td>
+<td>
+
+Handles communication between the Apollo Router and your subgraphs.
+
+Define `subgraph_service` to configure this communication (for example, to dynamically add HTTP headers to pass to a subgraph).
+
+Whereas other services are called once per client request, this service is called once per _subgraph_ request that's required to resolve the client's request. Each call is passed a `subgraph` parameter that indicates the name of the corresponding subgraph.
+
+</td>
+</tr>
+
+
+</tbody>
+</table>
+
+Each service uses data structures for request and response data that contain:
+* A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
+    - The original request from the client
+    - A bag of data that can be populated by plugins for communication across the request lifecycle
+* Any other specific data to that service (e.g., query plans and downstream requests/responses)
+
+### Service callbacks
 
 Each hook in your Rhai script's [main file](#main-file) is passed a `service` object, which provides two methods: `map_request` and `map_response`. Most of the time in a hook, you use one or both of these methods to register **callback functions** that are called during the lifecycle of a GraphQL operation.
 
@@ -197,7 +308,7 @@ Each hook in your Rhai script's [main file](#main-file) is passed a `service` ob
     
 
 
-## Examples
+## Example scripts
 
 In addition to the examples below, see more examples in the Router repo's [examples directory](https://github.com/apollographql/router/tree/main/examples). Rhai-specific examples are listed in `README.md`.
 
@@ -298,6 +409,17 @@ fn process_request(request) {
 }
 ```
 
+## Hot reloading
+
+The router "watches" your `rhai.scripts` directory (along with all subdirectories), and it initiates an interpreter reload whenever it detects one of the following changes:
+
+ * Creation of a new file with a `.rhai` suffix
+ * Modification or deletion of an existing file with a `.rhai` suffix
+
+The router attempts to identify any errors in your scripts before applying changes. If errors are detected, the router logs them and continues using its _existing_ set of scripts.
+
+> Not all error types can be detected reliably! Whenever you make changes to your scripts, check your router's log output to make sure they were applied.
+
 ## Limitations
 
 Currently, Rhai scripts _cannot_ do the following:
@@ -306,10 +428,10 @@ Currently, Rhai scripts _cannot_ do the following:
 * Execute network requests
 * Read or write to disk
 
-If your router customization needs to do any of these, you can instead create a [native Rust plugin](./native/).
+If your router customization needs to do any of these, you can instead use [external co-processing](./coprocessor/) (this is an [Enterprise feature](../enterprise-features)).
 
 ### Avoiding deadlocks
 
 The Apollo Router requires that its Rhai engine implements the [sync feature](https://rhai.rs/book/start/features.html) to guarantee data integrity within the router's multi-threading execution environment. This means that [shared values](https://rhai.rs/book/language/fn-closure.html?highlight=deadlock#data-races-in-sync-builds-can-become-deadlocks) within Rhai might cause a deadlock.
 
-This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains a good example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.
+This is particularly risky when using closures within callbacks while referencing external data. Take particular care to avoid this kind of situation by making copies of data when required. The [examples/surrogate-cache-key directory](https://github.com/apollographql/router/tree/main/examples/surrogate-cache-key) contains an example of this, where "closing over" `response.headers` would cause a deadlock. To avoid this, a local copy of the required data is obtained and used in the closure.

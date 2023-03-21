@@ -11,7 +11,6 @@ use super::log;
 use super::DeferredNode;
 use super::PlanNode;
 use super::QueryPlan;
-use super::QueryPlanOptions;
 use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
@@ -30,22 +29,21 @@ use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
-use crate::services::subgraph_service::SubgraphServiceFactory;
-use crate::*;
+use crate::services::SubgraphServiceFactory;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Context;
 
 impl QueryPlan {
     /// Execute the plan and return a [`Response`].
-    pub(crate) async fn execute<'a, SF>(
+    pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<SF>,
+        service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
-        schema: &'a Schema,
+        schema: &'a Arc<Schema>,
         sender: futures::channel::mpsc::Sender<Response>,
-    ) -> Response
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> Response {
         let root = Path::empty();
 
         log::trace_query_plan(&self.root);
@@ -60,7 +58,6 @@ impl QueryPlan {
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
                     query: &self.query,
-                    options: &self.options,
                 },
                 &root,
                 &Value::default(),
@@ -81,27 +78,23 @@ impl QueryPlan {
 }
 
 // holds the query plan executon arguments that do not change between calls
-pub(crate) struct ExecutionParameters<'a, SF> {
+pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<SF>,
-    pub(crate) schema: &'a Schema,
+    pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<String, Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
-    pub(crate) options: &'a QueryPlanOptions,
 }
 
 impl PlanNode {
-    fn execute_recursively<'a, SF>(
+    fn execute_recursively<'a>(
         &'a self,
-        parameters: &'a ExecutionParameters<'a, SF>,
+        parameters: &'a ExecutionParameters<'a>,
         current_dir: &'a Path,
         parent_value: &'a Value,
         sender: futures::channel::mpsc::Sender<Response>,
-    ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)>
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)> {
         Box::pin(async move {
             tracing::trace!("executing plan:\n{:#?}", self);
             let mut value;
@@ -251,7 +244,6 @@ impl PlanNode {
                                         schema: parameters.schema,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
-                                        options: parameters.options,
                                         query: parameters.query,
                                     },
                                     current_dir,
@@ -353,17 +345,14 @@ impl PlanNode {
 }
 
 impl DeferredNode {
-    fn execute<'a, 'b, SF>(
-        &'b self,
-        parameters: &'a ExecutionParameters<'a, SF>,
+    fn execute<'a>(
+        &self,
+        parameters: &'a ExecutionParameters<'a>,
         parent_value: &Value,
         sender: futures::channel::mpsc::Sender<Response>,
         primary_sender: &Sender<(Value, Vec<Error>)>,
         deferred_fetches: &mut HashMap<String, Sender<(Value, Vec<Error>)>>,
-    ) -> impl Future<Output = ()>
-    where
-        SF: SubgraphServiceFactory,
-    {
+    ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 
         for d in self.depends.iter() {
@@ -398,7 +387,6 @@ impl DeferredNode {
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
         let ctx = parameters.context.clone();
-        let opt = parameters.options.clone();
         let query = parameters.query.clone();
         let mut primary_receiver = primary_sender.subscribe();
         let mut value = parent_value.clone();
@@ -436,7 +424,6 @@ impl DeferredNode {
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,
                             query: &query,
-                            options: &opt,
                         },
                         &Path::default(),
                         &value,

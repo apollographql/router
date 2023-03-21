@@ -1,10 +1,10 @@
-use apollo_parser::ast;
+use apollo_compiler::hir;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
-use crate::*;
+use crate::spec::Schema;
 
 #[derive(Debug)]
 pub(crate) struct InvalidValue;
@@ -160,68 +160,19 @@ impl FieldType {
     }
 }
 
-impl TryFrom<ast::Type> for FieldType {
-    type Error = SpecError;
-    // Spec: https://spec.graphql.org/draft/#sec-Type-References
-    fn try_from(ty: ast::Type) -> Result<Self, Self::Error> {
+impl From<&'_ hir::Type> for FieldType {
+    fn from(ty: &'_ hir::Type) -> Self {
         match ty {
-            ast::Type::NamedType(named) => named.try_into(),
-            ast::Type::ListType(list) => list.try_into(),
-            ast::Type::NonNullType(non_null) => non_null.try_into(),
-        }
-    }
-}
-
-impl TryFrom<ast::NamedType> for FieldType {
-    type Error = SpecError;
-    // Spec: https://spec.graphql.org/draft/#NamedType
-    fn try_from(named: ast::NamedType) -> Result<Self, Self::Error> {
-        let name = named
-            .name()
-            .ok_or_else(|| {
-                SpecError::InvalidType("the node Name is not optional in the spec; qed".to_string())
-            })?
-            .text()
-            .to_string();
-        Ok(match name.as_str() {
-            "String" => Self::String,
-            "Int" => Self::Int,
-            "Float" => Self::Float,
-            "ID" => Self::Id,
-            "Boolean" => Self::Boolean,
-            _ => Self::Named(name),
-        })
-    }
-}
-
-impl TryFrom<ast::ListType> for FieldType {
-    type Error = SpecError;
-
-    // Spec: https://spec.graphql.org/draft/#ListType
-    fn try_from(list: ast::ListType) -> Result<Self, Self::Error> {
-        Ok(Self::List(Box::new(
-            list.ty()
-                .ok_or_else(|| {
-                    SpecError::InvalidType("node Type is not optional in the spec; qed".to_string())
-                })?
-                .try_into()?,
-        )))
-    }
-}
-
-impl TryFrom<ast::NonNullType> for FieldType {
-    type Error = SpecError;
-
-    // Spec: https://spec.graphql.org/draft/#NonNullType
-    fn try_from(non_null: ast::NonNullType) -> Result<Self, Self::Error> {
-        if let Some(list) = non_null.list_type() {
-            Ok(Self::NonNull(Box::new(list.try_into()?)))
-        } else if let Some(named) = non_null.named_type() {
-            Ok(Self::NonNull(Box::new(named.try_into()?)))
-        } else {
-            Err(SpecError::InvalidType(
-                "either the NamedType node is provided, either the ListType node; qed".to_string(),
-            ))
+            hir::Type::NonNull { ty, .. } => Self::NonNull(Box::new((&**ty).into())),
+            hir::Type::List { ty, .. } => Self::List(Box::new((&**ty).into())),
+            hir::Type::Named { name, .. } => match name.as_str() {
+                "String" => Self::String,
+                "Int" => Self::Int,
+                "Float" => Self::Float,
+                "ID" => Self::Id,
+                "Boolean" => Self::Boolean,
+                _ => Self::Named(name.clone()),
+            },
         }
     }
 }

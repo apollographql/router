@@ -3,146 +3,23 @@ title: Customizations for the Apollo Router
 description: Extend your router with custom functionality
 ---
 
-You can write customizations for the Apollo Router to add functionality that isn't provided by default. For example, you can make an external call to fetch authentication data for each incoming request.
+You can create **customizations** for the Apollo Router to add functionality that isn't available via built-in [configuration options](../configuration/overview/). For example, you can make an external call to fetch authentication data for each incoming request.
 
 ## Customization types
 
-The Apollo Router supports two types of customizations:
+The Apollo Router supports the following customization types:
 
-* [Rhai scripts](./rhai/) (recommended)
-    * The [Rhai scripting language](https://rhai.rs/book/) enables you to add functionality to the stock router binary, which means you _don't_ need to compile a custom binary or write any native Rust code.
-* [Native Rust plugins](./native/)
-    * Native Rust plugins require building the Apollo Router binary from source, which in turn requires familiarity with building Rust projects.
-    * If you need to build a native Rust plugin, [see examples provided in the Apollo Router repo](https://github.com/apollographql/router/tree/main/examples), including a [hello world](https://github.com/apollographql/router/blob/main/examples/hello-world/src/hello_world.rs).
+- [**Rhai scripts**](./rhai/)
+    - The [Rhai scripting language](https://rhai.rs/book/) enables you to add functionality directly to your stock router binary by hooking into different phases of the router's request lifecycle.
+- [**External co-processing**](./coprocessor/) ([Enterprise feature](../enterprise-features/))
+    - If your organization has a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/), you can write custom request-handling code in any language. This code can run in the same container as your router or separately.
+    - The router calls your custom code via HTTP, passing it the details of each incoming client request.
 
-**Use [Rhai scripts](./rhai/) if you can.** Use a native rust plugin _only_ if your customization needs to do any of the following:
+**Use [Rhai scripts](./rhai/) if they support your use case.** External co-processing is most helpful if your customization needs to do any of the following (which Rhai scripts _don't_ support):
 
-* Access Rust crates
-* Read or write to disk
-* Make network requests
-
-## How customizations work
-
-Before you build a customization, it helps to understand how the Apollo Router handles each incoming GraphQL request. During each request's execution, three **services** in the router communicate with each other as shown:
-
-```mermaid
-sequenceDiagram
-    actor Client
-    participant RouterService (experimental)
-    participant SupergraphService
-    participant ExecutionService
-    participant SubgraphService(s)
-
-    Client->>RouterService: Sends request
-    RouterService->>SupergraphService: Transforms the raw HTTP request into a GraphQL/JSON request
-    SupergraphService->>ExecutionService: Initiates query<br/>plan execution
-    par
-    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
-    SubgraphService(s)-->>ExecutionService: 
-    and
-    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
-    SubgraphService(s)-->>ExecutionService: 
-    and
-    ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
-    SubgraphService(s)-->>ExecutionService: 
-    end
-    ExecutionService-->>SupergraphService: Assembles and<br/>returns response
-    SupergraphService-->>RouterService: Returns GraphQL/JSON response
-    RouterService-->>Client: Returns an HTTP response
-```
-
-As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
-
-Apollo Router customizations can hook into _any combination_ of these services and modify the request, response, and/or related metadata as they're passed along.
-
-### Service descriptions
-
-Each Apollo Router service has a corresponding function that a customization can define to hook into that service:
-
-<table class="field-table">
-  <thead>
-    <tr>
-      <th>Service /<br/>Function</th>
-      <th>Description</th>
-    </tr>
-  </thead>
-
-<tbody>
-<tr>
-<td>
-
-##### `RouterService (experimental)`
-
-`router_service`
-</td>
-<td>
-
-Runs at the very beginning and very end of the request lifecycle.
-
-Define `router_service` if your customization needs to interact at the earliest or latest point possible. For example, this is a good opportunity to perform JWT verification before allowing a request to proceed further, or to make the payload a valid GraphQL request.
-
-</td>
-</tr>
-<tr>
-<td>
-
-##### `SupergraphService`
-
-`supergraph_service`
-</td>
-<td>
-
-Runs at the very beginning and very end of the GraphQL request lifecycle.
-
-Define `supergraph_service` if your customization needs to interact with the GraphQL request or the GraphQL response. For example, you can add a check for Anonymous queries.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `ExecutionService`
-
-`execution_service`
-</td>
-<td>
-
-Handles initiating the execution of a query plan after it's been generated.
-
-Define `execution_service` if your customization includes logic to govern execution (for example, if you want to block a particular query based on a policy decision).
-
-</td>
-</tr>
-
-
-<tr>
-<td>
-
-##### `SubgraphService`
-
-`subgraph_service`
-</td>
-<td>
-
-Handles communication between the Apollo Router and your subgraphs.
-
-Define `subgraph_service` to configure this communication (for example, to dynamically add HTTP headers to pass to a subgraph).
-
-Whereas other services are called once per client request, this service is called once per _subgraph_ that's required to resolve the client's request. Each call is passed a `subgraph` parameter that indicates the name of the corresponding subgraph
-
-</td>
-</tr>
-
-
-</tbody>
-</table>
-
-Each service has a request and response data-structure that holds:
-* A context object that was created at the start of the request and is propagated throughout the entire request lifecycle. It holds:
-    - The original request from the client
-    - A bag of data that can be populated by plugins for communication across the request lifecycle
-* Any other specific data to that service (e.g., query plans and downstream requests/responses)
+- Read or write to disk
+- Make network requests
+- Use libraries from a particular language or framework
 
 ---
 

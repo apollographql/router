@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
@@ -47,13 +49,13 @@ use crate::graphql;
 use crate::plugin::test::MockSupergraphService;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::RouterRequest;
+use crate::services::RouterResponse;
+use crate::services::SupergraphRequest;
+use crate::services::SupergraphResponse;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
-use crate::RouterRequest;
-use crate::RouterResponse;
-use crate::SupergraphRequest;
-use crate::SupergraphResponse;
 
 /// Containing [`Service`] in the request lifecyle.
 #[derive(Clone)]
@@ -186,7 +188,7 @@ where
                         graphql::Request::from_urlencoded_query(q.to_string()).map_err(|e| {
                             (
                                 "failed to decode a valid GraphQL request from path",
-                                format!("failed to decode a valid GraphQL request from path {}", e),
+                                format!("failed to decode a valid GraphQL request from path {e}"),
                             )
                         })
                     })
@@ -199,17 +201,14 @@ where
                     .map_err(|e| {
                         (
                             "failed to get the request body",
-                            format!("failed to get the request body: {}", e),
+                            format!("failed to get the request body: {e}"),
                         )
                     })
                     .and_then(|bytes| {
                         serde_json::from_reader(bytes.reader()).map_err(|err| {
                             (
                                 "failed to deserialize the request body into JSON",
-                                format!(
-                                    "failed to deserialize the request body into JSON: {}",
-                                    err
-                                ),
+                                format!("failed to deserialize the request body into JSON: {err}"),
                             )
                         })
                     })
@@ -222,8 +221,10 @@ where
                         context,
                     };
 
+                    let request_res = apq.supergraph_request(request).await;
+
                     let SupergraphResponse { response, context } =
-                        match apq.request(request).await.and_then(|request| {
+                        match request_res.and_then(|request| {
                             let query = request.supergraph_request.body().query.as_ref();
 
                             if query.is_none() || query.unwrap().trim().is_empty() {
@@ -249,10 +250,7 @@ where
                             }
                         }) {
                             Err(response) => response,
-                            Ok(request) => {
-                                let supergraph_service = supergraph_creator.create();
-                                supergraph_service.oneshot(request).await?
-                            }
+                            Ok(request) => supergraph_creator.create().oneshot(request).await?,
                         };
 
                     let accepts_wildcard: bool = context
@@ -363,15 +361,23 @@ where
                                 Ok(router::Response {
                                 response: http::Response::builder()
                                     .status(StatusCode::NOT_ACCEPTABLE)
-                                    .body(Body::from(
-                                        format!(
-                                            r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                            APPLICATION_JSON.essence_str(),
-                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                            MULTIPART_DEFER_CONTENT_TYPE
+                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                                    .body(
+                                    Body::from(
+                                        serde_json::to_string(
+                                            &graphql::Error::builder()
+                                                .message(format!(
+                                                    r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
+                                                    APPLICATION_JSON.essence_str(),
+                                                    GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                                    MULTIPART_DEFER_CONTENT_TYPE
+                                                ))
+                                                .extension_code("INVALID_ACCEPT_HEADER")
+                                                .build(),
                                         )
-                                    ))
-                                    .expect("cannot fail"),
+                                        .unwrap_or_else(|_| String::from("Invalid request"))
+                                    )
+                                ).expect("cannot fail"),
                                 context,
                             })
                             }
@@ -477,13 +483,14 @@ where
 {
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
-        let apq_layer = APQLayer::with_cache(
-            DeduplicatingCache::from_configuration(
-                &configuration.supergraph.apq.experimental_cache,
-                "APQ",
+        let apq_layer = if configuration.apq.enabled {
+            APQLayer::with_cache(
+                DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
+                    .await,
             )
-            .await,
-        );
+        } else {
+            APQLayer::disabled()
+        };
 
         Self {
             supergraph_creator,

@@ -10,8 +10,7 @@ use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
 
-#[cfg(feature = "experimental_cache")]
-mod redis;
+pub(crate) mod redis;
 pub(crate) mod storage;
 
 type WaitMap<K, V> = Arc<Mutex<HashMap<K, broadcast::Sender<V>>>>;
@@ -34,7 +33,7 @@ where
 {
     pub(crate) async fn with_capacity(
         capacity: NonZeroUsize,
-        redis_urls: Option<Vec<String>>,
+        redis_urls: Option<Vec<url::Url>>,
         caller: &str,
     ) -> Self {
         Self {
@@ -49,10 +48,7 @@ where
     ) -> Self {
         Self::with_capacity(
             config.in_memory.limit,
-            #[cfg(feature = "experimental_cache")]
             config.redis.as_ref().map(|c| c.urls.clone()),
-            #[cfg(not(feature = "experimental_cache"))]
-            None,
             caller,
         )
         .await
@@ -117,7 +113,7 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
-        self.storage.insert(key, value.clone()).await;
+        self.storage.insert(key, value).await;
     }
 
     async fn send(&self, sender: broadcast::Sender<V>, key: &K, value: V) {

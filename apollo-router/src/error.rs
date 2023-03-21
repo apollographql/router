@@ -47,6 +47,18 @@ pub(crate) enum FetchError {
         reason: String,
     },
 
+    /// request was malformed: {reason}
+    MalformedRequest {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
+    /// response was malformed: {reason}
+    MalformedResponse {
+        /// The reason the serialization failed.
+        reason: String,
+    },
+
     /// service '{service}' response was malformed: {reason}
     SubrequestMalformedResponse {
         /// The service that responded with the malformed response.
@@ -158,6 +170,8 @@ impl ErrorExtension for FetchError {
             FetchError::CompressionError { .. } => "COMPRESSION_ERROR",
             #[cfg(test)]
             FetchError::ExecutionInvalidContent { .. } => "EXECUTION_INVALID_CONTENT",
+            FetchError::MalformedRequest { .. } => "MALFORMED_REQUEST",
+            FetchError::MalformedResponse { .. } => "MALFORMED_RESPONSE",
         }
         .to_string()
     }
@@ -423,7 +437,7 @@ struct ParserError {
 impl ParseErrors {
     #[allow(clippy::needless_return)]
     pub(crate) fn print(&self) {
-        if LevelFilter::current() == LevelFilter::OFF {
+        if LevelFilter::current() == LevelFilter::OFF && cfg!(not(debug_assertions)) {
             return;
         } else if atty::is(atty::Stream::Stdout) {
             // Fancy Miette reports for TTYs
@@ -433,22 +447,18 @@ impl ParseErrors {
                     span: (err.index(), err.data().len()).into(),
                     ty: err.message().into(),
                 });
-                println!("{:?}", report);
+                // `format!` works around https://github.com/rust-lang/rust/issues/107118
+                // to test the panic from https://github.com/apollographql/router/issues/2269
+                #[allow(clippy::format_in_format_args)]
+                {
+                    println!("{}", format!("{report:?}"));
+                }
             });
         } else {
             // Best effort to display errors
             self.errors.iter().for_each(|r| {
-                println!("{:#?}", r);
+                println!("{r:#?}");
             });
         };
     }
-}
-
-/// Error types for licensing.
-#[derive(Error, Display, Debug, Clone, Serialize, Deserialize)]
-pub(crate) enum LicenseError {
-    /// Apollo graph reference is missing
-    MissingGraphReference,
-    /// Apollo key is missing
-    MissingKey,
 }

@@ -111,8 +111,8 @@ All trace exporters (apollo|datadog|zipkin|jaeger|otlp) have batch span processo
 
 `OpenTelemetry trace error occurred: cannot send span to the batch span processor because the channel is full`
 
-* **scheduled_delay** The delay from receiving the first span to the batch being sent. 
-* **max_concurrent_exports** The maximum number of overlapping export requests. For instance if ingest is taking a long time to respond there may be several overlapping export requests. 
+* **scheduled_delay** The delay from receiving the first span to the batch being sent.
+* **max_concurrent_exports** The maximum number of overlapping export requests. For instance if ingest is taking a long time to respond there may be several overlapping export requests.
 * **max_export_batch_size** The number of spans to include in a batch. Your ingest may have max message size limits.
 * **max_export_timeout** The timeout for sending spans before dropping the data.
 * **max_queue_size** The maximum number of spans to be buffered before dropping span data.
@@ -127,7 +127,7 @@ telemetry:
       max_export_batch_size: 10000
       max_export_timeout: 100s
       max_queue_size: 10000
-      
+
   tracing:
     # Datadog
     datadog:
@@ -153,9 +153,57 @@ The Apollo Router can be configured to connect to either the default agent addre
 telemetry:
   tracing:
     datadog:
-      # Either 'default' or a URL
+      # Either 'default' or a URL (example: 'http://http://127.0.0.1:8126')
       endpoint: default
 ```
+
+[Given that there are some incompatibilities](https://docs.rs/opentelemetry-datadog/latest/opentelemetry_datadog/#quirks)
+between Datadog and OpenTelemetry, the DataDog exporter might not provide meaningful contextual information in the exported spans.
+To fix this, you can configure the Apollo Router to perform a mapping for the span name and the span resource name.
+
+```yaml title="router.yaml"
+telemetry:
+  tracing:
+    datadog:
+      endpoint: default
+      enable_span_mapping: true
+```
+
+when `enable_span_mapping` is set to `true`, the Apollo Router will perform the following mapping:
+
+1. Use the Open Telemetry span name to set the Data Dog span operation name.
+2. Use the Open Telemetry span attributes to set the DataDog span resource name.
+
+Example:
+
+Lets say we send a query `MyQuery` to the Apollo Router, then the Router using the operation's query plan will send a
+query to `my-subgraph-name` and the following trace will be created:
+
+```
+    | apollo_router request                                                                 |
+        | apollo_router router                                                              |
+            | apollo_router supergraph                                                      |
+            | apollo_router query_planning  | apollo_router execution                       |
+                                                | apollo_router fetch                       |
+                                                    | apollo_router subgraph                |
+                                                        | apollo_router subgraph_request    |
+```
+
+As you can see, there is no clear information about the name of the query, the name of the subgraph, and the name of the
+query sent to the subgraph.
+
+Instead when `enable_span_mapping` is set to `true` the following trace will be created:
+
+```
+    | request /graphql                                                                                   |
+        | router                                                                                         |
+            | supergraph MyQuery                                                                         |
+                | query_planning MyQuery  | execution                                                    |
+                                              | fetch fetch                                              |
+                                                  | subgraph my-subgraph-name                            |
+                                                      | subgraph_request MyQuery__my-subgraph-name__0    |
+```
+
 
 ## Using Jaeger
 
@@ -215,9 +263,6 @@ telemetry:
       http:
         headers:
           foo: bar
-
-      # Optional timeout in humantime form
-      timeout: 2s
 ```
 
 Remember that `file.` and `env.` prefixes can be used for expansion in config yaml. e.g. `${file.ca.txt}`.

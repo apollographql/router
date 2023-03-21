@@ -4,6 +4,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use http::Uri;
+use schemars::JsonSchema;
+use serde::Deserialize;
+use serde::Serialize;
 use tower::BoxError;
 use tower::ServiceExt;
 
@@ -11,21 +14,30 @@ use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
 use crate::services::subgraph;
-use crate::SubgraphRequest;
+use crate::services::SubgraphRequest;
 
 #[derive(Debug, Clone)]
 struct OverrideSubgraphUrl {
     urls: HashMap<String, Uri>,
 }
 
+/// Subgraph URL mappings
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(untagged)]
+enum Conf {
+    /// Subgraph URL mappings
+    Mapping(HashMap<String, url::Url>),
+}
+
 #[async_trait::async_trait]
 impl Plugin for OverrideSubgraphUrl {
-    type Config = HashMap<String, url::Url>;
+    type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
+        let Conf::Mapping(urls) = init.config;
         Ok(OverrideSubgraphUrl {
-            urls: init
-                .config
+            urls: urls
                 .into_iter()
                 .map(|(k, v)| (k, Uri::from_str(v.as_str()).unwrap()))
                 .collect(),
@@ -64,9 +76,9 @@ mod tests {
 
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::DynPlugin;
+    use crate::services::SubgraphRequest;
+    use crate::services::SubgraphResponse;
     use crate::Context;
-    use crate::SubgraphRequest;
-    use crate::SubgraphResponse;
 
     #[tokio::test]
     async fn plugin_registered() {

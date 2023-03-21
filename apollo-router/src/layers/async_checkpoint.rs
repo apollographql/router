@@ -148,8 +148,8 @@ mod async_checkpoint_tests {
     use crate::layers::ServiceBuilderExt;
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockService;
-    use crate::ExecutionRequest;
-    use crate::ExecutionResponse;
+    use crate::services::ExecutionRequest;
+    use crate::services::ExecutionResponse;
 
     #[tokio::test(flavor = "multi_thread")]
     async fn test_service_builder() {
@@ -170,9 +170,7 @@ mod async_checkpoint_tests {
             MockService::create(move |req| exec.call(req));
 
         let service_stack = ServiceBuilder::new()
-            .checkpoint_async(|req: crate::ExecutionRequest| async {
-                Ok(ControlFlow::Continue(req))
-            })
+            .checkpoint_async(|req: ExecutionRequest| async { Ok(ControlFlow::Continue(req)) })
             .service(execution_service);
 
         let request = ExecutionRequest::fake_builder().build();

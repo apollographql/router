@@ -11,19 +11,22 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use serde_json_bytes::json;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
-use super::QueryPlanOptions;
-use super::TYPENAME;
 use crate::error::QueryPlannerError;
+use crate::graphql;
 use crate::introspection::Introspection;
-use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::services::QueryPlannerContent;
-use crate::*;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
 
 pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
 
@@ -36,7 +39,6 @@ pub(crate) struct BridgeQueryPlanner {
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
-    deduplicate_variables: bool,
 }
 
 impl BridgeQueryPlanner {
@@ -45,16 +47,13 @@ impl BridgeQueryPlanner {
         introspection: Option<Arc<Introspection>>,
         configuration: Arc<Configuration>,
     ) -> Result<Self, QueryPlannerError> {
-        // FIXME: The variables deduplication parameter lives in the traffic_shaping section of the config
-        let deduplicate_variables =
-            TrafficShaping::get_configuration_deduplicate_variables(&configuration);
         Ok(Self {
             planner: Arc::new(
                 Planner::new(
                     schema.as_string().to_string(),
                     QueryPlannerConfig {
                         incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.supergraph.preview_defer_support),
+                            enable_defer: Some(configuration.supergraph.defer_support),
                         }),
                     },
                 )
@@ -63,7 +62,6 @@ impl BridgeQueryPlanner {
             schema,
             introspection,
             configuration,
-            deduplicate_variables,
         })
     }
 
@@ -124,14 +122,11 @@ impl BridgeQueryPlanner {
                 let subselections = node.parse_subselections(&self.schema)?;
                 selections.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
-                    plan: Arc::new(query_planner::QueryPlan {
+                    plan: Arc::new(super::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
-                        options: QueryPlanOptions {
-                            enable_deduplicate_variables: self.deduplicate_variables,
-                        },
                     }),
                 })
             }
@@ -220,14 +215,22 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            // If we have only one operation containing a single root field `__typename`
-            if selections.contains_only_typename() {
+            // If we have only one operation containing only the root field `__typename`
+            // (possibly aliased or repeated). (This does mean we fail to properly support
+            // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
+            if let Some(output_keys) = selections
+                .operations
+                .get(0)
+                .and_then(|op| op.is_only_typenames_with_output_keys())
+            {
+                let operation_name = selections.operations[0].kind().to_string();
+                let data: Value = Value::Object(Map::from_iter(
+                    output_keys
+                        .into_iter()
+                        .map(|key| (key, Value::String(operation_name.clone().into()))),
+                ));
                 return Ok(QueryPlannerContent::Introspection {
-                    response: Box::new(
-                        graphql::Response::builder()
-                            .data(json!({TYPENAME: selections.operations[0].kind().to_string()}))
-                            .build(),
-                    ),
+                    response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
                 return self.introspection(key.0).await;
@@ -361,7 +364,7 @@ mod tests {
                 });
             }
             e => {
-                panic!("empty plan should have returned an EmptyPlanError: {:?}", e);
+                panic!("empty plan should have returned an EmptyPlanError: {e:?}");
             }
         }
     }
@@ -383,5 +386,55 @@ mod tests {
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
+    }
+
+    #[test(tokio::test)]
+    async fn test_single_aliased_root_typename() {
+        let planner = BridgeQueryPlanner::new(
+            Arc::new(example_schema()),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let result = planner
+            .get(("{ x: __typename }".into(), None))
+            .await
+            .unwrap();
+        if let QueryPlannerContent::Introspection { response } = result {
+            assert_eq!(
+                r#"{"data":{"x":"Query"}}"#,
+                serde_json::to_string(&response).unwrap()
+            )
+        } else {
+            panic!();
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn test_two_root_typenames() {
+        let planner = BridgeQueryPlanner::new(
+            Arc::new(example_schema()),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let result = planner
+            .get(("{ x: __typename __typename }".into(), None))
+            .await
+            .unwrap();
+        if let QueryPlannerContent::Introspection { response } = result {
+            assert_eq!(
+                r#"{"data":{"x":"Query","__typename":"Query"}}"#,
+                serde_json::to_string(&response).unwrap()
+            )
+        } else {
+            panic!();
+        }
     }
 }

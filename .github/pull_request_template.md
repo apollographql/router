@@ -1,46 +1,29 @@
-<!--
-First, 🌠 thank you 🌠 for considering a contribution to Apollo!
+*Description here*
 
-Some of this information is also included in the /CONTRIBUTING.md file at the
-root of this repository.  We suggest you read it!
+Fixes #issue_number
 
-  https://github.com/apollographql/router/blob/HEAD/CONTRIBUTING.md
+<!-- start metadata -->
 
-Here are some important details to keep in mind:
+**Checklist**
 
-* ⏰ Your time is important
-        To save your precious time, if the contribution you are making will
-        take more than an hour, please make sure it has been discussed in an
-        issue first. This is especially true for feature requests!
+Complete the checklist (and note appropriate exceptions) before a final PR is raised.
 
-* 💡 Features
-        Feature requests can be created and discussed within a GitHub Issue.
-        Be sure to search for existing feature requests (and related issues!)
-        prior to opening a new request. If an existing issue covers the need,
-        please upvote that issue by using the 👍 emote, rather than opening a
-        new issue.
+- [ ] Changes are compatible[^1]
+- [ ] Documentation[^2] completed
+- [ ] Performance impact assessed and acceptable
+- Tests added and passing[^3]
+    - [ ] Unit Tests
+    - [ ] Integration Tests
+    - [ ] Manual Tests
 
-* 🕷 Bug fixes
-        These can be created and discussed in this repository. When fixing a bug,
-        please _try_ to add a test which verifies the fix.  If you cannot, you should
-        still submit the PR but we may still ask you (and help you!) to create a test.
+**Exceptions**
 
-* 📖 Contribution guidelines
-        Follow https://github.com/apollographql/router/blob/HEAD/CONTRIBUTING.md
-        when submitting a pull request.  Make sure existing tests still pass, and add
-        tests for all new behavior.
+*Note any exceptions here*
 
-* ✏️ Explain your pull request
-        Describe the big picture of your changes here to communicate to what
-        your pull request is meant to accomplish. Provide 🔗 links 🔗 to
-        associated issues!  Documentation in the docs/ directory should be updated
-        as necessary.  Finally, a /CHANGELOG.md entry should be added.
+**Notes**
 
-We hope you will find this to be a positive experience! Contribution can be
-intimidating and we hope to alleviate that pain as much as possible. Without
-following these guidelines, you may be missing context that can help you succeed
-with your contribution, which is why we encourage discussion first. Ultimately,
-there is no guarantee that we will be able to merge your pull-request, but by
-following these guidelines we can try to avoid disappointment.
-
--->
+[^1]. It may be appropriate to bring upcoming changes to the attention of other (impacted) groups. Please endeavour to do this before seeking PR approval. The mechanism for doing this will vary considerably, so use your judgement as to how and when to do this.
+[^2]. Configuration is an important part of many changes. Where applicable please try to document configuration examples.
+[^3]. Tick whichever testing boxes are applicable. If you are adding Manual Tests:
+    - please document the manual testing (extensively) in the Exceptions.
+    - please raise a separate issue to automate the test and label it (or ask for it to be labeled) as `manual test`

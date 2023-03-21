@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
@@ -5,6 +6,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_compression::tokio::write::GzipDecoder;
 use async_compression::tokio::write::GzipEncoder;
@@ -28,6 +30,7 @@ use reqwest::header::ACCEPT;
 use reqwest::header::ACCESS_CONTROL_ALLOW_HEADERS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_METHODS;
 use reqwest::header::ACCESS_CONTROL_ALLOW_ORIGIN;
+use reqwest::header::ACCESS_CONTROL_MAX_AGE;
 use reqwest::header::ACCESS_CONTROL_REQUEST_HEADERS;
 use reqwest::header::ACCESS_CONTROL_REQUEST_METHOD;
 use reqwest::header::ORIGIN;
@@ -43,6 +46,7 @@ use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 #[cfg(unix)]
 use tokio::io::BufReader;
+use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
 use tower::BoxError;
@@ -60,6 +64,8 @@ use crate::graphql;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
+use crate::plugin::test::MockSubgraph;
+use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::static_page::home_page_content;
@@ -67,12 +73,17 @@ use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service;
+use crate::services::router_service::RouterCreator;
+use crate::services::supergraph;
+use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
+use crate::uplink::entitlement::EntitlementState;
 use crate::ApolloRouterError;
 use crate::Configuration;
 use crate::Context;
@@ -174,6 +185,8 @@ async fn init(
             }
         }
     });
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+
     let server = server_factory
         .create(
             TestRouterFactory {
@@ -202,6 +215,8 @@ async fn init(
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::Unentitled,
+            all_connections_stopped_sender,
         )
         .await
         .expect("Failed to create server factory");
@@ -236,6 +251,7 @@ pub(super) async fn init_with_config(
 ) -> Result<(HttpServerHandle, Client), ApolloRouterError> {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
     tokio::spawn(async move {
         loop {
@@ -256,6 +272,8 @@ pub(super) async fn init_with_config(
             None,
             vec![],
             web_endpoints,
+            EntitlementState::Unentitled,
+            all_connections_stopped_sender,
         )
         .await?;
     let mut default_headers = HeaderMap::new();
@@ -289,6 +307,7 @@ async fn init_unix(
 ) -> HttpServerHandle {
     let server_factory = AxumHttpServerFactory::new();
     let (service, mut handle) = tower_test::mock::spawn();
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
     tokio::spawn(async move {
         loop {
@@ -319,6 +338,8 @@ async fn init_unix(
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::Unentitled,
+            all_connections_stopped_sender,
         )
         .await
         .expect("Failed to create server factory")
@@ -656,6 +677,92 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
 
     assert!(err.is_status());
     assert_eq!(err.status(), Some(StatusCode::NOT_FOUND));
+
+    server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
+    let expected_response = graphql::Response::builder()
+        .data(json!({"response": "yay"}))
+        .build();
+    let example_response = expected_response.clone();
+
+    let router_service = router_service::from_supergraph_mock_callback(move |req| {
+        let example_response = example_response.clone();
+        Ok(SupergraphResponse::new_from_graphql_response(
+            example_response,
+            req.context,
+        ))
+    })
+    .await;
+
+    let conf = Configuration::fake_builder()
+        .supergraph(
+            crate::configuration::Supergraph::fake_builder()
+                .path(String::from("/*"))
+                .build(),
+        )
+        .build()
+        .unwrap();
+    let (server, client) =
+        init_with_config(router_service, Arc::new(conf), MultiMap::new()).await?;
+    let url = format!(
+        "{}/graphql",
+        server.graphql_listen_address().as_ref().unwrap()
+    );
+
+    // Post query
+    let response = client
+        .post(url.as_str())
+        .body(json!({ "query": "query" }).to_string())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response,
+    );
+
+    // Post query without path
+    let response = client
+        .post(
+            &server
+                .graphql_listen_address()
+                .as_ref()
+                .unwrap()
+                .to_string(),
+        )
+        .body(json!({ "query": "query" }).to_string())
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response,
+    );
+
+    // Get query
+    let response = client
+        .get(url.as_str())
+        .query(&json!({ "query": "query" }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    assert_eq!(
+        response.json::<graphql::Response>().await.unwrap(),
+        expected_response,
+    );
 
     server.shutdown().await?;
     Ok(())
@@ -1008,6 +1115,14 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE,);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"message":"'content-type' header can't be different from \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+    );
 
     server.shutdown().await
 }
@@ -1039,6 +1154,14 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::NOT_ACCEPTABLE);
+    assert_eq!(
+        response.headers().get(header::CONTENT_TYPE),
+        Some(&HeaderValue::from_static(APPLICATION_JSON.essence_str()))
+    );
+    assert_eq!(
+        response.text().await.unwrap(),
+        r#"{"message":"'accept' header can't be different from \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+    );
 
     server.shutdown().await
 }
@@ -1173,7 +1296,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.text().await.unwrap(), format!("GET + {}", path));
+        assert_eq!(response.text().await.unwrap(), format!("GET + {path}"));
     }
 
     for path in &["/a-custom-path", "/an-other-custom-path"] {
@@ -1188,7 +1311,7 @@ async fn it_answers_to_custom_endpoint() -> Result<(), ApolloRouterError> {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(response.text().await.unwrap(), format!("POST + {}", path));
+        assert_eq!(response.text().await.unwrap(), format!("POST + {path}"));
     }
     server.shutdown().await
 }
@@ -1287,6 +1410,26 @@ async fn cors_origin_default() -> Result<(), ApolloRouterError> {
     let response =
         request_cors_with_origin(&client, url.as_str(), "https://this.wont.work.com").await;
     assert_not_cors_origin(response, "https://this.wont.work.com");
+    Ok(())
+}
+
+#[tokio::test]
+async fn cors_max_age() -> Result<(), ApolloRouterError> {
+    let conf = Configuration::fake_builder()
+        .cors(Cors::builder().max_age(Duration::from_secs(100)).build())
+        .build()
+        .unwrap();
+    let (server, client) = init_with_config(
+        router_service::empty().await,
+        Arc::new(conf),
+        MultiMap::new(),
+    )
+    .await?;
+    let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
+
+    let response = request_cors_with_origin(&client, url.as_str(), "https://thisisatest.com").await;
+    assert_cors_max_age(response, "100");
+
     Ok(())
 }
 
@@ -1409,6 +1552,12 @@ fn assert_not_cors_origin(response: reqwest::Response, origin: &str) {
     assert!(!origin_valid(headers, origin));
 }
 
+fn assert_cors_max_age(response: reqwest::Response, max_age: &str) {
+    assert!(response.status().is_success());
+    assert_headers_valid(&response);
+    assert_header_contains!(response, ACCESS_CONTROL_MAX_AGE, &[max_age]);
+}
+
 fn assert_headers_valid(response: &reqwest::Response) {
     assert_header_contains!(response, ACCESS_CONTROL_ALLOW_METHODS, &["POST"]);
     assert_header_contains!(response, ACCESS_CONTROL_ALLOW_HEADERS, &["content-type"]);
@@ -1447,7 +1596,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
         .await
         .unwrap();
 
-    println!("response: {:?}", response);
+    println!("response: {response:?}");
     assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(
         response.headers().get(CONTENT_TYPE),
@@ -1608,6 +1757,8 @@ async fn it_supports_server_restart() {
         inner: service.into_inner(),
     };
 
+    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+
     let server = server_factory
         .create(
             supergraph_service_factory.clone(),
@@ -1615,6 +1766,8 @@ async fn it_supports_server_restart() {
             None,
             vec![],
             MultiMap::new(),
+            EntitlementState::default(),
+            all_connections_stopped_sender,
         )
         .await
         .expect("Failed to create server factory");
@@ -1642,6 +1795,7 @@ async fn it_supports_server_restart() {
             supergraph_service_factory,
             new_configuration,
             MultiMap::new(),
+            EntitlementState::default(),
         )
         .await
         .unwrap();
@@ -1994,7 +2148,7 @@ Accept: application/json\r
 #[tokio::test]
 async fn test_health_check() {
     let router_service = router_service::from_supergraph_mock_callback(|_| {
-        Ok(crate::supergraph::Response::builder()
+        Ok(supergraph::Response::builder()
             .data(json!({ "__typename": "Query"}))
             .context(Context::new())
             .build()
@@ -2121,4 +2275,60 @@ async fn test_supergraph_and_health_check_same_port_different_listener() {
         "tried to bind 0.0.0.0 and 127.0.0.1 on port 4013",
         error.to_string()
     );
+}
+
+#[tokio::test]
+async fn test_supergraph_timeout() {
+    let config = serde_json::json!({
+        "supergraph": {
+            "defer_support": false,
+        },
+        "traffic_shaping": {
+            "router": {
+                "timeout": "1ns"
+            }
+        },
+    });
+
+    let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
+
+    let schema = Schema::parse(
+        include_str!("..//testdata/minimal_supergraph.graphql"),
+        &conf,
+    )
+    .unwrap();
+
+    // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
+    // because we need the plugins to apply on the supergraph
+    let plugins = create_plugins(&conf, &schema, None).await.unwrap();
+
+    let mut builder = PluggableSupergraphServiceBuilder::new(Arc::new(schema))
+        .with_configuration(conf.clone())
+        .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
+
+    for (name, plugin) in plugins.into_iter() {
+        builder = builder.with_dyn_plugin(name, plugin);
+    }
+    let supergraph_creator = builder.build().await.unwrap();
+
+    let service = RouterCreator::new(Arc::new(supergraph_creator), &conf)
+        .await
+        .make();
+
+    // keep the server handle around otherwise it will immediately shutdown
+    let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
+        .await
+        .unwrap();
+    let url = "http://localhost:4000/";
+
+    let response = client
+        .post(url)
+        .body(r#"{ "query": "{ me }" }"#)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+    let body = response.bytes().await.unwrap();
+    assert_eq!(std::str::from_utf8(&body).unwrap(), "request timed out");
 }

@@ -11,13 +11,13 @@ The default behaviour of the router images is suitable for a quickstart or devel
 
 Note: The [docker documentation](https://docs.docker.com/engine/reference/run/) for the run command may be helpful when reading through the examples.
 
-Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.7.0`
+Note: The exact image version to use is your choice depending on which release you wish to use. In the following examples, replace `<image version>` with your chosen version. e.g.: `v1.12.1`
 
 ## Override the configuration
 
 Our default Docker images include a basic configuration which can be seen [in our repository](https://github.com/apollographql/router/blob/main/dockerfiles/router.yaml).  Inside the container, this file is located at `/dist/config/router.yaml`.
 
-If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network inferface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
+If you wish to override the default configuration, it is important to consider and preserve aspects of the default configuration.  In particular, it is generally important for the Router to bind to the special "listening address" of `0.0.0.0` (i.e., "all interfaces") to ensure the Router is exposed on a the network interface accessible outside of the local container; without this configuration, the Router will only listen on `localhost`.
 
 You can provide your own configuration from the host environment to the Router by mounting your configuration to `/dist/config/router.yaml`, as follows:
 
@@ -83,7 +83,7 @@ docker run -p 4000:4000 \
 
 The router will run under the control of heaptrack. The heaptrack output will be saved to the /data directory. The output can be analyzed directly using `heaptrack_gui` or `heaptrack_print` or shared with Apollo support staff.
 
-## Specifying the Supergraph
+## Specifying the supergraph
 
 If we don't want to use uplink to retrieve our subgraph, we can manually specify the details.
 
@@ -123,7 +123,3 @@ Usage: build_docker_image.sh [-b [-r <repo>]] [-d] [<release>]
 		build_docker_image.sh -d v0.9.1
 ```
 Note: The script has to be run from the `dockerfiles/diy` directory because it makes assumptions about the relative availability of various files. The example uses [debian:bullseye-slim image](https://hub.docker.com/_/debian/) for the final image build. Feel free to modify the script to use images which better suit your own needs, but be careful if using the [-d] flag since it makes the assumption that there is a `heaptrack` package available to install.
-
-## Building your own container with plugins
-
-Any project created using the method shown in the [Custom router binary](../customizations/custom-binary) section of this documentation contains a Dockerfile. Use and adapt the provided [Dockerfile](https://github.com/apollographql/router/tree/main/apollo-router-scaffold/templates/base/Dockerfile) to suit your usecase.

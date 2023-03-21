@@ -14,6 +14,7 @@ use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
 use crate::services::router;
@@ -21,7 +22,7 @@ use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::SupergraphCreator;
-use crate::Schema;
+use crate::spec::Schema;
 
 #[cfg(test)]
 pub(crate) mod http_client;
@@ -84,6 +85,20 @@ impl<'a> TestHarness<'a> {
             extra_plugins: Vec::new(),
             subgraph_network_requests: false,
         }
+    }
+
+    /// Specifies the logging level. Note that this function may not be called more than once.
+    /// log_level is in RUST_LOG format.
+    pub fn log_level(self, log_level: &'a str) -> Self {
+        init_telemetry(log_level).expect("failed to setup logging");
+        self
+    }
+
+    /// Specifies the logging level. Note that this function will silently fail if called more than once.
+    /// log_level is in RUST_LOG format.
+    pub fn try_log_level(self, log_level: &'a str) -> Self {
+        let _ = init_telemetry(log_level);
+        self
     }
 
     /// Specifies the (static) supergraph schema definition.
@@ -252,12 +267,18 @@ impl<'a> TestHarness<'a> {
         use crate::axum_factory::tests::make_axum_router;
         use crate::axum_factory::ListenAddrAndRouter;
         use crate::router_factory::RouterFactory;
+        use crate::uplink::entitlement::EntitlementState;
 
         let (config, supergraph_creator) = self.build_common().await?;
         let router_creator = RouterCreator::new(Arc::new(supergraph_creator), &config).await;
         let web_endpoints = router_creator.web_endpoints();
 
-        let routers = make_axum_router(router_creator, &config, web_endpoints)?;
+        let routers = make_axum_router(
+            router_creator,
+            &config,
+            web_endpoints,
+            EntitlementState::Unentitled,
+        )?;
         let ListenAddrAndRouter(_listener, router) = routers.main;
         Ok(router.boxed())
     }

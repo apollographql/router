@@ -6,13 +6,13 @@ pub(crate) use bridge_query_planner::*;
 pub(crate) use caching_query_planner::*;
 
 pub(crate) use self::fetch::OperationKind;
-use crate::*;
 
 mod bridge_query_planner;
 mod caching_query_planner;
 mod execution;
 pub(crate) mod fetch;
 mod plan;
+pub(crate) mod rewrites;
 mod selection;
 pub use plan::*;
 

@@ -18,6 +18,7 @@ pub struct Request {
     ///
     /// For historical purposes, the term "query" is commonly used to refer to
     /// *any* GraphQL operation which might be, e.g., a `mutation`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub query: Option<String>,
 
     /// The (optional) GraphQL operation name.
@@ -199,9 +200,9 @@ mod tests {
           "extensions": {"extension": 1}
         })
         .to_string();
-        println!("data: {}", data);
+        println!("data: {data}");
         let result = serde_json::from_str::<Request>(data.as_str());
-        println!("result: {:?}", result);
+        println!("result: {result:?}");
         assert_eq!(
             result.unwrap(),
             Request::builder()

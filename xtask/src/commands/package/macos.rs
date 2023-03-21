@@ -8,39 +8,38 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use serde_json_traversal::serde_json_traversal;
-use structopt::StructOpt;
 use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct PackageMacos {
     /// Keychain keychain_password.
-    #[structopt(long)]
+    #[clap(long)]
     keychain_password: String,
 
     /// Certificate bundle in base64.
-    #[structopt(long)]
+    #[clap(long)]
     cert_bundle_base64: String,
 
     /// Certificate bundle keychain_password.
-    #[structopt(long)]
+    #[clap(long)]
     cert_bundle_password: String,
 
     /// Primary bundle ID.
-    #[structopt(long)]
+    #[clap(long)]
     primary_bundle_id: String,
 
     /// Apple team ID.
-    #[structopt(long)]
+    #[clap(long)]
     apple_team_id: String,
 
     /// Apple username.
-    #[structopt(long)]
+    #[clap(long)]
     apple_username: String,
 
     /// Notarization password.
-    #[structopt(long)]
+    #[clap(long)]
     notarization_password: String,
 }
 
@@ -59,7 +58,7 @@ impl PackageMacos {
         eprintln!("Creating keychain...");
         ensure!(
             Command::new("security")
-                .args(&["create-keychain", "-p"])
+                .args(["create-keychain", "-p"])
                 .arg(&self.keychain_password)
                 .arg(keychain_name)
                 .status()
@@ -108,7 +107,7 @@ impl PackageMacos {
         eprintln!("Adding the codesign tool to the security partition-list...");
         ensure!(
             Command::new("security")
-                .args(&[
+                .args([
                     "set-key-partition-list",
                     "-S",
                     "apple-tool:,apple:,codesign:",
@@ -126,7 +125,7 @@ impl PackageMacos {
         eprintln!("Setting default keychain...");
         ensure!(
             Command::new("security")
-                .args(&["default-keychain", "-d", "user", "-s"])
+                .args(["default-keychain", "-d", "user", "-s"])
                 .arg(keychain_name)
                 .status()
                 .context("could not start command security")?
@@ -137,7 +136,7 @@ impl PackageMacos {
         eprintln!("Unlocking keychain...");
         ensure!(
             Command::new("security")
-                .args(&["unlock-keychain", "-p"])
+                .args(["unlock-keychain", "-p"])
                 .arg(&self.keychain_password)
                 .arg(keychain_name)
                 .status()
@@ -148,7 +147,7 @@ impl PackageMacos {
 
         eprintln!("Verifying keychain is set up correctly...");
         let output = Command::new("security")
-            .args(&["find-identity", "-v", "-p", "codesigning"])
+            .args(["find-identity", "-v", "-p", "codesigning"])
             .stderr(Stdio::inherit())
             .output()
             .context("could not start command security")?;
@@ -164,10 +163,10 @@ impl PackageMacos {
             Command::new("codesign")
                 .arg("--sign")
                 .arg(&self.apple_team_id)
-                .args(&["--options", "runtime", "--entitlements"])
+                .args(["--options", "runtime", "--entitlements"])
                 .arg(&entitlements)
-                .args(&["--force", "--timestamp"])
-                .arg(&release_path)
+                .args(["--force", "--timestamp"])
+                .arg(release_path)
                 .arg("-v")
                 .status()
                 .context("could not start command codesign")?
@@ -178,8 +177,8 @@ impl PackageMacos {
         eprintln!("Signing code (step 2)...");
         ensure!(
             Command::new("codesign")
-                .args(&["-vvv", "--deep", "--strict"])
-                .arg(&release_path)
+                .args(["-vvv", "--deep", "--strict"])
+                .arg(release_path)
                 .status()
                 .context("could not start command codesign")?
                 .success(),
@@ -201,7 +200,7 @@ impl PackageMacos {
         zip.start_file(path.to_str().unwrap(), options)?;
         std::io::copy(
             &mut std::io::BufReader::new(
-                std::fs::File::open(&release_path).context("could not open file")?,
+                std::fs::File::open(release_path).context("could not open file")?,
             ),
             &mut zip,
         )?;
@@ -209,7 +208,7 @@ impl PackageMacos {
 
         eprintln!("Beginning notarization process...");
         let output = Command::new("xcrun")
-            .args(&["altool", "--notarize-app", "--primary-bundle-id"])
+            .args(["altool", "--notarize-app", "--primary-bundle-id"])
             .arg(&self.primary_bundle_id)
             .arg("--username")
             .arg(&self.apple_username)
@@ -219,7 +218,7 @@ impl PackageMacos {
             .arg(&self.apple_team_id)
             .arg("--file")
             .arg(&dist_zip)
-            .args(&["--output-format", "json"])
+            .args(["--output-format", "json"])
             .stderr(Stdio::inherit())
             .output()
             .context("could not start command xcrun")?;
@@ -235,21 +234,21 @@ impl PackageMacos {
             .unwrap()
             .as_str()
             .unwrap();
-        eprintln!("Success message: {}", success_message);
-        eprintln!("Request UUID: {}", request_uuid);
+        eprintln!("Success message: {success_message}");
+        eprintln!("Request UUID: {request_uuid}");
 
         let start_time = std::time::Instant::now();
         let duration = std::time::Duration::from_secs(60 * 5);
         let result = loop {
             eprintln!("Checking notarization status...");
             let output = Command::new("xcrun")
-                .args(&["altool", "--notarization-info"])
+                .args(["altool", "--notarization-info"])
                 .arg(request_uuid)
                 .arg("--username")
                 .arg(&self.apple_username)
                 .arg("--password")
                 .arg(&self.notarization_password)
-                .args(&["--output-format", "json"])
+                .args(["--output-format", "json"])
                 .stderr(Stdio::inherit())
                 .output()
                 .context("could not start command xcrun")?;

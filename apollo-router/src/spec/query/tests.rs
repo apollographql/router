@@ -309,6 +309,37 @@ fn reformat_response_data_inline_fragment() {
 }
 
 #[test]
+fn typename_with_alias() {
+    let schema = "type Query {
+        getStuff: Stuff
+      }
+
+      type Stuff {
+          stuff: Bar
+      }
+      type Bar {
+          bar: String
+      }";
+    let query = "{ getStuff { stuff{bar} } __0_typename: __typename }";
+
+    FormatTest::builder()
+        .schema(schema)
+        .query(query)
+        .response(json! {
+            {"getStuff": { "stuff": {"bar": "2"}}}
+        })
+        .expected(json! {{
+            "getStuff": {
+                "stuff": {
+                    "bar": "2",
+                },
+            },
+            "__0_typename": "Query"
+        }})
+        .test();
+}
+
+#[test]
 fn inline_fragment_on_top_level_operation() {
     let schema = "type Query {
         get: Test
@@ -956,6 +987,45 @@ fn solve_query_with_single_typename() {
 }
 
 #[test]
+fn solve_query_with_aliased_typename() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }",
+        )
+        .query("{ aliased: __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "aliased": "Query"
+        }})
+        .test();
+}
+
+#[test]
+fn solve_query_with_multiple_typenames() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }",
+        )
+        .query("{ aliased: __typename __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "aliased": "Query",
+            "__typename": "Query"
+        }})
+        .test();
+}
+
+#[test]
 fn reformat_response_query_with_root_typename() {
     FormatTest::builder()
         .schema(
@@ -980,6 +1050,116 @@ fn reformat_response_query_with_root_typename() {
             },
             "__typename": "Query",
         }})
+        .test();
+}
+
+#[test]
+fn reformat_response_interface_typename_not_queried() {
+    // With the introduction of @interfaceObject, a subgraph can send back a typename that
+    // correspond to an interface in the supergraph. As long as that typename is not requested,
+    // we want this to be fine and to prevent formatting of the response.
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                i: I
+            }
+            interface I {
+                x: String
+            }
+            type A implements I {
+                x: String
+            }",
+        )
+        .query("{i{x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "I",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{
+            "i": {
+                "x": "foo",
+            },
+        }})
+        .test();
+}
+
+#[test]
+fn reformat_response_interface_typename_queried() {
+    // As mentioned in the previous test, the introduction of @interfaceObject makes it possible
+    // for a subgraph to send back a typename that correspond to an interface in the supergraph.
+    // If that typename is queried, then the query planner will ensure that such typename is
+    // replaced (overriden to a proper object type of the supergraph by a followup fetch). But
+    // as that later fetch can fail, we can have to format a response where the typename is
+    // requested and is still set to the interface. We must not return that value (it's invalid
+    // graphQL) and instead nullify the response in that case.
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                i: I
+            }
+            interface I {
+                x: String
+            }
+            type A implements I {
+                x: String
+            }",
+        )
+        .query("{i{__typename x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "I",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{
+            "i": null,
+        }})
+        .test();
+}
+
+#[test]
+fn reformat_response_unknown_typename() {
+    // If in a response we get a typename for a completely unknown type name, then we should
+    // nullify the object as something is off, and in the worst case we could be inadvertently
+    // leaking some @inaccessible type (or the subgraph is simply drunk but nullifying is fine too
+    // then). This should happen whether the actual __typename is queried or not.
+    let schema = "
+      type Query {
+          i: I
+      }
+      interface I {
+          x: String
+      }
+      type A implements I {
+          x: String
+      }";
+
+    // Without __typename queried
+    FormatTest::builder()
+        .schema(schema)
+        .query("{i{x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "X",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{ "i": null, }})
+        .test();
+
+    // With __typename queried
+    FormatTest::builder()
+        .schema(schema)
+        .query("{i{__typename x}}")
+        .response(json! {{
+            "i": {
+                "__typename": "X",
+                "x": "foo",
+            }
+        }})
+        .expected(json! {{ "i": null, }})
         .test();
 }
 
@@ -2882,7 +3062,10 @@ fn it_parses_default_floats() {
         "#,
     );
 
-    Schema::parse(&schema, &Default::default()).unwrap();
+    let schema = Schema::parse(&schema, &Default::default()).unwrap();
+    let (_field_type, value) =
+        &schema.input_types["WithAllKindsOfFloats"].fields["a_float_that_doesnt_fit_an_int"];
+    assert_eq!(value.as_ref().unwrap().as_i64().unwrap(), 9876543210);
 }
 
 #[test]
@@ -5201,4 +5384,42 @@ fn test_error_path_works_across_inline_fragments() {
         None,
         &Path::from("rootType/edges/0/node/subType/edges/0/node/myField")
     ));
+}
+
+#[test]
+fn test_query_not_named_query() {
+    let config = Default::default();
+    let schema = Schema::parse(
+        r#"
+        schema
+            @core(feature: "https://specs.apollo.dev/core/v0.1")
+            @core(feature: "https://specs.apollo.dev/join/v0.1")
+            @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+            {
+            query: TheOneAndOnlyQuery
+        }
+        directive @core(feature: String!) repeatable on SCHEMA
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+        enum join__Graph {
+            TEST @join__graph(name: "test", url: "http://localhost:4001/graphql")
+        }
+
+        type TheOneAndOnlyQuery { example: Boolean }
+        "#,
+        &config,
+    )
+    .unwrap();
+    let query = Query::parse("{ example }", &schema, &config).unwrap();
+    let selection = &query.operations[0].selection_set[0];
+    assert!(
+        matches!(
+            selection,
+            Selection::Field {
+                field_type: FieldType::Boolean,
+                ..
+            }
+        ),
+        "unexpected selection {selection:?}"
+    );
 }

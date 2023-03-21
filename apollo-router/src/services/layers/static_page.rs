@@ -108,9 +108,8 @@ fn prefers_html(headers: &HeaderMap) -> bool {
 
 /// Configuration options pertaining to the sandbox page.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, default)]
 pub(crate) struct Sandbox {
-    #[serde(default = "default_sandbox")]
     pub(crate) enabled: bool,
 }
 
@@ -136,10 +135,14 @@ impl Default for Sandbox {
 
 #[derive(Template)]
 #[template(path = "sandbox_index.html")]
-struct SandboxTemplate {}
+struct SandboxTemplate {
+    apollo_router_version: &'static str,
+}
 
 pub(crate) fn sandbox_page_content() -> String {
-    let template = SandboxTemplate {};
+    let template = SandboxTemplate {
+        apollo_router_version: std::env!("CARGO_PKG_VERSION"),
+    };
     template.render().expect("cannot fail")
 }
 

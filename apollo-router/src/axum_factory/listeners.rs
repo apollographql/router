@@ -12,17 +12,17 @@ use futures::channel::oneshot;
 use futures::prelude::*;
 use hyper::server::conn::Http;
 use multimap::MultiMap;
-use tokio::net::TcpListener;
 #[cfg(unix)]
 use tokio::net::UnixListener;
+use tokio::sync::mpsc;
 use tokio::sync::Notify;
 
 use crate::configuration::Configuration;
-use crate::configuration::ListenAddr;
 use crate::http_server_factory::Listener;
 use crate::http_server_factory::NetworkStream;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
+use crate::ListenAddr;
 
 #[derive(Clone, Debug)]
 pub(crate) struct ListenAddrAndRouter(pub(crate) ListenAddr, pub(crate) Router);
@@ -163,11 +163,7 @@ pub(super) async fn get_extra_listeners(
         // if we received a TCP listener, reuse it, otherwise create a new one
         #[cfg_attr(not(unix), allow(unused_mut))]
         let listener = match listen_addr.clone() {
-            ListenAddr::SocketAddr(addr) => Listener::Tcp(
-                TcpListener::bind(addr)
-                    .await
-                    .map_err(ApolloRouterError::ServerCreationError)?,
-            ),
+            ListenAddr::SocketAddr(addr) => Listener::new_from_socket_addr(addr, None).await?,
             #[cfg(unix)]
             ListenAddr::UnixSocket(path) => Listener::Unix(
                 UnixListener::bind(path).map_err(ApolloRouterError::ServerCreationError)?,
@@ -186,7 +182,9 @@ pub(super) async fn get_extra_listeners(
 
 pub(super) fn serve_router_on_listen_addr(
     mut listener: Listener,
+    address: ListenAddr,
     router: axum::Router,
+    all_connections_stopped_sender: mpsc::Sender<()>,
 ) -> (impl Future<Output = Listener>, oneshot::Sender<()>) {
     let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
     // this server reproduces most of hyper::server::Server's behaviour
@@ -200,6 +198,8 @@ pub(super) fn serve_router_on_listen_addr(
         let connection_shutdown = Arc::new(Notify::new());
         let mut max_open_file_warning = None;
 
+        let address = address.to_string();
+
         loop {
             tokio::select! {
                 _ = &mut shutdown_receiver => {
@@ -208,6 +208,7 @@ pub(super) fn serve_router_on_listen_addr(
                 res = listener.accept() => {
                     let app = router.clone();
                     let connection_shutdown = connection_shutdown.clone();
+                    let connection_stop_signal = all_connections_stopped_sender.clone();
 
                     match res {
                         Ok(res) => {
@@ -216,7 +217,16 @@ pub(super) fn serve_router_on_listen_addr(
                                 max_open_file_warning = None;
                             }
 
+                            tracing::info!(
+                                counter.apollo_router_session_count_total = 1,
+                                listener = &address
+                            );
+
+                            let address = address.clone();
                             tokio::task::spawn(async move {
+                                // this sender must be moved into the session to track that it is still running
+                                let _connection_stop_signal = connection_stop_signal;
+
                                 match res {
                                     NetworkStream::Tcp(stream) => {
                                         stream
@@ -226,6 +236,7 @@ pub(super) fn serve_router_on_listen_addr(
                                             );
                                             let connection = Http::new()
                                             .http1_keep_alive(true)
+                                            .http1_header_read_timeout(Duration::from_secs(10))
                                             .serve_connection(stream, app);
 
                                         tokio::pin!(connection);
@@ -265,8 +276,46 @@ pub(super) fn serve_router_on_listen_addr(
                                                 let _= connection.await;
                                             }
                                         }
+                                    },
+                                    NetworkStream::Tls(stream) => {
+                                        stream.get_ref().0
+                                            .set_nodelay(true)
+                                            .expect(
+                                                "this should not fail unless the socket is invalid",
+                                            );
+
+                                            let protocol = stream.get_ref().1.alpn_protocol();
+                                            let http2 = protocol == Some(&b"h2"[..]);
+
+                                            let connection = Http::new()
+                                            .http1_keep_alive(true)
+                                            .http1_header_read_timeout(Duration::from_secs(10))
+                                            .http2_only(http2)
+                                            .serve_connection(stream, app);
+
+                                        tokio::pin!(connection);
+                                        tokio::select! {
+                                            // the connection finished first
+                                            _res = &mut connection => {
+                                            }
+                                            // the shutdown receiver was triggered first,
+                                            // so we tell the connection to do a graceful shutdown
+                                            // on the next request, then we wait for it to finish
+                                            _ = connection_shutdown.notified() => {
+                                                let c = connection.as_mut();
+                                                c.graceful_shutdown();
+
+                                                let _= connection.await;
+                                            }
+                                        }
                                     }
                                 }
+
+                                tracing::info!(
+                                    counter.apollo_router_session_count_total = -1,
+                                    listener = &address
+                                );
+
                             });
                         }
 
@@ -305,8 +354,23 @@ pub(super) fn serve_router_on_listen_addr(
                                 continue;
                             }
 
+                            // ignored errors, these should not happen with accept()
+                            std::io::ErrorKind::NotFound |
+                            std::io::ErrorKind::AddrInUse |
+                            std::io::ErrorKind::AddrNotAvailable |
+                            std::io::ErrorKind::BrokenPipe|
+                            std::io::ErrorKind::AlreadyExists |
+                            std::io::ErrorKind::InvalidData |
+                            std::io::ErrorKind::WriteZero |
+                            std::io::ErrorKind::Unsupported |
+                            std::io::ErrorKind::UnexpectedEof |
+                            std::io::ErrorKind::OutOfMemory => {
+                                continue;
+                            }
+
                             // EPROTO, EOPNOTSUPP, EBADF, EFAULT, EMFILE, ENOBUFS, ENOMEM, ENOTSOCK
-                            std::io::ErrorKind::Other => {
+                            // We match on _ because max open file errors fall under ErrorKind::Uncategorized
+                            _ => {
                                 match e.raw_os_error() {
                                     Some(libc::EMFILE) | Some(libc::ENFILE) => {
                                         match max_open_file_warning {
@@ -314,30 +378,15 @@ pub(super) fn serve_router_on_listen_addr(
                                                 tracing::error!("reached the max open file limit, cannot accept any new connection");
                                                 max_open_file_warning = Some(Instant::now());
                                             }
-                                            Some(last) => if Instant::now() - last < Duration::from_secs(60) {
+                                            Some(last) => if Instant::now() - last > Duration::from_secs(60) {
                                                 tracing::error!("still at the max open file limit, cannot accept any new connection");
+                                                max_open_file_warning = Some(Instant::now());
                                             }
                                         }
+                                        tokio::time::sleep(Duration::from_millis(1)).await;
                                     }
                                     _ => {}
                                 }
-                                continue;
-                            }
-
-                            /* we should ignore the remaining errors as they're not supposed
-                            to happen with the accept() call
-                            std::io::ErrorKind::NotFound => todo!(),
-                            std::io::ErrorKind::AddrInUse => todo!(),
-                            std::io::ErrorKind::AddrNotAvailable => todo!(),
-                            std::io::ErrorKind::BrokenPipe => todo!(),
-                            std::io::ErrorKind::AlreadyExists => todo!(),
-                            std::io::ErrorKind::InvalidData => todo!(),
-                            std::io::ErrorKind::WriteZero => todo!(),
-
-                            std::io::ErrorKind::Unsupported => todo!(),
-                            std::io::ErrorKind::UnexpectedEof => todo!(),
-                            std::io::ErrorKind::OutOfMemory => todo!(),*/
-                            _ => {
                                 continue;
                             }
 

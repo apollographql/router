@@ -1,3 +1,7 @@
+"""
+ISO 8601, extended format with nanoseconds, Zulu (or "[+-]seconds" as a string or number relative to now)
+"""
+scalar Timestamp
 type FetchError {
   code: FetchErrorCode!
   message: String!
@@ -16,6 +20,13 @@ type Query {
     "When specified and the result is not newer, `Unchanged` is returned rather `RouterConfigResult`."
     ifAfterId: ID
   ): RouterConfigResponse!
+  "Fetch the current entitlements for a router."
+  routerEntitlements(apiKey: String!, 
+    "When specified and a match for the current entitlements, `Unchanged` is returned rather `EntitlementsResult`."
+    unlessId: ID,
+    "The reference to a graph variant, like `engine@prod` or `engine` (i.e. `engine@current`)."
+    ref: String!
+  ): RouterEntitlementsResponse!
 }
 type RouterConfigResult {
   "Variant-unique identifier."
@@ -27,7 +38,26 @@ type RouterConfigResult {
   "Minimum delay before the next fetch should occur, in seconds."
   minDelaySeconds: Float!
 }
-"Response indicating the router configuration available is not newer than the one passed in `ifAfterId`."
+type RouterEntitlement {
+  "RFC 8037 Ed25519 JWT signed representation of sibling fields."
+  jwt: String!
+  subject: String!
+  "Which audiences this entitlemnt applies to. Cloud and on-premise routers each require the presence of their own audience."
+  audience: [RouterEntitlementAudience!]!
+  "Router should stop serving requests after this time if commercial features are in use."
+  haltAt: Timestamp
+  "Router should warn users after this time if commercial features are in use."
+  warnAt: Timestamp
+}
+type RouterEntitlementsResult {
+  "Unique identifier for this result, to be passed in as `entitlements(unlessId:)`."
+  id: ID!
+  "The best available entitlement if any. May have expired already."
+  entitlement: RouterEntitlement
+  "Minimum delay before the next fetch should occur, in seconds."
+  minDelaySeconds: Float!
+}
+"Response indicating the router configuration available is not newer than the one passed in `ifAfterId`, or the router entitlements currently match `unlessId`."
 type Unchanged {
   "Variant-unique identifier for the configuration that remains in place."
   id: ID!
@@ -35,6 +65,7 @@ type Unchanged {
   minDelaySeconds: Float!
 }
 union RouterConfigResponse = RouterConfigResult | Unchanged | FetchError
+union RouterEntitlementsResponse = RouterEntitlementsResult | Unchanged | FetchError
 enum FetchErrorCode {
   "This token provided is not a valid graph token. Do not retry"
   AUTHENTICATION_FAILED
@@ -49,6 +80,10 @@ enum MessageLevel {
   ERROR
   WARN
   INFO
+}
+enum RouterEntitlementAudience {
+  SELF_HOSTED
+  CLOUD
 }
 "Exposes a URL that specifies the behaviour of this scalar."
 directive @specifiedBy(

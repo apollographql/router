@@ -17,7 +17,9 @@ use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::services::QueryPlannerContent;
-use crate::*;
+use crate::services::QueryPlannerRequest;
+use crate::services::QueryPlannerResponse;
+use crate::Context;
 
 /// A query planner wrapper that caches results.
 ///
@@ -279,14 +281,14 @@ impl std::fmt::Display for CachingQueryKey {
 mod tests {
     use mockall::mock;
     use mockall::predicate::*;
-    use query_planner::QueryPlan;
     use router_bridge::planner::UsageReporting;
     use test_log::test;
     use tower::Service;
 
     use super::*;
     use crate::error::PlanErrors;
-    use crate::query_planner::QueryPlanOptions;
+    use crate::query_planner::QueryPlan;
+    use crate::spec::Query;
 
     mock! {
         #[derive(Debug)]
@@ -381,7 +383,6 @@ mod tests {
                 let query_plan: QueryPlan = QueryPlan {
                     formatted_query_plan: Default::default(),
                     root: serde_json::from_str(test_query_plan!()).unwrap(),
-                    options: QueryPlanOptions::default(),
                     usage_reporting: UsageReporting {
                         stats_report_key: "this is a test report key".to_string(),
                         referenced_fields_by_type: Default::default(),

@@ -3,37 +3,29 @@
 
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::string::ToString;
 use std::time::Duration;
 
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::Method;
 use http::StatusCode;
-use once_cell::sync::Lazy;
-use reqwest::Client;
+use hyper::Body;
+use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde::Serialize;
 use strum_macros::Display;
 use tower::BoxError;
+use tower::Service;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use crate::error::LicenseError;
-use crate::services::apollo_graph_reference;
-use crate::services::apollo_key;
-use crate::tracer::TraceId;
 use crate::Context;
 
-const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
-
-static CLIENT: Lazy<Result<Client, BoxError>> = Lazy::new(|| {
-    apollo_graph_reference().ok_or(LicenseError::MissingGraphReference)?;
-    apollo_key().ok_or(LicenseError::MissingKey)?;
-    Ok(Client::new())
-});
+pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// Version of our externalised data. Rev this if it changes
-const EXTERNALIZABLE_VERSION: u8 = 1;
+pub(crate) const EXTERNALIZABLE_VERSION: u8 = 1;
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
 pub(crate) enum PipelineStep {
@@ -48,6 +40,7 @@ pub(crate) enum PipelineStep {
 }
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum Control {
     Continue,
     Break(u16),
@@ -73,68 +66,62 @@ impl Control {
     }
 }
 
+// TODO: Builder
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct Externalizable<T> {
     pub(crate) version: u8,
     pub(crate) stage: String,
-    pub(crate) control: Control,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) control: Option<Control>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) headers: Option<HashMap<String, Vec<String>>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) body: Option<T>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) context: Option<Context>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) sdl: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) service_name: Option<String>,
 }
 
 impl<T> Externalizable<T>
 where
     T: Debug + DeserializeOwned + Serialize + Send + Sync,
 {
-    pub(crate) fn new(
-        stage: PipelineStep,
-        headers: Option<HashMap<String, Vec<String>>>,
-        body: Option<T>,
-        context: Option<Context>,
-        sdl: Option<String>,
-    ) -> Self {
-        Self {
-            version: EXTERNALIZABLE_VERSION,
-            stage: stage.to_string(),
-            control: Control::default(),
-            id: TraceId::maybe_new().map(|id| id.to_string()),
-            headers,
-            body,
-            context,
-            sdl,
-        }
-    }
-
-    pub(crate) async fn call(self, url: &str, timeout: Option<Duration>) -> Result<Self, BoxError> {
-        let my_client = CLIENT.as_ref().map_err(|e| e.to_string())?.clone();
-        let t = timeout.unwrap_or(DEFAULT_EXTERNALIZATION_TIMEOUT);
-
+    pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
+    where
+        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+            + Clone
+            + Send
+            + Sync
+            + 'static,
+    {
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
-        let response = my_client
-            .post(url)
-            .json(&self)
+
+        let mut request = hyper::Request::builder()
+            .uri(uri)
+            .method(Method::POST)
             .header(ACCEPT, "application/json")
             .header(CONTENT_TYPE, "application/json")
-            .timeout(t)
-            .send()
-            .await?;
+            .body(serde_json::to_vec(&self)?.into())?;
 
-        // Let's process our response
-        let response: Self = response.json().await?;
+        get_text_map_propagator(|propagator| {
+            propagator.inject_context(
+                &tracing::span::Span::current().context(),
+                &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
+            );
+        });
 
-        Ok(response)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::CLIENT;
-
-    #[test]
-    fn it_will_not_externalize_without_environment() {
-        assert!(CLIENT.as_ref().is_err());
+        let response = client.call(request).await?;
+        hyper::body::to_bytes(response.into_body())
+            .await
+            .map_err(BoxError::from)
+            .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
     }
 }
