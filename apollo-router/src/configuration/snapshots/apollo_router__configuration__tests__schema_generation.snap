@@ -8,41 +8,186 @@ expression: "&schema"
   "description": "The configuration for the router.\n\nCan be created through `serde::Deserialize` from various formats, or inline in Rust code with `serde_json::json!` and `serde_json::from_value`.",
   "type": "object",
   "properties": {
+    "apq": {
+      "description": "Configures automatic persisted queries",
+      "default": {
+        "enabled": true,
+        "router": {
+          "cache": {
+            "in_memory": {
+              "limit": 512
+            },
+            "redis": null
+          }
+        },
+        "subgraph": {
+          "all": {
+            "enabled": false
+          },
+          "subgraphs": {}
+        }
+      },
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Activates Automatic Persisted Queries (enabled by default)",
+          "default": true,
+          "type": "boolean"
+        },
+        "router": {
+          "description": "Router level (APQ) configuration",
+          "default": {
+            "cache": {
+              "in_memory": {
+                "limit": 512
+              },
+              "redis": null
+            }
+          },
+          "type": "object",
+          "properties": {
+            "cache": {
+              "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
+              "type": "object",
+              "properties": {
+                "in_memory": {
+                  "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
+                  "type": "object",
+                  "required": [
+                    "limit"
+                  ],
+                  "properties": {
+                    "limit": {
+                      "description": "Number of entries in the Least Recently Used cache",
+                      "type": "integer",
+                      "format": "uint",
+                      "minimum": 1.0
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "redis": {
+                  "description": "Configures and activates the Redis cache",
+                  "default": null,
+                  "type": "object",
+                  "required": [
+                    "urls"
+                  ],
+                  "properties": {
+                    "urls": {
+                      "description": "List of URLs to the Redis cluster",
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "nullable": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "subgraph": {
+          "description": "Configuration options pertaining to the subgraph server component.",
+          "default": {
+            "all": {
+              "enabled": false
+            },
+            "subgraphs": {}
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "options applying to all subgraphs",
+              "default": {
+                "enabled": false
+              },
+              "type": "object",
+              "properties": {
+                "enabled": {
+                  "description": "Enable",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "subgraphs": {
+              "description": "per subgraph options",
+              "default": {},
+              "type": "object",
+              "additionalProperties": {
+                "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "description": "Enable",
+                    "default": false,
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "authentication": {
       "description": "Authentication",
       "type": "object",
       "required": [
-        "experimental"
+        "jwt"
       ],
       "properties": {
-        "experimental": {
-          "description": "The experimental configuration",
+        "jwt": {
+          "description": "The JWT configuration",
           "type": "object",
           "required": [
-            "jwt"
+            "jwks"
           ],
           "properties": {
-            "jwt": {
-              "description": "The JWT configuration",
-              "type": "object",
-              "required": [
-                "jwks_urls"
-              ],
-              "properties": {
-                "header_name": {
-                  "description": "HTTP header expected to contain JWT",
-                  "default": "authorization",
-                  "type": "string"
-                },
-                "header_value_prefix": {
-                  "description": "Header value prefix",
-                  "default": "Bearer",
-                  "type": "string"
-                },
-                "jwks_urls": {
-                  "description": "Retrieve our JWK Sets from these locations",
-                  "type": "array",
-                  "items": {
+            "header_name": {
+              "description": "HTTP header expected to contain JWT",
+              "default": "authorization",
+              "type": "string"
+            },
+            "header_value_prefix": {
+              "description": "Header value prefix",
+              "default": "Bearer",
+              "type": "string"
+            },
+            "jwks": {
+              "description": "List of JWKS used to verify tokens",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "url"
+                ],
+                "properties": {
+                  "issuer": {
+                    "description": "Expected issuer for tokens verified by that JWKS",
+                    "type": "string",
+                    "nullable": true
+                  },
+                  "url": {
+                    "description": "Retrieve the JWK Set",
                     "type": "string"
                   }
                 }
@@ -51,6 +196,240 @@ expression: "&schema"
           }
         }
       }
+    },
+    "coprocessor": {
+      "description": "Configures the externalization plugin",
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "properties": {
+        "router": {
+          "description": "The router stage request/response configuration",
+          "default": {
+            "request": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false
+            },
+            "response": {
+              "headers": false,
+              "context": false,
+              "body": false,
+              "sdl": false
+            }
+          },
+          "type": "object",
+          "properties": {
+            "request": {
+              "description": "The request configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            },
+            "response": {
+              "description": "The response configuration",
+              "default": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "sdl": false
+              },
+              "type": "object",
+              "properties": {
+                "body": {
+                  "description": "Send the body",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "context": {
+                  "description": "Send the context",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "headers": {
+                  "description": "Send the headers",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "sdl": {
+                  "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          }
+        },
+        "subgraph": {
+          "description": "The subgraph stage request/response configuration",
+          "default": {
+            "all": {
+              "request": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "uri": false,
+                "service_name": false
+              },
+              "response": {
+                "headers": false,
+                "context": false,
+                "body": false,
+                "uri": false,
+                "service_name": false
+              }
+            }
+          },
+          "type": "object",
+          "properties": {
+            "all": {
+              "description": "What information is passed to a subgraph request/response stage",
+              "default": {
+                "request": {
+                  "headers": false,
+                  "context": false,
+                  "body": false,
+                  "uri": false,
+                  "service_name": false
+                },
+                "response": {
+                  "headers": false,
+                  "context": false,
+                  "body": false,
+                  "uri": false,
+                  "service_name": false
+                }
+              },
+              "type": "object",
+              "properties": {
+                "request": {
+                  "description": "What information is passed to a subgraph request/response stage",
+                  "default": {
+                    "headers": false,
+                    "context": false,
+                    "body": false,
+                    "uri": false,
+                    "service_name": false
+                  },
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "description": "Send the body",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "context": {
+                      "description": "Send the context",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "headers": {
+                      "description": "Send the headers",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "service_name": {
+                      "description": "Send the service name",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "uri": {
+                      "description": "Send the subgraph URI",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "response": {
+                  "description": "What information is passed to a subgraph request/response stage",
+                  "default": {
+                    "headers": false,
+                    "context": false,
+                    "body": false,
+                    "uri": false,
+                    "service_name": false
+                  },
+                  "type": "object",
+                  "properties": {
+                    "body": {
+                      "description": "Send the body",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "context": {
+                      "description": "Send the context",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "headers": {
+                      "description": "Send the headers",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "service_name": {
+                      "description": "Send the service name",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "uri": {
+                      "description": "Send the subgraph URI",
+                      "default": false,
+                      "type": "boolean"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "timeout": {
+          "description": "The timeout for external requests",
+          "default": {
+            "secs": 1,
+            "nanos": 0
+          },
+          "type": "string"
+        },
+        "url": {
+          "description": "The url you'd like to offload processing to",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
     },
     "cors": {
       "description": "Cross origin request headers.",
@@ -651,96 +1030,6 @@ expression: "&schema"
           "description": "Expose query plan",
           "type": "boolean"
         },
-        "experimental.external": {
-          "description": "Configures the externalization plugin",
-          "type": "object",
-          "required": [
-            "url"
-          ],
-          "properties": {
-            "stages": {
-              "description": "The stages request/response configuration",
-              "default": null,
-              "type": "object",
-              "properties": {
-                "router": {
-                  "description": "The router stage",
-                  "default": null,
-                  "type": "object",
-                  "properties": {
-                    "request": {
-                      "description": "The request configuration",
-                      "default": null,
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "description": "Send the SDL",
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "nullable": true
-                    },
-                    "response": {
-                      "description": "The response configuration",
-                      "default": null,
-                      "type": "object",
-                      "properties": {
-                        "body": {
-                          "description": "Send the body",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "context": {
-                          "description": "Send the context",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "headers": {
-                          "description": "Send the headers",
-                          "default": false,
-                          "type": "boolean"
-                        },
-                        "sdl": {
-                          "description": "Send the SDL",
-                          "default": false,
-                          "type": "boolean"
-                        }
-                      },
-                      "nullable": true
-                    }
-                  },
-                  "nullable": true
-                }
-              },
-              "nullable": true
-            },
-            "timeout": {
-              "description": "The timeout for external requests",
-              "default": null,
-              "type": "string"
-            },
-            "url": {
-              "description": "The url you'd like to offload processing to",
-              "type": "string"
-            }
-          }
-        },
         "experimental.restricted": {
           "description": "Restricted plugin (for testing purposes only)",
           "type": "object",
@@ -813,21 +1102,6 @@ expression: "&schema"
         "path": "/",
         "introspection": false,
         "defer_support": true,
-        "apq": {
-          "enabled": true,
-          "experimental_cache": {
-            "in_memory": {
-              "limit": 512
-            },
-            "redis": null
-          },
-          "subgraph": {
-            "all": {
-              "enabled": false
-            },
-            "subgraphs": {}
-          }
-        },
         "query_planning": {
           "experimental_cache": {
             "in_memory": {
@@ -840,127 +1114,6 @@ expression: "&schema"
       },
       "type": "object",
       "properties": {
-        "apq": {
-          "description": "Configures automatic persisted queries",
-          "default": {
-            "enabled": true,
-            "experimental_cache": {
-              "in_memory": {
-                "limit": 512
-              },
-              "redis": null
-            },
-            "subgraph": {
-              "all": {
-                "enabled": false
-              },
-              "subgraphs": {}
-            }
-          },
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "description": "Activates Automatic Persisted Queries (enabled by default)",
-              "default": true,
-              "type": "boolean"
-            },
-            "experimental_cache": {
-              "description": "Cache configuration",
-              "default": {
-                "in_memory": {
-                  "limit": 512
-                },
-                "redis": null
-              },
-              "type": "object",
-              "required": [
-                "in_memory"
-              ],
-              "properties": {
-                "in_memory": {
-                  "description": "Configures the in memory cache (always active)",
-                  "type": "object",
-                  "required": [
-                    "limit"
-                  ],
-                  "properties": {
-                    "limit": {
-                      "description": "Number of entries in the Least Recently Used cache",
-                      "type": "integer",
-                      "format": "uint",
-                      "minimum": 1.0
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "redis": {
-                  "description": "Configures and activates the Redis cache",
-                  "type": "object",
-                  "required": [
-                    "urls"
-                  ],
-                  "properties": {
-                    "urls": {
-                      "description": "List of URLs to the Redis cluster",
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    }
-                  },
-                  "additionalProperties": false,
-                  "nullable": true
-                }
-              },
-              "additionalProperties": false
-            },
-            "subgraph": {
-              "description": "Configuration options pertaining to the subgraph server component.",
-              "default": {
-                "all": {
-                  "enabled": false
-                },
-                "subgraphs": {}
-              },
-              "type": "object",
-              "properties": {
-                "all": {
-                  "description": "options applying to all subgraphs",
-                  "default": {
-                    "enabled": false
-                  },
-                  "type": "object",
-                  "properties": {
-                    "enabled": {
-                      "description": "Enable",
-                      "default": false,
-                      "type": "boolean"
-                    }
-                  },
-                  "additionalProperties": false
-                },
-                "subgraphs": {
-                  "description": "per subgraph options",
-                  "default": {},
-                  "type": "object",
-                  "additionalProperties": {
-                    "description": "Subgraph level Automatic Persisted Queries (APQ) configuration",
-                    "type": "object",
-                    "properties": {
-                      "enabled": {
-                        "description": "Enable",
-                        "default": false,
-                        "type": "boolean"
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                }
-              }
-            }
-          },
-          "additionalProperties": false
-        },
         "defer_support": {
           "description": "Set to false to disable defer support",
           "default": true,
@@ -1002,19 +1155,22 @@ expression: "&schema"
             "warmed_up_queries": 0
           },
           "type": "object",
-          "required": [
-            "experimental_cache"
-          ],
           "properties": {
             "experimental_cache": {
               "description": "Cache configuration",
+              "default": {
+                "in_memory": {
+                  "limit": 512
+                },
+                "redis": null
+              },
               "type": "object",
-              "required": [
-                "in_memory"
-              ],
               "properties": {
                 "in_memory": {
                   "description": "Configures the in memory cache (always active)",
+                  "default": {
+                    "limit": 512
+                  },
                   "type": "object",
                   "required": [
                     "limit"
@@ -1031,6 +1187,7 @@ expression: "&schema"
                 },
                 "redis": {
                   "description": "Configures and activates the Redis cache",
+                  "default": null,
                   "type": "object",
                   "required": [
                     "urls"
@@ -1040,7 +1197,8 @@ expression: "&schema"
                       "description": "List of URLs to the Redis cluster",
                       "type": "array",
                       "items": {
-                        "type": "string"
+                        "type": "string",
+                        "format": "uri"
                       }
                     }
                   },
@@ -3646,6 +3804,11 @@ expression: "&schema"
                     }
                   }
                 },
+                "enable_span_mapping": {
+                  "description": "Enable datadog span mapping for span name and resource name.",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
                   "default": "default",
@@ -4423,6 +4586,21 @@ expression: "&schema"
               "type": "boolean",
               "nullable": true
             },
+            "experimental_entity_caching": {
+              "description": "Enable entity caching",
+              "type": "object",
+              "required": [
+                "ttl"
+              ],
+              "properties": {
+                "ttl": {
+                  "description": "expiration for all keys",
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false,
+              "nullable": true
+            },
             "experimental_retry": {
               "description": "Retry configuration",
               "type": "object",
@@ -4489,6 +4667,26 @@ expression: "&schema"
           "description": "DEPRECATED, now always enabled: Enable variable deduplication optimization when sending requests to subgraphs (https://github.com/apollographql/router/issues/87)",
           "default": null,
           "type": "boolean",
+          "nullable": true
+        },
+        "experimental_cache": {
+          "description": "Experimental URLs of Redis cache used for subgraph response caching",
+          "default": null,
+          "type": "object",
+          "required": [
+            "urls"
+          ],
+          "properties": {
+            "urls": {
+              "description": "List of URLs to the Redis cluster",
+              "type": "array",
+              "items": {
+                "type": "string",
+                "format": "uri"
+              }
+            }
+          },
+          "additionalProperties": false,
           "nullable": true
         },
         "router": {
@@ -4568,6 +4766,21 @@ expression: "&schema"
               "experimental_enable_http2": {
                 "description": "Enable HTTP2 for subgraphs",
                 "type": "boolean",
+                "nullable": true
+              },
+              "experimental_entity_caching": {
+                "description": "Enable entity caching",
+                "type": "object",
+                "required": [
+                  "ttl"
+                ],
+                "properties": {
+                  "ttl": {
+                    "description": "expiration for all keys",
+                    "type": "string"
+                  }
+                },
+                "additionalProperties": false,
                 "nullable": true
               },
               "experimental_retry": {

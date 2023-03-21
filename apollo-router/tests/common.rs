@@ -54,7 +54,7 @@ pub struct IntegrationTest {
     _subgraphs: wiremock::MockServer,
 }
 
-struct TracedResponder(ResponseTemplate);
+pub(crate) struct TracedResponder(pub(crate) ResponseTemplate);
 
 impl Respond for TracedResponder {
     fn respond(&self, request: &wiremock::Request) -> ResponseTemplate {
@@ -81,6 +81,20 @@ impl IntegrationTest {
         tracer: opentelemetry::sdk::trace::Tracer,
         propagator: P,
         config: &str,
+    ) -> Self {
+        Self::with_mock_responder(tracer, propagator, config,TracedResponder(
+            ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})
+    ))).await
+    }
+
+    pub async fn with_mock_responder<
+        P: TextMapPropagator + Send + Sync + 'static,
+        R: Respond + 'static,
+    >(
+        tracer: opentelemetry::sdk::trace::Tracer,
+        propagator: P,
+        config: &str,
+        responder: R,
     ) -> Self {
         Self::init_telemetry(tracer, propagator);
 
@@ -109,8 +123,7 @@ impl IntegrationTest {
             .await;
 
         Mock::given(method("POST"))
-            .respond_with(TracedResponder(ResponseTemplate::new(200).set_body_json(json!({"data":{"topProducts":[{"name":"Table"},{"name":"Couch"},{"name":"Chair"}]}})
-            )))
+            .respond_with(responder)
             .mount(&subgraphs)
             .await;
 
@@ -243,7 +256,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    pub async fn get_metrics(&self) -> reqwest::Result<String> {
+    pub async fn get_metrics_response(&self) -> reqwest::Result<reqwest::Response> {
         let client = reqwest::Client::new();
 
         let request = client
@@ -253,9 +266,7 @@ impl IntegrationTest {
             .build()
             .unwrap();
 
-        let res = client.execute(request).await?;
-
-        res.text().await
+        client.execute(request).await
     }
 
     #[allow(dead_code)]
@@ -281,7 +292,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    fn pid(&mut self) -> i32 {
+    pub(crate) fn pid(&mut self) -> i32 {
         self.router
             .as_ref()
             .expect("router must have been started")
@@ -313,6 +324,28 @@ impl IntegrationTest {
         }
         self.dump_stack_traces();
         panic!("'{msg}' not detected in logs");
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_metrics_contains(&self, text: &str, duration: Option<Duration>) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                if metrics.contains(text) {
+                    return;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{text}' not detected in metrics\n{last_metrics}");
     }
 
     #[allow(dead_code)]
