@@ -357,6 +357,9 @@ commands:
       - run:
           name: Validate helm manifests
           command: |
+            KUBECONFORM_INSTALL=$(mktemp -d)
+            curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C "${KUBEVAL_INSTALL}" -
+
             TODAY=$(date +"%Y-%m-%d")
 
             CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
@@ -367,10 +370,12 @@ commands:
             echo "${CURRENT_KUBE_VERSIONS}" | while read kube_version; do
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
 
-              kubeval "${TEMPLATE_DIR}/router-${kube_version}.yaml" \
+              "${KUBECONFORM_INSTALL}/kubeconform" \
                 --kubernetes-version "${kube_version}" \
                 --strict \
-                --schema-location https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master
+                --schema-location default \
+                --verbose \
+                "${TEMPLATE_DIR}/router-${kube_version}.yaml"
             done
 
   xtask_check_compliance:
