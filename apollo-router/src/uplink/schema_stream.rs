@@ -54,7 +54,7 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
                 delay: result.min_delay_seconds as u64,
             },
             SupergraphSdlQueryRouterConfig::Unchanged(response) => UplinkResponse::Unchanged {
-                id: None,
+                id: Some(response.id),
                 delay: Some(response.min_delay_seconds as u64),
             },
             SupergraphSdlQueryRouterConfig::FetchError(err) => UplinkResponse::Error {
