@@ -8,39 +8,38 @@ use anyhow::ensure;
 use anyhow::Context;
 use anyhow::Result;
 use serde_json_traversal::serde_json_traversal;
-use structopt::StructOpt;
 use xtask::*;
 
 const ENTITLEMENTS: &str = "macos-entitlements.plist";
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct PackageMacos {
     /// Keychain keychain_password.
-    #[structopt(long)]
+    #[clap(long)]
     keychain_password: String,
 
     /// Certificate bundle in base64.
-    #[structopt(long)]
+    #[clap(long)]
     cert_bundle_base64: String,
 
     /// Certificate bundle keychain_password.
-    #[structopt(long)]
+    #[clap(long)]
     cert_bundle_password: String,
 
     /// Primary bundle ID.
-    #[structopt(long)]
+    #[clap(long)]
     primary_bundle_id: String,
 
     /// Apple team ID.
-    #[structopt(long)]
+    #[clap(long)]
     apple_team_id: String,
 
     /// Apple username.
-    #[structopt(long)]
+    #[clap(long)]
     apple_username: String,
 
     /// Notarization password.
-    #[structopt(long)]
+    #[clap(long)]
     notarization_password: String,
 }
 
