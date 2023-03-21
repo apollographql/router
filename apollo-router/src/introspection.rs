@@ -92,8 +92,14 @@ mod introspection_tests {
 
     #[tokio::test]
     async fn test_plan_cache() {
-        let query_to_test = "this is a test query";
-        let schema = " ";
+        let query_to_test = r#"{
+            __schema {
+              types {
+                name
+              }
+            }
+          }"#;
+        let schema = include_str!("../tests/fixtures/supergraph.graphql");
         let expected_data = Response::builder().data(42).build();
 
         let planner = Arc::new(
