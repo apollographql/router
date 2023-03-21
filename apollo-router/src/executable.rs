@@ -228,7 +228,7 @@ pub struct Opt {
     pub(crate) version: bool,
 }
 
-/// Wrapper so that structop can display the default config path in the help message.
+/// Wrapper so that clap can display the default config path in the help message.
 /// Uses ProjectDirs to get the default location.
 #[derive(Debug)]
 struct ProjectDir {

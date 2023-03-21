@@ -46,7 +46,6 @@ use matching_pull_request::matching_pull_request::Variables;
 use matching_pull_request::MatchingPullRequest;
 use memorable_wordlist;
 use serde::Serialize;
-use structopt::StructOpt;
 use tinytemplate::format_unescaped;
 use tinytemplate::TinyTemplate;
 use xtask::PKG_PROJECT_ROOT;
@@ -87,7 +86,7 @@ impl Command {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Command {
     /// Add a new changeset
     Create(Create),
@@ -186,14 +185,14 @@ impl fmt::Display for Classification {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Create {
     /// Use the current branch as the file name
-    #[structopt(short = "b", long = "--with-branch-name")]
+    #[clap(short = 'b', long = "with-branch-name")]
     with_branch_name: bool,
 
     /// The classification of the changeset
-    #[structopt(short = "c", long = "--class")]
+    #[clap(short = 'c', long = "class")]
     classification: Option<Classification>,
 }
 
