@@ -15,9 +15,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use crate::json_ext::Value;
-
 use self::extensions::Extensions;
+use crate::json_ext::Value;
 
 pub(crate) mod extensions;
 

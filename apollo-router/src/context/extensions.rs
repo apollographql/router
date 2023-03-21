@@ -1,10 +1,12 @@
 // NOTE: this module is taken from tokio's tracing span's extensions
 //       which is taken from https://github.com/hyperium/http/blob/master/src/extensions.rs
 
-use std::any::{Any, TypeId};
+use std::any::Any;
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::fmt;
-use std::hash::{BuildHasherDefault, Hasher};
+use std::hash::BuildHasherDefault;
+use std::hash::Hasher;
 
 type AnyMap = HashMap<TypeId, Box<dyn Any + Send + Sync>, BuildHasherDefault<IdHasher>>;
 
