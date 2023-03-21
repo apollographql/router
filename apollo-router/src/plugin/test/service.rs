@@ -169,3 +169,58 @@ where
         })
     }
 }
+
+#[tokio::test(flavor = "multi_thread")]
+#[should_panic]
+async fn mockservice_catches_panic_on_drop() {
+    use tower::ServiceExt;
+
+    let expected_label = "from_mock_service";
+
+    let mut exec = MockExecutionService::new();
+
+    exec.expect_call()
+        .times(2)
+        .returning(move |req: crate::ExecutionRequest| {
+            Ok(ExecutionResponse::fake_builder()
+                .label(expected_label.to_string())
+                .context(req.context)
+                .build()
+                .unwrap())
+        });
+
+    let execution_service: MockService<ExecutionRequest, ExecutionResponse, tower::BoxError> =
+        MockService::create(move |req| exec.call(req));
+
+    let request = ExecutionRequest::fake_builder().build();
+
+    execution_service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap()
+        .label
+        .unwrap();
+}
+
+#[tokio::test]
+#[should_panic]
+async fn mock_service_requires_multithreaded_runtime() {
+    let expected_label = "from_mock_service";
+
+    let mut exec = MockExecutionService::new();
+
+    exec.expect_call()
+        .times(1)
+        .returning(move |req: crate::ExecutionRequest| {
+            Ok(ExecutionResponse::fake_builder()
+                .label(expected_label.to_string())
+                .context(req.context)
+                .build()
+                .unwrap())
+        });
+
+    MockService::create(move |req| exec.call(req));
+}
