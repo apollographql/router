@@ -13,4 +13,4 @@ We will be improving the robustness of the solution over the next weeks, so this
 
 Note that it is advised against using `APOLLO_UPLINK_ENDPOINTS` to try to cache uplink responses for HA purposes. Each request to uplink sends state, therefore limiting the usefulness of such a cache.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2803
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2803 https://github.com/apollographql/router/pull/2826
