@@ -64,8 +64,14 @@ where
 }
 
 pub(crate) enum Endpoints {
-    Fallback { urls: Vec<Url> },
-    RoundRobin { urls: Vec<Url>, current: usize },
+    Fallback {
+        urls: Vec<Url>,
+    },
+    #[allow(dead_code)]
+    RoundRobin {
+        urls: Vec<Url>,
+        current: usize,
+    },
 }
 
 impl Default for Endpoints {
@@ -83,6 +89,7 @@ impl Endpoints {
     pub(crate) fn fallback(urls: Vec<Url>) -> Self {
         Endpoints::Fallback { urls }
     }
+    #[allow(dead_code)]
     pub(crate) fn round_robin(urls: Vec<Url>) -> Self {
         Endpoints::RoundRobin { urls, current: 0 }
     }
@@ -154,6 +161,10 @@ where
             .await
             {
                 Ok(response) => {
+                    tracing::info!(
+                        counter.apollo_router_uplink_fetch_count_total = 1,
+                        status = "success"
+                    );
                     match response {
                         UplinkResponse::New {
                             id,
@@ -201,6 +212,10 @@ where
                     }
                 }
                 Err(err) => {
+                    tracing::info!(
+                        counter.apollo_router_uplink_fetch_count_total = 1,
+                        status = "failure"
+                    );
                     if let Err(e) = sender.send(Err(err)).await {
                         tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
                         break;
@@ -228,7 +243,6 @@ where
     <Query as graphql_client::GraphQLQuery>::Variables: From<UplinkRequest> + Send + Sync,
     Response: Send + Debug + 'static,
 {
-    let mut unchanged = None;
     for url in urls {
         let now = Instant::now();
         match http_request::<Query>(url.as_str(), request_body, timeout).await {
@@ -244,18 +258,19 @@ where
                 match &response {
                     None => {
                         tracing::info!(
-                            histogram.apollo_router_uplink_duration_seconds =
+                            histogram.apollo_router_uplink_fetch_duration_seconds =
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
-                            "kind" = "empty"
+                            "kind" = "uplink_error",
+                            error = "empty response from uplink",
                         );
                     }
                     Some(UplinkResponse::New { ordering_id, .. })
                         if ordering_id > &last_ordering_id =>
                     {
                         tracing::info!(
-                            histogram.apollo_router_uplink_duration_seconds =
+                            histogram.apollo_router_uplink_fetch_duration_seconds =
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
@@ -265,7 +280,7 @@ where
                     }
                     Some(UplinkResponse::New { .. }) => {
                         tracing::info!(
-                            histogram.apollo_router_uplink_duration_seconds =
+                            histogram.apollo_router_uplink_fetch_duration_seconds =
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
@@ -275,20 +290,24 @@ where
                         tracing::debug!(
                             "ignoring uplink event as is was equal to or older than our last known message. Other endpoints will be tried"
                         );
+                        return Ok(UplinkResponse::Unchanged {
+                            id: None,
+                            delay: None,
+                        });
                     }
                     Some(UplinkResponse::Unchanged { .. }) => {
                         tracing::info!(
-                            histogram.apollo_router_uplink_duration_seconds =
+                            histogram.apollo_router_uplink_fetch_duration_seconds =
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
                             "kind" = "unchanged"
                         );
-                        unchanged = response;
+                        return Ok(response.expect("we are in the some branch, qed"));
                     }
                     Some(UplinkResponse::Error { message, code, .. }) => {
                         tracing::info!(
-                            histogram.apollo_router_uplink_duration_seconds =
+                            histogram.apollo_router_uplink_fetch_duration_seconds =
                                 now.elapsed().as_secs_f64(),
                             query,
                             url = url.to_string(),
@@ -302,7 +321,8 @@ where
             }
             Err(e) => {
                 tracing::info!(
-                    histogram.apollo_router_uplink_duration_seconds = now.elapsed().as_secs_f64(),
+                    histogram.apollo_router_uplink_fetch_duration_seconds =
+                        now.elapsed().as_secs_f64(),
                     query = std::any::type_name::<Query>(),
                     url = url.to_string(),
                     "kind" = "http_error",
@@ -317,7 +337,7 @@ where
             }
         };
     }
-    unchanged.ok_or(Error::FetchFailed)
+    Err(Error::FetchFailed)
 }
 
 async fn http_request<Query>(
@@ -760,38 +780,6 @@ mod test {
             Duration::from_secs(1),
         )
         .take(2)
-        .collect::<Vec<_>>()
-        .await;
-        assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn stream_from_uplink_unchanged_error() {
-        let (mock_server, url1, url2, url3) = init_mock_server().await;
-        MockResponses::builder()
-            .mock_server(&mock_server)
-            .endpoint(&url1)
-            .response(response_ok(1))
-            .response(response_unchanged())
-            .response(response_ok(3))
-            .build()
-            .await;
-
-        MockResponses::builder()
-            .mock_server(&mock_server)
-            .endpoint(&url2)
-            .response(response_ok(2))
-            .build()
-            .await;
-
-        let results = stream_from_uplink::<TestQuery, QueryResult>(
-            "dummy_key".to_string(),
-            "dummy_graph_ref".to_string(),
-            Some(Endpoints::fallback(vec![url1, url2, url3])),
-            Duration::from_secs(0),
-            Duration::from_secs(1),
-        )
-        .take(3)
         .collect::<Vec<_>>()
         .await;
         assert_yaml_snapshot!(results.into_iter().map(to_friendly).collect::<Vec<_>>());

@@ -84,12 +84,15 @@ All cache metrics listed above have the following attributes:
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
 
 #### Uplink
-- `apollo_router_uplink_duration_seconds_bucket` - Uplink request duration, attributes:
+- `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`, or `ignored`)
   - `code`: The error code depending on type (if an error occurred)
   - `error`: The error message (if an error occurred)
+
+- `apollo_router_uplink_fetch_count_total`
+  - `status`: (`success`, `failure`) 
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
 

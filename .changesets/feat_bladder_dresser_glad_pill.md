@@ -2,8 +2,8 @@
 
 Adds metrics for uplink of the format:
 ```
-# HELP apollo_router_uplink uplink
-# TYPE apollo_router_uplink histogram
+# HELP apollo_router_uplink_duration_seconds apollo_router_uplink_duration_seconds
+# TYPE apollo_router_uplink_duration_seconds histogram
 apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.001"} 0
 apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.005"} 0
 apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="0.015"} 0
@@ -17,15 +17,20 @@ apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphS
 apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="5"} 1
 apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="10"} 1
 apollo_router_uplink_duration_seconds_bucket{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql",le="+Inf"} 1
-apollo_router_uplink_duration_seconds_bucket_sum{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"} 0.21680258
-apollo_router_uplink_duration_seconds_bucket_count{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"} 1
+apollo_router_uplink_duration_seconds_sum{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"} 0.228077684
+apollo_router_uplink_duration_seconds_count{kind="unchanged",query="SupergraphSdl",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"} 1
+# HELP apollo_router_uplink_fetch_count_total apollo_router_uplink_fetch_count_total
+# TYPE apollo_router_uplink_fetch_count_total gauge
+apollo_router_uplink_fetch_count_total{service_name="apollo-router",status="success"} 1
 ```
-This is a histogram of duration which contains the following attributes:
+`apollo_router_uplink_duration_seconds_bucket` is a histogram of duration which contains the following attributes:
 * url: the url that was polled
 * query: SupergraphSdl|Entitlement
 * type: new|unchanged|http_error|uplink_error|ignored
 * code: The error code depending on type
 * error: The error message
+
+`apollo_router_uplink_fetch_count_total` is a counter that keeps track of the overall success or failure from fetches to uplink without taking into account fallback.
 
 A limitation of this is that it can't display metrics for the first poll to uplink as telemetry hasn't been set up yet.
 
