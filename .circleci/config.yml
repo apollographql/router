@@ -191,7 +191,7 @@ commands:
           command: |
             # The Rust index takes time to download. Update this daily.
             date +%j > ~/.daily_version
-            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild 
+            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild
             find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
             # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
             # Run this command twice to prevent the log message from ssh from messing with things
@@ -292,7 +292,7 @@ commands:
             if [[ ! -d "$HOME/.cargo" ]]; then
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
-              ./rustup.sh -y --profile minimal --component clippy --component rustfmt 
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
@@ -349,6 +349,30 @@ commands:
           paths:
             - target
 
+  xtask_check_helm:
+    parameters:
+      os:
+        type: string
+    steps:
+      - run:
+          name: Validate helm manifests
+          command: |
+            TODAY=$(date +"%Y-%m-%d")
+
+            CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
+              | yq -o json '.' \
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[0].release')
+
+            TEMPLATE_DIR=$(mktemp -d)
+            echo "${CURRENT_KUBE_VERSIONS}" | while read kube_version; do
+              helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+
+              kubeval "${TEMPLATE_DIR}/router-${kube_version}.yaml" \
+                --kubernetes-version "${kube_version}" \
+                --strict \
+                --schema-location https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master
+            done
+
   xtask_check_compliance:
     steps:
       - restore_cache:
@@ -397,6 +421,22 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_lint
+  check_helm:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - checkout
+      - when:
+          condition:
+            equal: [*rust_linux_executor, << parameters.platform >>]
+          steps:
+            - linux_install_baseline
+            - xtask_check_helm:
+                os: linux
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -640,6 +680,10 @@ workflows:
           matrix:
             parameters:
               platform: [ amd_linux_build ]
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [rust_linux]
       - check_compliance:
           matrix:
             parameters:
