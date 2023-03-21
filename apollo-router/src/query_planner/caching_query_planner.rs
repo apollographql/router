@@ -7,8 +7,6 @@ use std::task;
 
 use futures::future::BoxFuture;
 use router_bridge::planner::UsageReporting;
-use serde::Serialize;
-use serde_json_bytes::value::Serializer;
 use tower::ServiceExt;
 use tracing::Instrument;
 

@@ -37,16 +37,17 @@ impl Hasher for IdHasher {
 /// `Extensions` can be used by `Request` and `Response` to store
 /// extra data derived from the underlying protocol.
 #[derive(Default)]
-pub struct Extensions {
+pub(crate) struct Extensions {
     // If extensions are never used, no need to carry around an empty HashMap.
     // That's 3 words. Instead, this is only 1 word.
     map: Option<Box<AnyMap>>,
 }
 
+#[allow(unused)]
 impl Extensions {
     /// Create an empty `Extensions`.
     #[inline]
-    pub fn new() -> Extensions {
+    pub(crate) fn new() -> Extensions {
         Extensions { map: None }
     }
 
@@ -64,9 +65,9 @@ impl Extensions {
     /// assert!(ext.insert(4u8).is_none());
     /// assert_eq!(ext.insert(9i32), Some(5i32));
     /// ```
-    pub fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
+    pub(crate) fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
         self.map
-            .get_or_insert_with(|| Box::new(HashMap::default()))
+            .get_or_insert_with(Box::default)
             .insert(TypeId::of::<T>(), Box::new(val))
             .and_then(|boxed| {
                 (boxed as Box<dyn Any + 'static>)
@@ -88,7 +89,7 @@ impl Extensions {
     ///
     /// assert_eq!(ext.get::<i32>(), Some(&5i32));
     /// ```
-    pub fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
+    pub(crate) fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.map
             .as_ref()
             .and_then(|map| map.get(&TypeId::of::<T>()))
@@ -107,14 +108,14 @@ impl Extensions {
     ///
     /// assert_eq!(ext.get::<String>().unwrap(), "Hello World");
     /// ```
-    pub fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
+    pub(crate) fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
         self.map
             .as_mut()
             .and_then(|map| map.get_mut(&TypeId::of::<T>()))
             .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
     }
 
-    pub fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
+    pub(crate) fn contains_key<T: Send + Sync + 'static>(&self) -> bool {
         self.map
             .as_ref()
             .map(|map| map.contains_key(&TypeId::of::<T>()))
@@ -134,7 +135,7 @@ impl Extensions {
     /// assert_eq!(ext.remove::<i32>(), Some(5i32));
     /// assert!(ext.get::<i32>().is_none());
     /// ```
-    pub fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
+    pub(crate) fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
         self.map
             .as_mut()
             .and_then(|map| map.remove(&TypeId::of::<T>()))
@@ -159,7 +160,7 @@ impl Extensions {
     /// assert!(ext.get::<i32>().is_none());
     /// ```
     #[inline]
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         if let Some(ref mut map) = self.map {
             map.clear();
         }
@@ -177,7 +178,7 @@ impl Extensions {
     /// assert!(!ext.is_empty());
     /// ```
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.map.as_ref().map_or(true, |map| map.is_empty())
     }
 
@@ -193,7 +194,7 @@ impl Extensions {
     /// assert_eq!(ext.len(), 1);
     /// ```
     #[inline]
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.map.as_ref().map_or(0, |map| map.len())
     }
 }
