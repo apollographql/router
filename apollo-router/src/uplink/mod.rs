@@ -165,7 +165,8 @@ where
                             last_ordering_id = ordering_id;
                             interval = Duration::from_secs(delay);
 
-                            if sender.send(Ok(response)).await.is_err() {
+                            if let Err(e) = sender.send(Ok(response)).await {
+                                tracing::debug!("failed to push to stream. This is likely to be because the router is shutting down: {e}");
                                 break;
                             }
                         }
@@ -189,7 +190,8 @@ where
                             } else {
                                 Err(Error::UplinkErrorNoRetry { code, message })
                             };
-                            if sender.send(err).await.is_err() {
+                            if let Err(e) = sender.send(err).await {
+                                tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
                                 break;
                             }
                             if !retry_later {
@@ -199,7 +201,8 @@ where
                     }
                 }
                 Err(err) => {
-                    if sender.send(Err(err)).await.is_err() {
+                    if let Err(e) = sender.send(Err(err)).await {
+                        tracing::debug!("failed to send error to uplink stream. This is likely to be because the router is shutting down: {e}");
                         break;
                     }
                 }
