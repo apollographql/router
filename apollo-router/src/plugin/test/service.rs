@@ -17,6 +17,7 @@ use hyper::Request as HyperRequest;
 use hyper::Response as HyperResponse;
 use tokio::runtime::Handle;
 use tokio::runtime::RuntimeFlavor;
+use tokio::task::JoinError;
 use tower::Service;
 
 use crate::services::ExecutionRequest;
@@ -115,7 +116,7 @@ where
     Response: Send,
     Error: Send,
 {
-    tx: mpsc::Sender<MockServiceMessage<Request, Response, Error>>,
+    inner: Arc<InnerMockService<Request, Response, Error>>,
 }
 
 impl<Request, Response, Error> Clone for MockService<Request, Response, Error>
@@ -126,7 +127,7 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            tx: self.tx.clone(),
+            inner: self.inner.clone(),
         }
     }
 }
@@ -146,6 +147,7 @@ where
         }
 
         let (tx, mut rx) = mpsc::channel::<MockServiceMessage<Request, Response, Error>>(100);
+        let (drop_tx, drop_rx) = oneshot::channel();
 
         let store_sender = Arc::new(Mutex::new(None));
 
@@ -161,14 +163,17 @@ where
             })
             .await
             {
-                let error = e.try_into_panic().unwrap();
-                println!("task got panic: {:?}", error);
-                let sender = store_sender.lock().await.take().unwrap();
-                let _ = sender.send(Err(error));
+                println!("got join error");
+                drop_tx.send(e).unwrap();
             }
         });
 
-        Self { tx }
+        Self {
+            inner: Arc::new(InnerMockService {
+                tx: Some(tx),
+                drop_rx: Some(drop_rx),
+            }),
+        }
     }
 }
 
@@ -195,7 +200,7 @@ where
     fn call(&mut self, request: Request) -> Self::Future {
         let (sender, receiver) = oneshot::channel();
 
-        let mut tx = self.tx.clone();
+        let mut tx = self.inner.tx.clone().unwrap();
 
         Box::pin(async move {
             tx.send((request, sender))
@@ -207,6 +212,36 @@ where
                 .expect("oneshot sender dropped")
                 .expect("mock service panicked")
         })
+    }
+}
+
+struct InnerMockService<Request, Response, Error>
+where
+    Request: Send,
+    Response: Send,
+    Error: Send,
+{
+    tx: Option<mpsc::Sender<MockServiceMessage<Request, Response, Error>>>,
+    drop_rx: Option<oneshot::Receiver<JoinError>>,
+}
+
+impl<Request, Response, Error> Drop for InnerMockService<Request, Response, Error>
+where
+    Request: Send,
+    Response: Send,
+    Error: Send,
+{
+    fn drop(&mut self) {
+        println!("will drop tx");
+        drop(self.tx.take());
+        //std::thread::sleep(std::time::Duration::from_millis(100));
+        println!("will try to receive");
+        match self.drop_rx.take().unwrap().try_recv() {
+            Ok(e) => panic!("MockService panicked: {e:?}"),
+            res => {
+                println!("did not receive")
+            }
+        }
     }
 }
 
