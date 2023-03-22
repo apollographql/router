@@ -787,7 +787,6 @@ fn set_true() -> bool {
 }
 
 #[test]
-#[cfg(unix)]
 fn test_subgraph_override() {
     let settings = SchemaSettings::draft2019_09().with(|s| {
         s.option_nullable = true;
@@ -796,8 +795,7 @@ fn test_subgraph_override() {
     });
     let gen = settings.into_generator();
     let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
-    println!("{}", serde_json::to_string_pretty(&schema).unwrap());
-    //panic!()
+    insta::assert_json_snapshot!(schema);
 }
 
 #[test]
