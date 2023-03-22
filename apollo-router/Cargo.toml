@@ -212,7 +212,7 @@ uname = "0.1.1"
 
 [dev-dependencies]
 ecdsa = { version = "0.15.1", features = ["signing", "pem", "pkcs8"] }
-fred = "6.0.0-beta.2"
+fred = "6.0.0"
 redis = { version = "0.21.7", features = ["tokio-comp"] }
 futures-test = "0.3.27"
 insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
