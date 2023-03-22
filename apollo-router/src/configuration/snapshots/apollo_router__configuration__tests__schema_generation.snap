@@ -143,8 +143,7 @@ expression: "&schema"
                 "additionalProperties": false
               }
             }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -4508,8 +4507,7 @@ expression: "&schema"
                 "additionalProperties": false
               }
             }
-          },
-          "additionalProperties": false
+          }
         },
         "supergraph": {
           "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
