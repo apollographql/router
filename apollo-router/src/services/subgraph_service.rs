@@ -287,7 +287,7 @@ async fn call_http(
         .headers_mut()
         .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS);
 
-    let schema_uri = request.uri().clone();
+    let schema_uri = request.uri();
     let host = schema_uri.host().unwrap_or_default();
     let port = schema_uri.port_u16().unwrap_or_else(|| {
         let scheme = schema_uri.scheme_str();

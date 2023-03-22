@@ -254,8 +254,6 @@ async fn plan_query(
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
-            graphql.document = body.query.as_deref().unwrap_or_default(),
-            graphql.operation.name = body.operation_name.as_deref().unwrap_or_default(),
             "otel.kind" = "INTERNAL"
         ))
         .await
