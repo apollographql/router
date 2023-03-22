@@ -122,6 +122,22 @@ expression: get_spans()
             }
           },
           "children": {
+            "apollo_router::services::router_service::receive_body": {
+              "name": "apollo_router::services::router_service::receive_body",
+              "record": {
+                "entries": [],
+                "metadata": {
+                  "name": "receive_body",
+                  "target": "apollo_router::services::router_service",
+                  "level": "DEBUG",
+                  "module_path": "apollo_router::services::router_service",
+                  "fields": {
+                    "names": []
+                  }
+                }
+              },
+              "children": {}
+            },
             "apollo_router::plugins::telemetry::supergraph": {
               "name": "apollo_router::plugins::telemetry::supergraph",
               "record": {
@@ -174,14 +190,6 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "graphql.document",
-                        "{ topProducts { name name2:name } }"
-                      ],
-                      [
-                        "graphql.operation.name",
-                        ""
-                      ],
-                      [
                         "otel.kind",
                         "INTERNAL"
                       ],
@@ -229,8 +237,6 @@ expression: get_spans()
                       "module_path": "apollo_router::services::supergraph_service",
                       "fields": {
                         "names": [
-                          "graphql.document",
-                          "graphql.operation.name",
                           "otel.kind"
                         ]
                       }
