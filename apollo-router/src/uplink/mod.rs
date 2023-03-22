@@ -17,8 +17,8 @@ pub(crate) mod entitlement;
 pub(crate) mod entitlement_stream;
 pub(crate) mod schema_stream;
 
-const GCP_URL: &str = "https://uplink.api.apollographql.com/graphql";
-const AWS_URL: &str = "https://aws.uplink.api.apollographql.com/graphql";
+const GCP_URL: &str = "https://uplink.api.apollographql.com";
+const AWS_URL: &str = "https://aws.uplink.api.apollographql.com";
 
 #[derive(Debug, Error)]
 pub(crate) enum Error {
