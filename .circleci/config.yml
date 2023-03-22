@@ -14,6 +14,10 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
+  amd_linux_helm: &amd_linux_helm_executor
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
@@ -359,7 +363,7 @@ commands:
 
             # Install kubeconform
             KUBECONFORM_INSTALL=$(mktemp -d)
-            curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C "${KUBECONFORM_INSTALL}" -
+            curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C "${KUBECONFORM_INSTALL}"
 
             # Create list of kube versions
             CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
@@ -439,10 +443,12 @@ jobs:
         type: executor
     executor: << parameters.platform >>
     steps:
-      - checkout
-      - setup_environment:
-          platform: << parameters.platform >>
-      - xtask_check_helm
+      - when:
+          condition:
+            equal: [*amd_linux_helm_executor, << parameters.platform >>]
+          steps:
+            - checkout
+            - xtask_check_helm
 
   check_compliance:
     environment:
@@ -690,7 +696,7 @@ workflows:
       - check_helm:
           matrix:
             parameters:
-              platform: [ amd_linux_build ]
+              platform: [ amd_linux_helm ]
       - check_compliance:
           matrix:
             parameters:
