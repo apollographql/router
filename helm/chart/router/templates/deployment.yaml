@@ -101,7 +101,7 @@ spec:
             httpGet:
               path: "/health"
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
-              initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
+            initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
               path: "/health"
