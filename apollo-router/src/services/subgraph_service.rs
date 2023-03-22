@@ -288,7 +288,7 @@ async fn call_http(
         .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS);
 
     let schema_uri = request.uri().clone();
-    let host = schema_uri.host().map(String::from).unwrap_or_default();
+    let host = schema_uri.host().unwrap_or_default();
     let port = schema_uri.port_u16().unwrap_or_else(|| {
         let scheme = schema_uri.scheme_str();
         if scheme == Some("https") {
@@ -308,17 +308,17 @@ async fn call_http(
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
     }
 
-    let path = schema_uri.path().to_string();
+    let path = schema_uri.path();
 
     let subgraph_req_span = tracing::info_span!("subgraph_request",
         "otel.kind" = "CLIENT",
-        "net.peer.name" = &display(host),
-        "net.peer.port" = &display(port),
-        "http.route" = &display(path),
-        "http.url" = &display(schema_uri),
+        "net.peer.name" = %host,
+        "net.peer.port" = %port,
+        "http.route" = %path,
+        "http.url" = %schema_uri,
         "net.transport" = "ip_tcp",
         "apollo.subgraph.name" = %service_name,
-        "graphql.operation.name" = &display(operation_name)
+        "graphql.operation.name" = %operation_name,
     );
     get_text_map_propagator(|propagator| {
         propagator.inject_context(

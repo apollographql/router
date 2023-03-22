@@ -254,12 +254,8 @@ async fn plan_query(
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
-            graphql.document = body
-                .query
-                .clone()
-                .expect("the query presence was already checked by a plugin")
-                .as_str(),
-            graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
+            graphql.document = body.query.as_deref().unwrap_or_default(),
+            graphql.operation.name = body.operation_name.as_deref().unwrap_or_default(),
             "otel.kind" = "INTERNAL"
         ))
         .await

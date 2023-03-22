@@ -403,20 +403,20 @@ impl Plugin for Telemetry {
                     .subgraph_request
                     .body()
                     .query
-                    .clone()
+                    .as_deref()
                     .unwrap_or_default();
                 let operation_name = req
                     .subgraph_request
                     .body()
                     .operation_name
-                    .clone()
+                    .as_deref()
                     .unwrap_or_default();
 
                 info_span!(
                     SUBGRAPH_SPAN_NAME,
                     "apollo.subgraph.name" = name.as_str(),
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
+                    graphql.document = query,
+                    graphql.operation.name = operation_name,
                     "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = field::Empty
                 )
@@ -642,18 +642,18 @@ impl Telemetry {
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
-            let query = http_request.body().query.clone().unwrap_or_default();
+            let query = http_request.body().query.as_deref().unwrap_or_default();
             let operation_name = http_request
                 .body()
                 .operation_name
-                .clone()
+                .as_deref()
                 .unwrap_or_default();
 
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
-                graphql.document = query.as_str(),
+                graphql.document = query,
                 // TODO add graphql.operation.type
-                graphql.operation.name = operation_name.as_str(),
+                graphql.operation.name = operation_name,
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,
