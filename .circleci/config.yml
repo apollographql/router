@@ -704,6 +704,8 @@ workflows:
       - test_updated:
           requires:
             - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
@@ -711,6 +713,8 @@ workflows:
       - test:
           requires:
             - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
