@@ -372,7 +372,6 @@ commands:
 
             # Use helm to template our chart against all kube versions
             TEMPLATE_DIR=$(mktemp -d)
-            # echo "${CURRENT_KUBE_VERSIONS}" |: while read kube_version; do
             for kube_version in ${CURRENT_KUBE_VERSIONS}; do
               # Use helm to template our chart against kube_version
               helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
