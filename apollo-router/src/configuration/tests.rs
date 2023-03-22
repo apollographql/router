@@ -7,7 +7,6 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-#[cfg(unix)]
 use schemars::gen::SchemaSettings;
 use serde_json::json;
 use walkdir::DirEntry;
