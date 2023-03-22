@@ -3,6 +3,8 @@ title: Writing native Rust plugins for the Apollo Router
 description: Extend the Apollo Router with custom Rust code
 ---
 
+> ⚠️ **Native Rust plugins are not recommended!** Instead, you should extend your router with a [Rhai script](./rhai/) or [external coprocessor](./coprocessor/).
+
 Your federated graph might have specific requirements that aren't supported by the Apollo Router's built-in [configuration options](../configuration/overview/). For example, you might need to further customize the behavior of:
 
 * Authentication/authorization
