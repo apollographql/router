@@ -5,6 +5,9 @@
 // Read more: https://github.com/hyperium/tonic/issues/1056
 #![allow(clippy::derive_partial_eq_without_eq)]
 
+use std::str::FromStr;
+use std::time::SystemTime;
+
 use graphql_client::GraphQLQuery;
 
 use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
@@ -36,16 +39,23 @@ impl From<UplinkRequest> for supergraph_sdl_query::Variables {
 impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
     fn from(response: supergraph_sdl_query::ResponseData) -> Self {
         match response.router_config {
-            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::Result {
+            SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
+                ordering_id: humantime::Timestamp::from_str(result.id.as_str())
+                    .map(Into::into)
+                    .unwrap_or_else(|e|{
+                        // There's not much we can do if we didn't understand the timestamp from uplink
+                        tracing::error!("uplink response had a malformed system time. This uplink event will be ignored. If you are not using a custom uplink proxy then this is a bug, please report to Apollo. Error was: {}", e);
+                        SystemTime::UNIX_EPOCH
+                    }),
                 response: result.supergraph_sdl,
                 id: result.id,
                 // this will truncate the number of seconds to under u64::MAX, which should be
                 // a large enough delay anyway
                 delay: result.min_delay_seconds as u64,
             },
-            SupergraphSdlQueryRouterConfig::Unchanged => UplinkResponse::Unchanged {
-                id: None,
-                delay: None,
+            SupergraphSdlQueryRouterConfig::Unchanged(response) => UplinkResponse::Unchanged {
+                id: Some(response.id),
+                delay: Some(response.min_delay_seconds as u64),
             },
             SupergraphSdlQueryRouterConfig::FetchError(err) => UplinkResponse::Error {
                 retry_later: err.code == FetchErrorCode::RETRY_LATER,
@@ -64,36 +74,45 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
 
 #[cfg(test)]
 mod test {
+    use std::str::FromStr;
     use std::time::Duration;
 
     use futures::stream::StreamExt;
+    use url::Url;
 
     use crate::uplink::schema_stream::SupergraphSdlQuery;
     use crate::uplink::stream_from_uplink;
+    use crate::uplink::Endpoints;
+    use crate::uplink::AWS_URL;
+    use crate::uplink::GCP_URL;
 
     #[tokio::test]
     async fn integration_test() {
-        if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
-            std::env::var("TEST_APOLLO_KEY"),
-            std::env::var("TEST_APOLLO_GRAPH_REF"),
-        ) {
-            let results = stream_from_uplink::<SupergraphSdlQuery, String>(
-                apollo_key,
-                apollo_graph_ref,
-                None,
-                Duration::from_secs(1),
-                Duration::from_secs(5),
-            )
-            .take(1)
-            .collect::<Vec<_>>()
-            .await;
+        for url in &[GCP_URL, AWS_URL] {
+            if let (Ok(apollo_key), Ok(apollo_graph_ref)) = (
+                std::env::var("TEST_APOLLO_KEY"),
+                std::env::var("TEST_APOLLO_GRAPH_REF"),
+            ) {
+                let results = stream_from_uplink::<SupergraphSdlQuery, String>(
+                    apollo_key,
+                    apollo_graph_ref,
+                    Some(Endpoints::fallback(vec![
+                        Url::from_str(url).expect("url must be valid")
+                    ])),
+                    Duration::from_secs(1),
+                    Duration::from_secs(5),
+                )
+                .take(1)
+                .collect::<Vec<_>>()
+                .await;
 
-            assert!(!results
-                .get(0)
-                .expect("expected one result")
-                .as_ref()
-                .expect("schema should be OK")
-                .is_empty())
+                let schema = results
+                    .get(0)
+                    .unwrap_or_else(|| panic!("expected one result from {}", url))
+                    .as_ref()
+                    .unwrap_or_else(|_| panic!("schema should be OK from {}", url));
+                assert!(schema.contains("type Product"))
+            }
         }
     }
 }
