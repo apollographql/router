@@ -1,6 +1,6 @@
 # Rhai script
 
-Demonstrates extracting body details and header manipulation via Rhai script.
+Demonstrates basic logging using Rhai.
 
 Usage:
 
