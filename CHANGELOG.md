@@ -20,7 +20,7 @@ For monitoring, observability and debugging requirements around Uplink-related b
   - `code`: The error code, depending on `type`
   - `error`: The error message
 
-- `apollo_router_uplink_fetch_count_total`: A _gauge_ that counts the overall success (`status="success"`) or failure (`status="failure"`) counts occur when communicating to Uplink _without_ taking into account fallback.
+- `apollo_router_uplink_fetch_count_total`: A _gauge_ that counts the overall success (`status="success"`) or failure (`status="failure"`) counts that occur when communicating to Uplink _without_ taking into account fallback.
 
 > :warning: The very first poll to Uplink is unable to capture metrics since its so early in the router's lifecycle that telemetry hasn't yet been setup.  We consider this a suitable trade-off and don't want to allow perfect to be the enemy of good.
 
@@ -59,16 +59,16 @@ Uplink is backed by multiple cloud providers to ensure high availability. Howeve
 
 This has not been a problem for most users, as the default mode of operation for the router is to fallback to the secondary Uplink endpoint if the first fails.
 
-The other mode of operation, is round-robin, which is triggered only when setting the `APOLLO_UPLINK_ENDPOINTS` environment variable.  In this mode there is a much higher chance that the router will end up flapping due to disagreement between the Apollo Uplink servers or any user-provided proxies set into this variable.
+The other mode of operation, is round-robin, which is triggered only when setting the `APOLLO_UPLINK_ENDPOINTS` environment variable. In this mode there is a much higher chance that the router will go back and forth between schema versions due to disagreement between the Apollo Uplink servers or any user-provided proxies set into this variable.
 
 This change introduces two fixes:
 
-1. The Router checks uplink messages against the last known message to see if it is newer. Messages that are old are discarded.
+1. The Router checks uplink messages against the last known message to see if it is newer. Older messages are discarded.
 2. The Router will _only_ use fallback strategy. Uplink endpoints are only eventually consistent, and therefore it is better to always poll a primary source of information if available.
 
 We will be improving the robustness of the solution over the next weeks, including via other fixes in this release, so this can be seen as an incremental improvement.
 
-> Note: We advise against using `APOLLO_UPLINK_ENDPOINTS` to try to cache uplink responses for HA purposes. Each request to Uplink currently sends state which limits the usefulness of such a cache.
+> Note: We advise against using `APOLLO_UPLINK_ENDPOINTS` to try to cache uplink responses for high availability purposes. Each request to Uplink currently sends state which limits the usefulness of such a cache.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2803 https://github.com/apollographql/router/pull/2826
 
@@ -150,7 +150,7 @@ We've introduced a new generic wrapper type for _subgraph-level_ configuration, 
 
 - If there's a config in `all`, it applies to all subgraphs. If it is not there, the default values apply
 - If there's a config in `subgraphs` for a specific _named_ subgraph:
-  - the fields it does specify override the fields specified in `all`
+  - the fields it specifies override the fields specified in `all`
   - the fields it does _not_ specify uses the values provided by `all`, or default values, if applicable
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2453
