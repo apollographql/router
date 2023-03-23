@@ -54,7 +54,8 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                 let withdrew = self.budget.withdraw();
                 if withdrew.is_err() {
                     tracing::info!(
-                        monotonic_counter.apollo_router_subgraph_request_retry_break_count = 1u64,
+                        monotonic_counter.apollo_router_subgraph_request_retry_total = 1u64,
+                        status = "aborted",
                         subgraph = %self.subgraph_name,
                     );
 
@@ -62,7 +63,7 @@ impl<Res, E> Policy<subgraph::Request, Res, E> for RetryPolicy {
                 }
 
                 tracing::info!(
-                    monotonic_counter.apollo_router_subgraph_request_retry_attempt_count = 1u64,
+                    monotonic_counter.apollo_router_subgraph_request_retry_total = 1u64,
                     subgraph = %self.subgraph_name,
                 );
 
