@@ -33,7 +33,7 @@ query GetTopProducts {
 
 To respond incrementally, the Apollo Router uses a multipart-encoded HTTP response. To use `@defer` successfully with the Apollo Router, a client's GraphQL library must _also_ support the directive by handling multipart HTTP responses correctly.
 
-The Apollo Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/supported-subgraphs/), because the deferring logic exists entirely within the router itself.
+The Apollo Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/), because the deferring logic exists entirely within the router itself.
 
 ### Basics of `@defer`
 

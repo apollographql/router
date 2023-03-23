@@ -51,7 +51,7 @@ The number of options you currently provide to your `ApolloGateway` constructor 
 
 ### `supergraphSdl`
 
-The [`supergraphSdl` option](/federation/api/apollo-gateway#supergraphsdl) is used in _non_-managed federation to provide a composed supergraph schema via a file or other string. Usually, that schema is composed using the [Rover CLI](/rover/supergraphs/).
+The [`supergraphSdl` option](/apollo-server/using-federation/api/apollo-gateway/#supergraphsdl) is used in _non_-managed federation to provide a composed supergraph schema via a file or other string. Usually, that schema is composed using the [Rover CLI](/rover/commands/supergraphs/).
 
 You can achieve this option's effect with the Apollo Router in one of the following ways:
 
@@ -68,11 +68,11 @@ You can achieve this option's effect with the Apollo Router in one of the follow
 
 If you provide one of these constructor options, your gateway performs its _own_ supergraph schema composition on startup. **The Apollo Router does not support this in-process composition.**
 
-Instead, you need to perform composition using [managed federation](./managed-federation/setup/) or the [Rover CLI](/rover/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
+Instead, you need to perform composition using [managed federation](./managed-federation/setup/) or the [Rover CLI](/rover/commands/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
 
 ### `buildService`
 
-The [`buildService` function](/federation/api/apollo-gateway#buildservice) enables you to customize the HTTP requests that the gateway sends to your subgraphs.
+The [`buildService` function](/apollo-server/using-federation/api/apollo-gateway/#buildservice) enables you to customize the HTTP requests that the gateway sends to your subgraphs.
 
 Common use cases include:
 
@@ -83,7 +83,7 @@ Common use cases include:
 
 ### `logger`
 
-The [`logger` constructor option](/federation/api/apollo-gateway#logger) enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
+The [`logger` constructor option](/apollo-server/using-federation/api/apollo-gateway/#logger) enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
 
 In the Apollo Router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
 
