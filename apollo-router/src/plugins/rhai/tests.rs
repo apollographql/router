@@ -177,11 +177,6 @@ fn it_logs_messages() {
         r#"log_info("info log")"#,
         r#"log_warn("warn log")"#,
         r#"log_error("error log")"#,
-        r#"log_trace("trace log", "tests")"#,
-        r#"log_debug("debug log", "tests")"#,
-        r#"log_info("info log", "tests")"#,
-        r#"log_warn("warn log", "tests")"#,
-        r#"log_error("error log", "tests")"#,
     ];
     for log in input_logs {
         engine.eval::<()>(log).expect("it logged a message");
@@ -205,28 +200,6 @@ fn it_logs_messages() {
     assert!(tracing_test::internal::logs_with_scope_contain(
         "apollo_router",
         "error log"
-    ));
-
-    // tests for including the
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "trace log tests",
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "debug log tests"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log tests"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "warn log tests"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "error log tests"
     ));
 }
 
