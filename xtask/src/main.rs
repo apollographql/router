@@ -1,8 +1,8 @@
 mod commands;
 
-use ansi_term::Colour::Green;
 use anyhow::Result;
 use clap::Parser;
+use nu_ansi_term::Color::Green;
 
 fn main() -> Result<()> {
     let app = Xtask::parse();
