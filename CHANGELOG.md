@@ -62,15 +62,12 @@ This has not been a problem for most users, as the default mode of operation for
 The other mode of operation, is round-robin, which is triggered only when setting the `APOLLO_UPLINK_ENDPOINTS` environment variable. In this mode there is a much higher chance that the router will go back and forth between schema versions due to disagreement between the Apollo Uplink servers or any user-provided proxies set into this variable.
 
 This change introduces two fixes:
-
-1. The Router checks uplink messages against the last known message to see if it is newer. Older messages are discarded.
-2. The Router will _only_ use fallback strategy. Uplink endpoints are only eventually consistent, and therefore it is better to always poll a primary source of information if available.
-
-We will be improving the robustness of the solution over the next weeks, including via other fixes in this release, so this can be seen as an incremental improvement.
+1. The Router will only use fallback strategy. Uplink endpoints are not strongly consistent, and therefore it is better to always poll a primary source of information if available.
+2. Uplink already handled freshness of schema but now also handles entitlement freshness.
 
 > Note: We advise against using `APOLLO_UPLINK_ENDPOINTS` to try to cache uplink responses for high availability purposes. Each request to Uplink currently sends state which limits the usefulness of such a cache.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2803 https://github.com/apollographql/router/pull/2826
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/2803, https://github.com/apollographql/router/pull/2826, https://github.com/apollographql/router/pull/2846
 
 ### Distributed caching: Don't send Redis' `CLIENT SETNAME` ([PR #2825](https://github.com/apollographql/router/pull/2825))
 
