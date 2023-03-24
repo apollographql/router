@@ -256,6 +256,11 @@ async fn call_http(
         subgraph_request, ..
     } = request;
 
+    let operation_name = subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
     let (parts, _) = subgraph_request.into_parts();
 
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
@@ -312,7 +317,8 @@ async fn call_http(
         "http.route" = &display(path),
         "http.url" = &display(schema_uri),
         "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %service_name
+        "apollo.subgraph.name" = %service_name,
+        "graphql.operation.name" = &display(operation_name)
     );
     get_text_map_propagator(|propagator| {
         propagator.inject_context(
