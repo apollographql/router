@@ -1,6 +1,7 @@
 // With regards to ELv2 licensing, this entire file is license key functionality
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::RwLock;
 
@@ -13,6 +14,7 @@ use futures::stream::select_all;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use jsonwebtoken::jwk::JwkSet;
+use jsonwebtoken::Algorithm;
 use mime::APPLICATION_JSON;
 use tokio::fs::read_to_string;
 use tokio::sync::oneshot;
@@ -34,12 +36,14 @@ pub(super) struct JwksManager {
 pub(super) struct JwksConfig {
     pub(super) url: Url,
     pub(super) issuer: Option<String>,
+    pub(super) algorithms: HashSet<Algorithm>,
 }
 
 #[derive(Clone)]
 pub(super) struct JwkSetInfo {
     pub(super) jwks: JwkSet,
     pub(super) issuer: Option<String>,
+    pub(super) algorithms: HashSet<Algorithm>,
 }
 
 impl JwksManager {
@@ -203,6 +207,7 @@ impl<'a> Iterator for Iter<'a> {
                             return Some(JwkSetInfo {
                                 jwks: jwks.clone(),
                                 issuer: config.issuer.clone(),
+                                algorithms: config.algorithms.clone(),
                             });
                         }
                     } else {

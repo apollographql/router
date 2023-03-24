@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 use jsonwebtoken::encode;
@@ -549,7 +550,11 @@ async fn build_jwks_search_components() -> JwksManager {
 
     for s_url in &sets {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
-        urls.push(JwksConfig { url, issuer: None });
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: HashSet::new(),
+        });
     }
 
     JwksManager::new(urls).await.unwrap()
@@ -655,6 +660,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
     let list = vec![JwksConfig {
         url: url.clone(),
         issuer,
+        algorithms: HashSet::new(),
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -838,4 +844,35 @@ async fn issuer_check() {
             println!("claims: {claims:?}");
         }
     }
+}
+
+#[tokio::test]
+async fn it_rejects_key_with_restricted_algorithm() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: HashSet::from([Algorithm::RS256]),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::HS256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria)
+        .expect("search worked")
+        .is_none());
 }

@@ -181,6 +181,14 @@ expression: "&schema"
                   "url"
                 ],
                 "properties": {
+                  "algorithms": {
+                    "description": "List of accepted algorithms. Possible values are HS2356, HS384, HS512, ES256, ES384, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA",
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
                   "issuer": {
                     "description": "Expected issuer for tokens verified by that JWKS",
                     "type": "string",
