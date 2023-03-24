@@ -577,6 +577,15 @@ pub enum PathElement {
     Key(String),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResponsePathElement<'a> {
+    /// An index path element.
+    Index(usize),
+
+    /// A key path element.
+    Key(&'a str),
+}
+
 fn deserialize_flatten<'de, D>(deserializer: D) -> Result<(), D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -671,6 +680,17 @@ impl Path {
                             |name| PathElement::Fragment(name.to_string()),
                         )
                     }
+                })
+                .collect(),
+        )
+    }
+
+    pub fn from_response_slice(s: &[ResponsePathElement]) -> Self {
+        Self(
+            s.iter()
+                .map(|x| match x {
+                    ResponsePathElement::Index(index) => PathElement::Index(*index),
+                    ResponsePathElement::Key(s) => PathElement::Key(s.to_string()),
                 })
                 .collect(),
         )

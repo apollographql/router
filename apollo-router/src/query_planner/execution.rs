@@ -167,7 +167,10 @@ impl PlanNode {
                             parent_value,
                             sender,
                         )
-                        .instrument(tracing::info_span!(FLATTEN_SPAN_NAME, "graphql.path" = %current_dir, "otel.kind" = "INTERNAL"))
+                        .instrument(tracing::info_span!(
+                            FLATTEN_SPAN_NAME,
+                            /*"graphql.path" = %current_dir,*/ "otel.kind" = "INTERNAL"
+                        ))
                         .await;
 
                     value = v;
