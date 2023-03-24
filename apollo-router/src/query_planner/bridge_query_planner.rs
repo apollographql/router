@@ -11,7 +11,8 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use serde_json_bytes::json;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::Service;
 use tracing::Instrument;
 
@@ -23,7 +24,6 @@ use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::query::TYPENAME;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
@@ -215,14 +215,22 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            // If we have only one operation containing a single root field `__typename`
-            if selections.contains_only_typename() {
+            // If we have only one operation containing only the root field `__typename`
+            // (possibly aliased or repeated). (This does mean we fail to properly support
+            // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
+            if let Some(output_keys) = selections
+                .operations
+                .get(0)
+                .and_then(|op| op.is_only_typenames_with_output_keys())
+            {
+                let operation_name = selections.operations[0].kind().to_string();
+                let data: Value = Value::Object(Map::from_iter(
+                    output_keys
+                        .into_iter()
+                        .map(|key| (key, Value::String(operation_name.clone().into()))),
+                ));
                 return Ok(QueryPlannerContent::Introspection {
-                    response: Box::new(
-                        graphql::Response::builder()
-                            .data(json!({TYPENAME: selections.operations[0].kind().to_string()}))
-                            .build(),
-                    ),
+                    response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
                 return self.introspection(key.0).await;
@@ -378,5 +386,55 @@ mod tests {
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
+    }
+
+    #[test(tokio::test)]
+    async fn test_single_aliased_root_typename() {
+        let planner = BridgeQueryPlanner::new(
+            Arc::new(example_schema()),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let result = planner
+            .get(("{ x: __typename }".into(), None))
+            .await
+            .unwrap();
+        if let QueryPlannerContent::Introspection { response } = result {
+            assert_eq!(
+                r#"{"data":{"x":"Query"}}"#,
+                serde_json::to_string(&response).unwrap()
+            )
+        } else {
+            panic!();
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn test_two_root_typenames() {
+        let planner = BridgeQueryPlanner::new(
+            Arc::new(example_schema()),
+            Some(Arc::new(
+                Introspection::new(&Configuration::default()).await,
+            )),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let result = planner
+            .get(("{ x: __typename __typename }".into(), None))
+            .await
+            .unwrap();
+        if let QueryPlannerContent::Introspection { response } = result {
+            assert_eq!(
+                r#"{"data":{"x":"Query","__typename":"Query"}}"#,
+                serde_json::to_string(&response).unwrap()
+            )
+        } else {
+            panic!();
+        }
     }
 }

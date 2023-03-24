@@ -55,7 +55,7 @@ use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
 use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::entitlement_stream::EntitlementQuery;
 use crate::uplink::entitlement_stream::EntitlementStreamExt;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
@@ -255,7 +255,7 @@ impl SchemaSource {
                 stream_from_uplink::<SupergraphSdlQuery, String>(
                     apollo_key,
                     apollo_graph_ref,
-                    urls.map(Endpoints::round_robin),
+                    urls.map(Endpoints::fallback),
                     poll_interval,
                     timeout,
                 )
@@ -531,10 +531,10 @@ impl EntitlementSource {
                 urls,
                 poll_interval,
                 timeout,
-            } => stream_from_uplink::<EntitlementRequest, Entitlement>(
+            } => stream_from_uplink::<EntitlementQuery, Entitlement>(
                 apollo_key,
                 apollo_graph_ref,
-                urls.map(Endpoints::round_robin),
+                urls.map(Endpoints::fallback),
                 poll_interval,
                 timeout,
             )

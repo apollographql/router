@@ -143,8 +143,7 @@ expression: "&schema"
                 "additionalProperties": false
               }
             }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -3805,6 +3804,11 @@ expression: "&schema"
                     }
                   }
                 },
+                "enable_span_mapping": {
+                  "description": "Enable datadog span mapping for span name and resource name.",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "endpoint": {
                   "description": "The endpoint to send to",
                   "default": "default",
@@ -4503,8 +4507,7 @@ expression: "&schema"
                 "additionalProperties": false
               }
             }
-          },
-          "additionalProperties": false
+          }
         },
         "supergraph": {
           "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
