@@ -691,13 +691,13 @@ mod tests {
         {
           query: Query
         }
-        
+
         directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
         directive @join__graph(name: String!, url: String!) on ENUM_VALUE
         directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
         directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
         directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-                
+
         scalar link__Import
         enum link__Purpose {
           SECURITY
@@ -711,9 +711,9 @@ mod tests {
           errorField: String
           nonNullErrorField: String!
         }
-        
+
         scalar join__FieldSet
-        
+
         enum join__Graph {
           COMPUTERS @join__graph(name: "computers", url: "http://localhost:4001/")
         }
@@ -768,8 +768,8 @@ mod tests {
         let request = supergraph::Request::fake_builder()
             .context(defer_context())
             .query(
-                r#"query { 
-                computer(id: "Computer1") {   
+                r#"query {
+                computer(id: "Computer1") {
                   id
                   ...ComputerErrorField @defer
                 }
@@ -1173,55 +1173,55 @@ mod tests {
     query: Query
     mutation: Mutation
   }
-  
+
   directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-  
+
   directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     PRODUCTS @join__graph(name: "products", url: "http://products:4000/graphql")
     USERS @join__graph(name: "users", url: "http://users:4000/graphql")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     SECURITY
     EXECUTION
   }
-  
+
   type MakePaymentResult
     @join__type(graph: USERS)
   {
     id: ID!
     paymentStatus: PaymentStatus
   }
-  
+
   type Mutation
     @join__type(graph: USERS)
   {
     makePayment(userId: ID!): MakePaymentResult!
   }
-  
-  
+
+
  type PaymentStatus
     @join__type(graph: USERS)
   {
     id: ID!
   }
-  
+
   type Query
     @join__type(graph: PRODUCTS)
     @join__type(graph: USERS)
@@ -1399,7 +1399,7 @@ mod tests {
             {
                 query: Query
             }
-        
+
             directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
             directive @join__field(graph: join__Graph!, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
             directive @join__graph(name: String!, url: String!) on ENUM_VALUE
@@ -1407,7 +1407,7 @@ mod tests {
             directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
             directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
             directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
-        
+
             scalar join__FieldSet
             enum join__Graph {
                 USER @join__graph(name: "user", url: "http://localhost:4000/graphql")
@@ -1428,7 +1428,7 @@ mod tests {
             id: ID!
             name: String!
             }
-        
+
             type User implements Identity
                 @join__implements(graph: USER, interface: "Identity")
                 @join__type(graph: USER, key: "id")
@@ -2254,7 +2254,7 @@ mod tests {
           {
             foo: Foo! @join__field(graph: S1)
           }
-          
+
           type Foo
             @join__owner(graph: S1)
             @join__type(graph: S1)
@@ -2262,7 +2262,7 @@ mod tests {
             id: ID! @join__field(graph: S1)
             bar: Bar! @join__field(graph: S1)
           }
-          
+
           type Bar
           @join__owner(graph: S1)
           @join__type(graph: S1, key: "id")

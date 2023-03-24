@@ -1,41 +1,61 @@
 use std::collections::HashMap;
 
+use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) fn print_all_experimental_conf() {
-    let available_exp_confs = serde_json::from_str::<HashMap<String, String>>(include_str!(
-        "../../experimental_features.json"
-    ))
-    .expect("cannot load the list of available experimental configurations");
-
-    let available_exp_confs_str: Vec<String> = available_exp_confs
-        .into_iter()
-        .map(|(used_exp_conf, discussion_link)| format!("\t- {used_exp_conf}: {discussion_link}"))
-        .collect();
-    println!(
-        "List of all experimental configurations with related GitHub discussions:\n\n{}",
-        available_exp_confs_str.join("\n")
-    );
+#[derive(Deserialize)]
+pub(crate) struct Discussed {
+    experimental: HashMap<String, String>,
+    preview: HashMap<String, String>,
 }
 
-pub(crate) fn log_used_experimental_conf(conf: &Value) {
-    let available_discussions = serde_json::from_str::<HashMap<String, String>>(include_str!(
-        "../../experimental_features.json"
-    ));
-    if let Ok(available_discussions) = available_discussions {
-        let used_experimental_conf = get_experimental_configurations(conf);
+impl Discussed {
+    pub(crate) fn new() -> Self {
+        serde_json::from_str(include_str!("../../feature_discussions.json"))
+            .expect("cannot load the list of available discussed configurations")
+    }
+
+    pub(crate) fn print_experimental(&self) {
+        let available_exp_confs_str: Vec<String> = self
+            .experimental
+            .iter()
+            .map(|(used_exp_conf, discussion_link)| {
+                format!("\t- {used_exp_conf}: {discussion_link}")
+            })
+            .collect();
+        println!(
+            "List of all experimental configurations with related GitHub discussions:\n\n{}",
+            available_exp_confs_str.join("\n")
+        );
+    }
+
+    pub(crate) fn print_preview(&self) {
+        let available_confs_str: Vec<String> = self
+            .preview
+            .iter()
+            .map(|(used_conf, discussion_link)| format!("\t- {used_conf}: {discussion_link}"))
+            .collect();
+        println!(
+            "List of all preview configurations with related GitHub discussions:\n\n{}",
+            available_confs_str.join("\n")
+        );
+    }
+
+    pub(crate) fn log_experimental_used(&self, conf: &Value) {
+        let used_experimental_conf = get_configurations(conf, "experimental");
+
         let needed_discussions: Vec<String> = used_experimental_conf
             .into_iter()
             .filter_map(|used_exp_conf| {
-                available_discussions
+                self.experimental
                     .get(&used_exp_conf)
                     .map(|discussion_link| format!("\t- {used_exp_conf}: {discussion_link}"))
             })
             .collect();
         if !needed_discussions.is_empty() {
             tracing::info!(
-                r#"You're using some "experimental" features (configuration prefixed by "experimental_" or contained within an "experimental" section), we may make breaking changes in future releases.
-To help us design the stable version we need your feedback, here is a list of links where you can give your opinion:
+                r#"You're using some "experimental" features (configuration prefixed by "experimental_" or contained within an "experimental" section). We may make breaking changes in future releases.
+To help us design the stable version we need your feedback. Here is a list of links where you can give your opinion:
 
 {}
 "#,
@@ -43,29 +63,39 @@ To help us design the stable version we need your feedback, here is a list of li
             );
         }
     }
+
+    pub(crate) fn log_preview_used(&self, conf: &Value) {
+        let used_preview_conf = get_configurations(conf, "preview");
+
+        let needed_discussions: Vec<String> = used_preview_conf
+            .into_iter()
+            .filter_map(|used_conf| {
+                self.experimental
+                    .get(&used_conf)
+                    .map(|discussion_link| format!("\t- {used_conf}: {discussion_link}"))
+            })
+            .collect();
+        if !needed_discussions.is_empty() {
+            tracing::info!(
+                r#"You're using some "preview" features of the Apollo Router (those which have their configuration prefixed by "preview").  These features are not officially supported with any SLA and may still contain bugs or undergo iteration. You're encouraged to try preview features in test environments to familiarize yourself with upcoming functionality before it reaches general availability. For more information about launch stages, please see the documentation here: https://www.apollographql.com/docs/resources/product-launch-stages/"#,
+            );
+        }
+    }
 }
 
-fn get_experimental_configurations(conf: &Value) -> Vec<String> {
-    let mut experimental_fields = Vec::new();
-    visit_experimental_configurations(conf, &mut experimental_fields);
-
-    experimental_fields
+fn get_configurations(conf: &Value, prefix: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    visit_configurations(conf, prefix, &mut fields);
+    fields
 }
 
-pub(crate) fn visit_experimental_configurations(
-    conf: &Value,
-    experimental_fields: &mut Vec<String>,
-) {
+fn visit_configurations(conf: &Value, prefix: &str, fields: &mut Vec<String>) {
     if let Value::Object(object) = conf {
         object.iter().for_each(|(field_name, val)| {
-            if field_name.starts_with("experimental_") {
-                experimental_fields.push(field_name.clone());
+            if field_name.starts_with(&format!("{}_", prefix)) {
+                fields.push(field_name.clone());
             }
-            // TODO: Remove when JWT authentication is generally available
-            if field_name == "experimental" {
-                experimental_fields.push("experimental_jwt_authentication".to_string());
-            }
-            visit_experimental_configurations(val, experimental_fields);
+            visit_configurations(val, prefix, fields);
         });
     }
 }
@@ -87,7 +117,7 @@ mod tests {
         });
 
         assert_eq!(
-            get_experimental_configurations(&val),
+            get_configurations(&val, "experimental"),
             vec![
                 "experimental_logging".to_string(),
                 "experimental_trace_id".to_string()
