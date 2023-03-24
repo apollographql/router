@@ -4,6 +4,7 @@ version: 2.1
 # across projects.  See https://circleci.com/orbs/ for more information.
 orbs:
   gh: circleci/github-cli@2.2.0
+  slack: circleci/slack@4.12.1
 
 executors:
   amd_linux_build: &amd_linux_build_executor
@@ -13,10 +14,14 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 4
       RUST_TEST_THREADS: 6
+  amd_linux_helm: &amd_linux_helm_executor
+    docker:
+      - image: cimg/base:stable
+    resource_class: small
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.0.8
+      - image: cimg/redis:7.0.9
       - image: jaegertracing/all-in-one:1.42.0
     resource_class: xlarge
     environment:
@@ -190,7 +195,7 @@ commands:
           command: |
             # The Rust index takes time to download. Update this daily.
             date +%j > ~/.daily_version
-            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild 
+            # The checksum of the xtask/src directory, so that when we make changes to xtask we cause a full rebuild
             find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
             # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
             # Run this command twice to prevent the log message from ssh from messing with things
@@ -291,7 +296,7 @@ commands:
             if [[ ! -d "$HOME/.cargo" ]]; then
               curl https://sh.rustup.rs -sSf -o rustup.sh
               chmod 755 ./rustup.sh
-              ./rustup.sh -y --profile minimal --component clippy --component rustfmt 
+              ./rustup.sh -y --profile minimal --component clippy --component rustfmt
             fi
             echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> "$BASH_ENV"
 
@@ -348,6 +353,38 @@ commands:
           paths:
             - target
 
+  xtask_check_helm:
+    steps:
+      - run:
+          name: Validate helm manifests
+          command: |
+            # Install Helm
+            curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+            # Install kubeconform
+            KUBECONFORM_INSTALL=$(mktemp -d)
+            curl -L https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz -C "${KUBECONFORM_INSTALL}"
+
+            # Create list of kube versions
+            CURRENT_KUBE_VERSIONS=$(curl -L https://raw.githubusercontent.com/kubernetes/website/main/data/releases/schedule.yaml \
+              | yq -o json '.' \
+              | jq --raw-output '.schedules[] | select((now | strftime("%Y-%m-%dT00:00:00Z")) as $date | .releaseDate < $date and .endOfLifeDate > $date) | .previousPatches[0].release')
+
+            # Use helm to template our chart against all kube versions
+            TEMPLATE_DIR=$(mktemp -d)
+            for kube_version in ${CURRENT_KUBE_VERSIONS}; do
+              # Use helm to template our chart against kube_version
+              helm template --kube-version "${kube_version}" router helm/chart/router --set autoscaling.enabled=true > "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+
+              # Execute kubeconform on our templated charts to ensure they are good
+              "${KUBECONFORM_INSTALL}/kubeconform" \
+                --kubernetes-version "${kube_version}" \
+                --strict \
+                --schema-location default \
+                --verbose \
+                "${TEMPLATE_DIR}/router-${kube_version}.yaml"
+            done
+
   xtask_check_compliance:
     steps:
       - restore_cache:
@@ -396,6 +433,22 @@ jobs:
       - setup_environment:
           platform: << parameters.platform >>
       - xtask_lint
+
+  check_helm:
+    environment:
+      <<: *common_job_environment
+    parameters:
+      platform:
+        type: executor
+    executor: << parameters.platform >>
+    steps:
+      - when:
+          condition:
+            equal: [*amd_linux_helm_executor, << parameters.platform >>]
+          steps:
+            - checkout
+            - xtask_check_helm
+
   check_compliance:
     environment:
       <<: *common_job_environment
@@ -513,6 +566,66 @@ jobs:
             - "*"
       - store_artifacts:
           path: artifacts/
+      - when:
+          condition:
+            equal: [ true, << parameters.nightly >> ]
+          steps:
+            - slack/notify:
+                event: fail
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":x: A `nightly` release run has **failed** for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`!"
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+            - slack/notify:
+                event: pass
+                custom: |
+                  {
+                    "blocks": [
+                      {
+                        "type": "section",
+                        "text": {
+                          "type": "mrkdwn",
+                          "text": ":white_check_mark: A `nightly` build has completed for `${CIRCLE_JOB}` on `${CIRCLE_PROJECT_REPONAME}`'s `${CIRCLE_BRANCH}`."
+                        }
+                      },
+                      {
+                        "type": "actions",
+                        "elements": [
+                          {
+                            "type": "button",
+                            "action_id": "success_tagged_deploy_view",
+                            "text": {
+                              "type": "plain_text",
+                              "text": "View Job"
+                            },
+                            "url": "${CIRCLE_BUILD_URL}"
+                          }
+                        ]
+                      }
+                    ]
+                  }
 
   publish_github_release:
     docker:
@@ -579,6 +692,10 @@ workflows:
           matrix:
             parameters:
               platform: [ amd_linux_build ]
+      - check_helm:
+          matrix:
+            parameters:
+              platform: [ amd_linux_helm ]
       - check_compliance:
           matrix:
             parameters:
@@ -587,6 +704,8 @@ workflows:
       - test_updated:
           requires:
             - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
@@ -594,6 +713,8 @@ workflows:
       - test:
           requires:
             - lint
+            - check_helm
+            - check_compliance
           matrix:
             parameters:
               platform:
@@ -604,6 +725,7 @@ workflows:
     jobs:
       - build_release:
           nightly: true
+          context: router
           matrix:
             parameters:
               platform:

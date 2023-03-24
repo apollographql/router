@@ -10,7 +10,11 @@ const PROMETHEUS_CONFIG: &str = include_str!("fixtures/prometheus.router.yaml");
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_metrics_reloading() -> Result<(), BoxError> {
-    let mut router = create_router(PROMETHEUS_CONFIG).await?;
+    let mut router = IntegrationTest::builder()
+        .config(PROMETHEUS_CONFIG)
+        .build()
+        .await;
+
     router.start().await;
     router.assert_started().await;
 
@@ -56,16 +60,9 @@ async fn test_metrics_reloading() -> Result<(), BoxError> {
         .await;
 
     if std::env::var("APOLLO_KEY").is_ok() && std::env::var("APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains(r#"uplink_count{kind="duration",query="Entitlement",service_name="apollo-router",type="unchanged",url="https://uplink.api.apollographql.com/graphql"}"#, Some(Duration::from_secs(60))).await;
+        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="Entitlement",service_name="apollo-router",url="https://uplink.api.apollographql.com/graphql"}"#, Some(Duration::from_secs(120))).await;
+        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="Entitlement",service_name="apollo-router",status="success"}"#, Some(Duration::from_secs(1))).await;
     }
 
     Ok(())
-}
-
-async fn create_router(config: &str) -> Result<IntegrationTest, BoxError> {
-    let tracer = opentelemetry_jaeger::new_agent_pipeline()
-        .with_service_name("my_app")
-        .install_simple()?;
-
-    Ok(IntegrationTest::new(tracer, opentelemetry_jaeger::Propagator::new(), config).await)
 }

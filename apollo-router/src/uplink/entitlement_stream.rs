@@ -53,8 +53,13 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
             EntitlementQueryRouterEntitlements::RouterEntitlementsResult(result) => {
                 if let Some(entitlement) = result.entitlement {
                     match Entitlement::from_str(&entitlement.jwt) {
-                        Ok(entitlement) => UplinkResponse::New {
-                            response: entitlement,
+                        Ok(jwt) => UplinkResponse::New {
+                            ordering_id: jwt
+                                .claims
+                                .as_ref()
+                                .map(|c| c.halt_at)
+                                .unwrap_or(SystemTime::UNIX_EPOCH),
+                            response: jwt,
                             id: result.id,
                             // this will truncate the number of seconds to under u64::MAX, which should be
                             // a large enough delay anyway
@@ -68,6 +73,7 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
                     }
                 } else {
                     UplinkResponse::New {
+                        ordering_id: SystemTime::UNIX_EPOCH,
                         response: Entitlement::default(),
                         id: result.id,
                         // this will truncate the number of seconds to under u64::MAX, which should be
