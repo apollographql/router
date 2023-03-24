@@ -5,7 +5,6 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Mutex;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
@@ -14,6 +13,7 @@ use apollo_compiler::HirDatabase;
 use apollo_compiler::Snapshot;
 use derivative::Derivative;
 use once_cell::sync::OnceCell;
+use parking_lot::Mutex;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
@@ -311,8 +311,7 @@ impl Query {
         let compiler1 = self
             .compiler
             .get_or_init(|| Mutex::new(self.uncached_compiler(schema)))
-            .lock()
-            .expect("this is only locked from inside this function, and only for the time needed to generate a snapshot");
+            .lock();
         compiler1.snapshot()
     }
 

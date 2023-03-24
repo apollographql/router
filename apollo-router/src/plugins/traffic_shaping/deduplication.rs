@@ -4,10 +4,10 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::Poll;
 
 use futures::future::BoxFuture;
+use parking_lot::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
@@ -106,12 +106,7 @@ where
                         let (_drop_signal, drop_sentinel) = oneshot::channel::<()>();
                         tokio::task::spawn(async move {
                             let _ = drop_sentinel.await;
-                            match wait_map.lock() {
-                                Ok(mut locked_wait_map) => {
-                                    locked_wait_map.remove(&http_request);
-                                }
-                                Err(_e) => {}
-                            };
+                            wait_map.lock().remove(&http_request);
                         });
 
                         service
@@ -150,10 +145,7 @@ fn get_or_insert_wait_map(
     OwnedRwLockWriteGuard<Option<Result<CloneSubgraphResponse, String>>>,
     Arc<RwLock<Option<Result<CloneSubgraphResponse, String>>>>,
 > {
-    let mut locked_wait_map = match wait_map.lock() {
-        Ok(guard) => guard,
-        Err(_e) => panic!(),
-    };
+    let mut locked_wait_map = wait_map.lock();
     match locked_wait_map.get_mut(&(&request.subgraph_request).into()) {
         Some(waiter) => {
             // Register interest in key

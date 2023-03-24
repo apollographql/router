@@ -5,9 +5,9 @@ use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use lru::LruCache;
+use parking_lot::Mutex;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::time::Instant;
@@ -131,13 +131,7 @@ where
     fn get_in_memory(&self, key: &K) -> Option<V> {
         let instant_memory = Instant::now();
 
-        match self
-            .inner
-            .lock()
-            .expect("hashmap operations shouldn't panic")
-            .get(key)
-            .cloned()
-        {
+        match self.inner.lock().get(key).cloned() {
             Some(v) => {
                 tracing::info!(
                     monotonic_counter.apollo_router_cache_hit_count = 1u64,
@@ -181,10 +175,7 @@ where
 
     fn insert_in_memory(&self, key: K, value: V) {
         let size = {
-            let mut in_memory = self
-                .inner
-                .lock()
-                .expect("hashmap operations shouldn't panic");
+            let mut in_memory = self.inner.lock();
             in_memory.put(key, value);
             in_memory.len() as u64
         };
@@ -196,20 +187,12 @@ where
     }
 
     pub(crate) fn in_memory_keys(&self) -> Vec<K> {
-        self.inner
-            .lock()
-            .expect("hashmap operations shouldn't panic")
-            .iter()
-            .map(|(k, _)| k.clone())
-            .collect()
+        self.inner.lock().iter().map(|(k, _)| k.clone()).collect()
     }
 
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
-        self.inner
-            .lock()
-            .expect("hashmap operations shouldn't panic")
-            .len()
+        self.inner.lock().len()
     }
 }
 

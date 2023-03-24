@@ -240,6 +240,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
  "p256",
+ "parking_lot 0.12.1",
  "paste",
  "pin-project-lite",
  "prometheus",

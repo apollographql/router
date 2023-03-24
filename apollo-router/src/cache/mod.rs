@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::sync::Mutex;
 
+use parking_lot::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
@@ -106,10 +106,7 @@ where
         &self,
         key: &K,
     ) -> Result<OwnedRwLockWriteGuard<Option<V>>, Arc<RwLock<Option<V>>>> {
-        let mut locked_wait_map = self
-            .wait_map
-            .lock()
-            .expect("only locked in get_or_insert_wait_map or remove_from_wait_map");
+        let mut locked_wait_map = self.wait_map.lock();
         match locked_wait_map.get_mut(key) {
             Some(waiter) => {
                 // Register interest in key
@@ -134,9 +131,7 @@ where
     }
 
     fn remove_from_wait_map(wait_map: &WaitMap<K, V>, key: &K) {
-        let mut locked_wait_map = wait_map
-            .lock()
-            .expect("only locked in get_or_insert_wait_map or remove_from_wait_map");
+        let mut locked_wait_map = wait_map.lock();
         let _ = locked_wait_map.remove(key);
     }
 

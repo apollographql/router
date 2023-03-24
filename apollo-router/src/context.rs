@@ -4,13 +4,14 @@
 //! allows additional data to be passed back and forth along the request invocation pipeline.
 
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
 
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
+use parking_lot::Mutex;
+
 use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
@@ -190,17 +191,17 @@ impl Context {
 
     /// Notify the busy timer that we're waiting on a network request
     pub(crate) async fn enter_active_request(&self) {
-        self.busy_timer.lock().unwrap().increment_active_requests()
+        self.busy_timer.lock().increment_active_requests()
     }
 
     /// Notify the busy timer that we stopped waiting on a network request
     pub(crate) async fn leave_active_request(&self) {
-        self.busy_timer.lock().unwrap().decrement_active_requests()
+        self.busy_timer.lock().decrement_active_requests()
     }
 
     /// How much time was spent working on the request
     pub(crate) async fn busy_time(&self) -> Duration {
-        self.busy_timer.lock().unwrap().current()
+        self.busy_timer.lock().current()
     }
 }
 
