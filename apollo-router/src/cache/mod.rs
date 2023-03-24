@@ -1,11 +1,15 @@
 use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::Instant;
 
+use lru::LruCache;
 use parking_lot::Mutex;
 use tokio::sync::oneshot;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
+
+use crate::cache::storage::CacheStorageName;
 
 use self::storage::CacheStorage;
 use self::storage::KeyType;
@@ -24,6 +28,8 @@ pub(crate) const DEFAULT_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(
 #[derive(Clone)]
 pub(crate) struct DeduplicatingCache<K: KeyType, V: ValueType> {
     wait_map: WaitMap<K, V>,
+    memory: Arc<Mutex<LruCache<K, V>>>,
+    caller: String,
     storage: CacheStorage<K, V>,
 }
 
@@ -39,6 +45,8 @@ where
     ) -> Self {
         Self {
             wait_map: Arc::new(Mutex::new(HashMap::new())),
+            memory: Arc::new(Mutex::new(LruCache::new(capacity))),
+            caller: caller.to_string(),
             storage: CacheStorage::new(capacity, redis_urls, caller).await,
         }
     }
@@ -56,6 +64,50 @@ where
     }
 
     pub(crate) async fn get(&self, key: &K) -> Entry<K, V> {
+        match self.get_in_memory(key) {
+            Some(v) => Entry {
+                inner: EntryInner::Value(v),
+            },
+            None => self.get_dedup(key).await,
+        }
+    }
+
+    fn get_in_memory(&self, key: &K) -> Option<V> {
+        let instant_memory = Instant::now();
+
+        match self.memory.lock().get(key).cloned() {
+            Some(v) => {
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_hit_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_hit_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                Some(v)
+            }
+            None => {
+                let duration = instant_memory.elapsed().as_secs_f64();
+                tracing::info!(
+                    histogram.apollo_router_cache_miss_time = duration,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                tracing::info!(
+                    monotonic_counter.apollo_router_cache_miss_count = 1u64,
+                    kind = %self.caller,
+                    storage = &tracing::field::display(CacheStorageName::Memory),
+                );
+                None
+            }
+        }
+    }
+
+    pub(crate) async fn get_dedup(&self, key: &K) -> Entry<K, V> {
         // waiting on a value from the cache is a potentially long(millisecond scale) task that
         // can involve a network call to an external database. To reduce the waiting time, we
         // go through a wait map to register interest in data associated with a key.
@@ -136,7 +188,22 @@ where
     }
 
     pub(crate) async fn insert(&self, key: K, value: V) {
+        self.insert_in_memory(key.clone(), value.clone());
+
         self.storage.insert(key, value).await;
+    }
+
+    fn insert_in_memory(&self, key: K, value: V) {
+        let size = {
+            let mut in_memory = self.memory.lock();
+            in_memory.put(key, value);
+            in_memory.len() as u64
+        };
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
     }
 
     fn send(&self, mut sender: OwnedRwLockWriteGuard<Option<V>>, key: &K, value: V) {
