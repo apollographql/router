@@ -830,6 +830,9 @@ impl Default for Sandbox {
 pub(crate) struct Homepage {
     /// Set to false to disable the homepage
     pub(crate) enabled: bool,
+    /// Graph reference
+    /// This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer
+    pub(crate) graph_ref: Option<String>,
 }
 
 fn default_homepage() -> bool {
@@ -842,6 +845,7 @@ impl Homepage {
     pub(crate) fn new(enabled: Option<bool>) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_homepage),
+            graph_ref: None,
         }
     }
 }
@@ -853,13 +857,14 @@ impl Homepage {
     pub(crate) fn fake_new(enabled: Option<bool>) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_homepage),
+            graph_ref: None,
         }
     }
 }
 
 impl Default for Homepage {
     fn default() -> Self {
-        Self::builder().build()
+        Self::builder().enabled(default_homepage()).build()
     }
 }
 
