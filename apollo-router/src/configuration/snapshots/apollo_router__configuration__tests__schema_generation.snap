@@ -975,6 +975,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "graph_ref": {
+          "default": null,
           "type": "string",
           "nullable": true
         }
