@@ -284,8 +284,8 @@ mod test {
 
     fn check(router_yaml: &str, supergraph_schema: &str) -> EntitlementReport {
         let config = Configuration::from_str(router_yaml).expect("router config must be valid");
-        let schema =
-            Schema::parse(supergraph_schema, &config).expect("supergraph schema must be valid");
+        let schema = Schema::parse(supergraph_schema, &config, None)
+            .expect("supergraph schema must be valid");
 
         EntitlementReport::build(&config, &schema)
     }

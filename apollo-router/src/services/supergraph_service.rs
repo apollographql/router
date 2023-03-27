@@ -11,6 +11,7 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use router_bridge::planner::Planner;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -26,10 +27,8 @@ use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
-use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-use crate::introspection::Introspection;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
@@ -38,6 +37,7 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::QueryPlanResult;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -266,19 +266,19 @@ async fn plan_query(
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
-    schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
+    planner: BridgeQueryPlanner,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(schema: Arc<Schema>) -> Self {
+    pub(crate) fn new(planner: BridgeQueryPlanner) -> Self {
         Self {
-            schema,
             plugins: Default::default(),
             subgraph_services: Default::default(),
             configuration: None,
+            planner,
         }
     }
 
@@ -315,20 +315,10 @@ impl PluggableSupergraphServiceBuilder {
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
-        let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(&configuration).await))
-        } else {
-            None
-        };
-
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration.clone())
-                .await
-                .map_err(ServiceBuildError::QueryPlannerError)?;
+        let schema = self.planner.schema();
         let query_planner_service = CachingQueryPlanner::new(
-            bridge_query_planner,
-            self.schema.schema_id.clone(),
+            self.planner,
+            schema.schema_id.clone(),
             &configuration.supergraph.query_planning,
         )
         .await;
@@ -352,7 +342,7 @@ impl PluggableSupergraphServiceBuilder {
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_service_factory,
-            schema: self.schema,
+            schema,
             plugins,
         })
     }
@@ -450,6 +440,11 @@ impl SupergraphCreator {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.query_planner_service.cache_keys(count).await
     }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.query_planner_service.planner()
+    }
+
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         cache_keys: Vec<(String, Option<String>)>,
@@ -482,7 +477,7 @@ impl MockSupergraphCreator {
         use crate::router_factory::create_plugins;
         let plugins = create_plugins(
             &configuration,
-            &Schema::parse(canned_schema, &configuration).unwrap(),
+            &Schema::parse_test(canned_schema, &configuration).unwrap(),
             None,
         )
         .await
