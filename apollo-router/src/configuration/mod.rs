@@ -830,6 +830,8 @@ impl Default for Sandbox {
 pub(crate) struct Homepage {
     /// Set to false to disable the homepage
     pub(crate) enabled: bool,
+    /// Graph reference
+    /// This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer
     pub(crate) graph_ref: Option<String>,
 }
 

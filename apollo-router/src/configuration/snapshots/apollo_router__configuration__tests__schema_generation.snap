@@ -975,6 +975,7 @@ expression: "&schema"
           "type": "boolean"
         },
         "graph_ref": {
+          "description": "Graph reference This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer",
           "default": null,
           "type": "string",
           "nullable": true
