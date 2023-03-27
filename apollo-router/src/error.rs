@@ -301,23 +301,6 @@ impl IntoGraphQLErrors for QueryPlannerError {
     }
 }
 
-impl ErrorExtension for QueryPlannerError {
-    fn extension_code(&self) -> String {
-        match self {
-            QueryPlannerError::SchemaValidationErrors(_) => "SCHEMA_VALIDATION_ERRORS",
-            QueryPlannerError::PlanningErrors(_) => "PLANNING_ERRORS",
-            QueryPlannerError::JoinError(_) => "JOIN_ERROR",
-            QueryPlannerError::CacheResolverError(_) => "CACHE_RESOLVER_ERROR",
-            QueryPlannerError::EmptyPlan(_) => "EMPTY_PLAN",
-            QueryPlannerError::UnhandledPlannerResult => "UNHANDLED_PLANNER_RESULT",
-            QueryPlannerError::RouterBridgeError(_) => "ROUTER_BRIDGE_ERROR",
-            QueryPlannerError::SpecError(_) => "SPEC_ERROR",
-            QueryPlannerError::Introspection(_) => "INTROSPECTION",
-        }
-        .to_string()
-    }
-}
-
 #[derive(Clone, Debug, Error, Serialize, Deserialize)]
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
