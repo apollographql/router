@@ -161,6 +161,10 @@ pub(super) struct RouterConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
+    /// Send the uri
+    pub(super) uri: bool,
+    /// Send the method
+    pub(super) method: bool,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -450,10 +454,13 @@ where
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
 
+    // HTTP GET requests don't have a body
     let body_to_send = request_config
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
-        .transpose()?;
+        .transpose()
+        .unwrap_or_default();
+
     let context_to_send = request_config.context.then(|| request.context.clone());
     let sdl = request_config.sdl.then(|| sdl.clone().to_string());
 
@@ -466,7 +473,8 @@ where
         body: body_to_send,
         context: context_to_send,
         sdl,
-        uri: None,
+        uri: Some(parts.uri.to_string()),
+        method: Some(parts.method.to_string()),
         service_name: None,
     };
 
@@ -588,6 +596,7 @@ where
         context: context_to_send,
         sdl,
         uri: None,
+        method: None,
         service_name: None,
     };
 
@@ -673,6 +682,7 @@ where
         sdl: None,
         service_name,
         uri,
+        method: Some(parts.method.to_string()),
     };
 
     tracing::debug!(?payload, "externalized output");
@@ -797,6 +807,7 @@ where
         context: context_to_send,
         sdl: None,
         uri: None,
+        method: None,
         service_name,
     };
 
