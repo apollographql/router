@@ -121,8 +121,6 @@ register_plugin!("experimental", "expose_query_plan", ExposeQueryPlan);
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use once_cell::sync::Lazy;
     use serde_json::Value as jValue;
     use serde_json_bytes::ByteString;
@@ -134,8 +132,8 @@ mod tests {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::query_planner::BridgeQueryPlanner;
     use crate::services::PluggableSupergraphServiceBuilder;
-    use crate::spec::Schema;
 
     static EXPECTED_RESPONSE_WITH_QUERY_PLAN: Lazy<Response> = Lazy::new(|| {
         serde_json::from_str(include_str!(
@@ -187,9 +185,11 @@ mod tests {
 
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+        let planner = BridgeQueryPlanner::new(schema.to_string(), Default::default())
+            .await
+            .unwrap();
 
-        let builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let builder = PluggableSupergraphServiceBuilder::new(planner);
         let builder = builder
             .with_dyn_plugin("experimental.expose_query_plan".to_string(), plugin)
             .with_subgraph_service("accounts", account_service.clone())
