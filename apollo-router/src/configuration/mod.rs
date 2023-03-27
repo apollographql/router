@@ -829,7 +829,6 @@ impl Default for Sandbox {
 #[serde(default)]
 pub(crate) struct Homepage {
     /// Set to false to disable the homepage
-    #[serde(default = "default_homepage")]
     pub(crate) enabled: bool,
     pub(crate) graph_ref: Option<String>,
 }
@@ -863,7 +862,7 @@ impl Homepage {
 
 impl Default for Homepage {
     fn default() -> Self {
-        Self::builder().build()
+        Self::builder().enabled(default_homepage()).build()
     }
 }
 
