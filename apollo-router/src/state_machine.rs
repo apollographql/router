@@ -1111,7 +1111,7 @@ mod tests {
                 .times(expect_times_called - 1)
                 .withf(
                     move |_configuration: &Arc<Configuration>,
-                          _,//schema: String,
+                          _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
                         previous_router_service_factory.is_some()
