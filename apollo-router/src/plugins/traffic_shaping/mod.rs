@@ -418,6 +418,7 @@ impl TrafficShaping {
                     config.min_per_sec,
                     config.retry_percent,
                     config.retry_mutations,
+                    name.to_string(),
                 );
                 tower::retry::RetryLayer::new(retry_policy)
             });

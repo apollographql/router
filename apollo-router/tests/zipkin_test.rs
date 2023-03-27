@@ -3,19 +3,15 @@ mod common;
 use tower::BoxError;
 
 use crate::common::IntegrationTest;
+use crate::common::Telemetry;
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
 async fn test_tracing() -> Result<(), BoxError> {
-    let tracer = opentelemetry_zipkin::new_pipeline()
-        .with_service_name("my_app")
-        .install_batch(opentelemetry::runtime::Tokio)?;
-
-    let mut router = IntegrationTest::new(
-        tracer,
-        opentelemetry_zipkin::Propagator::new(),
-        include_str!("fixtures/zipkin.router.yaml"),
-    )
-    .await;
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Zipkin)
+        .config(include_str!("fixtures/zipkin.router.yaml"))
+        .build()
+        .await;
     router.start().await;
     router.assert_started().await;
 

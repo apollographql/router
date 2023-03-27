@@ -8,14 +8,13 @@ use chrono::prelude::Utc;
 use git2::Repository;
 use octorust::types::PullsCreateRequest;
 use octorust::Client;
-use structopt::StructOpt;
 use tap::TapFallible;
 use walkdir::WalkDir;
 use xtask::*;
 
 use crate::commands::changeset::slurp_and_remove_changesets;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Subcommand)]
 pub enum Command {
     /// Prepare a new release
     Prepare(Prepare),
@@ -55,18 +54,18 @@ impl FromStr for Version {
     }
 }
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Prepare {
     /// Release from the current branch rather than creating a new one.
-    #[structopt(long)]
+    #[clap(long)]
     current_branch: bool,
 
     /// Skip the license check
-    #[structopt(long)]
+    #[clap(long)]
     skip_license_ckeck: bool,
 
     /// Dry run, don't commit the changes and create the PR.
-    #[structopt(long)]
+    #[clap(long)]
     dry_run: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).

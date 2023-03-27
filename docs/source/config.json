@@ -76,7 +76,9 @@
         [
           "enterprise"
         ]
-      ]
+      ],
+      "Native Rust plugins": "/customizations/native",
+      "Custom router binary": "/customizations/custom-binary"
     },
     "Subgraph Support": {
       "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",

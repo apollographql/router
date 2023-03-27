@@ -177,11 +177,6 @@ fn it_logs_messages() {
         r#"log_info("info log")"#,
         r#"log_warn("warn log")"#,
         r#"log_error("error log")"#,
-        r#"log_trace("trace log", "tests")"#,
-        r#"log_debug("debug log", "tests")"#,
-        r#"log_info("info log", "tests")"#,
-        r#"log_warn("warn log", "tests")"#,
-        r#"log_error("error log", "tests")"#,
     ];
     for log in input_logs {
         engine.eval::<()>(log).expect("it logged a message");
@@ -205,28 +200,6 @@ fn it_logs_messages() {
     assert!(tracing_test::internal::logs_with_scope_contain(
         "apollo_router",
         "error log"
-    ));
-
-    // tests for including the
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "trace log tests",
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "debug log tests"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "info log tests"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "warn log tests"
-    ));
-    assert!(tracing_test::internal::logs_with_scope_contain(
-        "apollo_router",
-        "error log tests"
     ));
 }
 
@@ -532,8 +505,8 @@ fn it_can_create_unix_now() {
     let st = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("can get system time")
-        .as_secs();
-    let unix_now: u64 = engine
+        .as_secs() as i64;
+    let unix_now: i64 = engine
         .eval(r#"unix_now()"#)
         .expect("can get unix_now() timestamp");
     // Always difficult to do timing tests. unix_now() should execute within a second of st,

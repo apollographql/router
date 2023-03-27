@@ -258,7 +258,7 @@ impl SchemaSource {
                 stream_from_uplink::<SupergraphSdlQuery, String>(
                     apollo_key,
                     apollo_graph_ref,
-                    urls.map(Endpoints::round_robin),
+                    urls.map(Endpoints::fallback),
                     poll_interval,
                     timeout,
                 )
@@ -537,7 +537,7 @@ impl EntitlementSource {
             } => stream_from_uplink::<EntitlementQuery, Entitlement>(
                 apollo_key,
                 apollo_graph_ref,
-                urls.map(Endpoints::round_robin),
+                urls.map(Endpoints::fallback),
                 poll_interval,
                 timeout,
             )

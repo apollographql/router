@@ -1,25 +1,24 @@
 use anyhow::Result;
-use structopt::StructOpt;
 use xtask::*;
 
 const TEST_DEFAULT_ARGS: &[&str] = &["test"];
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Test {
     /// The number of jobs to pass to cargo test via --jobs
-    #[structopt(long)]
+    #[clap(long)]
     jobs: Option<usize>,
 
     /// The number of threads to pass to cargo test via --test-threads
-    #[structopt(long)]
+    #[clap(long)]
     test_threads: Option<usize>,
 
     /// Pass --locked to cargo test
-    #[structopt(long)]
+    #[clap(long)]
     locked: bool,
 
     /// Pass --workspace to cargo test
-    #[structopt(long)]
+    #[clap(long)]
     workspace: bool,
 }
 

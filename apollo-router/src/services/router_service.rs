@@ -30,6 +30,7 @@ use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
@@ -199,6 +200,7 @@ where
                     })
             } else {
                 hyper::body::to_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
                         (

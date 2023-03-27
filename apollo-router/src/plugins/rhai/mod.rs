@@ -1549,32 +1549,17 @@ impl Rhai {
             .register_fn("log_trace", |out: Dynamic| {
                 tracing::trace!(%out, "rhai_trace");
             })
-            .register_fn("log_trace", |out: Dynamic, message: &str| {
-                tracing::trace!(%out, message);
-            })
             .register_fn("log_debug", |out: Dynamic| {
                 tracing::debug!(%out, "rhai_debug");
-            })
-            .register_fn("log_debug", |out: Dynamic, message: &str| {
-                tracing::debug!(%out, message);
             })
             .register_fn("log_info", |out: Dynamic| {
                 tracing::info!(%out, "rhai_info");
             })
-            .register_fn("log_info", |out: Dynamic, message: &str| {
-                tracing::info!(%out, message);
-            })
             .register_fn("log_warn", |out: Dynamic| {
                 tracing::warn!(%out, "rhai_warn");
             })
-            .register_fn("log_warn", |out: Dynamic, message: &str| {
-                tracing::warn!(%out, message);
-            })
             .register_fn("log_error", |out: Dynamic| {
                 tracing::error!(%out, "rhai_error");
-            })
-            .register_fn("log_error", |out: Dynamic, message: &str| {
-                tracing::error!(%out, message);
             })
             // Register a function for printing to stderr
             .register_fn("eprint", |x: &str| {
@@ -1643,11 +1628,11 @@ impl Rhai {
             .register_fn("uuid_v4", || -> String {
                 Uuid::new_v4().to_string()
             })
-            .register_fn("unix_now", ||-> u64 {
-                match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                    Ok(v)=> v.as_secs(),
-                    Err(_)=>0
-                }
+            .register_fn("unix_now", ||-> Result<i64, Box<EvalAltResult>> {
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map_err(|e| e.to_string().into())
+                    .map(|x| x.as_secs() as i64)
             })
             // Add query plan getter to execution request
             .register_get(

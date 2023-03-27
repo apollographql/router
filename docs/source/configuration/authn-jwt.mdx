@@ -55,7 +55,7 @@ You enable JWT authentication for your router with the following steps:
 
     - The path to the router's YAML configuration file (via the `--config` option)
     - The graph ref for the [GraphOS variant](/graphos/graphs/overview#variants) your router should use (via the `APOLLO_GRAPH_REF` environment variable)
-    - A [graph API key](/graphos/api-keys/graph-api-keys) that enables the router to authenticate with GraphOS to fetch its supergraph schema (via the `APOLLO_KEY` environment variable)
+    - A [graph API key](/graphos/api-keys/#graph-api-keys) that enables the router to authenticate with GraphOS to fetch its supergraph schema (via the `APOLLO_KEY` environment variable)
 
     ```bash
     APOLLO_GRAPH_REF=docs-example-graph@main APOLLO_KEY="..." ./router --config router.yaml
