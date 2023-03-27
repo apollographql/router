@@ -1,6 +1,6 @@
+use parking_lot::RwLock;
 use std::borrow::Cow;
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use opentelemetry::trace::SpanBuilder;
 use opentelemetry::trace::Tracer;
@@ -18,21 +18,21 @@ impl<S: PreSampledTracer> PreSampledTracer for ReloadTracer<S> {
     ) -> opentelemetry::Context {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .sampled_context(data)
     }
 
     fn new_trace_id(&self) -> opentelemetry::trace::TraceId {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .new_trace_id()
     }
 
     fn new_span_id(&self) -> opentelemetry::trace::SpanId {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .new_span_id()
     }
 }
@@ -46,7 +46,7 @@ impl<S: Tracer> Tracer for ReloadTracer<S> {
     {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .start(name)
     }
 
@@ -56,7 +56,7 @@ impl<S: Tracer> Tracer for ReloadTracer<S> {
     {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .start_with_context(name, parent_cx)
     }
 
@@ -66,14 +66,14 @@ impl<S: Tracer> Tracer for ReloadTracer<S> {
     {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .span_builder(name)
     }
 
     fn build(&self, builder: SpanBuilder) -> Self::Span {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .build(builder)
     }
 
@@ -84,7 +84,7 @@ impl<S: Tracer> Tracer for ReloadTracer<S> {
     ) -> Self::Span {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            // .expect("parent tracer must be available")
             .build_with_context(builder, parent_cx)
     }
 
@@ -96,7 +96,7 @@ impl<S: Tracer> Tracer for ReloadTracer<S> {
     {
         self.parent
             .read()
-            .expect("parent tracer must be available")
+            //.expect("parent tracer must be available")
             .in_span(name, f)
     }
 }
@@ -112,6 +112,7 @@ impl<S> ReloadTracer<S> {
         *self
             .parent
             .write()
-            .expect("parent tracer must be available") = new;
+            //.expect("parent tracer must be available")
+            = new;
     }
 }

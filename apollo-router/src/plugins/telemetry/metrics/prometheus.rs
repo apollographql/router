@@ -1,4 +1,3 @@
-use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 
@@ -12,6 +11,7 @@ use opentelemetry::sdk::metrics::processors;
 use opentelemetry::sdk::metrics::selectors;
 use opentelemetry::sdk::Resource;
 use opentelemetry::KeyValue;
+use parking_lot::Mutex;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -67,12 +67,9 @@ static CONTROLLER: Lazy<Mutex<Option<BasicController>>> = Lazy::new(Default::def
 static NEW_CONTROLLER: Lazy<Mutex<Option<BasicController>>> = Lazy::new(Default::default);
 
 pub(crate) fn commit_new_controller() {
-    if let Some(controller) = NEW_CONTROLLER.lock().expect("lock poisoned").take() {
+    if let Some(controller) = NEW_CONTROLLER.lock().take() {
         tracing::debug!("committing prometheus controller");
-        CONTROLLER
-            .lock()
-            .expect("lock poisoned")
-            .replace(controller);
+        CONTROLLER.lock().replace(controller);
     }
 }
 
@@ -103,7 +100,7 @@ impl MetricsConfigurator for Config {
 
             // Check the last controller to see if the resources are the same, if they are we can use it as is.
             // Otherwise go with the new controller and store it so that it can be committed during telemetry activation.
-            if let Some(last_controller) = CONTROLLER.lock().expect("lock poisoned").clone() {
+            if let Some(last_controller) = CONTROLLER.lock().clone() {
                 if controller.resource() == last_controller.resource() {
                     tracing::debug!("prometheus controller can be reused");
                     controller = last_controller
@@ -111,10 +108,7 @@ impl MetricsConfigurator for Config {
                     tracing::debug!("prometheus controller cannot be reused");
                 }
             }
-            NEW_CONTROLLER
-                .lock()
-                .expect("lock poisoned")
-                .replace(controller.clone());
+            NEW_CONTROLLER.lock().replace(controller.clone());
 
             let exporter = opentelemetry_prometheus::exporter(controller).try_init()?;
 
