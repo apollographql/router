@@ -6,6 +6,15 @@ If you were using versions of Apollo Router prior to the 1.0 release, thank you 
 
 ## What's different?
 
+Our pre-1.0 versions of the Router had highly iterative development lifecycles and had regular, notable changes.  You'll need to look at changes to:
+
+- Environment variables
+- Supported configuration
+- Rhai scripting capabilities
+- the exposed API
+
+In most cases, things have been moved around in order to strike the right balanace of user experience and functionality without over-exposing things that we'd like to still design further.
+
 The changes you'll need to make depend on which version you were coming from.  The key versions before 1.0 included:
 
 - prerelease versions of 1.0.0, including `alpha.x` and `rc.x` releases
@@ -78,7 +87,7 @@ The number of options you currently provide to your `ApolloGateway` constructor 
 
 ### `supergraphSdl`
 
-The [`supergraphSdl` option](/federation/api/apollo-gateway#supergraphsdl) is used in _non_-managed federation to provide a composed supergraph schema via a file or other string. Usually, that schema is composed using the [Rover CLI](/rover/supergraphs/).
+The [`supergraphSdl` option](/apollo-server/using-federation/api/apollo-gateway/#supergraphsdl) is used in _non_-managed federation to provide a composed supergraph schema via a file or other string. Usually, that schema is composed using the [Rover CLI](/rover/commands/supergraphs/).
 
 You can achieve this option's effect with the Apollo Router in one of the following ways:
 
@@ -95,11 +104,11 @@ You can achieve this option's effect with the Apollo Router in one of the follow
 
 If you provide one of these constructor options, your gateway performs its _own_ supergraph schema composition on startup. **The Apollo Router does not support this in-process composition.**
 
-Instead, you need to perform composition using [managed federation](./managed-federation/setup/) or the [Rover CLI](/rover/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
+Instead, you need to perform composition using [managed federation](./managed-federation/setup/) or the [Rover CLI](/rover/commands/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
 
 ### `buildService`
 
-The [`buildService` function](/federation/api/apollo-gateway#buildservice) enables you to customize the HTTP requests that the gateway sends to your subgraphs.
+The [`buildService` function](/apollo-server/using-federation/api/apollo-gateway/#buildservice) enables you to customize the HTTP requests that the gateway sends to your subgraphs.
 
 Common use cases include:
 
@@ -110,7 +119,7 @@ Common use cases include:
 
 ### `logger`
 
-The [`logger` constructor option](/federation/api/apollo-gateway#logger) enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
+The [`logger` constructor option](/apollo-server/using-federation/api/apollo-gateway/#logger) enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
 
 In the Apollo Router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
 
@@ -132,7 +141,7 @@ This constructor option is an object that enables you to propagate information a
 * Authentication information
 * Header propagation
 
-The Apollo Router provides [similar functionality](./customizations/native#5-define-necessary-context).
+The Apollo Router provides [similar functionality](./customizations/rhai-api/#requestcontext).
 
 ### `plugins`
 
@@ -150,7 +159,7 @@ The Apollo Router currently supports two types of customizations that hook into 
 
 * [Rhai scripts](./customizations/rhai/)
     * Rhai is a scripting language designed for use with Rust applications.
-* [Native Rust plugins](./customizations/native/)
+* [External coprocessing](./customizations/coprocessor/)
 
 Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
 

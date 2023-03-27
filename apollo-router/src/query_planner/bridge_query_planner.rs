@@ -11,19 +11,20 @@ use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use serde_json_bytes::json;
+use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use tower::Service;
 use tracing::Instrument;
 
 use super::PlanNode;
 use super::QueryKey;
 use crate::error::QueryPlannerError;
+use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
-use crate::spec::query::TYPENAME;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
@@ -43,26 +44,85 @@ pub(crate) struct BridgeQueryPlanner {
 
 impl BridgeQueryPlanner {
     pub(crate) async fn new(
-        schema: Arc<Schema>,
-        introspection: Option<Arc<Introspection>>,
+        schema: String,
         configuration: Arc<Configuration>,
-    ) -> Result<Self, QueryPlannerError> {
+    ) -> Result<Self, ServiceBuildError> {
+        let planner = Arc::new(
+            Planner::new(
+                schema.clone(),
+                QueryPlannerConfig {
+                    incremental_delivery: Some(IncrementalDeliverySupport {
+                        enable_defer: Some(configuration.supergraph.defer_support),
+                    }),
+                },
+            )
+            .await?,
+        );
+
+        let api_schema = planner.api_schema().await?;
+        let api_schema = Schema::parse(&api_schema.schema, &configuration, None)?;
+        let schema = Arc::new(Schema::parse(
+            &schema,
+            &configuration,
+            Some(Box::new(api_schema)),
+        )?);
+        let introspection = if configuration.supergraph.introspection {
+            Some(Arc::new(Introspection::new(planner.clone()).await))
+        } else {
+            None
+        };
         Ok(Self {
-            planner: Arc::new(
-                Planner::new(
-                    schema.as_string().to_string(),
-                    QueryPlannerConfig {
-                        incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.supergraph.defer_support),
-                        }),
-                    },
-                )
-                .await?,
-            ),
+            planner,
             schema,
             introspection,
             configuration,
         })
+    }
+
+    pub(crate) async fn new_from_planner(
+        planner: Arc<Planner<QueryPlanResult>>,
+        schema: String,
+        configuration: Arc<Configuration>,
+    ) -> Result<Self, ServiceBuildError> {
+        planner
+            .update(
+                schema.clone(),
+                QueryPlannerConfig {
+                    incremental_delivery: Some(IncrementalDeliverySupport {
+                        enable_defer: Some(configuration.supergraph.defer_support),
+                    }),
+                },
+            )
+            .await?;
+
+        let api_schema = planner.api_schema().await?;
+        let api_schema = Schema::parse(&api_schema.schema, &configuration, None)?;
+        let schema = Arc::new(Schema::parse(
+            &schema,
+            &configuration,
+            Some(Box::new(api_schema)),
+        )?);
+
+        let introspection = if configuration.supergraph.introspection {
+            Some(Arc::new(Introspection::new(planner.clone()).await))
+        } else {
+            None
+        };
+
+        Ok(Self {
+            planner,
+            schema,
+            introspection,
+            configuration,
+        })
+    }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.planner.clone()
+    }
+
+    pub(crate) fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
     }
 
     async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
@@ -84,7 +144,7 @@ impl BridgeQueryPlanner {
         match self.introspection.as_ref() {
             Some(introspection) => {
                 let response = introspection
-                    .execute(self.schema.as_string(), query)
+                    .execute(query)
                     .await
                     .map_err(QueryPlannerError::Introspection)?;
 
@@ -215,14 +275,22 @@ impl BridgeQueryPlanner {
         let selections = self.parse_selections(key.0.clone()).await?;
 
         if selections.contains_introspection() {
-            // If we have only one operation containing a single root field `__typename`
-            if selections.contains_only_typename() {
+            // If we have only one operation containing only the root field `__typename`
+            // (possibly aliased or repeated). (This does mean we fail to properly support
+            // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
+            if let Some(output_keys) = selections
+                .operations
+                .get(0)
+                .and_then(|op| op.is_only_typenames_with_output_keys())
+            {
+                let operation_name = selections.operations[0].kind().to_string();
+                let data: Value = Value::Object(Map::from_iter(
+                    output_keys
+                        .into_iter()
+                        .map(|key| (key, Value::String(operation_name.clone().into()))),
+                ));
                 return Ok(QueryPlannerContent::Introspection {
-                    response: Box::new(
-                        graphql::Response::builder()
-                            .data(json!({TYPENAME: selections.operations[0].kind().to_string()}))
-                            .build(),
-                    ),
+                    response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
                 return self.introspection(key.0).await;
@@ -256,17 +324,13 @@ mod tests {
 
     use super::*;
 
+    const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
+
     #[test(tokio::test)]
     async fn test_plan() {
-        let planner = BridgeQueryPlanner::new(
-            Arc::new(example_schema()),
-            Some(Arc::new(
-                Introspection::new(&Configuration::default()).await,
-            )),
-            Default::default(),
-        )
-        .await
-        .unwrap();
+        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap();
         let result = planner
             .get((include_str!("testdata/query.graphql").into(), None))
             .await
@@ -283,15 +347,9 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_invalid_query() {
-        let planner = BridgeQueryPlanner::new(
-            Arc::new(example_schema()),
-            Some(Arc::new(
-                Introspection::new(&Configuration::default()).await,
-            )),
-            Default::default(),
-        )
-        .await
-        .unwrap();
+        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap();
         let err = planner
             .get((
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
@@ -313,11 +371,6 @@ mod tests {
         }
     }
 
-    fn example_schema() -> Schema {
-        let schema = include_str!("testdata/schema.graphql");
-        Schema::parse(schema, &Default::default()).unwrap()
-    }
-
     #[test]
     fn empty_query_plan() {
         serde_json::from_value::<QueryPlan>(json!({ "plan": { "kind": "QueryPlan"} } )).expect(
@@ -328,26 +381,20 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let err = BridgeQueryPlanner::new(
-            Arc::new(example_schema()),
-            Some(Arc::new(
-                Introspection::new(&Configuration::default()).await,
-            )),
-            Default::default(),
-        )
-        .await
-        .unwrap()
-        // test the planning part separately because it is a valid introspection query
-        // it should be caught by the introspection part, but just in case, we check
-        // that the query planner would return an empty plan error if it received an
-        // introspection query
-        .plan(
-            include_str!("testdata/unknown_introspection_query.graphql").into(),
-            None,
-            Query::default(),
-        )
-        .await
-        .unwrap_err();
+        let err = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap()
+            // test the planning part separately because it is a valid introspection query
+            // it should be caught by the introspection part, but just in case, we check
+            // that the query planner would return an empty plan error if it received an
+            // introspection query
+            .plan(
+                include_str!("testdata/unknown_introspection_query.graphql").into(),
+                None,
+                Query::default(),
+            )
+            .await
+            .unwrap_err();
 
         match err {
             QueryPlannerError::EmptyPlan(usage_reporting) => {
@@ -363,20 +410,52 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let planner = BridgeQueryPlanner::new(
-            Arc::new(example_schema()),
-            Some(Arc::new(
-                Introspection::new(&Configuration::default()).await,
-            )),
-            Default::default(),
-        )
-        .await
-        .unwrap();
+        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap();
         let result = planner.get(("".into(), None)).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
             result.unwrap_err().to_string()
         );
+    }
+
+    #[test(tokio::test)]
+    async fn test_single_aliased_root_typename() {
+        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap();
+        let result = planner
+            .get(("{ x: __typename }".into(), None))
+            .await
+            .unwrap();
+        if let QueryPlannerContent::Introspection { response } = result {
+            assert_eq!(
+                r#"{"data":{"x":"Query"}}"#,
+                serde_json::to_string(&response).unwrap()
+            )
+        } else {
+            panic!();
+        }
+    }
+
+    #[test(tokio::test)]
+    async fn test_two_root_typenames() {
+        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap();
+        let result = planner
+            .get(("{ x: __typename __typename }".into(), None))
+            .await
+            .unwrap();
+        if let QueryPlannerContent::Introspection { response } = result {
+            assert_eq!(
+                r#"{"data":{"x":"Query","__typename":"Query"}}"#,
+                serde_json::to_string(&response).unwrap()
+            )
+        } else {
+            panic!();
+        }
     }
 }

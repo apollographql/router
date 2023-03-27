@@ -2,13 +2,12 @@ use std::process::Command;
 
 use anyhow::ensure;
 use anyhow::Result;
-use structopt::StructOpt;
 use xtask::*;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Lint {
     /// apply formatting fixes
-    #[structopt(long)]
+    #[clap(long)]
     fmt: bool,
 }
 
@@ -49,7 +48,15 @@ impl Lint {
 
     fn run_common(&self, fmt: impl FnOnce() -> Result<()>) -> Result<()> {
         fmt()?;
-        cargo!(["clippy", "--all", "--all-targets", "--", "-D", "warnings",]);
+        cargo!([
+            "clippy",
+            "--all",
+            "--all-targets",
+            "--no-deps",
+            "--",
+            "-D",
+            "warnings"
+        ]);
         cargo!(["doc", "--all", "--no-deps"], env = { "RUSTDOCFLAGS" => "-Dwarnings" });
         Ok(())
     }

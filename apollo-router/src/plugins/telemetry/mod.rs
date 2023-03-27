@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -132,7 +133,7 @@ const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 
 #[doc(hidden)] // Only public for integration tests
-pub struct Telemetry {
+pub(crate) struct Telemetry {
     config: Arc<config::Conf>,
     metrics: BasicMetrics,
     // Do not remove _metrics_exporters. Metrics will not be exported if it is removed.
@@ -189,7 +190,12 @@ impl Drop for Telemetry {
         if let Some(tracer_provider) = self.tracer_provider.take() {
             // If we have no runtime then we don't need to spawn a task as we are already in a blocking context.
             if Handle::try_current().is_ok() {
-                tokio::task::spawn_blocking(move || drop(tracer_provider));
+                // This is a thread for a reason!
+                // Tokio doesn't finish executing tasks before termination https://github.com/tokio-rs/tokio/issues/1156.
+                // This means that if the runtime is shutdown there is potentially a race where the provider may not be flushed.
+                // By using a thread it doesn't matter if the tokio runtime is shut down.
+                // This is likely to happen in tests due to the tokio runtime being destroyed when the test method exits.
+                thread::spawn(move || drop(tracer_provider));
             }
         }
     }
@@ -397,20 +403,20 @@ impl Plugin for Telemetry {
                     .subgraph_request
                     .body()
                     .query
-                    .clone()
+                    .as_deref()
                     .unwrap_or_default();
                 let operation_name = req
                     .subgraph_request
                     .body()
                     .operation_name
-                    .clone()
+                    .as_deref()
                     .unwrap_or_default();
 
                 info_span!(
                     SUBGRAPH_SPAN_NAME,
                     "apollo.subgraph.name" = name.as_str(),
-                    graphql.document = query.as_str(),
-                    graphql.operation.name = operation_name.as_str(),
+                    graphql.document = query,
+                    graphql.operation.name = operation_name,
                     "otel.kind" = "INTERNAL",
                     "apollo_private.ftv1" = field::Empty
                 )
@@ -636,18 +642,18 @@ impl Telemetry {
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
-            let query = http_request.body().query.clone().unwrap_or_default();
+            let query = http_request.body().query.as_deref().unwrap_or_default();
             let operation_name = http_request
                 .body()
                 .operation_name
-                .clone()
+                .as_deref()
                 .unwrap_or_default();
 
             let span = info_span!(
                 SUPERGRAPH_SPAN_NAME,
-                graphql.document = query.as_str(),
+                graphql.document = query,
                 // TODO add graphql.operation.type
-                graphql.operation.name = operation_name.as_str(),
+                graphql.operation.name = operation_name,
                 otel.kind = "INTERNAL",
                 apollo_private.field_level_instrumentation_ratio =
                     field_level_instrumentation_ratio,

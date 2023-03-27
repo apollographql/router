@@ -22,7 +22,6 @@ use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::services::SupergraphCreator;
-use crate::spec::Schema;
 
 #[cfg(test)]
 pub(crate) mod http_client;
@@ -223,9 +222,13 @@ impl<'a> TestHarness<'a> {
         let config = builder.configuration.unwrap_or_default();
         let canned_schema = include_str!("../testing_schema.graphql");
         let schema = builder.schema.unwrap_or(canned_schema);
-        let schema = Arc::new(Schema::parse(schema, &config)?);
         let supergraph_creator = YamlRouterFactory
-            .create_supergraph(config.clone(), schema, None, Some(builder.extra_plugins))
+            .create_supergraph(
+                config.clone(),
+                schema.to_string(),
+                None,
+                Some(builder.extra_plugins),
+            )
             .await?;
 
         Ok((config, supergraph_creator))

@@ -1,34 +1,33 @@
 ---
 title: JWT Authentication in the Apollo Router
-sidebar_title: JWT Authentication
 ---
 
-> ⚠️ **This feature is currently experimental.** As long as it's experimental, its behavior might change, or it might be removed entirely in a future release. [Learn about experimental features.](/resources/product-launch-stages#experimental-features)
->
-> To provide feedback or otherwise participate in this feature, join [this GitHub discussion](https://github.com/apollographql/router/discussions/2391).
+> ⚠️ **This is an [Enterprise feature](../enterprise-features/) of the Apollo Router.** It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).
 
-The Apollo Router provides experimental support for request authentication via [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**). This feature is implemented as a built-in [native Rust plugin](../customizations/native/).
+The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
-To use this feature:
+By enabling JWT authentication, you can block malicious traffic at the edge of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
+
+**To use this feature:**
 
 - You must have an identity provider (**IdP**) or similar service that issues JWTs to authenticated clients using one of the signature algorithms supported by the [jsonwebtoken Rust library](https://crates.io/crates/jsonwebtoken) (most popular signing algorithms are supported).
-- You must [connect your router to GraphOS](./overview/#environment-variables).
+- You must have a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/) and [connect your router to GraphOS](./overview/#environment-variables).
 
 If you issue JWTs via a popular third-party IdP (Auth0, Okta, PingOne, etc.), adding JWT authentication to your router is comparatively straightforward. If you use your own custom IdP, [advanced configuration is required](#creating-your-own-jwks-advanced).
 
-## Authentication steps
+## How it works
 
 These are the high-level steps of JWT-based authentication with the Apollo Router:
 
 1. Whenever a client authenticates with your system, your IdP issues that client a valid JSON Web Token (JWT).
 2. In its subsequent requests to your router, the authenticated client provides its JWT in a designated HTTP header.
-3. Whenever your router receives a client request, its authentication plugin extracts the JWT from the designated header (if present).
-4. The authentication plugin validates the extracted JWT using a corresponding [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**).
-    - The plugin obtains all of its known JWKs from URLs that you specify in your router's configuration file. Each URL provides its keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
-    - Validation fails if the JWT is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
+3. Whenever your router receives a client request, it extracts the JWT from the designated header (if present).
+    - **If no JWT is present, the request proceeds.** You can reject requests with no accompanying JWT at a later phase ([see below](#working-with-jwt-claims)).
+4. Your router validates the extracted JWT using a corresponding [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**).
+    - Your router obtains all of its known JWKs from URLs that you specify in its configuration file. Each URL provides its keys within a single JSON object called a [JWK Set](https://www.rfc-editor.org/rfc/rfc7517#section-5) (or a **JWKS**).
+    - **If validation fails, the router rejects the request.** This can occur if the JWT is malformed, or if it's been expired for more than 60 seconds (this window accounts for synchronization issues).
 
-5. The authentication plugin extracts all **claims** from the validated JWT and adds them to the request's context, making them available to your [router customizations](../customizations/overview/), such as Rhai scripts.
-    - **Claims** are the individual details of a JWT's scope. These details might include the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
+5. The router extracts all **claims** from the validated JWT and includes them in the request's context, making them available to your [router customizations](../customizations/overview/), such as Rhai scripts.
 6. Your customizations can handle the request differently depending on the details of the extracted claims, and/or you can propagate the claims to subgraphs to enable more granular access control.
     - For examples, [see below](#working-with-jwt-claims).
 
@@ -36,19 +35,18 @@ These are the high-level steps of JWT-based authentication with the Apollo Route
 
 You enable JWT authentication for your router with the following steps:
 
-1. Set configuration options for JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication.experimental` key:
+1. Set configuration options for JWT authentication in your router's [YAML config file](./overview/#yaml-config-file), under the `authentication` key:
 
     ```yaml title="router.yaml"
     authentication:
-      experimental:
-        jwt:
-          jwks: # This key is required.
-            - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
-              issuer: <optional name of issuer>
+     jwt:
+       jwks: # This key is required.
+         - url: https://dev-zzp5enui.us.auth0.com/.well-known/jwks.json
+           issuer: <optional name of issuer>
 
-          # These keys are optional. Default values are shown.
-          header_name: Authorization
-          header_value_prefix: Bearer
+       # These keys are optional. Default values are shown.
+       header_name: Authorization
+       header_value_prefix: Bearer
     ```
 
     These options are documented [below](#configuration-options).
@@ -57,7 +55,7 @@ You enable JWT authentication for your router with the following steps:
 
     - The path to the router's YAML configuration file (via the `--config` option)
     - The graph ref for the [GraphOS variant](/graphos/graphs/overview#variants) your router should use (via the `APOLLO_GRAPH_REF` environment variable)
-    - A [graph API key](/graphos/api-keys/graph-api-keys) that enables the router to authenticate with GraphOS to fetch its supergraph schema (via the `APOLLO_KEY` environment variable)
+    - A [graph API key](/graphos/api-keys/#graph-api-keys) that enables the router to authenticate with GraphOS to fetch its supergraph schema (via the `APOLLO_KEY` environment variable)
 
     ```bash
     APOLLO_GRAPH_REF=docs-example-graph@main APOLLO_KEY="..." ./router --config router.yaml
@@ -90,11 +88,13 @@ The following configuration options are supported:
 </td>
 <td>
 
-**Required.** a list of JWK Set (JWKS) configuration options:
-- `url`: **required** URL from which the JWKS file will be read. It can be an `https://` or a `file://` URL.
+**Required.** A list of JWK Set (JWKS) configuration options:
+
+- `url`: **required** URL from which the JWKS file will be read. Must be a valid URL.
   - **If you use a third-party IdP,** consult its documentation to determine its JWKS URL.
   - **If you use your own custom IdP,** you need to make its JWKS available at a router-accessible URL if you haven't already. For more information, see [Creating your own JWKS](#creating-your-own-jwks-advanced).
 - `issuer`: **optional** name of the issuer, that will be compared to the `iss` claim in the JWT if present. If it does not match, the request will be rejected.
+
 </td>
 </tr>
 
@@ -128,28 +128,97 @@ The default value is `Bearer`.
 </td>
 </tr>
 
-<tr>
-<td style="min-width: 150px;">
-
-
 </tbody>
 </table>
 
-## Handling JWT claims
+## Working with JWT claims
 
-After the Apollo Router's authentication plugin validates a JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
+After the Apollo Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
 
-The authentication plugin performs validation in the `RouterService`, which is the _first_ service that executes in the Apollo Router's [request pipeline](../customizations/overview/#how-customizations-work). This means you can build [router customizations](../customizations/overview/) (usually [Rhai scripts](../customizations/rhai/)) that interact with claims by hooking into any _other_ service.
+> - If no JWT is present for a client request, this context value is the empty tuple, `()`.
+> - If a JWT _is_ present but validation of the JWT fails, the router _rejects_ the request.
 
-> **Important:** You _cannot_ build a router customization that interacts with an incoming JWT _before_ the authentication plugin validates it. Plugins that hook into the `RouterService` execute in an undefined order and might even execute in parallel.
+**Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
 
-Below are two example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
+Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Customizations for the Apollo Router](../customizations/overview/)).
 
-### Example: Validating claims
+Below are three example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
-Below is an example [Rhai script](../customizations/rhai/) that checks the details of different JWT claims and throws different errors for different invalid claim details.
+### Example: Rejecting unauthenticated requests
 
-> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/overview#service-descriptions)
+Below is an example [Rhai script](../customizations/rhai/) that rejects requests that don't present a valid JWT.
+
+> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="require_authentication.rhai"
+fn supergraph_service(service) {
+    const request_callback = Fn("process_request");
+    service.map_request(request_callback);
+}
+
+// This will examine our context to determine if our user is authenticated.
+fn process_request(request) {
+    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
+    // constant with value `apollo_authentication::JWT::claims`
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims == () {
+        throw #{
+            status: 401,
+            body: #{
+                errors: [#{
+                    message: "The request is not authenticated",
+                    extensions: #{
+                        code: "AUTH_ERROR"
+                    }
+                }]
+            }
+        };
+    }
+    // We are happy we are authenticated.
+}
+```
+
+</ExpansionPanel>
+
+
+### Example: Forwarding claims to subgraphs
+
+Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
+
+> This script hooks into the router's `SubgraphService`, which executes before the router sends a subquery to an individual subgraph. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
+
+<ExpansionPanel title="Click to expand">
+
+```rhai title="claims_forwarding.rhai"
+fn subgraph_service(service, subgraph) {
+  let f = |request| {
+    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
+    // constant with value `apollo_authentication::JWT::claims`
+    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
+    if claims ==() {
+      throw #{
+        status: 401
+      };
+    }
+    // Add each claim key-value pair as a separate HTTP header
+    for key in claims.keys() {
+      request.subgraph.headers[key] = claims[key];
+    }
+  };
+
+  service.map_request(f);
+}
+```
+
+</ExpansionPanel>
+
+### Example: Throwing errors for invalid claims
+
+Below is an example [Rhai script](../customizations/rhai/) that throws distinct errors for different invalid JWT claim details.
+
+> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
 
 <ExpansionPanel title="Click to expand">
 
@@ -168,7 +237,11 @@ fn process_request(request) {
         if claims == () {
             throw #{
                 status: 401,
-                message: "No claims presented in this request"
+                body: #{
+                    errors: [#{
+                        message: "No claims presented in this request"
+                    }]
+                }
             };
         }
         if !claims.contains("iss") {
@@ -180,7 +253,11 @@ fn process_request(request) {
         if claims["iss"] != "https://idp.local" {
             throw #{
                 status: 401,
-                message: `Issuer ${claims.iss} is not accepted here`
+                body: #{
+                    errors: [#{
+                        message: `Issuer ${claims.iss} is not accepted here`
+                    }]
+                }
             };
         }
         // Happy path: We have valid claims from the correct idP.
@@ -193,38 +270,6 @@ fn process_request(request) {
         log_error(`Error during claims processing: ${err}`);
         throw err;
     }
-}
-```
-
-</ExpansionPanel>
-
-### Example: Forwarding claims to subgraphs
-
-Below is an example [Rhai script](../customizations/rhai/) that forwards a JWT's claims to individual subgraphs via HTTP headers (one header for each claim). This enables each subgraph to define logic to handle (or potentially reject) incoming requests based on claim details.
-
-> This script hooks into the router's `SubgraphService`, which executes _once for each subgraph_ that the router communicates with to resolve the operation. [Learn more about router services.](../customizations/overview#service-descriptions)
-
-<ExpansionPanel title="Click to expand">
-
-```rhai title="claims_forwarding.rhai"
-fn subgraph_service(service, subgraph) {
-  // Rhai closure syntax
-  let f = |request| {
-    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-    // constant with value `apollo_authentication::JWT::claims`
-    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
-    if claims ==() {
-      throw #{
-        status: 401
-      };
-    }
-    // Add each claim key-value pair as a separate HTTP header
-    for key in claims.keys() {
-      request.subgraph.headers[key] = claims[key];
-    }
-  };
-
-  service.map_request(f); // Register the callback
 }
 ```
 
@@ -543,7 +588,9 @@ This matching strategy is necessary because some identity providers (IdPs) don't
 
 ## Forwarding JWTs to subgraphs
 
-If you need to forward entire JWTs to subgraphs so that they can _also_ validate them (instead of only [forwarding claims](#example-forwarding-claims-to-subgraphs)), you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
+Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs) to enable fine-grained access control.
+
+If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
 
 ## Observability
 

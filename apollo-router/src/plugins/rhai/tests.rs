@@ -23,6 +23,7 @@ use super::RhaiExecutionDeferredResponse;
 use super::RhaiExecutionResponse;
 use super::RhaiSupergraphDeferredResponse;
 use super::RhaiSupergraphResponse;
+use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
 use crate::plugin::test::MockExecutionService;
@@ -504,8 +505,8 @@ fn it_can_create_unix_now() {
     let st = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("can get system time")
-        .as_secs();
-    let unix_now: u64 = engine
+        .as_secs() as i64;
+    let unix_now: i64 = engine
         .eval(r#"unix_now()"#)
         .expect("can get unix_now() timestamp");
     // Always difficult to do timing tests. unix_now() should execute within a second of st,
@@ -597,11 +598,55 @@ async fn it_can_process_om_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_om_forbidden").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
-        assert_eq!(processed_error.message, "I have raised a 403");
+        assert_eq!(
+            processed_error.message,
+            Some("I have raised a 403".to_string())
+        );
     } else {
         // Test failed
         panic!("error processed incorrectly");
     }
+}
+
+#[tokio::test]
+async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
+    let error = base_process_function("process_subgraph_response_om_forbidden_graphql")
+        .await
+        .unwrap_err();
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        processed_error.body,
+        Some(
+            crate::response::Response::builder()
+                .errors(vec![{
+                    Error::builder()
+                        .message("I have raised a 403")
+                        .extension_code("ACCESS_DENIED")
+                        .build()
+                }])
+                .build()
+        )
+    );
+}
+
+#[tokio::test]
+async fn it_can_process_om_subgraph_200_with_graphql_data() {
+    let error = base_process_function("process_subgraph_response_om_200_graphql")
+        .await
+        .unwrap_err();
+
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::OK);
+    assert_eq!(
+        processed_error.body,
+        Some(
+            crate::response::Response::builder()
+                .data(serde_json::json!({ "name": "Ada Lovelace"}))
+                .build()
+        )
+    );
 }
 
 #[tokio::test]
@@ -609,7 +654,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: I have raised an error (line 124, position 5)\nin call to function 'process_subgraph_response_string''");
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 149, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -617,24 +662,25 @@ async fn it_can_process_string_subgraph_forbidden() {
 }
 
 #[tokio::test]
-async fn it_cannot_process_ok_subgraph_forbidden() {
-    if let Err(error) = base_process_function("process_subgraph_response_om_ok").await {
-        let processed_error = process_error(error);
-        assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, "I have raised a 200");
-    } else {
-        // Test failed
-        panic!("error processed incorrectly");
-    }
+async fn it_can_process_ok_subgraph_forbidden() {
+    let error = base_process_function("process_subgraph_response_om_ok")
+        .await
+        .unwrap_err();
+    let processed_error = process_error(error);
+    assert_eq!(processed_error.status, StatusCode::OK);
+    assert_eq!(
+        processed_error.message,
+        Some("I have raised a 200".to_string())
+    );
 }
 
 #[tokio::test]
-async fn it_cannot_process_om_subgraph_missing_message() {
+async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     if let Err(error) = base_process_function("process_subgraph_response_om_missing_message").await
     {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(processed_error.message, "rhai execution error: 'Runtime error: #{\"status\": 400} (line 135, position 5)\nin call to function 'process_subgraph_response_om_missing_message''");
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 160, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");

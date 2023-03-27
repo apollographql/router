@@ -50,12 +50,11 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router;
-use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
 use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::entitlement_stream::EntitlementQuery;
 use crate::uplink::entitlement_stream::EntitlementStreamExt;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
@@ -73,9 +72,13 @@ async fn make_router_service<RF>(
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     entitlement: EntitlementState,
 ) -> Result<router::BoxCloneService, BoxError> {
-    let schema = Arc::new(Schema::parse(schema, &configuration)?);
     let service_factory = YamlRouterFactory
-        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .create(
+            configuration.clone(),
+            schema.to_string(),
+            None,
+            Some(extra_plugins),
+        )
         .await?;
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
@@ -255,7 +258,7 @@ impl SchemaSource {
                 stream_from_uplink::<SupergraphSdlQuery, String>(
                     apollo_key,
                     apollo_graph_ref,
-                    urls.map(Endpoints::round_robin),
+                    urls.map(Endpoints::fallback),
                     poll_interval,
                     timeout,
                 )
@@ -414,18 +417,19 @@ type EntitlementStream = Pin<Box<dyn Stream<Item = Entitlement> + Send>>;
 #[derivative(Debug)]
 #[non_exhaustive]
 pub enum EntitlementSource {
-    /// A static entitlement.
+    /// A static entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Static")]
     Static { entitlement: Entitlement },
 
+    /// An entitlement supplied via APOLLO_ROUTER_ENTITLEMENT. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Env")]
     Env,
 
-    /// A stream of entitlement.
+    /// A stream of entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Stream")]
     Stream(#[derivative(Debug = "ignore")] EntitlementStream),
 
-    /// A raw file that may be watched for changes.
+    /// A raw file that may be watched for changes. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "File")]
     File {
         /// The path of the entitlement file.
@@ -530,10 +534,10 @@ impl EntitlementSource {
                 urls,
                 poll_interval,
                 timeout,
-            } => stream_from_uplink::<EntitlementRequest, Entitlement>(
+            } => stream_from_uplink::<EntitlementQuery, Entitlement>(
                 apollo_key,
                 apollo_graph_ref,
-                urls.map(Endpoints::round_robin),
+                urls.map(Endpoints::fallback),
                 poll_interval,
                 timeout,
             )
@@ -548,6 +552,7 @@ impl EntitlementSource {
             })
             .boxed(),
             EntitlementSource::Env => {
+                // EXPERIMENTAL and not subject to semver.
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
                     Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),

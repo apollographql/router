@@ -21,12 +21,7 @@ use url::Url;
 
 use super::CLIENT;
 use super::DEFAULT_AUTHENTICATION_NETWORK_TIMEOUT;
-use crate::configuration::ConfigurationError;
-#[cfg(not(test))]
-use crate::error::LicenseError;
 use crate::plugins::authentication::DEFAULT_AUTHENTICATION_DOWNLOAD_INTERVAL;
-#[cfg(not(test))]
-use crate::services::apollo_graph_reference;
 
 #[derive(Clone)]
 pub(super) struct JwksManager {
@@ -59,27 +54,18 @@ impl JwksManager {
             })
             .collect::<Vec<_>>();
 
-        let jwks_map: Option<_> = join_all(downloads).await.into_iter().collect();
+        let jwks_map: HashMap<_, _> = join_all(downloads).await.into_iter().flatten().collect();
 
-        match jwks_map {
-            None => Err(ConfigurationError::InvalidConfiguration {
-                message: "bad configuration for the JWT authentication plugin",
-                error: "could not download or parse some of the JWKS".to_string(),
-            }
-            .into()),
-            Some(map) => {
-                let jwks_map = Arc::new(RwLock::new(map));
-                let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
+        let jwks_map = Arc::new(RwLock::new(jwks_map));
+        let (_drop_signal, drop_receiver) = oneshot::channel::<()>();
 
-                tokio::task::spawn(poll(list.clone(), jwks_map.clone(), drop_receiver));
+        tokio::task::spawn(poll(list.clone(), jwks_map.clone(), drop_receiver));
 
-                Ok(JwksManager {
-                    list,
-                    jwks_map,
-                    _drop_signal: Arc::new(_drop_signal),
-                })
-            }
-        }
+        Ok(JwksManager {
+            list,
+            jwks_map,
+            _drop_signal: Arc::new(_drop_signal),
+        })
     }
 
     #[cfg(test)]
@@ -146,14 +132,6 @@ async fn poll(
 // scattered through the processing.
 pub(super) async fn get_jwks(url: Url) -> Option<JwkSet> {
     let data = if url.scheme() == "file" {
-        #[cfg(not(test))]
-        apollo_graph_reference()
-            .ok_or(LicenseError::MissingGraphReference)
-            .map_err(|e| {
-                tracing::error!(%e, "could not activate authentication feature");
-                e
-            })
-            .ok()?;
         let path = url
             .to_file_path()
             .map_err(|e| {

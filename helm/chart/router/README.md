@@ -2,7 +2,7 @@
 
 [router](https://github.com/apollographql/router) Rust Graph Routing runtime for Apollo Federation
 
-![Version: 1.11.0](https://img.shields.io/badge/Version-1.11.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.11.0](https://img.shields.io/badge/AppVersion-v1.11.0-informational?style=flat-square)
+![Version: 1.13.0](https://img.shields.io/badge/Version-1.13.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.13.0](https://img.shields.io/badge/AppVersion-v1.13.0-informational?style=flat-square)
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@
 ## Get Repo Info
 
 ```console
-helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.11.0
+helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.13.0
 ```
 
 ## Install Chart
@@ -19,7 +19,7 @@ helm pull oci://ghcr.io/apollographql/helm-charts/router --version 1.11.0
 **Important:** only helm3 is supported
 
 ```console
-helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.11.0 --values my-values.yaml
+helm upgrade --install [RELEASE_NAME] oci://ghcr.io/apollographql/helm-charts/router --version 1.13.0 --values my-values.yaml
 ```
 
 _See [configuration](#configuration) below._
@@ -69,6 +69,8 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | podAnnotations | object | `{}` |  |
 | podSecurityContext | object | `{}` |  |
 | priorityClassName | string | `""` | Set to existing PriorityClass name to control pod preemption by the scheduler |
+| probes.liveness | object | `{"initialDelaySeconds":0}` | Configure liveness probe |
+| probes.readiness | object | `{"initialDelaySeconds":0}` | Configure readiness probe |
 | replicaCount | int | `1` |  |
 | resources | object | `{}` |  |
 | router | object | `{"args":["--hot-reload"],"configuration":{"health_check":{"listen":"0.0.0.0:8088"},"supergraph":{"listen":"0.0.0.0:80"},"telemetry":{"metrics":{"prometheus":{"enabled":false,"listen":"0.0.0.0:9090","path":"/metrics"}}}}}` | See https://www.apollographql.com/docs/router/configuration/overview#configuration-file for yaml structure |
