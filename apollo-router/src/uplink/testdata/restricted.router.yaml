@@ -1,0 +1,43 @@
+health_check:
+  enabled: true
+homepage:
+  enabled: true
+
+authentication:
+  jwt:
+    jwks:
+      - url: https://example.com
+
+coprocessor:
+  url: https://example.com
+
+supergraph:
+  query_planning:
+    experimental_cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+apq:
+  router:
+    cache:
+      redis:
+        urls:
+          - https://example.com
+      in_memory:
+        limit: 1000
+
+traffic_shaping:
+  subgraphs:
+    products:
+      experimental_entity_caching:
+        ttl: 2s
+  experimental_cache:
+    urls:
+      - https://example.com
+
+plugins:
+  experimental.restricted:
+    enabled: true

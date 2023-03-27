@@ -7,12 +7,13 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-#[cfg(unix)]
 use schemars::gen::SchemaSettings;
+use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 use super::schema::validate_yaml_configuration;
+use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::error::SchemaError;
 
@@ -367,7 +368,26 @@ cors:
         .cors
         .into_layer()
         .expect_err("should have resulted in an error");
-    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`");
+    assert_eq!(error, "Invalid CORS configuration: Cannot combine `Access-Control-Allow-Credentials: true` with `allow_any_origin: true`");
+}
+
+#[test]
+fn it_doesnt_allow_origins_wildcard() {
+    let cfg = validate_yaml_configuration(
+        r#"
+cors:
+  origins:
+    - "*"
+        "#,
+        Expansion::default().unwrap(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    let error = cfg
+        .cors
+        .into_layer()
+        .expect_err("should have resulted in an error");
+    assert_eq!(error, "Invalid CORS configuration: use `allow_any_origin: true` to set `Access-Control-Allow-Origin: *`");
 }
 
 #[test]
@@ -712,4 +732,124 @@ fn test_configuration_validate_and_sanitize() {
         .supergraph(Supergraph::builder().path("/*/whatever").build())
         .build()
         .is_err());
+}
+
+#[test]
+fn load_tls() {
+    let mut cert_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    cert_path.push("src");
+    cert_path.push("configuration");
+    cert_path.push("testdata");
+    cert_path.push("server.crt");
+    let cert_path = cert_path.to_string_lossy();
+
+    let mut key_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    key_path.push("src");
+    key_path.push("configuration");
+    key_path.push("testdata");
+    key_path.push("server.key");
+    let key_path = key_path.to_string_lossy();
+
+    let cfg = validate_yaml_configuration(
+        &format!(
+            r#"
+tls:
+  supergraph:
+    certificate: ${{file.{cert_path}}}
+    certificate_chain: ${{file.{cert_path}}}
+    key: ${{file.{key_path}}}
+"#,
+        ),
+        Expansion::builder().supported_mode("file").build(),
+        Mode::NoUpgrade,
+    )
+    .expect("should not have resulted in an error");
+    cfg.tls.supergraph.unwrap().tls_config().unwrap();
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct TestSubgraphOverride {
+    value: Option<u8>,
+    subgraph: SubgraphConfiguration<PluginConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct PluginConfig {
+    #[serde(default = "set_true")]
+    a: bool,
+    #[serde(default)]
+    b: u8,
+}
+
+fn set_true() -> bool {
+    true
+}
+
+#[test]
+fn test_subgraph_override() {
+    let settings = SchemaSettings::draft2019_09().with(|s| {
+        s.option_nullable = true;
+        s.option_add_null_type = false;
+        s.inline_subschemas = true;
+    });
+    let gen = settings.into_generator();
+    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    insta::assert_json_snapshot!(schema);
+}
+
+#[test]
+fn test_subgraph_override_json() {
+    let first = json!({
+        "subgraph": {
+            "all": {
+                "a": false
+            },
+            "subgraphs": {
+                "products": {
+                    "a": true
+                }
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(first).unwrap();
+    assert!(!data.subgraph.all.a);
+    assert!(data.subgraph.subgraphs.get("products").unwrap().a);
+
+    let second = json!({
+        "subgraph": {
+            "all": {
+                "a": false
+            },
+            "subgraphs": {
+                "products": {
+                    "b": 1
+                }
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(second).unwrap();
+    assert!(!data.subgraph.all.a);
+    // since products did not set the `a` field, it should take the override value from `all`
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
+
+    // the default value from `all` should work even if it is parsed after
+    let third = json!({
+        "subgraph": {
+            "subgraphs": {
+                "products": {
+                    "b": 1
+                }
+            },
+            "all": {
+                "a": false
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(third).unwrap();
+    assert!(!data.subgraph.all.a);
+    // since products did not set the `a` field, it should take the override value from `all`
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
 }

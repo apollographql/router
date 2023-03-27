@@ -195,5 +195,8 @@ pub fn setup() -> TestHarness<'static> {
     mocks.insert("products", product_service);
 
     let schema = include_str!("../benches/fixtures/supergraph.graphql");
-    TestHarness::builder().schema(schema).extra_plugin(mocks)
+    TestHarness::builder()
+        .try_log_level("info")
+        .schema(schema)
+        .extra_plugin(mocks)
 }

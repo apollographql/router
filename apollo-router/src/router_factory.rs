@@ -174,18 +174,18 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         SubgraphService::new(
                             name,
                             configuration
-                                .supergraph
                                 .apq
                                 .subgraph
                                 .subgraphs
                                 .get(name)
                                 .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
+                                .unwrap_or(configuration.apq.subgraph.all.enabled),
                             subgraph_root_store,
+                            shaping.enable_subgraph_http2(name),
                         ),
                     ),
                 ),
-                None => Either::B(SubgraphService::new(name, false, subgraph_root_store)),
+                None => Either::B(SubgraphService::new(name, false, subgraph_root_store, true)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -194,7 +194,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             builder = builder.with_dyn_plugin(plugin_name, plugin);
         }
 
-        // We're good to go with the new service.
+        // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
         let mut supergraph_creator = builder.build().await?;
 
         if let Some(router) = previous_router {
@@ -261,18 +261,18 @@ impl YamlRouterFactory {
                         SubgraphService::new(
                             name,
                             configuration
-                                .supergraph
                                 .apq
                                 .subgraph
                                 .subgraphs
                                 .get(name)
                                 .map(|apq| apq.enabled)
-                                .unwrap_or(configuration.supergraph.apq.subgraph.all.enabled),
+                                .unwrap_or(configuration.apq.subgraph.all.enabled),
                             subgraph_root_store,
+                            shaping.enable_subgraph_http2(name),
                         ),
                     ),
                 ),
-                None => Either::B(SubgraphService::new(name, false, subgraph_root_store)),
+                None => Either::B(SubgraphService::new(name, false, subgraph_root_store, true)),
             };
             builder = builder.with_subgraph_service(name, subgraph_service);
         }
@@ -363,6 +363,7 @@ pub(crate) async fn create_plugins(
     let mandatory_plugins = vec![
         "apollo.include_subgraph_errors",
         "apollo.csrf",
+        "apollo.headers",
         "apollo.telemetry",
     ];
 

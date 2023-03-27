@@ -6,6 +6,7 @@ use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::Context as OtelContext;
 use opentelemetry::Key;
@@ -21,6 +22,7 @@ use tracing_subscriber::Layer;
 use super::METRIC_PREFIX_COUNTER;
 use super::METRIC_PREFIX_HISTOGRAM;
 use super::METRIC_PREFIX_MONOTONIC_COUNTER;
+use super::METRIC_PREFIX_VALUE;
 
 const I64_MAX: u64 = i64::MAX as u64;
 
@@ -33,6 +35,7 @@ pub(crate) struct Instruments {
     u64_histogram: MetricsMap<Histogram<u64>>,
     i64_histogram: MetricsMap<Histogram<i64>>,
     f64_histogram: MetricsMap<Histogram<f64>>,
+    u64_gauge: MetricsMap<ObservableGauge<u64>>,
 }
 
 type MetricsMap<T> = RwLock<HashMap<&'static str, T>>;
@@ -46,6 +49,7 @@ pub(crate) enum InstrumentType {
     HistogramU64(u64),
     HistogramI64(i64),
     HistogramF64(f64),
+    GaugeU64(u64),
 }
 
 impl Instruments {
@@ -138,6 +142,14 @@ impl Instruments {
                     |rec| rec.record(cx, value, custom_attributes),
                 );
             }
+            InstrumentType::GaugeU64(value) => {
+                update_or_insert(
+                    &self.u64_gauge,
+                    metric_name,
+                    || meter.u64_observable_gauge(metric_name).init(),
+                    |gauge| gauge.observe(cx, value, custom_attributes),
+                );
+            }
         };
     }
 }
@@ -182,6 +194,8 @@ impl<'a> Visit for MetricVisitor<'a> {
             }
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
             self.metric = Some((metric_name, InstrumentType::HistogramU64(value)));
+        } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {
+            self.metric = Some((metric_name, InstrumentType::GaugeU64(value)));
         } else {
             self.record_debug(field, &value);
         }
@@ -232,10 +246,10 @@ pub(crate) struct MetricsLayer {
     instruments: Instruments,
 }
 
-impl Default for MetricsLayer {
-    fn default() -> Self {
+impl MetricsLayer {
+    pub(crate) fn new(meter_provider: &impl MeterProvider) -> Self {
         Self {
-            meter: opentelemetry::global::meter_provider().meter("apollo/router"),
+            meter: meter_provider.meter("apollo/router"),
             instruments: Default::default(),
         }
     }

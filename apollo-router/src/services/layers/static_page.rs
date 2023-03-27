@@ -107,10 +107,14 @@ fn prefers_html(headers: &HeaderMap) -> bool {
 
 #[derive(Template)]
 #[template(path = "sandbox_index.html")]
-struct SandboxTemplate {}
+struct SandboxTemplate {
+    apollo_router_version: &'static str,
+}
 
 pub(crate) fn sandbox_page_content() -> String {
-    let template = SandboxTemplate {};
+    let template = SandboxTemplate {
+        apollo_router_version: std::env!("CARGO_PKG_VERSION"),
+    };
     template.render().expect("cannot fail")
 }
 

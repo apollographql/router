@@ -5,7 +5,7 @@ description: Run the Apollo Router with Apollo-hosted subgraphs
 
 Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
-> **Self-hosting the Apollo Router is part of the Apollo Enterprise plan.** For other organizations, you should instead [create a cloud supergraph](/graphos/quickstart/cloud/), which provisions and hosts your router for you.
+> If you're just getting started with GraphOS, we recommend instead [creating a cloud supergraph](/graphos/quickstart/cloud/), which provisions and hosts routing capabilities for you.
 
 ## 1. Download and extract the Apollo Router binary
 
@@ -193,7 +193,7 @@ The console output should look like the following:
 2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
 ```
 
-That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/studio/explorer/sandbox/) so you can run queries against the Apollo Router. This flag also relaxes some defaults to provide a better development experience (e.g., it exposes subgraph error messages), so you should always _exclude_ this flag when running the router in a non-development environment.
+That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the Apollo Router. This flag also relaxes some defaults to provide a better development experience (e.g., it exposes subgraph error messages), so you should always _exclude_ this flag when running the router in a non-development environment.
 
 Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire supergraph, and run your first queries!
 

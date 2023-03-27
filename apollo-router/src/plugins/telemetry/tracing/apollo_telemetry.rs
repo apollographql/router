@@ -486,16 +486,18 @@ fn extract_i64(v: &Value) -> Option<i64> {
 }
 
 fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::reports::Trace>, Error>> {
-    if let Some(v) = extract_string(v) {
-        if let Ok(v) = base64::decode(v) {
-            if let Ok(t) = proto::reports::Trace::decode(Cursor::new(v)) {
-                return Some(Ok(Box::new(t)));
-            }
+    if let Value::String(s) = v {
+        if let Some(t) = decode_ftv1_trace(s.as_str()) {
+            return Some(Ok(Box::new(t)));
         }
-
         return Some(Err(Error::TraceParsingFailed));
     }
     None
+}
+
+pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
+    let bytes = base64::decode(string).ok()?;
+    proto::reports::Trace::decode(Cursor::new(bytes)).ok()
 }
 
 fn extract_http_data(span: &SpanData) -> Http {

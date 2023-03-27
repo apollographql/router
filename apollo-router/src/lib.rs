@@ -100,40 +100,5 @@ pub mod _private {
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
     // For tests
-    pub use crate::plugins::telemetry::Telemetry as TelemetryPlugin;
     pub use crate::router_factory::create_test_service_factory_from_yaml;
-
-    /// Retuns the `Debug` fomatting of two `Result<Schema, SchemaError>`,
-    /// from `parse_with_ast` and `parse_with_hir` respectively.
-    ///
-    /// The two strings are expected to be equal.
-    pub fn compare_schema_parsing(schema: &str) -> (String, String) {
-        use crate::spec::Schema;
-        let conf = Default::default();
-        (
-            format!("{:?}", Schema::parse_with_ast(schema, &conf)),
-            format!("{:?}", Schema::parse_with_hir(schema, &conf)),
-        )
-    }
-
-    /// Retuns the `Debug` fomatting of two `Result<Query, SpecError>`,
-    /// from `parse_with_ast` and `parse_with_hir` respectively.
-    ///
-    /// The two strings are expected to be equal.
-    pub fn compare_query_parsing(query: &str) -> (String, String) {
-        use once_cell::sync::OnceCell;
-
-        use crate::spec::Query;
-        use crate::spec::Schema;
-
-        static DUMMY_SCHEMA: OnceCell<Schema> = OnceCell::new();
-        let conf = Default::default();
-        let schema = DUMMY_SCHEMA.get_or_init(|| {
-            Schema::parse(include_str!("testdata/minimal_supergraph.graphql"), &conf).unwrap()
-        });
-        (
-            format!("{:?}", Query::parse_with_ast(query, schema, &conf)),
-            format!("{:?}", Query::parse_with_hir(query, schema, &conf)),
-        )
-    }
 }

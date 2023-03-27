@@ -13,6 +13,7 @@ use tracing_subscriber::registry::LookupSpan;
 use super::metrics::METRIC_PREFIX_COUNTER;
 use super::metrics::METRIC_PREFIX_HISTOGRAM;
 use super::metrics::METRIC_PREFIX_MONOTONIC_COUNTER;
+use super::metrics::METRIC_PREFIX_VALUE;
 
 pub(crate) const TRACE_ID_FIELD_NAME: &str = "trace_id";
 
@@ -69,5 +70,6 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
         f.name().starts_with(METRIC_PREFIX_COUNTER)
             || f.name().starts_with(METRIC_PREFIX_HISTOGRAM)
             || f.name().starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
+            || f.name().starts_with(METRIC_PREFIX_VALUE)
     })
 }

@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
@@ -27,6 +29,7 @@ use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
@@ -195,6 +198,7 @@ where
                     })
             } else {
                 hyper::body::to_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
                         (
@@ -481,13 +485,10 @@ where
 {
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
-        let apq_layer = if configuration.supergraph.apq.enabled {
+        let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(
-                    &configuration.supergraph.apq.experimental_cache,
-                    "APQ",
-                )
-                .await,
+                DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
+                    .await,
             )
         } else {
             APQLayer::disabled()

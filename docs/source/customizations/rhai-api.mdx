@@ -9,7 +9,7 @@ This article documents symbols and behaviors that are specific to [Rhai customiz
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn supergraph_service(service) {}
@@ -89,22 +89,46 @@ fn supergraph_service(service) {
 }
 ```
 
-If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
+You can also `throw` a valid GraphQL response, which will be deserialized and dealt with by the router.
 
-Returning a `200` "error" is not currently supported. If encountered, it will be silently converted into a `500` error. We may relax this restriction in the future.
+For example:
+```rhai
+fn supergraph_service(service) {
+    // Define a closure to process our request
+    let f = |request| {
+        // Something goes wrong during request processing...
+        throw #{
+            status: 403,
+            body: #{
+                errors: [#{
+                    message: `I have raised a 403`,
+                    extensions: #{
+                        code: "ACCESS_DENIED"
+                    }
+                }]
+            }
+        };
+    // Map our request using our closure
+    service.map_request(f);
+}
+```
+
+Rhai throws at the `map_request` layer behave the same as `ControlFlow::Break`, which is explained in the [external extensibility section](https://www.apollographql.com/docs/router/configuration/rhai).
+
+If the supplied status code is not a valid HTTP status code, then a `500` response code will result.
 
 ## Timing execution
 
-Your Rhai customization can use the global `apollo_start` constant to calculate durations. This is similar to `Epoch` in Unix environments.
+Your Rhai customization can use the global `Router.APOLLO_START` constant to calculate durations. This is similar to `Epoch` in Unix environments.
 
 ```rhai
 fn supergraph_service(service) {
     // Define a closure to process our response
     let f = |response| {
         // highlight-start
-        let start = apollo_start.elapsed;
+        let start = Router.APOLLO_START.elapsed;
         // Do some processing here...
-        let duration = apollo_start.elapsed - start;
+        let duration = Router.APOLLO_START.elapsed - start;
         print(`response processing took: ${duration}`);
         // highlight-end
 
@@ -118,11 +142,11 @@ fn supergraph_service(service) {
 
 ## Accessing the SDL
 
-Your Rhai customization can use the global `apollo_sdl` constant to examine the supergraph.
+Your Rhai customization can use the global `Router.APOLLO_SDL` constant to examine the supergraph.
 
 ```rhai
 fn supergraph_service(service) {
-    print(`${apollo_sdl}`);
+    print(`${Router.APOLLO_SDL}`);
 }
 ```
 
@@ -196,6 +220,26 @@ If you wish to get multiple values for a header key, then you must use the `valu
 
 Look at the examples to see how this works in practice.
 
+## Unix timestamp
+
+Your Rhai customization can use the function `unix_now()` to obtain the current Unix timestamp in seconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_now();
+}
+```
+
+## Unique IDs (UUID)
+
+Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
+ 
+```rhai
+fn supergraph_service(service) {
+    let id = uuid_v4();
+}
+```
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields, any of which a callback can modify in-place (read-write):
@@ -230,8 +274,6 @@ These additional fields are shared across all subgraph invocations and are thus 
 The context is a generic key/value store that exists for the entire lifespan of a particular client request. You can use this to share information between multiple callbacks throughout the request's lifespan.
 
 Keys must be strings, but values can be any Rhai object.
-
-For more information, see [Define necessary context](./native#5-define-necessary-context).
 
 ```rhai
 // You can interact with request.context as an indexed variable

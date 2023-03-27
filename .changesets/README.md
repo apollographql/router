@@ -10,10 +10,19 @@ This directory keeps files which individually represent entries that will repres
 >
 > The aforementioned **tooling doesn't exist yet** but will be created soon. 😺
 
-Create a file **by hand** in this directory for each individual changelog entry by using the required convention.  That convention is:
+### How to create a Changelog entry
+
+1. Push the change you are writing a changeset for up to GitHub.
+2. Open a pull request for it.  Note that your PR title and body will be used to pre-populate the changeset.
+3. On your local checkout, **run `cargo xtask changeset create` from the root of the repository** and follow the prompts.
+4. Add, commit and push the changeset file that is created and push it up to GitHub.
+
+### Conventions used in this `.changesets/` directory
+
+The convention used in this directory and obeyed by the `cargo xtask changeset create` command is:
 
 1. Files in this directory must use the `.md` file extension.
-2. Do not put multiple changelog entries in a single file.
+2. There must not be multiple changelog entries in a single file.
 3. Files *must start with a prefix* that indicates the classification of the changeset.  The prefixes are as follows:
    - **Breaking**: `breaking_`
    - **Feature**: `feat_`
@@ -22,7 +31,7 @@ Create a file **by hand** in this directory for each individual changelog entry 
    - **Maintenance**: `maint_`
    - **Documentation**: `docs_`
    - **Experimental**: `exp_`
-4. The pattern proceeding the prefix can be anything that matches `[a-z_]+` (i.e., any number of lowercased `a-z` and `_`).  Again, `.md` must be on the end as the extension.  For example, `feat_flying_forest_foxes.md`.
+4. The pattern following the prefix can be anything that matches `[a-z_]+` (i.e., any number of lowercased `a-z` and `_`).  Again, `.md` must be on the end as the extension.  For example, `feat_flying_forest_foxes.md`.
 5. Other files not matching the above convention will be ignored, including this `README.md`.
 6. The files must use the following format:
 

@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Plugin system for the router.
 //!
 //! Provides a customization mechanism for the router.
@@ -230,15 +232,6 @@ pub trait Plugin: Send + Sync + 'static {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         MultiMap::new()
     }
-
-    /// Support downcasting.
-    #[cfg(test)]
-    fn as_any(&self) -> &dyn std::any::Any
-    where
-        Self: Sized,
-    {
-        self
-    }
 }
 
 fn get_type_of<T>(_: &T) -> &'static str {
@@ -282,7 +275,11 @@ pub(crate) trait DynPlugin: Send + Sync + 'static {
     /// Return one or several `Endpoint`s and `ListenAddr` and the router will serve your custom web Endpoint(s).
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint>;
 
+    /// Support downcasting
     fn as_any(&self) -> &dyn std::any::Any;
+
+    /// Support downcasting
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any;
 }
 
 #[async_trait]
@@ -319,6 +316,10 @@ where
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
+
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
 }
 
 /// Register a plugin with a group and a name
@@ -326,6 +327,21 @@ where
 /// Plugins will appear in the configuration as a layer property called: {group}.{name}
 #[macro_export]
 macro_rules! register_plugin {
+    ($group: literal, $name: literal, $plugin_type: ident <  $generic: ident >) => {
+        //  Artificial scope to avoid naming collisions
+        const _: () = {
+            use $crate::_private::once_cell::sync::Lazy;
+            use $crate::_private::PluginFactory;
+            use $crate::_private::PLUGINS;
+
+            #[$crate::_private::linkme::distributed_slice(PLUGINS)]
+            #[linkme(crate = $crate::_private::linkme)]
+            static REGISTER_PLUGIN: Lazy<PluginFactory> = Lazy::new(|| {
+                $crate::plugin::PluginFactory::new::<$plugin_type<$generic>>($group, $name)
+            });
+        };
+    };
+
     ($group: literal, $name: literal, $plugin_type: ident) => {
         //  Artificial scope to avoid naming collisions
         const _: () = {
