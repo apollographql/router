@@ -1171,6 +1171,13 @@ expression: "&schema"
             "redis": null
           },
           "warmed_up_queries": 0
+        },
+        "limits": {
+          "max_depth": null,
+          "max_height": null,
+          "max_root_fields": null,
+          "max_aliases": null,
+          "warn_only": false
         }
       },
       "type": "object",
@@ -1184,6 +1191,57 @@ expression: "&schema"
           "description": "Enable introspection Default: false",
           "default": false,
           "type": "boolean"
+        },
+        "limits": {
+          "description": "Query complexity limiting",
+          "default": {
+            "max_depth": null,
+            "max_height": null,
+            "max_root_fields": null,
+            "max_aliases": null,
+            "warn_only": false
+          },
+          "type": "object",
+          "properties": {
+            "max_aliases": {
+              "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
+              "default": null,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0,
+              "nullable": true
+            },
+            "max_depth": {
+              "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nTODO: define depth",
+              "default": null,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0,
+              "nullable": true
+            },
+            "max_height": {
+              "description": "If set, requests with operations higher than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nHeight is based on simple merging of fields using the same name or alias, but only within the same selection set. For example `name` here is only counted once and the query has height 3, not 4:\n\n```graphql query { name { first } name { last } } ```\n\nThis may change in a future version of Apollo Router to do [full field merging across fragments][merging] instead.\n\n[merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]",
+              "default": null,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0,
+              "nullable": true
+            },
+            "max_root_fields": {
+              "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nTODO: define root fields (e.g. in the presence of fragment)",
+              "default": null,
+              "type": "integer",
+              "format": "uint32",
+              "minimum": 0.0,
+              "nullable": true
+            },
+            "warn_only": {
+              "description": "If set to true (which is the default is dev mode), requests that exceed a `max_*` limit are *not* rejected. Instead they are executed normally, and a warning is logged.",
+              "default": false,
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         },
         "listen": {
           "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
