@@ -37,7 +37,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### Update the planner with a new schema ([Issue #2690](https://github.com/apollographql/router/issues/2690))
+### Use single Deno runtime for query planning ([Issue #2690](https://github.com/apollographql/router/issues/2690))
 
 We now keep the same JavaScript-based query-planning runtime alive for the entirety of the Router's lifetime, rather than disposing of it and creating a new one at several points in time, including when processing GraphQL requests, generating an "API schema" (the publicly queryable version of the supergraph, with private fields excluded), and when processing introspection queries.
 
