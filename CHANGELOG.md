@@ -4,6 +4,49 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.13.1] - 2023-03-28
+
+## 🚀 Features
+
+### Router homepage now supports redirecting to Apollo Studio Explorer ([PR #2282](https://github.com/apollographql/router/pull/2282))
+
+In order to replicate the landing-page experience (called "homepage" on the Router) which was available in Apollo Gateway, we've introduced a `graph_ref` option to the `homepage` configuration.  This allows users to be (optionally, as as sticky preference) _redirected_ from the Apollo Router homepage directly to the correct graph in Apollo Studio Explorer.
+
+Since users may have their own preference on the value, we do not automatically infer the graph reference (e.g., `graph@variant`), instead requiring that the user set it to the value of their choice.
+
+For example:
+
+```yaml
+homepage:
+  graph_ref: my-org-graph@production
+```
+
+By [@flyboarder](https://github.com/flyboarder) in https://github.com/apollographql/router/pull/2282
+
+### New metric for subgraph-requests, including "retry" and "break" events ([Issue #2518](https://github.com/apollographql/router/issues/2518)), ([Issue #2736](https://github.com/apollographql/router/issues/2736))
+
+We now emit a `apollo_router_http_request_retry_total` metric from the Router.  The metric also offers observability into _aborted_ requests via an `status = "aborted"` attribute on the metric.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2829
+
+### New `receive_body` span represents time consuming a client's request body ([Issue #2518](https://github.com/apollographql/router/issues/2518)), ([Issue #2736](https://github.com/apollographql/router/issues/2736))
+
+When running with **debug-level** instrumentation, the Router now emits a `receive_body` span which tracks time spent receiving the request body from the client.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2829
+
+## 🐛 Fixes
+
+### Use single Deno runtime for query planning ([Issue #2690](https://github.com/apollographql/router/issues/2690))
+
+We now keep the same JavaScript-based query-planning runtime alive for the entirety of the Router's lifetime, rather than disposing of it and creating a new one at several points in time, including when processing GraphQL requests, generating an "API schema" (the publicly queryable version of the supergraph, with private fields excluded), and when processing introspection queries.
+
+Not only is this a more preferred architecture that is more considerate of system resources, but it was also responsible for a memory leak which occurred during supergraph changes.
+
+We believe this will alleviate, but not entirely solve, the circumstances seen in the above-linked issue.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2706
+
 # [1.13.0] - 2023-03-23
 
 ## 🚀 Features
