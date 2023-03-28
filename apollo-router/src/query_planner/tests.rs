@@ -106,7 +106,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
         )
         .await;
@@ -163,7 +163,7 @@ async fn fetch_includes_operation_name() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
         )
         .await;
@@ -217,7 +217,7 @@ async fn fetch_makes_post_requests() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
         )
         .await;
@@ -340,7 +340,7 @@ async fn defer() {
     let (sender, mut receiver) = futures::channel::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
-    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([
             (
@@ -390,7 +390,7 @@ async fn defer_if_condition() {
           }"#;
 
     let schema = include_str!("testdata/defer_clause.graphql");
-    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
 
     let root: PlanNode =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -610,7 +610,7 @@ async fn dependent_mutations() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse(schema, &Default::default()).unwrap()),
+            &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
             sender,
         )
         .await;
