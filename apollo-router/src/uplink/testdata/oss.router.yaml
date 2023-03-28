@@ -2,4 +2,6 @@ health_check:
   enabled: false
 homepage:
   enabled: false
-
+supergraph:
+  limits:
+    parser_max_recursion: 1000

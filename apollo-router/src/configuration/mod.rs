@@ -474,6 +474,9 @@ pub(crate) struct Supergraph {
 
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
+
+    /// Query complexity limiting
+    pub(crate) limits: Limits,
 }
 
 fn default_defer_support() -> bool {
@@ -489,6 +492,7 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
+        limits: Option<Limits>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -496,6 +500,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
+            limits: limits.unwrap_or_default(),
         }
     }
 }
@@ -510,6 +515,7 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
+        limits: Option<Limits>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -517,6 +523,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
+            limits: limits.unwrap_or_default(),
         }
     }
 }
@@ -541,6 +548,72 @@ impl Supergraph {
         }
 
         path
+    }
+}
+
+/// Configuration options pertaining to the supergraph server component.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Limits {
+    /// If set, requests with operations deeper than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    ///
+    /// TODO: define depth
+    pub(crate) max_depth: Option<u32>,
+
+    /// If set, requests with operations higher than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
+    ///
+    /// Height is based on simple merging of fields using the same name or alias,
+    /// but only within the same selection set.
+    /// For example `name` here is only counted once and the query has height 3, not 4:
+    ///
+    /// ```graphql
+    /// query {
+    ///     name { first }
+    ///     name { last }
+    /// }
+    /// ```
+    ///
+    /// This may change in a future version of Apollo Router to do
+    /// [full field merging across fragments][merging] instead.
+    ///
+    /// [merging]: https://spec.graphql.org/October2021/#sec-Field-Selection-Merging]
+    pub(crate) max_height: Option<u32>,
+
+    /// If set, requests with operations with more root fields than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_ROOT_FIELDS_LIMIT"}`
+    ///
+    /// TODO: define root fields (e.g. in the presence of fragment)
+    pub(crate) max_root_fields: Option<u32>,
+
+    /// If set, requests with operations with more aliases than this maximum
+    /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
+    /// `"extensions": {"code": "MAX_ALIASES_LIMIT"}`
+    pub(crate) max_aliases: Option<u32>,
+
+    /// If set to true (which is the default is dev mode),
+    /// requests that exceed a `max_*` limit are *not* rejected.
+    /// Instead they are executed normally, and a warning is logged.
+    pub(crate) warn_only: bool,
+}
+
+#[allow(clippy::derivable_impls)] //  explicit is better here
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            // These limits are opt-in
+            max_depth: None,
+            max_height: None,
+            max_root_fields: None,
+            max_aliases: None,
+
+            warn_only: false,
+        }
     }
 }
 
