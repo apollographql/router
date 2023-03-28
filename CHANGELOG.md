@@ -4,6 +4,39 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.13.1] - 2023-03-28
+
+## 🚀 Features
+
+### Apollo Router landing page ([PR #2282](https://github.com/apollographql/router/pull/2282))
+
+We've added a `graph_ref` option to the `homepage` configuration, this will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer.  The experience now duplicates the user-experience which exists in Apollo Gateway today.
+
+By [@flyboarder](https://github.com/flyboarder) in https://github.com/apollographql/router/pull/2282
+
+## 🐛 Fixes
+
+### Update the planner with a new schema ([Issue #2690](https://github.com/apollographql/router/issues/2690))
+
+Previously, the router was creating a new JS runtime for the planner everytime there's a new schema, and creating one for every API schema creation, and every introspection query call. Creating these runtimes leaks memory, so this change makes sure we keep the same JS runtime for the entire life of the router, and use it across planner updates, API schema generation and introspection queries.
+
+By [@geal](https://github.com/geal) in https://github.com/apollographql/router/pull/2706
+
+## 🛠 Maintenance
+
+### add events tracking subgraph requests retry and break ([Issue #2518](https://github.com/apollographql/router/issues/2518)), ([Issue #2736](https://github.com/apollographql/router/issues/2736))
+
+New metrics tracking retries:
+- `apollo_router_subgraph_request_retry_break_count`
+- `apollo_router_subgraph_request_retry_attempt_count`
+
+New spans:
+- `receive_body` tracking the time spent receiving the request body (debug level)
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2829
+
+
+
 # [1.13.0] - 2023-03-23
 
 ## 🚀 Features
