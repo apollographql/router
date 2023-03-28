@@ -25,7 +25,7 @@ By [@flyboarder](https://github.com/flyboarder) in https://github.com/apollograp
 
 ### New metric for subgraph-requests, including "retry" and "break" events ([Issue #2518](https://github.com/apollographql/router/issues/2518)), ([Issue #2736](https://github.com/apollographql/router/issues/2736))
 
-We now emit a `apollo_router_subgraph_request_retry_total` metric from the Router.  The metric also offers observability into _aborted_ requests via a `status = "aborted"` attribute on the metric.
+We now emit a `apollo_router_http_request_retry_total` metric from the Router.  The metric also offers observability into _aborted_ requests via an `status = "aborted"` attribute on the metric.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2829
 
