@@ -19,6 +19,11 @@ supergraph:
           - https://example.com
       in_memory:
         limit: 1000
+  limits:
+    max_depth: 20
+    max_height: 100
+    max_aliases: 100
+    max_root_fields: 10
 
 apq:
   router:

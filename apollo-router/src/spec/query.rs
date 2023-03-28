@@ -43,10 +43,10 @@ pub(crate) const TYPENAME: &str = "__typename";
 #[derive(Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
-    string: String,
+    pub(crate) string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
     #[serde(skip)]
-    compiler: OnceCell<Mutex<ApolloCompiler>>,
+    pub(crate) compiler: OnceCell<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
