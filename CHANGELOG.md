@@ -31,7 +31,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### New `receive_body` span represents time consuming a client's request body ([Issue #2518](https://github.com/apollographql/router/issues/2518)), ([Issue #2736](https://github.com/apollographql/router/issues/2736))
 
-When running with **debug-level** instrumentation, the Router now emits a `receive_body` span which tracks spent receiving the request body from the client.
+When running with **debug-level** instrumentation, the Router now emits a `receive_body` span which tracks time spent receiving the request body from the client.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2829
 
@@ -41,7 +41,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 We now keep the same JavaScript-based query-planning runtime alive for the entirety of the Router's lifetime, rather than disposing of it and creating a new one at several points in time, including when processing GraphQL requests, generating an "API schema" (the publicly queryable version of the supergraph, with private fields excluded), and when processing introspection queries.
 
-Not only is this a more preferred architecture that is more considerate of system resources, but we also believe the previously configuration was responsible for memory leaks occurring during supergraph changes.
+Not only is this a more preferred architecture that is more considerate of system resources, but it was also responsible for a memory leak which occurred during supergraph changes.
 
 We believe this will alleviate, but not entirely solve, the circumstances seen in the above-linked issue.
 
