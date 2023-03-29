@@ -1,9 +1,9 @@
-use parking_lot::RwLock;
 use std::borrow::Cow;
 use std::sync::Arc;
 
 use opentelemetry::trace::SpanBuilder;
 use opentelemetry::trace::Tracer;
+use parking_lot::RwLock;
 use tracing_opentelemetry::PreSampledTracer;
 
 #[derive(Clone)]

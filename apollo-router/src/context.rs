@@ -10,9 +10,8 @@ use std::time::Instant;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
-use parking_lot::Mutex;
-
 use derivative::Derivative;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
