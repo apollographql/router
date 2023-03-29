@@ -262,7 +262,6 @@ where
                     } = context
                         .private_entries
                         .lock()
-                        .unwrap()
                         .get()
                         .cloned()
                         .unwrap_or_default();

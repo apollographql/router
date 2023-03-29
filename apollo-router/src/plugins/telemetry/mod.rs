@@ -311,7 +311,7 @@ impl Plugin for Telemetry {
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
                 if let Some(usage_reporting) =
-                    resp.context.private_entries.lock().unwrap().get::<UsageReporting>()
+                    resp.context.private_entries.lock().get::<UsageReporting>()
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -713,7 +713,6 @@ impl Telemetry {
             context
                 .private_entries
                 .lock()
-                .unwrap()
                 .get::<MetricsAttributes>()
                 .cloned()
         }
@@ -856,15 +855,10 @@ impl Telemetry {
             let _ = context
                 .private_entries
                 .lock()
-                .unwrap()
                 .insert(MetricsAttributes(attributes));
         }
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
-            context
-                .private_entries
-                .lock()
-                .unwrap()
-                .insert(EnableSubgraphFtv1);
+            context.private_entries.lock().insert(EnableSubgraphFtv1);
         }
     }
 
@@ -952,7 +946,6 @@ impl Telemetry {
             .context
             .private_entries
             .lock()
-            .unwrap()
             .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
     }
 
@@ -968,7 +961,6 @@ impl Telemetry {
             context
                 .private_entries
                 .lock()
-                .unwrap()
                 .get::<SubgraphMetricsAttributes>()
                 .cloned()
         }
@@ -1130,7 +1122,6 @@ impl Telemetry {
         let metrics = if let Some(usage_reporting) = context
             .private_entries
             .lock()
-            .unwrap()
             .get::<UsageReporting>()
             .cloned()
         {
@@ -1406,7 +1397,6 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
         .context
         .private_entries
         .lock()
-        .unwrap()
         .contains_key::<EnableSubgraphFtv1>()
         && Span::current().context().span().span_context().is_sampled()
     {
@@ -1424,7 +1414,6 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
         .context
         .private_entries
         .lock()
-        .unwrap()
         .contains_key::<EnableSubgraphFtv1>()
     {
         if let Some(serde_json_bytes::Value::String(ftv1)) =

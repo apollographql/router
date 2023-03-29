@@ -195,7 +195,6 @@ where
             } = context
                 .private_entries
                 .lock()
-                .unwrap()
                 .get()
                 .cloned()
                 .unwrap_or_default();
@@ -1541,14 +1540,10 @@ mod tests {
 
     fn defer_context() -> Context {
         let context = Context::new();
-        context
-            .private_entries
-            .lock()
-            .unwrap()
-            .insert(ClientRequestAccepts {
-                multipart: true,
-                ..Default::default()
-            });
+        context.private_entries.lock().insert(ClientRequestAccepts {
+            multipart: true,
+            ..Default::default()
+        });
 
         context
     }

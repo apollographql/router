@@ -220,39 +220,35 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
-        let fut =
-            async move {
-                match this
-                    .get((req.query.clone(), req.operation_name.to_owned()))
-                    .await
-                {
-                    Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
-                        .content(query_planner_content)
-                        .context(req.context)
-                        .build()),
-                    Err(e) => {
-                        match &e {
-                            QueryPlannerError::PlanningErrors(pe) => {
-                                req.context
-                                    .private_entries
-                                    .lock()
-                                    .unwrap()
-                                    .insert(pe.usage_reporting.clone());
-                            }
-                            QueryPlannerError::SpecError(e) => {
-                                req.context.private_entries.lock().unwrap().insert(
-                                    UsageReporting {
-                                        stats_report_key: e.get_error_key().to_string(),
-                                        referenced_fields_by_type: HashMap::new(),
-                                    },
-                                );
-                            }
-                            _ => (),
+        let fut = async move {
+            match this
+                .get((req.query.clone(), req.operation_name.to_owned()))
+                .await
+            {
+                Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
+                    .content(query_planner_content)
+                    .context(req.context)
+                    .build()),
+                Err(e) => {
+                    match &e {
+                        QueryPlannerError::PlanningErrors(pe) => {
+                            req.context
+                                .private_entries
+                                .lock()
+                                .insert(pe.usage_reporting.clone());
                         }
-                        Err(e)
+                        QueryPlannerError::SpecError(e) => {
+                            req.context.private_entries.lock().insert(UsageReporting {
+                                stats_report_key: e.get_error_key().to_string(),
+                                referenced_fields_by_type: HashMap::new(),
+                            });
+                        }
+                        _ => (),
                     }
+                    Err(e)
                 }
-            };
+            }
+        };
 
         // Return the response as an immediate future
         Box::pin(fut)

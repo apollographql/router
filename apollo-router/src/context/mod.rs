@@ -40,7 +40,7 @@ pub struct Context {
     entries: Entries,
 
     #[serde(skip, default)]
-    pub(crate) private_entries: Arc<std::sync::Mutex<Extensions>>,
+    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
@@ -56,7 +56,7 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
-            private_entries: Arc::new(std::sync::Mutex::new(Extensions::default())),
+            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }

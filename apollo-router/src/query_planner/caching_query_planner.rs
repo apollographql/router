@@ -169,7 +169,6 @@ where
                                     context
                                         .private_entries
                                         .lock()
-                                        .unwrap()
                                         .insert(plan.usage_reporting.clone());
                                 }
                                 Ok(QueryPlannerResponse {
@@ -205,7 +204,6 @@ where
                             context
                                 .private_entries
                                 .lock()
-                                .unwrap()
                                 .insert(plan.usage_reporting.clone());
                         }
 
@@ -221,16 +219,17 @@ where
                                     .context
                                     .private_entries
                                     .lock()
-                                    .unwrap()
                                     .insert(pe.usage_reporting.clone());
                             }
                             QueryPlannerError::SpecError(e) => {
-                                request.context.private_entries.lock().unwrap().insert(
-                                    UsageReporting {
+                                request
+                                    .context
+                                    .private_entries
+                                    .lock()
+                                    .insert(UsageReporting {
                                         stats_report_key: e.get_error_key().to_string(),
                                         referenced_fields_by_type: HashMap::new(),
-                                    },
-                                );
+                                    });
                             }
                             _ => {}
                         }
@@ -405,7 +404,6 @@ mod tests {
                 .context
                 .private_entries
                 .lock()
-                .unwrap()
                 .contains_key::<UsageReporting>());
         }
     }

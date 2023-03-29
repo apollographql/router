@@ -521,14 +521,10 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context
-            .private_entries
-            .lock()
-            .unwrap()
-            .insert(ClientRequestAccepts {
-                json: true,
-                ..Default::default()
-            });
+        context.private_entries.lock().insert(ClientRequestAccepts {
+            json: true,
+            ..Default::default()
+        });
 
         context
     }

@@ -77,7 +77,6 @@ where
                     req.context
                         .private_entries
                         .lock()
-                        .unwrap()
                         .insert(ClientRequestAccepts {
                             wildcard: accepts_wildcard,
                             multipart: accepts_multipart,
@@ -133,7 +132,6 @@ where
                 } = context
                     .private_entries
                     .lock()
-                    .unwrap()
                     .get()
                     .cloned()
                     .unwrap_or_default();
