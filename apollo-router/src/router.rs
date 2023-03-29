@@ -50,7 +50,6 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router;
-use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
@@ -73,9 +72,13 @@ async fn make_router_service<RF>(
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     entitlement: EntitlementState,
 ) -> Result<router::BoxCloneService, BoxError> {
-    let schema = Arc::new(Schema::parse(schema, &configuration)?);
     let service_factory = YamlRouterFactory
-        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .create(
+            configuration.clone(),
+            schema.to_string(),
+            None,
+            Some(extra_plugins),
+        )
         .await?;
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
