@@ -26,7 +26,6 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::json_ext::PathElement;
 use crate::json_ext::ResponsePathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
@@ -369,7 +368,7 @@ impl Query {
                             };
                             parameters.errors.push(Error {
                                 message,
-                                path: Some(Path::from_response_slice(&path)),
+                                path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
                             });
 
@@ -413,7 +412,7 @@ impl Query {
                             res
                         }) {
                         Err(InvalidValue) => {
-                            parameters.nullified.push(Path::from_response_slice(&path));
+                            parameters.nullified.push(Path::from_response_slice(path));
                             *output = Value::Null;
                             Ok(())
                         }
@@ -459,7 +458,7 @@ impl Query {
                             if !parameters.schema.object_types.contains_key(input_type)
                                 && !parameters.schema.interfaces.contains_key(input_type)
                             {
-                                parameters.nullified.push(Path::from_response_slice(&path));
+                                parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
                                 return Ok(());
                             }
@@ -481,14 +480,14 @@ impl Query {
                             )
                             .is_err()
                         {
-                            parameters.nullified.push(Path::from_response_slice(&path));
+                            parameters.nullified.push(Path::from_response_slice(path));
                             *output = Value::Null;
                         }
 
                         Ok(())
                     }
                     _ => {
-                        parameters.nullified.push(Path::from_response_slice(&path));
+                        parameters.nullified.push(Path::from_response_slice(path));
                         *output = Value::Null;
                         Ok(())
                     }
@@ -621,7 +620,7 @@ impl Query {
                                     "Cannot return null for non-nullable field {parent_type}.{}",
                                     field_name.as_str()
                                 ),
-                                path: Some(Path::from_response_slice(&path)),
+                                path: Some(Path::from_response_slice(path)),
                                 ..Error::default()
                             });
 
@@ -785,7 +784,7 @@ impl Query {
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 operation.kind
                             ),
-                            path: Some(Path::from_response_slice(&path)),
+                            path: Some(Path::from_response_slice(path)),
                             ..Error::default()
                         });
                         return Err(InvalidValue);
