@@ -254,7 +254,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         FA: RouterSuperServiceFactory,
     {
         let parsed_schema = Arc::new(
-            Schema::parse(&schema, &configuration)
+            Schema::parse(&schema, &configuration, None)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
 
@@ -298,7 +298,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             .router_configurator
             .create(
                 configuration.clone(),
-                parsed_schema,
+                schema.to_string(),
                 previous_router_service_factory,
                 None,
             )
@@ -947,7 +947,7 @@ mod tests {
             async fn create<'a>(
                 &'a mut self,
                 configuration: Arc<Configuration>,
-                schema: Arc<Schema>,
+                schema: String,
                 previous_router_service_factory: Option<&'a MockMyRouterFactory>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;
@@ -1111,7 +1111,7 @@ mod tests {
                 .times(expect_times_called - 1)
                 .withf(
                     move |_configuration: &Arc<Configuration>,
-                          _schema: &Arc<Schema>,
+                          _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>| {
                         previous_router_service_factory.is_some()

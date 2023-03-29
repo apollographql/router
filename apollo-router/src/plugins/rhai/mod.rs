@@ -1628,11 +1628,11 @@ impl Rhai {
             .register_fn("uuid_v4", || -> String {
                 Uuid::new_v4().to_string()
             })
-            .register_fn("unix_now", ||-> u64 {
-                match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
-                    Ok(v)=> v.as_secs(),
-                    Err(_)=>0
-                }
+            .register_fn("unix_now", ||-> Result<i64, Box<EvalAltResult>> {
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .map_err(|e| e.to_string().into())
+                    .map(|x| x.as_secs() as i64)
             })
             // Add query plan getter to execution request
             .register_get(

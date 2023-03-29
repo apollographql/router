@@ -24,6 +24,7 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use router_bridge::planner::Planner;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
@@ -48,6 +49,7 @@ use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::RouterRequest;
@@ -529,6 +531,10 @@ where
 impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.supergraph_creator.cache_keys(count).await
+    }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.supergraph_creator.planner()
     }
 }
 
