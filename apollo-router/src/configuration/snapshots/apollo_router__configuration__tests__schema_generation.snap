@@ -211,13 +211,17 @@ expression: "&schema"
               "headers": false,
               "context": false,
               "body": false,
-              "sdl": false
+              "sdl": false,
+              "uri": false,
+              "method": false
             },
             "response": {
               "headers": false,
               "context": false,
               "body": false,
-              "sdl": false
+              "sdl": false,
+              "uri": false,
+              "method": false
             }
           },
           "type": "object",
@@ -228,7 +232,9 @@ expression: "&schema"
                 "headers": false,
                 "context": false,
                 "body": false,
-                "sdl": false
+                "sdl": false,
+                "uri": false,
+                "method": false
               },
               "type": "object",
               "properties": {
@@ -247,8 +253,18 @@ expression: "&schema"
                   "default": false,
                   "type": "boolean"
                 },
+                "method": {
+                  "description": "Send the method",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "sdl": {
                   "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "uri": {
+                  "description": "Send the uri",
                   "default": false,
                   "type": "boolean"
                 }
@@ -261,7 +277,9 @@ expression: "&schema"
                 "headers": false,
                 "context": false,
                 "body": false,
-                "sdl": false
+                "sdl": false,
+                "uri": false,
+                "method": false
               },
               "type": "object",
               "properties": {
@@ -280,8 +298,18 @@ expression: "&schema"
                   "default": false,
                   "type": "boolean"
                 },
+                "method": {
+                  "description": "Send the method",
+                  "default": false,
+                  "type": "boolean"
+                },
                 "sdl": {
                   "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "uri": {
+                  "description": "Send the uri",
                   "default": false,
                   "type": "boolean"
                 }

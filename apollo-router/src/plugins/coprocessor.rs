@@ -588,9 +588,7 @@ where
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
         .transpose()?;
-    let status_to_send = response_config
-        .status_code
-        .then(|| parts.status.to_string());
+    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
     let sdl = response_config.sdl.then(|| sdl.clone().to_string());
 
@@ -800,9 +798,7 @@ where
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
 
-    let status_to_send = response_config
-        .status_code
-        .then(|| parts.status.to_string());
+    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
 
     let body_to_send = response_config
         .body
