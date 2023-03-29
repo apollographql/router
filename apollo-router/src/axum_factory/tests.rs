@@ -65,6 +65,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::plugin::test::MockSubgraph;
+use crate::query_planner::BridgeQueryPlanner;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -80,7 +81,6 @@ use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::entitlement::EntitlementState;
@@ -1197,7 +1197,10 @@ async fn it_displays_homepage() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.text().await.unwrap(), home_page_content());
+    assert_eq!(
+        response.text().await.unwrap(),
+        home_page_content(Homepage::fake_builder().enabled(false).build())
+    );
     server.shutdown().await.unwrap();
 }
 
@@ -2292,17 +2295,17 @@ async fn test_supergraph_timeout() {
 
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
-    let schema = Schema::parse(
-        include_str!("..//testdata/minimal_supergraph.graphql"),
-        &conf,
-    )
-    .unwrap();
+    let schema = include_str!("..//testdata/minimal_supergraph.graphql");
+    let planner = BridgeQueryPlanner::new(schema.to_string(), conf.clone())
+        .await
+        .unwrap();
+    let schema = planner.schema();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
     let plugins = create_plugins(&conf, &schema, None).await.unwrap();
 
-    let mut builder = PluggableSupergraphServiceBuilder::new(Arc::new(schema))
+    let mut builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
         .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
 

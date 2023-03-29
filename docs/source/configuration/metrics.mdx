@@ -62,9 +62,12 @@ The following metrics are available when using Prometheus. Attributes are listed
 #### HTTP
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
-  - `subgraph`: (Optional) The subgraph being queried.
+  - `subgraph`: (Optional) The subgraph being queried
 - `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status 
 - `apollo_router_timeout` - Number of triggered timeouts
+- `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
+  - `subgraph`: The subgraph being queried
+  - `status` : If the retry was aborted (`aborted`)
 
 #### Session
 - `apollo_router_session_count_total` - Number of currently connected clients 
@@ -87,7 +90,7 @@ All cache metrics listed above have the following attributes:
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
-  - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`, or `ignored`)
+  - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
   - `code`: The error code depending on type (if an error occurred)
   - `error`: The error message (if an error occurred)
 

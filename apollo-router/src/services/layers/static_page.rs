@@ -18,13 +18,11 @@ use mediatype::names::HTML;
 use mediatype::names::TEXT;
 use mediatype::MediaType;
 use mediatype::MediaTypeList;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
 use tower::BoxError;
 use tower::Layer;
 use tower::Service;
 
+use crate::configuration::Homepage;
 use crate::layers::sync_checkpoint::CheckpointService;
 use crate::services::router;
 use crate::Configuration;
@@ -40,7 +38,8 @@ impl StaticPageLayer {
         let static_page = if configuration.sandbox.enabled {
             Some(sandbox_page_content())
         } else if configuration.homepage.enabled {
-            Some(home_page_content())
+            let homepage_config = configuration.homepage.clone();
+            Some(home_page_content(homepage_config))
         } else {
             None
         };
@@ -106,33 +105,6 @@ fn prefers_html(headers: &HeaderMap) -> bool {
     })
 }
 
-/// Configuration options pertaining to the sandbox page.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Sandbox {
-    pub(crate) enabled: bool,
-}
-
-fn default_sandbox() -> bool {
-    false
-}
-
-#[buildstructor::buildstructor]
-impl Sandbox {
-    #[builder]
-    pub(crate) fn new(enabled: Option<bool>) -> Self {
-        Self {
-            enabled: enabled.unwrap_or_else(default_sandbox),
-        }
-    }
-}
-
-impl Default for Sandbox {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 #[derive(Template)]
 #[template(path = "sandbox_index.html")]
 struct SandboxTemplate {
@@ -148,9 +120,13 @@ pub(crate) fn sandbox_page_content() -> String {
 
 #[derive(Template)]
 #[template(path = "homepage_index.html")]
-struct HomepageTemplate {}
+struct HomepageTemplate {
+    graph_ref: String,
+}
 
-pub(crate) fn home_page_content() -> String {
-    let template = HomepageTemplate {};
+pub(crate) fn home_page_content(homepage_config: Homepage) -> String {
+    let template = HomepageTemplate {
+        graph_ref: homepage_config.graph_ref.unwrap_or_default(),
+    };
     template.render().expect("cannot fail")
 }

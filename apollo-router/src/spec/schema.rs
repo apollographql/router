@@ -10,8 +10,6 @@ use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use http::Uri;
-use itertools::Itertools;
-use router_bridge::api_schema;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -40,7 +38,10 @@ pub(crate) struct Schema {
     root_operations: HashMap<OperationKind, String>,
 }
 
+#[cfg(test)]
 fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
+    use itertools::Itertools;
+    use router_bridge::api_schema;
     let s = api_schema::api_schema(schema)
         .map_err(|e| SchemaError::Api(e.to_string()))?
         .map_err(|e| SchemaError::Api(e.iter().filter_map(|e| e.message.as_ref()).join(", ")))?;
@@ -48,155 +49,169 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
 }
 
 impl Schema {
-    pub(crate) fn parse(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let mut schema = parse(s, configuration)?;
-        schema.api_schema = Some(Box::new(parse(&make_api_schema(s)?, configuration)?));
-        return Ok(schema);
+    pub(crate) fn parse(
+        s: &str,
+        configuration: &Configuration,
+        api_schema: Option<Box<Schema>>,
+    ) -> Result<Self, SchemaError> {
+        let mut schema = Self::parse_inner(s, configuration)?;
+        schema.api_schema = api_schema;
+        Ok(schema)
+    }
 
-        fn parse(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
-            let mut compiler = ApolloCompiler::new();
-            compiler.add_type_system(
-                include_str!("introspection_types.graphql"),
-                "introspection_types.graphql",
-            );
-            let id = compiler.add_type_system(schema, "schema.graphql");
+    #[cfg(test)]
+    pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
+        let mut schema = Self::parse_inner(s, configuration)?;
+        schema.api_schema = Some(Box::new(Self::parse_inner(
+            &make_api_schema(s)?,
+            configuration,
+        )?));
+        Ok(schema)
+    }
 
-            let ast = compiler.db.ast(id);
+    fn parse_inner(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
+        let mut compiler = ApolloCompiler::new();
+        compiler.add_type_system(
+            include_str!("introspection_types.graphql"),
+            "introspection_types.graphql",
+        );
+        let id = compiler.add_type_system(schema, "schema.graphql");
 
-            // Trace log recursion limit data
-            let recursion_limit = ast.recursion_limit();
-            tracing::trace!(?recursion_limit, "recursion limit data");
+        let ast = compiler.db.ast(id);
 
-            // TODO: run full compiler-based validation instead?
-            let errors = ast.errors().cloned().collect::<Vec<_>>();
-            if !errors.is_empty() {
-                let errors = ParseErrors {
-                    raw_schema: schema.to_string(),
-                    errors,
-                };
-                errors.print();
-                return Err(SchemaError::Parse(errors));
+        // Trace log recursion limit data
+        let recursion_limit = ast.recursion_limit();
+        tracing::trace!(?recursion_limit, "recursion limit data");
+
+        // TODO: run full compiler-based validation instead?
+        let errors = ast.errors().cloned().collect::<Vec<_>>();
+        if !errors.is_empty() {
+            let errors = ParseErrors {
+                raw_schema: schema.to_string(),
+                errors,
+            };
+            errors.print();
+            return Err(SchemaError::Parse(errors));
+        }
+
+        fn as_string(value: &hir::Value) -> Option<&String> {
+            if let hir::Value::String(string) = value {
+                Some(string)
+            } else {
+                None
             }
+        }
 
-            fn as_string(value: &hir::Value) -> Option<&String> {
-                if let hir::Value::String(string) = value {
-                    Some(string)
-                } else {
-                    None
+        let mut subgraphs = HashMap::new();
+        // TODO: error if not found?
+        if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
+            for (name, url) in join_enum
+                .enum_values_definition()
+                .iter()
+                .filter_map(|value| {
+                    let join_directive = value
+                        .directives()
+                        .iter()
+                        .find(|directive| directive.name() == "join__graph")?;
+                    let name = as_string(join_directive.argument_by_name("name")?)?;
+                    let url = as_string(join_directive.argument_by_name("url")?)?;
+                    Some((name, url))
+                })
+            {
+                if url.is_empty() {
+                    return Err(SchemaError::MissingSubgraphUrl(name.clone()));
+                }
+                let url =
+                    Uri::from_str(url).map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
+                if subgraphs.insert(name.clone(), url).is_some() {
+                    return Err(SchemaError::Api(format!(
+                        "must not have several subgraphs with same name '{name}'"
+                    )));
                 }
             }
+        }
 
-            let mut subgraphs = HashMap::new();
-            // TODO: error if not found?
-            if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
-                for (name, url) in join_enum
+        let object_types: HashMap<_, _> = compiler
+            .db
+            .object_types()
+            .iter()
+            .map(|(name, def)| (name.clone(), (&**def).into()))
+            .collect();
+
+        let interfaces: HashMap<_, _> = compiler
+            .db
+            .interfaces()
+            .iter()
+            .map(|(name, def)| (name.clone(), (&**def).into()))
+            .collect();
+
+        let input_types: HashMap<_, _> = compiler
+            .db
+            .input_objects()
+            .iter()
+            .map(|(name, def)| (name.clone(), (&**def).into()))
+            .collect();
+
+        let enums = compiler
+            .db
+            .enums()
+            .iter()
+            .map(|(name, def)| {
+                let values = def
                     .enum_values_definition()
                     .iter()
-                    .filter_map(|value| {
-                        let join_directive = value
-                            .directives()
-                            .iter()
-                            .find(|directive| directive.name() == "join__graph")?;
-                        let name = as_string(join_directive.argument_by_name("name")?)?;
-                        let url = as_string(join_directive.argument_by_name("url")?)?;
-                        Some((name, url))
-                    })
-                {
-                    if url.is_empty() {
-                        return Err(SchemaError::MissingSubgraphUrl(name.clone()));
-                    }
-                    let url = Uri::from_str(url)
-                        .map_err(|err| SchemaError::UrlParse(name.clone(), err))?;
-                    if subgraphs.insert(name.clone(), url).is_some() {
-                        return Err(SchemaError::Api(format!(
-                            "must not have several subgraphs with same name '{name}'"
-                        )));
-                    }
-                }
-            }
-
-            let object_types: HashMap<_, _> = compiler
-                .db
-                .object_types()
-                .iter()
-                .map(|(name, def)| (name.clone(), (&**def).into()))
-                .collect();
-
-            let interfaces: HashMap<_, _> = compiler
-                .db
-                .interfaces()
-                .iter()
-                .map(|(name, def)| (name.clone(), (&**def).into()))
-                .collect();
-
-            let input_types: HashMap<_, _> = compiler
-                .db
-                .input_objects()
-                .iter()
-                .map(|(name, def)| (name.clone(), (&**def).into()))
-                .collect();
-
-            let enums = compiler
-                .db
-                .enums()
-                .iter()
-                .map(|(name, def)| {
-                    let values = def
-                        .enum_values_definition()
-                        .iter()
-                        .map(|value| value.enum_value().to_owned())
-                        .collect();
-                    (name.clone(), values)
-                })
-                .collect();
-
-            let root_operations = compiler
-                .db
-                .schema()
-                .root_operation_type_definition()
-                .iter()
-                .filter(|def| def.loc().is_some()) // exclude implict operations
-                .map(|def| {
-                    (
-                        def.operation_ty().into(),
-                        if let hir::Type::Named { name, .. } = def.named_type() {
-                            name.clone()
-                        } else {
-                            // FIXME: hir::RootOperationTypeDefinition should contain
-                            // the name directly, not a `Type` enum value which happens to always
-                            // be the `Named` variant.
-                            unreachable!()
-                        },
-                    )
-                })
-                .collect();
-
-            let custom_scalars = compiler
-                .db
-                .scalars()
-                .iter()
-                .filter(|(_name, def)| !def.is_built_in())
-                .map(|(name, _def)| name.clone())
-                .collect();
-
-            let mut hasher = Sha256::new();
-            hasher.update(schema.as_bytes());
-            let schema_id = Some(format!("{:x}", hasher.finalize()));
-
-            Ok(Schema {
-                raw_sdl: Arc::new(schema.into()),
-                type_system: compiler.db.type_system(),
-                subgraphs,
-                object_types,
-                interfaces,
-                input_types,
-                custom_scalars,
-                enums,
-                api_schema: None,
-                schema_id,
-                root_operations,
+                    .map(|value| value.enum_value().to_owned())
+                    .collect();
+                (name.clone(), values)
             })
-        }
+            .collect();
+
+        let root_operations = compiler
+            .db
+            .schema()
+            .root_operation_type_definition()
+            .iter()
+            .filter(|def| def.loc().is_some()) // exclude implict operations
+            .map(|def| {
+                (
+                    def.operation_ty().into(),
+                    if let hir::Type::Named { name, .. } = def.named_type() {
+                        name.clone()
+                    } else {
+                        // FIXME: hir::RootOperationTypeDefinition should contain
+                        // the name directly, not a `Type` enum value which happens to always
+                        // be the `Named` variant.
+                        unreachable!()
+                    },
+                )
+            })
+            .collect();
+
+        let custom_scalars = compiler
+            .db
+            .scalars()
+            .iter()
+            .filter(|(_name, def)| !def.is_built_in())
+            .map(|(name, _def)| name.clone())
+            .collect();
+
+        let mut hasher = Sha256::new();
+        hasher.update(schema.as_bytes());
+        let schema_id = Some(format!("{:x}", hasher.finalize()));
+
+        Ok(Schema {
+            raw_sdl: Arc::new(schema.into()),
+            type_system: compiler.db.type_system(),
+            subgraphs,
+            object_types,
+            interfaces,
+            input_types,
+            custom_scalars,
+            enums,
+            api_schema: None,
+            schema_id,
+            root_operations,
+        })
     }
 }
 
@@ -376,7 +391,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse(&schema, &Default::default()).unwrap()
+            Schema::parse_test(&schema, &Default::default()).unwrap()
         }
 
         fn gen_schema_interfaces(schema: &str) -> Schema {
@@ -400,7 +415,7 @@ mod tests {
             "#,
             );
             let schema = format!("{base_schema}\n{schema}");
-            Schema::parse(&schema, &Default::default()).unwrap()
+            Schema::parse_test(&schema, &Default::default()).unwrap()
         }
         let schema = gen_schema_types("union UnionType = Foo | Bar | Baz");
         assert!(schema.is_subtype("UnionType", "Foo"));
@@ -456,7 +471,7 @@ mod tests {
             @join__graph(name: "products" url: "http://localhost:4003/graphql")
             REVIEWS @join__graph(name: "reviews" url: "http://localhost:4002/graphql")
         }"#;
-        let schema = Schema::parse(schema, &Default::default()).unwrap();
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
         assert_eq!(schema.subgraphs.len(), 4);
         assert_eq!(
@@ -505,7 +520,7 @@ mod tests {
     #[test]
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
-        let schema = Schema::parse(schema, &Default::default()).unwrap();
+        let schema = Schema::parse_test(schema, &Default::default()).unwrap();
         assert!(schema.object_types["Product"]
             .fields
             .get("inStock")
@@ -521,7 +536,7 @@ mod tests {
         #[cfg(not(windows))]
         {
             let schema = include_str!("../testdata/starstuff@current.graphql");
-            let schema = Schema::parse(schema, &Default::default()).unwrap();
+            let schema = Schema::parse_test(schema, &Default::default()).unwrap();
 
             assert_eq!(
                 schema.schema_id,
@@ -543,7 +558,7 @@ mod tests {
     #[test]
     fn inaccessible_on_non_core() {
         let schema = include_str!("../testdata/inaccessible_on_non_core.graphql");
-        match Schema::parse(schema, &Default::default()) {
+        match Schema::parse_test(schema, &Default::default()) {
             Err(SchemaError::Api(s)) => {
                 assert_eq!(
                     s,
@@ -565,7 +580,7 @@ GraphQL request:42:1
     #[test]
     fn unclosed_brace_error_does_not_panic() {
         let schema = "schema {";
-        let result = Schema::parse(schema, &Default::default());
+        let result = Schema::parse_test(schema, &Default::default());
         assert!(result.is_err());
     }
 }
