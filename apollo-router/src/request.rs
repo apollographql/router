@@ -8,6 +8,14 @@ use serde_json_bytes::Value;
 
 use crate::json_ext::Object;
 
+/// A GraphQLHttpRequest used to represent both either a Single or Batch GraphQLRequest.
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+pub(crate) enum GraphQLHttpRequest {
+    Single(Request),
+    Batch(Vec<Request>),
+}
+
 /// A GraphQL `Request` used to represent both supergraph and subgraph requests.
 #[derive(Clone, Derivative, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -212,6 +220,53 @@ mod tests {
                 .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
                 .build()
         );
+    }
+
+    #[test]
+    fn test_batch_request() {
+        let data = json!([
+            {
+              "query": "query firstQuery($arg1: String!) { test(who: $arg1) }",
+              "operationName": "aTest",
+              "variables": { "arg1": "me" },
+              "extensions": {"extension": 1}
+            },
+            {
+              "query": "query secondQuery($arg1: String!) { test(who: $arg1) }",
+              "operationName": "secondQuery",
+              "variables": { "arg1": "me" },
+              "extensions": {"extension": 1}
+            }
+        ]).to_string();
+        println!("data: {data}");
+        let result = serde_json::from_str::<GraphQLHttpRequest>(data.as_str());
+        println!("result: {result:?}");
+
+        match result.unwrap() {
+            GraphQLHttpRequest::Batch(rq) => {
+                assert_eq!(
+                    rq[0],
+                    Request::builder()
+                        .query("query firstQuery($arg1: String!) { test(who: $arg1) }".to_owned())
+                        .operation_name("firstQuery")
+                        .variables(bjson!({ "arg1": "me" }).as_object().unwrap().clone())
+                        .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
+                        .build()
+                );
+                assert_eq!(
+                    rq[1],
+                    Request::builder()
+                        .query("query secondQuery($arg1: String!) { test(who: $arg1) }".to_owned())
+                        .operation_name("secondQuery")
+                        .variables(bjson!({ "arg1": "me" }).as_object().unwrap().clone())
+                        .extensions(bjson!({"extension": 1}).as_object().cloned().unwrap())
+                        .build()
+                )
+            },
+            GraphQLHttpRequest::Single(_rq) => {
+                panic!("fail");
+            }
+        }
     }
 
     #[test]
