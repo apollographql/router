@@ -7,12 +7,13 @@ use http::Uri;
 use insta::assert_json_snapshot;
 use regex::Regex;
 use rust_embed::RustEmbed;
-#[cfg(unix)]
 use schemars::gen::SchemaSettings;
+use serde_json::json;
 use walkdir::DirEntry;
 use walkdir::WalkDir;
 
 use super::schema::validate_yaml_configuration;
+use super::subgraph::SubgraphConfiguration;
 use super::*;
 use crate::error::SchemaError;
 
@@ -53,7 +54,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse(schema, &Default::default(), None).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -105,7 +106,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default(), None)
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -764,4 +765,91 @@ tls:
     )
     .expect("should not have resulted in an error");
     cfg.tls.supergraph.unwrap().tls_config().unwrap();
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+struct TestSubgraphOverride {
+    value: Option<u8>,
+    subgraph: SubgraphConfiguration<PluginConfig>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+struct PluginConfig {
+    #[serde(default = "set_true")]
+    a: bool,
+    #[serde(default)]
+    b: u8,
+}
+
+fn set_true() -> bool {
+    true
+}
+
+#[test]
+fn test_subgraph_override() {
+    let settings = SchemaSettings::draft2019_09().with(|s| {
+        s.option_nullable = true;
+        s.option_add_null_type = false;
+        s.inline_subschemas = true;
+    });
+    let gen = settings.into_generator();
+    let schema = gen.into_root_schema_for::<TestSubgraphOverride>();
+    insta::assert_json_snapshot!(schema);
+}
+
+#[test]
+fn test_subgraph_override_json() {
+    let first = json!({
+        "subgraph": {
+            "all": {
+                "a": false
+            },
+            "subgraphs": {
+                "products": {
+                    "a": true
+                }
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(first).unwrap();
+    assert!(!data.subgraph.all.a);
+    assert!(data.subgraph.subgraphs.get("products").unwrap().a);
+
+    let second = json!({
+        "subgraph": {
+            "all": {
+                "a": false
+            },
+            "subgraphs": {
+                "products": {
+                    "b": 1
+                }
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(second).unwrap();
+    assert!(!data.subgraph.all.a);
+    // since products did not set the `a` field, it should take the override value from `all`
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
+
+    // the default value from `all` should work even if it is parsed after
+    let third = json!({
+        "subgraph": {
+            "subgraphs": {
+                "products": {
+                    "b": 1
+                }
+            },
+            "all": {
+                "a": false
+            }
+        }
+    });
+
+    let data: TestSubgraphOverride = serde_json::from_value(third).unwrap();
+    assert!(!data.subgraph.all.a);
+    // since products did not set the `a` field, it should take the override value from `all`
+    assert!(!data.subgraph.subgraphs.get("products").unwrap().a);
 }

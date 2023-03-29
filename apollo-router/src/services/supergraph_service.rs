@@ -11,6 +11,7 @@ use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
 use multimap::MultiMap;
+use router_bridge::planner::Planner;
 use tower::util::Either;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -26,10 +27,8 @@ use super::subgraph_service::SubgraphServiceFactory;
 use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
-use crate::error::ServiceBuildError;
 use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
-use crate::introspection::Introspection;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
@@ -38,6 +37,7 @@ use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
+use crate::query_planner::QueryPlanResult;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
@@ -260,12 +260,6 @@ async fn plan_query(
         )
         .instrument(tracing::info_span!(
             QUERY_PLANNING_SPAN_NAME,
-            graphql.document = body
-                .query
-                .clone()
-                .expect("the query presence was already checked by a plugin")
-                .as_str(),
-            graphql.operation.name = body.operation_name.clone().unwrap_or_default().as_str(),
             "otel.kind" = "INTERNAL"
         ))
         .await
@@ -278,19 +272,19 @@ async fn plan_query(
 /// [`tower::util::BoxCloneService`] capable of processing a router request
 /// through the entire stack to return a response.
 pub(crate) struct PluggableSupergraphServiceBuilder {
-    schema: Arc<Schema>,
     plugins: Plugins,
     subgraph_services: Vec<(String, Arc<dyn MakeSubgraphService>)>,
     configuration: Option<Arc<Configuration>>,
+    planner: BridgeQueryPlanner,
 }
 
 impl PluggableSupergraphServiceBuilder {
-    pub(crate) fn new(schema: Arc<Schema>) -> Self {
+    pub(crate) fn new(planner: BridgeQueryPlanner) -> Self {
         Self {
-            schema,
             plugins: Default::default(),
             subgraph_services: Default::default(),
             configuration: None,
+            planner,
         }
     }
 
@@ -327,20 +321,10 @@ impl PluggableSupergraphServiceBuilder {
     pub(crate) async fn build(self) -> Result<SupergraphCreator, crate::error::ServiceBuildError> {
         let configuration = self.configuration.unwrap_or_default();
 
-        let introspection = if configuration.supergraph.introspection {
-            Some(Arc::new(Introspection::new(&configuration).await))
-        } else {
-            None
-        };
-
-        // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
-        let bridge_query_planner =
-            BridgeQueryPlanner::new(self.schema.clone(), introspection, configuration.clone())
-                .await
-                .map_err(ServiceBuildError::QueryPlannerError)?;
+        let schema = self.planner.schema();
         let query_planner_service = CachingQueryPlanner::new(
-            bridge_query_planner,
-            self.schema.schema_id.clone(),
+            self.planner,
+            schema.schema_id.clone(),
             &configuration.supergraph.query_planning,
         )
         .await;
@@ -364,7 +348,7 @@ impl PluggableSupergraphServiceBuilder {
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_service_factory,
-            schema: self.schema,
+            schema,
             plugins,
         })
     }
@@ -462,6 +446,11 @@ impl SupergraphCreator {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.query_planner_service.cache_keys(count).await
     }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.query_planner_service.planner()
+    }
+
     pub(crate) async fn warm_up_query_planner(
         &mut self,
         cache_keys: Vec<(String, Option<String>)>,
@@ -494,7 +483,7 @@ impl MockSupergraphCreator {
         use crate::router_factory::create_plugins;
         let plugins = create_plugins(
             &configuration,
-            &Schema::parse(canned_schema, &configuration).unwrap(),
+            &Schema::parse_test(canned_schema, &configuration).unwrap(),
             None,
         )
         .await
@@ -2240,5 +2229,135 @@ mod tests {
             serde_json::to_value(&response.data).unwrap(),
             serde_json::json!({"t": {"us": [{"f": "fA"}, {"f": "fB"}]}}),
         );
+    }
+
+    #[tokio::test]
+    async fn errors_on_nullified_paths() {
+        let schema = r#"
+          schema
+            @link(url: "https://specs.apollo.dev/link/v1.0")
+            @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+          {
+            query: Query
+          }
+
+          directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+          directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+          directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+          directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+          directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+          directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+          directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+          directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+          scalar join__FieldSet
+
+          enum join__Graph {
+            S1 @join__graph(name: "S1", url: "s1")
+            S2 @join__graph(name: "S2", url: "s2")
+          }
+
+          scalar link__Import
+
+          enum link__Purpose {
+            SECURITY
+            EXECUTION
+          }
+
+          type Query
+          {
+            foo: Foo! @join__field(graph: S1)
+          }
+          
+          type Foo
+            @join__owner(graph: S1)
+            @join__type(graph: S1)
+          {
+            id: ID! @join__field(graph: S1)
+            bar: Bar! @join__field(graph: S1)
+          }
+          
+          type Bar
+          @join__owner(graph: S1)
+          @join__type(graph: S1, key: "id")
+          @join__type(graph: S2, key: "id") {
+            id: ID! @join__field(graph: S1) @join__field(graph: S2)
+            something: String @join__field(graph: S2)
+          }
+        "#;
+
+        let query = r#"
+          query Query {
+            foo {
+              id
+              bar {
+                id
+                something
+              }
+            }
+          }
+        "#;
+
+        let subgraphs = MockedSubgraphs([
+        ("S1", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"query Query__S1__0{foo{id bar{__typename id}}}", "operationName": "Query__S1__0"}},
+                serde_json::json!{{"data": {
+                    "foo": {
+                        "id": 1,
+                        "bar": {
+                            "__typename": "Bar",
+                            "id": 2
+                        }
+                    }
+                }}}
+            )
+          .build()),
+        ("S2", MockSubgraph::builder()  .with_json(
+            serde_json::json!{{
+                "query":"query Query__S2__1($representations:[_Any!]!){_entities(representations:$representations){...on Bar{something}}}",
+                "operationName": "Query__S2__1",
+                "variables": {
+                    "representations":[{"__typename": "Bar", "id": 2}]
+                }
+            }},
+            serde_json::json!{{
+                "data": {
+                  "_entities": [
+                    null
+                  ]
+                },
+                "errors": [
+                  {
+                    "message": "Could not fetch bar",
+                    "path": [
+                      "_entities"
+                    ],
+                    "extensions": {
+                      "code": "NOT_FOUND"
+                    }
+                  }
+                ],
+              }}
+        ).build())
+    ].into_iter().collect());
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(defer_context())
+            .query(query)
+            .build()
+            .unwrap();
+
+        let mut stream = service.oneshot(request).await.unwrap();
+
+        insta::assert_json_snapshot!(stream.next_response().await.unwrap());
     }
 }

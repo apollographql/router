@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::task;
 
 use futures::future::BoxFuture;
+use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -13,6 +14,8 @@ use tracing::Instrument;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::QueryPlanResult;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -105,6 +108,12 @@ where
         }
 
         tracing::debug!("warmed up the query planner cache with {count} queries");
+    }
+}
+
+impl CachingQueryPlanner<BridgeQueryPlanner> {
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.delegate.planner()
     }
 }
 

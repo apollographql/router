@@ -174,14 +174,6 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "graphql.document",
-                        "query ExampleQuery($topProductsFirst: Int, $reviewsForAuthorAuthorId: ID!) {\n                topProducts(first: $topProductsFirst) {\n                    name\n                    reviewsForAuthor(authorID: $reviewsForAuthorAuthorId) {\n                        body\n                        author {\n                            id\n                            name\n                        }\n                    }\n                }\n            }"
-                      ],
-                      [
-                        "graphql.operation.name",
-                        ""
-                      ],
-                      [
                         "otel.kind",
                         "INTERNAL"
                       ],
@@ -229,8 +221,6 @@ expression: get_spans()
                       "module_path": "apollo_router::services::supergraph_service",
                       "fields": {
                         "names": [
-                          "graphql.document",
-                          "graphql.operation.name",
                           "otel.kind"
                         ]
                       }

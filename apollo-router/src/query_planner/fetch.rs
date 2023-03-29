@@ -329,9 +329,13 @@ impl FetchNode {
                                     })
                                 }
                             }
-                            _ => errors.push(error),
+                            _ => {
+                                error.path = Some(current_dir.clone());
+                                errors.push(error)
+                            }
                         }
                     } else {
+                        error.path = Some(current_dir.clone());
                         errors.push(error);
                     }
                 } else {

@@ -143,8 +143,7 @@ expression: "&schema"
                 "additionalProperties": false
               }
             }
-          },
-          "additionalProperties": false
+          }
         }
       },
       "additionalProperties": false
@@ -965,7 +964,8 @@ expression: "&schema"
     "homepage": {
       "description": "Homepage configuration",
       "default": {
-        "enabled": true
+        "enabled": true,
+        "graph_ref": null
       },
       "type": "object",
       "properties": {
@@ -973,6 +973,12 @@ expression: "&schema"
           "description": "Set to false to disable the homepage",
           "default": true,
           "type": "boolean"
+        },
+        "graph_ref": {
+          "description": "Graph reference This will allow you to redirect from the Apollo Router landing page back to Apollo Studio Explorer",
+          "default": null,
+          "type": "string",
+          "nullable": true
         }
       },
       "additionalProperties": false
@@ -4508,8 +4514,7 @@ expression: "&schema"
                 "additionalProperties": false
               }
             }
-          },
-          "additionalProperties": false
+          }
         },
         "supergraph": {
           "description": "TLS server configuration\n\nthis will affect the GraphQL endpoint and any other endpoint targeting the same listen address",
