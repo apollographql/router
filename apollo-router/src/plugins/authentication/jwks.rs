@@ -36,14 +36,14 @@ pub(super) struct JwksManager {
 pub(super) struct JwksConfig {
     pub(super) url: Url,
     pub(super) issuer: Option<String>,
-    pub(super) algorithms: HashSet<Algorithm>,
+    pub(super) algorithms: Option<HashSet<Algorithm>>,
 }
 
 #[derive(Clone)]
 pub(super) struct JwkSetInfo {
     pub(super) jwks: JwkSet,
     pub(super) issuer: Option<String>,
-    pub(super) algorithms: HashSet<Algorithm>,
+    pub(super) algorithms: Option<HashSet<Algorithm>>,
 }
 
 impl JwksManager {

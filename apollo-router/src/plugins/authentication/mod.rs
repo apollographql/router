@@ -120,10 +120,10 @@ struct JwksConf {
     url: String,
     /// Expected issuer for tokens verified by that JWKS
     issuer: Option<String>,
-    /// List of accepted algorithms. Possible values are HS2356, HS384, HS512, ES256, ES384, RS256, RS384, RS512, PS256, PS384, PS512, EdDSA
-    #[schemars(with = "Vec<String>", default)]
+    /// List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`
+    #[schemars(with = "Option<Vec<String>>", default)]
     #[serde(default)]
-    algorithms: Vec<Algorithm>,
+    algorithms: Option<Vec<Algorithm>>,
 }
 
 impl Default for JWTConf {
@@ -178,8 +178,10 @@ fn search_jwks(
     } in jwks_manager.iter_jwks()
     {
         // filter accepted algorithms
-        if !algorithms.is_empty() && !algorithms.contains(&criteria.alg) {
-            continue;
+        if let Some(algs) = algorithms {
+            if !algs.contains(&criteria.alg) {
+                continue;
+            }
         }
 
         // Try to figure out if our jwks contains a candidate key (i.e.: a key which matches our
@@ -321,7 +323,10 @@ impl Plugin for AuthenticationPlugin {
             list.push(JwksConfig {
                 url,
                 issuer: jwks_conf.issuer.clone(),
-                algorithms: jwks_conf.algorithms.iter().cloned().collect(),
+                algorithms: jwks_conf
+                    .algorithms
+                    .as_ref()
+                    .map(|algs| algs.iter().cloned().collect()),
             });
         }
 

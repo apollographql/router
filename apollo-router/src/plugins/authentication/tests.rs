@@ -553,7 +553,7 @@ async fn build_jwks_search_components() -> JwksManager {
         urls.push(JwksConfig {
             url,
             issuer: None,
-            algorithms: HashSet::new(),
+            algorithms: None,
         });
     }
 
@@ -660,7 +660,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
     let list = vec![JwksConfig {
         url: url.clone(),
         issuer,
-        algorithms: HashSet::new(),
+        algorithms: None,
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -860,7 +860,7 @@ async fn it_rejects_key_with_restricted_algorithm() {
         urls.push(JwksConfig {
             url,
             issuer: None,
-            algorithms: HashSet::from([Algorithm::RS256]),
+            algorithms: Some(HashSet::from([Algorithm::RS256])),
         });
     }
 
