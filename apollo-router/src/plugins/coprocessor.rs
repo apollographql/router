@@ -165,6 +165,8 @@ pub(super) struct RouterConf {
     pub(super) uri: bool,
     /// Send the method
     pub(super) method: bool,
+    /// Send the http status
+    pub(super) status_code: bool,
 }
 
 /// What information is passed to a subgraph request/response stage
@@ -181,6 +183,8 @@ pub(super) struct SubgraphConf {
     pub(super) uri: bool,
     /// Send the service name
     pub(super) service_name: bool,
+    /// Send the http status
+    pub(super) status_code: bool,
 }
 
 /// Configures the externalization plugin
@@ -476,6 +480,7 @@ where
         uri: Some(parts.uri.to_string()),
         method: Some(parts.method.to_string()),
         service_name: None,
+        status_code: None,
     };
 
     tracing::debug!(?payload, "externalized output");
@@ -583,6 +588,9 @@ where
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
         .transpose()?;
+    let status_to_send = response_config
+        .status_code
+        .then(|| parts.status.to_string());
     let context_to_send = response_config.context.then(|| response.context.clone());
     let sdl = response_config.sdl.then(|| sdl.clone().to_string());
 
@@ -594,6 +602,7 @@ where
         headers: headers_to_send,
         body: body_to_send,
         context: context_to_send,
+        status_code: status_to_send,
         sdl,
         uri: None,
         method: None,
@@ -683,6 +692,7 @@ where
         service_name,
         uri,
         method: Some(parts.method.to_string()),
+        status_code: None,
     };
 
     tracing::debug!(?payload, "externalized output");
@@ -790,6 +800,10 @@ where
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
 
+    let status_to_send = response_config
+        .status_code
+        .then(|| parts.status.to_string());
+
     let body_to_send = response_config
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
@@ -805,6 +819,7 @@ where
         headers: headers_to_send,
         body: body_to_send,
         context: context_to_send,
+        status_code: status_to_send,
         sdl: None,
         uri: None,
         method: None,

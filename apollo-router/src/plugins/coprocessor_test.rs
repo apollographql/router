@@ -8,6 +8,7 @@ mod tests {
     use http::header::CONTENT_TYPE;
     use http::HeaderMap;
     use http::HeaderValue;
+    use http::Method;
     use http::StatusCode;
     use hyper::Body;
     use mime::APPLICATION_JSON;
@@ -97,6 +98,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
+                uri: false,
+                method: false,
             },
             response: Default::default(),
         };
@@ -154,6 +157,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
+                uri: false,
+                method: false,
             },
             response: Default::default(),
         };
@@ -211,6 +216,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
+                uri: false,
+                method: false,
             },
             response: Default::default(),
         };
@@ -634,6 +641,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
+                uri: true,
+                method: true,
             },
             response: Default::default(),
         };
@@ -743,6 +752,134 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn external_plugin_router_request_http_get() {
+        let router_stage = RouterStage {
+            request: RouterConf {
+                headers: true,
+                context: true,
+                body: true,
+                sdl: true,
+                uri: true,
+                method: true,
+            },
+            response: Default::default(),
+        };
+
+        let mock_router_service = router_service::from_supergraph_mock_callback(move |req| {
+            // Let's assert that the router request has been transformed as it should have.
+            assert_eq!(
+                req.supergraph_request.headers().get("cookie").unwrap(),
+                "tasty_cookie=strawberry"
+            );
+
+            // the method shouldn't have changed
+            assert_eq!(req.supergraph_request.method(), Method::GET);
+            // the uri shouldn't have changed
+            assert_eq!(req.supergraph_request.uri(), "/");
+
+            assert_eq!(
+                req.context
+                    .get::<&str, u8>("this-is-a-test-context")
+                    .unwrap()
+                    .unwrap(),
+                42
+            );
+
+            // The query should have changed
+            assert_eq!(
+                "query Long {\n  me {\n  name\n}\n}",
+                req.supergraph_request.into_body().query.unwrap()
+            );
+
+            Ok(supergraph::Response::builder()
+                .data(json!({ "test": 1234_u32 }))
+                .context(req.context)
+                .build()
+                .unwrap())
+        })
+        .await;
+
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
+            Box::pin(async {
+                let deserialized_request: Externalizable<serde_json::Value> =
+                    serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
+                        .unwrap();
+
+                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_request.version);
+                assert_eq!(
+                    PipelineStep::RouterRequest.to_string(),
+                    deserialized_request.stage
+                );
+
+                Ok(hyper::Response::builder()
+                    .body(Body::from(
+                        r##"{
+                    "version": 1,
+                    "stage": "RouterRequest",
+                    "control": "continue",
+                    "id": "1b19c05fdafc521016df33148ad63c1b",
+                    "uri": "/this/is/a/new/uri",
+                    "method": "POST",
+                    "headers": {
+                      "cookie": [
+                        "tasty_cookie=strawberry"
+                      ],
+                      "content-type": [
+                        "application/json"
+                      ],
+                      "host": [
+                        "127.0.0.1:4000"
+                      ],
+                      "apollo-federation-include-trace": [
+                        "ftv1"
+                      ],
+                      "apollographql-client-name": [
+                        "manual"
+                      ],
+                      "accept": [
+                        "*/*"
+                      ],
+                      "user-agent": [
+                        "curl/7.79.1"
+                      ],
+                      "content-length": [
+                        "46"
+                      ]
+                    },
+                    "body": {
+                      "query": "query Long {\n  me {\n  name\n}\n}"
+                    },
+                    "context": {
+                      "entries": {
+                        "accepts-json": false,
+                        "accepts-wildcard": true,
+                        "accepts-multipart": false,
+                        "this-is-a-test-context": 42
+                      }
+                    },
+                    "sdl": "the sdl shouldnt change"
+                  }"##,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = router_stage.as_service(
+            mock_http_client,
+            mock_router_service.boxed(),
+            "http://test".to_string(),
+            Arc::new("".to_string()),
+        );
+
+        let request = supergraph::Request::fake_builder()
+            .method(Method::GET)
+            .build()
+            .unwrap();
+
+        service.oneshot(request.try_into().unwrap()).await.unwrap();
+    }
+
+    #[tokio::test]
     async fn external_plugin_router_request_controlflow_break() {
         let router_stage = RouterStage {
             request: RouterConf {
@@ -750,6 +887,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
+                uri: true,
+                method: true,
             },
             response: Default::default(),
         };
@@ -835,6 +974,8 @@ mod tests {
                 context: true,
                 body: true,
                 sdl: true,
+                uri: true,
+                method: true,
             },
             request: Default::default(),
         };
