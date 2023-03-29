@@ -55,16 +55,6 @@ impl Extensions {
     ///
     /// If a extension of this type already existed, it will
     /// be returned.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// assert!(ext.insert(5i32).is_none());
-    /// assert!(ext.insert(4u8).is_none());
-    /// assert_eq!(ext.insert(9i32), Some(5i32));
-    /// ```
     pub(crate) fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
         self.map
             .get_or_insert_with(Box::default)
@@ -78,17 +68,6 @@ impl Extensions {
     }
 
     /// Get a reference to a type previously inserted on this `Extensions`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// assert!(ext.get::<i32>().is_none());
-    /// ext.insert(5i32);
-    ///
-    /// assert_eq!(ext.get::<i32>(), Some(&5i32));
-    /// ```
     pub(crate) fn get<T: Send + Sync + 'static>(&self) -> Option<&T> {
         self.map
             .as_ref()
@@ -97,17 +76,6 @@ impl Extensions {
     }
 
     /// Get a mutable reference to a type previously inserted on this `Extensions`.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// ext.insert(String::from("Hello"));
-    /// ext.get_mut::<String>().unwrap().push_str(" World");
-    ///
-    /// assert_eq!(ext.get::<String>().unwrap(), "Hello World");
-    /// ```
     pub(crate) fn get_mut<T: Send + Sync + 'static>(&mut self) -> Option<&mut T> {
         self.map
             .as_mut()
@@ -125,16 +93,6 @@ impl Extensions {
     /// Remove a type from this `Extensions`.
     ///
     /// If a extension of this type existed, it will be returned.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// ext.insert(5i32);
-    /// assert_eq!(ext.remove::<i32>(), Some(5i32));
-    /// assert!(ext.get::<i32>().is_none());
-    /// ```
     pub(crate) fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
         self.map
             .as_mut()
@@ -148,17 +106,6 @@ impl Extensions {
     }
 
     /// Clear the `Extensions` of all inserted extensions.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// ext.insert(5i32);
-    /// ext.clear();
-    ///
-    /// assert!(ext.get::<i32>().is_none());
-    /// ```
     #[inline]
     pub(crate) fn clear(&mut self) {
         if let Some(ref mut map) = self.map {
@@ -167,32 +114,12 @@ impl Extensions {
     }
 
     /// Check whether the extension set is empty or not.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// assert!(ext.is_empty());
-    /// ext.insert(5i32);
-    /// assert!(!ext.is_empty());
-    /// ```
     #[inline]
     pub(crate) fn is_empty(&self) -> bool {
         self.map.as_ref().map_or(true, |map| map.is_empty())
     }
 
     /// Get the numer of extensions available.
-    ///
-    /// # Example
-    ///
-    /// ```
-    /// # use http::Extensions;
-    /// let mut ext = Extensions::new();
-    /// assert_eq!(ext.len(), 0);
-    /// ext.insert(5i32);
-    /// assert_eq!(ext.len(), 1);
-    /// ```
     #[inline]
     pub(crate) fn len(&self) -> usize {
         self.map.as_ref().map_or(0, |map| map.len())
