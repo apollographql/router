@@ -152,7 +152,7 @@ where
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub(super) struct RouterConf {
+pub(super) struct RouterRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -165,14 +165,27 @@ pub(super) struct RouterConf {
     pub(super) uri: bool,
     /// Send the method
     pub(super) method: bool,
+}
+
+/// What information is passed to a router request/response stage
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct RouterResponseConf {
+    /// Send the headers
+    pub(super) headers: bool,
+    /// Send the context
+    pub(super) context: bool,
+    /// Send the body
+    pub(super) body: bool,
+    /// Send the SDL
+    pub(super) sdl: bool,
     /// Send the http status
     pub(super) status_code: bool,
 }
-
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub(super) struct SubgraphConf {
+pub(super) struct SubgraphRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -181,6 +194,22 @@ pub(super) struct SubgraphConf {
     pub(super) body: bool,
     /// Send the subgraph URI
     pub(super) uri: bool,
+    /// Send the subgraph URI
+    pub(super) method: bool,
+    /// Send the service name
+    pub(super) service_name: bool,
+}
+
+/// What information is passed to a subgraph request/response stage
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct SubgraphResponseConf {
+    /// Send the headers
+    pub(super) headers: bool,
+    /// Send the context
+    pub(super) context: bool,
+    /// Send the body
+    pub(super) body: bool,
     /// Send the service name
     pub(super) service_name: bool,
     /// Send the http status
@@ -214,9 +243,9 @@ fn default_timeout() -> Duration {
 #[serde(default)]
 pub(super) struct RouterStage {
     /// The request configuration
-    pub(super) request: RouterConf,
+    pub(super) request: RouterRequestConf,
     /// The response configuration
-    pub(super) response: RouterConf,
+    pub(super) response: RouterResponseConf,
 }
 
 impl RouterStage {
@@ -330,9 +359,9 @@ pub(super) struct SubgraphStages {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStage {
     #[serde(default)]
-    pub(super) request: SubgraphConf,
+    pub(super) request: SubgraphRequestConf,
     #[serde(default)]
-    pub(super) response: SubgraphConf,
+    pub(super) response: SubgraphResponseConf,
 }
 
 impl SubgraphStage {
@@ -437,7 +466,7 @@ async fn process_router_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: router::Request,
-    request_config: RouterConf,
+    request_config: RouterRequestConf,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -564,7 +593,7 @@ async fn process_router_response_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut response: router::Response,
-    response_config: RouterConf,
+    response_config: RouterResponseConf,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -649,7 +678,7 @@ async fn process_subgraph_request_stage<C>(
     coprocessor_url: String,
     service_name: String,
     mut request: subgraph::Request,
-    request_config: SubgraphConf,
+    request_config: SubgraphRequestConf,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -776,7 +805,7 @@ async fn process_subgraph_response_stage<C>(
     coprocessor_url: String,
     service_name: String,
     mut response: subgraph::Response,
-    response_config: SubgraphConf,
+    response_config: SubgraphResponseConf,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>

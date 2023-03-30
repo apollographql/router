@@ -93,14 +93,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_returning_the_wrong_version_should_fail() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
                 uri: false,
                 method: false,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -153,14 +152,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_returning_the_wrong_stage_should_fail() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
                 uri: false,
                 method: false,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -213,14 +211,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_missing_request_control_should_fail() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
                 uri: false,
                 method: false,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -272,13 +269,13 @@ mod tests {
     #[tokio::test]
     async fn coprocessor_subgraph_with_invalid_response_body_should_fail() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
+            request: SubgraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
                 uri: false,
+                method: false,
                 service_name: false,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -334,13 +331,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_subgraph_request() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
+            request: SubgraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
                 uri: false,
+                method: false,
                 service_name: false,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -463,13 +460,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_subgraph_request_controlflow_break() {
         let subgraph_stage = SubgraphStage {
-            request: SubgraphConf {
+            request: SubgraphRequestConf {
                 headers: false,
                 context: false,
                 body: true,
                 uri: false,
+                method: false,
                 service_name: false,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -532,11 +529,10 @@ mod tests {
     async fn external_plugin_subgraph_response() {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
-            response: SubgraphConf {
+            response: SubgraphResponseConf {
                 headers: false,
                 context: false,
                 body: true,
-                uri: false,
                 service_name: false,
                 status_code: false,
             },
@@ -643,14 +639,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
                 uri: true,
                 method: true,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -762,14 +757,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_request_http_get() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
                 uri: true,
                 method: true,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -891,14 +885,13 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_request_controlflow_break() {
         let router_stage = RouterStage {
-            request: RouterConf {
+            request: RouterRequestConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
                 uri: true,
                 method: true,
-                status_code: false,
             },
             response: Default::default(),
         };
@@ -979,13 +972,11 @@ mod tests {
     #[tokio::test]
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
-            response: RouterConf {
+            response: RouterResponseConf {
                 headers: true,
                 context: true,
                 body: true,
                 sdl: true,
-                uri: true,
-                method: true,
                 status_code: false,
             },
             request: Default::default(),
