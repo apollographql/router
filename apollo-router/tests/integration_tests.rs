@@ -519,7 +519,7 @@ async fn missing_variables() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_under_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 12_usize}
+        "supergraph": {"limits": {"parser_max_recursion": 12_usize}}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -540,7 +540,7 @@ async fn query_just_under_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 5_usize}
+        "supergraph": {"limits": {"parser_max_recursion": 5_usize}}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
