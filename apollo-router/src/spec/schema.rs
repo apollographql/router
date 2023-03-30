@@ -71,10 +71,6 @@ impl Schema {
 
     fn parse_inner(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
         let mut compiler = ApolloCompiler::new();
-        compiler.add_type_system(
-            include_str!("introspection_types.graphql"),
-            "introspection_types.graphql",
-        );
         let id = compiler.add_type_system(schema, "schema.graphql");
 
         let ast = compiler.db.ast(id);
@@ -105,19 +101,15 @@ impl Schema {
         let mut subgraphs = HashMap::new();
         // TODO: error if not found?
         if let Some(join_enum) = compiler.db.find_enum_by_name("join__Graph".into()) {
-            for (name, url) in join_enum
-                .enum_values_definition()
-                .iter()
-                .filter_map(|value| {
-                    let join_directive = value
-                        .directives()
-                        .iter()
-                        .find(|directive| directive.name() == "join__graph")?;
-                    let name = as_string(join_directive.argument_by_name("name")?)?;
-                    let url = as_string(join_directive.argument_by_name("url")?)?;
-                    Some((name, url))
-                })
-            {
+            for (name, url) in join_enum.values().filter_map(|value| {
+                let join_directive = value
+                    .directives()
+                    .iter()
+                    .find(|directive| directive.name() == "join__graph")?;
+                let name = as_string(join_directive.argument_by_name("name")?)?;
+                let url = as_string(join_directive.argument_by_name("url")?)?;
+                Some((name, url))
+            }) {
                 if url.is_empty() {
                     return Err(SchemaError::MissingSubgraphUrl(name.clone()));
                 }
@@ -133,7 +125,7 @@ impl Schema {
 
         let object_types: HashMap<_, _> = compiler
             .db
-            .object_types()
+            .object_types_with_built_ins()
             .iter()
             .map(|(name, def)| (name.clone(), (&**def).into()))
             .collect();
@@ -154,12 +146,11 @@ impl Schema {
 
         let enums = compiler
             .db
-            .enums()
+            .enums_with_built_ins()
             .iter()
             .map(|(name, def)| {
                 let values = def
-                    .enum_values_definition()
-                    .iter()
+                    .values()
                     .map(|value| value.enum_value().to_owned())
                     .collect();
                 (name.clone(), values)
@@ -169,8 +160,7 @@ impl Schema {
         let root_operations = compiler
             .db
             .schema()
-            .root_operation_type_definition()
-            .iter()
+            .root_operations()
             .filter(|def| def.loc().is_some()) // exclude implict operations
             .map(|def| {
                 (
@@ -268,13 +258,7 @@ macro_rules! implement_object_type_or_interface {
             fn from(def: &'_ $hir_ty) -> Self {
                 Self {
                     fields: def
-                        .fields_definition()
-                        .iter()
-                        .chain(
-                            def.extensions()
-                                .iter()
-                                .flat_map(|ext| ext.fields_definition()),
-                        )
+                        .fields()
                         .map(|field| (field.name().to_owned(), field.ty().into()))
                         .collect(),
                 }
@@ -324,13 +308,7 @@ impl From<&'_ hir::InputObjectTypeDefinition> for InputObjectType {
     fn from(def: &'_ hir::InputObjectTypeDefinition) -> Self {
         InputObjectType {
             fields: def
-                .input_fields_definition()
-                .iter()
-                .chain(
-                    def.extensions()
-                        .iter()
-                        .flat_map(|ext| ext.input_fields_definition()),
-                )
+                .fields()
                 .map(|field| {
                     (
                         field.name().to_owned(),
