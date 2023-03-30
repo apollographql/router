@@ -61,6 +61,7 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
+use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
@@ -615,6 +616,7 @@ impl Telemetry {
                         .with_target(logging.display_target),
                     filter_metric_events,
                 ))
+                .fmt_fields(NullFieldFormatter)
                 .boxed(),
             config::LoggingFormat::Json => tracing_subscriber::fmt::layer()
                 .json()
@@ -630,6 +632,7 @@ impl Telemetry {
                         filter_metric_events,
                     )
                 })
+                .fmt_fields(NullFieldFormatter)
                 .map_fmt_fields(|_f| JsonFields::default())
                 .boxed(),
         };
