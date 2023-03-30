@@ -46,7 +46,7 @@ use super::HasPlugins;
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
-use crate::graphql;
+use crate::{Context, graphql};
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::query_planner::QueryPlanResult;
@@ -259,7 +259,7 @@ where
                                 }
                                 let supergraph_request = SupergraphRequest {
                                     // supergraph_request: http::Request::from_parts(Parts::from_request(router_request), request),
-                                    //supergraph_request: http::Request::new(request),
+                                    // supergraph_request: http::Request::new(request),
                                     supergraph_request: supergraph_request_builder.body(request).unwrap(),
                                     context: context.clone()
                                 };
@@ -279,21 +279,35 @@ where
                             supergraph_response
                         }
                         ExecuteRequestResult::Batch(supergraph_responses) => {
-                            let first_response_context = supergraph_responses.first().unwrap().context.clone();
-                            first_response_context.insert(IS_BATCH_REQUEST_CONTEXT_KEY, true).unwrap();
+                            // create 1 context from all supergraph_responses contexts
+                            // create 1 parts from all supergraph_responses parts
+                            // create 1 responseStream from all supergraph_responses responseStream
 
-                            // let (first_parts, _) =  first_response.response.into_parts();
-                            let futures =
-                                supergraph_responses.into_iter().map(|mut supergraph_response| async move {
+                            let aggregated_context = Context::new();
+                            let mut futures = Vec::new();
+
+                            for mut supergraph_response in supergraph_responses {
+                                for entry in supergraph_response.context.iter() {
+                                    aggregated_context.insert(entry.key().clone(), entry.value().clone()).unwrap();
+                                }
+
+                                futures.push(async move {
                                     supergraph_response.next_response().await.unwrap()
                                 });
+                            }
+                            aggregated_context.insert(IS_BATCH_REQUEST_CONTEXT_KEY, true).unwrap();
 
+                            // let (first_parts, _) =  first_response.response.into_parts();
+                            // let futures =
+                            //     supergraph_responses.into_iter().map(|mut supergraph_response| async move {
+                            //         supergraph_response.next_response().await.unwrap()
+                            //     });
                             let response_stream = stream::iter(join_all(futures).await).boxed();
 
                             SupergraphResponse {
                                 // response: Response::from_parts(supergraph_responses.first().unwrap().response.into_parts().0, response_stream),
                                 response: Response::new(response_stream),
-                                context: first_response_context
+                                context: aggregated_context
                             }
                         }
                     };
