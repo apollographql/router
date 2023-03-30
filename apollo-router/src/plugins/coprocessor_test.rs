@@ -100,6 +100,7 @@ mod tests {
                 sdl: true,
                 uri: false,
                 method: false,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -159,6 +160,7 @@ mod tests {
                 sdl: true,
                 uri: false,
                 method: false,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -218,6 +220,7 @@ mod tests {
                 sdl: true,
                 uri: false,
                 method: false,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -275,6 +278,7 @@ mod tests {
                 body: true,
                 uri: false,
                 service_name: false,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -336,6 +340,7 @@ mod tests {
                 body: true,
                 uri: false,
                 service_name: false,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -464,6 +469,7 @@ mod tests {
                 body: true,
                 uri: false,
                 service_name: false,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -532,6 +538,7 @@ mod tests {
                 body: true,
                 uri: false,
                 service_name: false,
+                status_code: false,
             },
         };
 
@@ -643,6 +650,7 @@ mod tests {
                 sdl: true,
                 uri: true,
                 method: true,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -761,6 +769,7 @@ mod tests {
                 sdl: true,
                 uri: true,
                 method: true,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -889,6 +898,7 @@ mod tests {
                 sdl: true,
                 uri: true,
                 method: true,
+                status_code: false,
             },
             response: Default::default(),
         };
@@ -976,6 +986,7 @@ mod tests {
                 sdl: true,
                 uri: true,
                 method: true,
+                status_code: false,
             },
             request: Default::default(),
         };

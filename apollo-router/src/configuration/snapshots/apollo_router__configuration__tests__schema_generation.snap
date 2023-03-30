@@ -213,7 +213,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "uri": false,
-              "method": false
+              "method": false,
+              "status_code": false
             },
             "response": {
               "headers": false,
@@ -221,7 +222,8 @@ expression: "&schema"
               "body": false,
               "sdl": false,
               "uri": false,
-              "method": false
+              "method": false,
+              "status_code": false
             }
           },
           "type": "object",
@@ -234,7 +236,8 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "uri": false,
-                "method": false
+                "method": false,
+                "status_code": false
               },
               "type": "object",
               "properties": {
@@ -260,6 +263,11 @@ expression: "&schema"
                 },
                 "sdl": {
                   "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "status_code": {
+                  "description": "Send the http status",
                   "default": false,
                   "type": "boolean"
                 },
@@ -279,7 +287,8 @@ expression: "&schema"
                 "body": false,
                 "sdl": false,
                 "uri": false,
-                "method": false
+                "method": false,
+                "status_code": false
               },
               "type": "object",
               "properties": {
@@ -305,6 +314,11 @@ expression: "&schema"
                 },
                 "sdl": {
                   "description": "Send the SDL",
+                  "default": false,
+                  "type": "boolean"
+                },
+                "status_code": {
+                  "description": "Send the http status",
                   "default": false,
                   "type": "boolean"
                 },
@@ -327,14 +341,16 @@ expression: "&schema"
                 "context": false,
                 "body": false,
                 "uri": false,
-                "service_name": false
+                "service_name": false,
+                "status_code": false
               },
               "response": {
                 "headers": false,
                 "context": false,
                 "body": false,
                 "uri": false,
-                "service_name": false
+                "service_name": false,
+                "status_code": false
               }
             }
           },
@@ -348,14 +364,16 @@ expression: "&schema"
                   "context": false,
                   "body": false,
                   "uri": false,
-                  "service_name": false
+                  "service_name": false,
+                  "status_code": false
                 },
                 "response": {
                   "headers": false,
                   "context": false,
                   "body": false,
                   "uri": false,
-                  "service_name": false
+                  "service_name": false,
+                  "status_code": false
                 }
               },
               "type": "object",
@@ -367,7 +385,8 @@ expression: "&schema"
                     "context": false,
                     "body": false,
                     "uri": false,
-                    "service_name": false
+                    "service_name": false,
+                    "status_code": false
                   },
                   "type": "object",
                   "properties": {
@@ -388,6 +407,11 @@ expression: "&schema"
                     },
                     "service_name": {
                       "description": "Send the service name",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "status_code": {
+                      "description": "Send the http status",
                       "default": false,
                       "type": "boolean"
                     },
@@ -406,7 +430,8 @@ expression: "&schema"
                     "context": false,
                     "body": false,
                     "uri": false,
-                    "service_name": false
+                    "service_name": false,
+                    "status_code": false
                   },
                   "type": "object",
                   "properties": {
@@ -427,6 +452,11 @@ expression: "&schema"
                     },
                     "service_name": {
                       "description": "Send the service name",
+                      "default": false,
+                      "type": "boolean"
+                    },
+                    "status_code": {
+                      "description": "Send the http status",
                       "default": false,
                       "type": "boolean"
                     },
