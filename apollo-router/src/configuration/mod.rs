@@ -105,10 +105,6 @@ pub struct Configuration {
     #[serde(skip)]
     pub(crate) validated_yaml: Option<Value>,
 
-    /// Configuration options pertaining to the http server component.
-    #[serde(default)]
-    pub(crate) server: Server,
-
     /// Health check configuration
     #[serde(default)]
     pub(crate) health_check: HealthCheck,
@@ -161,7 +157,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         #[derive(Deserialize, Default)]
         #[serde(default)]
         struct AdHocConfiguration {
-            server: Server,
             health_check: HealthCheck,
             sandbox: Sandbox,
             homepage: Homepage,
@@ -177,7 +172,6 @@ impl<'de> serde::Deserialize<'de> for Configuration {
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
         Configuration::builder()
-            .server(ad_hoc.server)
             .health_check(ad_hoc.health_check)
             .sandbox(ad_hoc.sandbox)
             .homepage(ad_hoc.homepage)
@@ -209,7 +203,6 @@ fn test_listen() -> ListenAddr {
 impl Configuration {
     #[builder]
     pub(crate) fn new(
-        server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
@@ -223,7 +216,6 @@ impl Configuration {
     ) -> Result<Self, ConfigurationError> {
         let conf = Self {
             validated_yaml: Default::default(),
-            server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_default(),
             health_check: health_check.unwrap_or_default(),
             sandbox: sandbox.unwrap_or_default(),
@@ -279,7 +271,6 @@ impl Default for Configuration {
 impl Configuration {
     #[builder]
     pub(crate) fn fake_new(
-        server: Option<Server>,
         supergraph: Option<Supergraph>,
         health_check: Option<HealthCheck>,
         sandbox: Option<Sandbox>,
@@ -293,7 +284,6 @@ impl Configuration {
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
-            server: server.unwrap_or_default(),
             supergraph: supergraph.unwrap_or_else(|| Supergraph::fake_builder().build()),
             health_check: health_check.unwrap_or_else(|| HealthCheck::fake_builder().build()),
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
@@ -600,6 +590,10 @@ pub(crate) struct Limits {
     /// requests that exceed a `max_*` limit are *not* rejected.
     /// Instead they are executed normally, and a warning is logged.
     pub(crate) warn_only: bool,
+
+    /// Limit recursion in the GraphQL parser to protect against stack overflow.
+    /// default: 4096
+    pub(crate) parser_max_recursion: usize,
 }
 
 #[allow(clippy::derivable_impls)] //  explicit is better here
@@ -611,8 +605,12 @@ impl Default for Limits {
             max_height: None,
             max_root_fields: None,
             max_aliases: None,
-
             warn_only: false,
+
+            // This is `apollo-parser`’s default, which protects against stack overflow
+            // but is still very high for "reasonable" queries.
+            // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
+            parser_max_recursion: 4096,
         }
     }
 }
@@ -1002,34 +1000,6 @@ impl Default for HealthCheck {
     }
 }
 
-/// Configuration options pertaining to the http server component.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[serde(default)]
-pub(crate) struct Server {
-    /// Experimental limitation of query depth
-    /// default: 4096
-    pub(crate) experimental_parser_recursion_limit: usize,
-}
-
-#[buildstructor::buildstructor]
-impl Server {
-    #[builder]
-    #[allow(clippy::too_many_arguments)] // Used through a builder, not directly
-    pub(crate) fn new(parser_recursion_limit: Option<usize>) -> Self {
-        Self {
-            experimental_parser_recursion_limit: parser_recursion_limit
-                .unwrap_or_else(default_parser_recursion_limit),
-        }
-    }
-}
-
-impl Default for Server {
-    fn default() -> Self {
-        Self::builder().build()
-    }
-}
-
 /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
 /// You probably don’t want this in production!
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -1105,11 +1075,4 @@ fn default_graphql_path() -> String {
 
 fn default_graphql_introspection() -> bool {
     false
-}
-
-fn default_parser_recursion_limit() -> usize {
-    // This is `apollo-parser`’s default, which protects against stack overflow
-    // but is still very high for "reasonable" queries.
-    // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
-    4096
 }
