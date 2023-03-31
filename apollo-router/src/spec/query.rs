@@ -10,14 +10,14 @@ use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
+use apollo_compiler::Snapshot;
 use derivative::Derivative;
+use once_cell::sync::OnceCell;
+use parking_lot::Mutex;
 use serde::de::Visitor;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
-use tokio::sync::Mutex;
-use tokio::sync::MutexGuard;
-use tokio::sync::OnceCell;
 use tracing::level_filters::LevelFilter;
 
 use crate::error::FetchError;
@@ -306,12 +306,13 @@ impl Query {
         })
     }
 
-    pub(crate) async fn compiler(&self, schema: Option<&Schema>) -> MutexGuard<'_, ApolloCompiler> {
-        self.compiler
-            .get_or_init(|| async { Mutex::new(self.uncached_compiler(schema)) })
-            .await
-            .lock()
-            .await
+    #[allow(clippy::expect_used)]
+    pub(crate) fn snapshot_compiler(&self, schema: Option<&Schema>) -> Snapshot {
+        let compiler1 = self
+            .compiler
+            .get_or_init(|| Mutex::new(self.uncached_compiler(schema)))
+            .lock();
+        compiler1.snapshot()
     }
 
     /// Create a new compiler for this query, without caching it

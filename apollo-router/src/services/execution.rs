@@ -66,7 +66,7 @@ impl Request {
         schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
+        let compiler = query_plan.query.snapshot_compiler(Some(schema));
         Self {
             supergraph_request,
             query_plan,
