@@ -471,9 +471,9 @@ where
     };
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request().await;
+    request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request().await;
+    request.context.leave_active_request();
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -593,9 +593,9 @@ where
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request().await;
+    response.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    response.context.leave_active_request().await;
+    response.context.leave_active_request();
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
@@ -676,9 +676,9 @@ where
     };
 
     tracing::debug!(?payload, "externalized output");
-    request.context.enter_active_request().await;
+    request.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    request.context.leave_active_request().await;
+    request.context.leave_active_request();
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
     validate_coprocessor_output(&co_processor_output, PipelineStep::SubgraphRequest)?;
@@ -801,9 +801,9 @@ where
     };
 
     tracing::debug!(?payload, "externalized output");
-    response.context.enter_active_request().await;
+    response.context.enter_active_request();
     let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-    response.context.leave_active_request().await;
+    response.context.leave_active_request();
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
 
