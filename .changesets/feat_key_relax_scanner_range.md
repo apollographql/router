@@ -12,6 +12,8 @@ router response:
 subgraph response:
     - status_code
 
+It removes the`coprocessor.subgraph.all.response.uri` key (that was unused), with a migration.
+
 It also fixes a bug where a coprocessor operating at the `router_request` stage would fail to deserialize an empty body (which happens for GET requests).
 
 By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/2863
