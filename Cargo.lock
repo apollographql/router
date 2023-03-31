@@ -156,14 +156,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "224afbd727c3d6e4b90103ece64b8d1b67fbb1973b1046c2281eed3f3803f800"
 
 [[package]]
-name = "apollo-compiler"
-version = "0.6.0"
+name = "apollo-ariadne"
+version = "0.2.0-alpha.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e04b7fcd8b65c7c62d317bee4b83a53699033c1fed2ca2757d80b81f2295160d"
+checksum = "28d0599491753b640c75cdaefc2cb1c9b9ba5787a461cb7c821f37e9e6694f0a"
 dependencies = [
- "apollo-parser 0.4.1",
+ "unicode-width",
+ "yansi",
+]
+
+[[package]]
+name = "apollo-compiler"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fecbe4f00b1baeb4dfe40eb54e8e3831057086296e68217e4f7a246569abebac"
+dependencies = [
+ "apollo-ariadne",
+ "apollo-parser 0.5.0",
  "indexmap",
- "miette",
  "ordered-float 2.10.0",
  "rowan",
  "salsa",
@@ -211,6 +221,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "apollo-parser"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bde1ede19cfd36f4ebdce836fd571a1791e08b634f6d63648203e885b8fba9f4"
+dependencies = [
+ "rowan",
+ "thiserror",
+]
+
+[[package]]
 name = "apollo-router"
 version = "1.13.1"
 dependencies = [
@@ -218,7 +238,7 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.4.1",
+ "apollo-parser 0.5.0",
  "arc-swap",
  "askama",
  "async-compression",
@@ -6795,6 +6815,12 @@ checksum = "56c1936c4cc7a1c9ab21a1ebb602eb942ba868cbd44a99cb7cdc5892335e1c85"
 dependencies = [
  "linked-hash-map",
 ]
+
+[[package]]
+name = "yansi"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
 
 [[package]]
 name = "zeroize"
