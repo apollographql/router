@@ -6,6 +6,8 @@ use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use tower::BoxError;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::filter::Filtered;
+use tracing_subscriber::layer::Filter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
@@ -21,8 +23,10 @@ use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
-pub(super) type LayeredTracer =
-    Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>;
+pub(super) type LayeredTracer = Layered<
+    Filtered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, SamplingFilter, Registry>,
+    Registry,
+>;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
@@ -52,7 +56,9 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("noop", None, None),
     );
-    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());
+    let opentelemetry_layer = tracing_opentelemetry::layer()
+        .with_tracer(hot_tracer.clone())
+        .with_filter(SamplingFilter);
 
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
@@ -127,5 +133,17 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
 pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
+    }
+}
+
+pub(crate) struct SamplingFilter;
+
+impl<S> Filter<S> for SamplingFilter {
+    fn enabled(
+        &self,
+        _meta: &tracing::Metadata<'_>,
+        _cx: &tracing_subscriber::layer::Context<'_, S>,
+    ) -> bool {
+        false
     }
 }
