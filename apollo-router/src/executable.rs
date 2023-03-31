@@ -19,6 +19,10 @@ use clap::Subcommand;
 use directories::ProjectDirs;
 #[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
 use once_cell::sync::OnceCell;
+// Note: We want to use jemalloc on unix, but we don't enable it if dhat-heap is in use because we
+// can only have one global allocator
+#[cfg(target = "unix")]
+use tikv_jemallocator::Jemalloc;
 use url::ParseError;
 use url::Url;
 
@@ -32,11 +36,6 @@ use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 use crate::EntitlementSource;
-
-// Note: We want to use jemalloc on unix, but we don't enable it if dhat-heap is in use because we
-// can only have one global allocator
-#[cfg(target = "unix")]
-use tikv_jemallocator::Jemalloc;
 
 #[cfg(target = "unix")]
 #[cfg(not(feature = "dhat-heap"))]
