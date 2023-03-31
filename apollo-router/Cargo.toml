@@ -256,3 +256,7 @@ tonic-build = "0.8.4"
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests.rs"
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+tikv-jemallocator = "0.5"
+
