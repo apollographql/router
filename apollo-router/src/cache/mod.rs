@@ -125,7 +125,7 @@ where
     }
 
     pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        self.storage.in_memory_keys().await
+        self.storage.in_memory_keys()
     }
 }
 
@@ -235,7 +235,7 @@ mod tests {
             entry.insert(i).await;
         }
 
-        assert_eq!(cache.storage.len().await, 13);
+        assert_eq!(cache.storage.len(), 13);
     }
 
     mock! {
@@ -271,6 +271,6 @@ mod tests {
         while let Some(_result) = computations.next().await {}
 
         // To be really sure, check there is only one value in the cache
-        assert_eq!(cache.storage.len().await, 1);
+        assert_eq!(cache.storage.len(), 1);
     }
 }
