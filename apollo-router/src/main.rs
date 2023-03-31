@@ -1,6 +1,5 @@
 //! Main entry point for CLI command to start server.
 
-# main.rs
 #[cfg(not(target_env = "msvc"))]
 use tikv_jemallocator::Jemalloc;
 
