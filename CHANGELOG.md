@@ -4,6 +4,18 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.13.2] - 2023-04-03
+
+## 🐛 Fixes
+
+### Actually replace the old query planner on reload 
+
+The new query planner reload code introduced a regression where new schemas were not used, because the old query planner instance was kept instead of the new one.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2895
+
+
+
 # [1.13.1] - 2023-03-28
 
 ## 🚀 Features
