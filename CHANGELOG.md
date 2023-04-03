@@ -10,7 +10,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Replace the old query planner with the incoming query planner on reload
 
-We've fixed an important regression in v1.13.1 (introduced by [PR #2706](https://github.com/apollographql/router/pull/2706) which resulted in Routers failing to update to newer supergraphs unless they were fully restarted; hot-reloads of the supergraph did not work properly.  This affects all v1.13.1 versions, whether the supergraph was delivered from a local file or if delivered as part of Managed Federation through Apollo Uplink.
+We've fixed an important regression in v1.13.1 (introduced by [PR #2706](https://github.com/apollographql/router/pull/2706)) which resulted in Routers failing to update to newer supergraphs unless they were fully restarted; hot-reloads of the supergraph did not work properly.  This affects all v1.13.1 versions, whether the supergraph was delivered from a local file or if delivered as part of Managed Federation through Apollo Uplink.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2895
 
