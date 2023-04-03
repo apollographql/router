@@ -1157,8 +1157,8 @@ impl Telemetry {
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
                                     // FIXME
-                                    operation_type: "null".to_string(),
-                                    operation_subtype: "null".to_string(),
+                                    operation_type: String::new(),
+                                    operation_subtype: String::new(),
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
