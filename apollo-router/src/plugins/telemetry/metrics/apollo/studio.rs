@@ -325,6 +325,8 @@ mod test {
                         context: StatsContext {
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
+                            operation_type: String::new(),
+                            operation_subtype: String::new(),
                         },
                         query_latency_stats: SingleQueryLatencyStats {
                             latency: Duration::from_secs(1),
