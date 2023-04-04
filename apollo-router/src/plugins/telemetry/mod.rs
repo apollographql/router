@@ -62,7 +62,6 @@ use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::LayeredTracer;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
-use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -590,7 +589,6 @@ impl Telemetry {
         Ok(builder)
     }
 
-    #[allow(clippy::type_complexity)]
     fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
