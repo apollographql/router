@@ -1,3 +1,7 @@
+use std::mem;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
+
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
@@ -56,13 +60,16 @@ static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
+pub(super) static SPAN_SAMPLING_RATE: AtomicU64 =
+    AtomicU64::new(unsafe { mem::transmute::<f64, u64>(0.0) });
+
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("noop", None, None),
     );
     let opentelemetry_layer = tracing_opentelemetry::layer()
         .with_tracer(hot_tracer.clone())
-        .with_filter(SamplingFilter::new(0.001));
+        .with_filter(SamplingFilter::new());
 
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
@@ -140,22 +147,16 @@ pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
     }
 }
 
-pub(crate) struct SamplingFilter {
-    rate: f64,
-    //rng: ThreadRng,
-}
+pub(crate) struct SamplingFilter {}
 
 impl SamplingFilter {
-    pub(crate) fn new(rate: f64) -> Self {
-        Self {
-            rate,
-            //rng: thread_rng(),
-        }
+    pub(crate) fn new() -> Self {
+        Self {}
     }
 
     fn sample(&self) -> bool {
         let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= self.rate
+        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
     }
 }
 

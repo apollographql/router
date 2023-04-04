@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -54,6 +55,7 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
+use self::config::Sampler;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -62,6 +64,7 @@ use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::LayeredTracer;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
+use self::reload::SPAN_SAMPLING_RATE;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -537,15 +540,24 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        let trace_config = &tracing_config.trace_config.unwrap_or_default();
-        let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
+        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
+        let sampling_rate = match trace_config.sampler {
+            config::SamplerOption::TraceIdRatioBased(rate) => rate,
+            config::SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+            config::SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+        };
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        trace_config.sampler = config::SamplerOption::Always(Sampler::AlwaysOn);
+        SPAN_SAMPLING_RATE.store(f64::to_bits(sampling_rate), Ordering::Relaxed);
+
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_config((&trace_config).into());
+
+        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, &trace_config)?;
         // For metrics
         builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
 
