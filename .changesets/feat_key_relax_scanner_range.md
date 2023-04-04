@@ -1,19 +1,15 @@
-### Coprocessor: add fields to the router and the subgraph stage ([Issue #2861](https://github.com/apollographql/router/issues/2861), [Issue #2861](https://github.com/apollographql/router/issues/2862))
+### GraphOS Enterprise: Coprocessor read access to request `uri`, `method` and HTTP response status codes ([Issue #2861](https://github.com/apollographql/router/issues/2861), [Issue #2861](https://github.com/apollographql/router/issues/2862))
 
-This changeset adds several (read only) fields to coprocessor stages:
+We've added the ability for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor) to have read-only access to additional contextual information at [the `RouterService` and SubgraphService`](https://www.apollographql.com/docs/router/customizations/coprocessor/#how-it-works) stages:
 
-router request:
-    - uri
-    - method
+The `RouterService` stage now has read-only access to the **request** from the client:
+    - `uri` (e.g., `https://host.com/`)
+    - `method` (e.g., `POST`, `GET`)
 
-router response:
-    - status_code
+The `RouterService` stage now has read-only access to the overall **response** to the client:
+    - `status_code` (e.g. `403`, `200`)
 
-subgraph response:
-    - status_code
-
-It removes the`coprocessor.subgraph.all.response.uri` key (that was unused), with a migration.
-
-It also fixes a bug where a coprocessor operating at the `router_request` stage would fail to deserialize an empty body (which happens for GET requests).
+The `SubgraphService` stage now has read-only access to the **response** of the subgraph request:
+    - `status_code` (e.g., `503`, `200`)
 
 By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/2863
