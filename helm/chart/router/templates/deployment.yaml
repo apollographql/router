@@ -6,7 +6,7 @@ metadata:
     {{- include "router.labels" . | nindent 4 }}
   {{/* There may not be much configuration so check that there is something */}}
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
-    {{- toYaml .Values.router.additionalLabels | nindent 4 }}
+    {{- toYaml .Values.router.extraLabels | nindent 4 }}
   annotations:
     prometheus.io/path: {{ .Values.router.configuration.telemetry.metrics.prometheus.path | default "/metrics" }}
     prometheus.io/port: {{ (splitList ":" .Values.router.configuration.telemetry.metrics.prometheus.listen | last) | default "9090" | quote }}
@@ -32,7 +32,7 @@ spec:
       {{- end }}
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
-        {{- toYaml .Values.router.additionalLabels | nindent 8 }}
+        {{- toYaml .Values.router.extraLabels | nindent 8 }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
