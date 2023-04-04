@@ -268,7 +268,8 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let query = query.into();
         let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.supergraph.limits.parser_max_recursion);
+            .recursion_limit(configuration.supergraph.limits.parser_max_recursion)
+            .token_limit(configuration.supergraph.limits.parser_max_tokens);
         let id = compiler.add_executable(&query, "query");
         let ast = compiler.db.ast(id);
 
