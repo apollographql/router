@@ -1161,7 +1161,8 @@ expression: "&schema"
           "max_root_fields": null,
           "max_aliases": null,
           "warn_only": false,
-          "parser_max_recursion": 4096
+          "parser_max_recursion": 4096,
+          "parser_max_tokens": 15000
         }
       },
       "type": "object",
@@ -1184,7 +1185,8 @@ expression: "&schema"
             "max_root_fields": null,
             "max_aliases": null,
             "warn_only": false,
-            "parser_max_recursion": 4096
+            "parser_max_recursion": 4096,
+            "parser_max_tokens": 15000
           },
           "type": "object",
           "properties": {
@@ -1197,7 +1199,7 @@ expression: "&schema"
               "nullable": true
             },
             "max_depth": {
-              "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nTODO: define depth",
+              "description": "If set, requests with operations deeper than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_DEPTH_LIMIT\"}`\n\nCounts depth of an operation, looking at its selection sets, including fields in fragments and inline fragments. The following example has a depth of 3.\n\n```graphql query getProduct { book { # 1 ...bookDetails } }\n\nfragment bookDetails on Book { details { # 2 ... on ProductDetailsBook { country # 3 } } } ```",
               "default": null,
               "type": "integer",
               "format": "uint32",
@@ -1213,7 +1215,7 @@ expression: "&schema"
               "nullable": true
             },
             "max_root_fields": {
-              "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nTODO: define root fields (e.g. in the presence of fragment)",
+              "description": "If set, requests with operations with more root fields than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ROOT_FIELDS_LIMIT\"}`\n\nThis limit counts only the top level fields in a selection set, including fragments and inline fragments.",
               "default": null,
               "type": "integer",
               "format": "uint32",
@@ -1223,6 +1225,13 @@ expression: "&schema"
             "parser_max_recursion": {
               "description": "Limit recursion in the GraphQL parser to protect against stack overflow. default: 4096",
               "default": 4096,
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0.0
+            },
+            "parser_max_tokens": {
+              "description": "Limit the number of tokens the GraphQL parser processes before aborting.",
+              "default": 15000,
               "type": "integer",
               "format": "uint",
               "minimum": 0.0
