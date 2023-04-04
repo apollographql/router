@@ -91,21 +91,21 @@ coprocessor:
       context: false
       sdl: false
       status_code: false
-    subgraph:
-      all:
-        request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
-          headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
-          body: false
-          context: false
-          uri: false
-          method: false
-          service_name: false
-        response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
-          headers: true
-          body: false
-          context: false
-          service_name: false
-          status_code: false
+  subgraph:
+    all:
+      request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
+        headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+        body: false
+        context: false
+        uri: false
+        method: false
+        service_name: false
+      response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
+        headers: true
+        body: false
+        context: false
+        service_name: false
+        status_code: false
 ```
 
 ### Minimal configuration
@@ -606,9 +606,10 @@ This value is present only for coprocessor requests from the router's `SubgraphS
 </td>
 <td>
 
-The URL of the subgraph that this coprocessor request pertains to.
+The URL that this coprocessor request pertains to.
 
-This value is present only for coprocessor requests from the router's `SubgraphService`.
+At the `RouterService` stage, this is the path the resquest was made to.
+At the `SubgraphService` request stage, this is the full URL the subgraph request will be made to.
 
 </td>
 </tr>
