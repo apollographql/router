@@ -83,13 +83,29 @@ coprocessor:
       body: false
       context: false
       sdl: false
+      uri: false
+      method: false
     response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send a client response.
       headers: true
       body: false
       context: false
       sdl: false
-# You can uncomment this key and populate it like the router: key above to hook into the `SubgraphService`.
-# subgraph:
+      status_code: false
+    subgraph:
+      all:
+        request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
+          headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+          body: false
+          context: false
+          uri: false
+          method: false
+          service_name: false
+        response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
+          headers: true
+          body: false
+          context: false
+          service_name: false
+          status_code: false
 ```
 
 ### Minimal configuration
@@ -549,6 +565,14 @@ A unique ID corresponding to the client request associated with this coprocessor
 </tr>
 
 <tr>
+<td colspan="2">
+
+**Data properties**
+
+</td>
+</tr>
+
+<tr>
 <td>
 
 ##### `serviceName`
@@ -585,9 +609,31 @@ This value is present only for coprocessor requests from the router's `SubgraphS
 </tr>
 
 <tr>
-<td colspan="2">
+<td>
 
-**Data properties**
+##### `method`
+
+`string`
+
+</td>
+<td>
+
+The HTTP method that is used by the request.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `status_code`
+
+`number`
+
+</td>
+<td>
+
+The HTTP status code received by a response.
 
 </td>
 </tr>
