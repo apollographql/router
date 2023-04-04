@@ -89,6 +89,8 @@ pub(crate) struct Externalizable<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) method: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) service_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) status_code: Option<u16>,

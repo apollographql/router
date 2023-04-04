@@ -161,8 +161,8 @@ pub(super) struct RouterRequestConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
-    /// Send the uri
-    pub(super) uri: bool,
+    /// Send the path
+    pub(super) path: bool,
     /// Send the method
     pub(super) method: bool,
 }
@@ -494,6 +494,8 @@ where
         .transpose()
         .unwrap_or_default();
 
+    let path_to_send = request_config.path.then(|| parts.uri.to_string());
+
     let context_to_send = request_config.context.then(|| request.context.clone());
     let sdl = request_config.sdl.then(|| sdl.clone().to_string());
 
@@ -506,7 +508,8 @@ where
         body: body_to_send,
         context: context_to_send,
         sdl,
-        uri: Some(parts.uri.to_string()),
+        uri: None,
+        path: path_to_send,
         method: Some(parts.method.to_string()),
         service_name: None,
         status_code: None,
@@ -632,6 +635,7 @@ where
         status_code: status_to_send,
         sdl,
         uri: None,
+        path: None,
         method: None,
         service_name: None,
     };
@@ -717,6 +721,7 @@ where
         context: context_to_send,
         sdl: None,
         service_name,
+        path: None,
         uri,
         method: Some(parts.method.to_string()),
         status_code: None,
@@ -847,6 +852,7 @@ where
         status_code: status_to_send,
         sdl: None,
         uri: None,
+        path: None,
         method: None,
         service_name,
     };

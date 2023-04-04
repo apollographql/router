@@ -3,7 +3,7 @@
 We've added the ability for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor) to have read-only access to additional contextual information at [the `RouterService` and `SubgraphService`](https://www.apollographql.com/docs/router/customizations/coprocessor/#how-it-works) stages:
 
 The `RouterService` stage now has read-only access to the **request** from the client:
-  - `uri` (e.g., `https://host.com/`)
+  - `path` (e.g., `/graphql`)
   - `method` (e.g., `POST`, `GET`)
 
 The `RouterService` stage now has read-only access to the overall **response** to the client:
