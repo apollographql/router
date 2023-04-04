@@ -550,7 +550,25 @@ pub(crate) struct Limits {
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
     ///
-    /// TODO: define depth
+    /// Counts depth of an operation, looking at its selection sets,
+    /// including fields in fragments and inline fragments. The following
+    /// example has a depth of 3.
+    ///
+    /// ```graphql
+    /// query getProduct {
+    ///   book { # 1
+    ///     ...bookDetails
+    ///   }
+    /// }
+    ///
+    /// fragment bookDetails on Book {
+    ///   details { # 2
+    ///     ... on ProductDetailsBook {
+    ///       country # 3
+    ///     }
+    ///   }
+    /// }
+    /// ```
     pub(crate) max_depth: Option<u32>,
 
     /// If set, requests with operations higher than this maximum
@@ -578,7 +596,8 @@ pub(crate) struct Limits {
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_ROOT_FIELDS_LIMIT"}`
     ///
-    /// TODO: define root fields (e.g. in the presence of fragment)
+    /// This limit counts only the top level fields in a selection set,
+    /// including fragments and inline fragments.
     pub(crate) max_root_fields: Option<u32>,
 
     /// If set, requests with operations with more aliases than this maximum
@@ -594,6 +613,9 @@ pub(crate) struct Limits {
     /// Limit recursion in the GraphQL parser to protect against stack overflow.
     /// default: 4096
     pub(crate) parser_max_recursion: usize,
+
+    /// Limit the number of tokens the GraphQL parser processes before aborting.
+    pub(crate) parser_max_tokens: usize,
 }
 
 #[allow(clippy::derivable_impls)] //  explicit is better here
@@ -611,6 +633,7 @@ impl Default for Limits {
             // but is still very high for "reasonable" queries.
             // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
             parser_max_recursion: 4096,
+            parser_max_tokens: 15_000,
         }
     }
 }

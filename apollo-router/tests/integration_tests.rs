@@ -557,6 +557,46 @@ async fn query_just_at_recursion_limit() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn query_just_under_token_limit() {
+    let config = serde_json::json!({
+        "supergraph": {"limits": {"parser_max_tokens": 36_usize}}
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .build()
+        .expect("expecting valid request");
+
+    let expected_service_hits = hashmap! {
+        "reviews".to_string() => 1,
+        "accounts".to_string() => 2,
+    };
+
+    let (actual, registry) = query_rust_with_config(request, config).await;
+
+    assert_eq!(0, actual.errors.len());
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_just_at_token_limit() {
+    let config = serde_json::json!({
+        "supergraph": {"limits": {"parser_max_tokens": 34_usize}}
+    });
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
+        .build()
+        .expect("expecting valid request");
+
+    let expected_service_hits = hashmap! {};
+
+    let (actual, registry) = query_rust_with_config(request, config).await;
+
+    assert_eq!(1, actual.errors.len());
+    assert!(actual.errors[0].message.contains("token limit reached"));
+    assert_eq!(registry.totals(), expected_service_hits);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn normal_query_with_defer_accept_header() {
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
