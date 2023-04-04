@@ -972,6 +972,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
 async fn response_failure() -> Result<(), ApolloRouterError> {
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = crate::error::FetchError::SubrequestHttpError {
+            status_code: Some(200),
             service: "Mock service".to_string(),
             reason: "Mock error".to_string(),
         }
@@ -1007,6 +1008,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
     assert_eq!(
         response,
         crate::error::FetchError::SubrequestHttpError {
+            status_code: Some(200),
             service: "Mock service".to_string(),
             reason: "Mock error".to_string(),
         }
