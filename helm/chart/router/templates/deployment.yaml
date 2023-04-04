@@ -122,6 +122,9 @@ spec:
               {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
           {{- end }}
+          {{- if .Values.extraContainers }}
+          {{- tpl (toYaml .Values.extraContainers) $ | nindent 10 }}
+          {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
         {{- if .Values.router.configuration }}

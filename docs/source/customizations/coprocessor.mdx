@@ -83,13 +83,29 @@ coprocessor:
       body: false
       context: false
       sdl: false
+      path: false
+      method: false
     response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send a client response.
       headers: true
       body: false
       context: false
       sdl: false
-# You can uncomment this key and populate it like the router: key above to hook into the `SubgraphService`.
-# subgraph:
+      status_code: false
+  subgraph:
+    all:
+      request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
+        headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
+        body: false
+        context: false
+        uri: false
+        method: false
+        service_name: false
+      response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
+        headers: true
+        body: false
+        context: false
+        service_name: false
+        status_code: false
 ```
 
 ### Minimal configuration
@@ -173,6 +189,8 @@ Properties of the JSON body are divided into two high-level categories:
     }
   },
   "sdl": "..." // String omitted due to length
+  "path": "/",
+  "method": "POST"
 }
 ```
 
@@ -233,6 +251,7 @@ Properties of the JSON body are divided into two high-level categories:
       "accepts-wildcard": true
     }
   },
+  "statusCode": 200,
   "sdl": "..." // Omitted due to length
 }
 ```
@@ -311,6 +330,7 @@ Properties of the JSON body are divided into two high-level categories:
     }
   },
   "uri": "https://reviews.demo.starstuff.dev/",
+  "method": "POST",
   "serviceName": "reviews"
 }
 
@@ -437,7 +457,8 @@ Properties of the JSON body are divided into two high-level categories:
       "apollo_telemetry::client_name": ""
     }
   },
-  "serviceName": "reviews"
+  "serviceName": "reviews",
+  "statusCode": 200
 }
 
 ```
@@ -549,6 +570,14 @@ A unique ID corresponding to the client request associated with this coprocessor
 </tr>
 
 <tr>
+<td colspan="2">
+
+**Data properties**
+
+</td>
+</tr>
+
+<tr>
 <td>
 
 ##### `serviceName`
@@ -570,6 +599,24 @@ This value is present only for coprocessor requests from the router's `SubgraphS
 <tr>
 <td>
 
+##### `path`
+
+`string`
+
+</td>
+<td>
+
+The `RouterService` path that this coprocessor request pertains to.
+
+</td>
+</tr>
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 ##### `uri`
 
 `string`
@@ -577,17 +624,37 @@ This value is present only for coprocessor requests from the router's `SubgraphS
 </td>
 <td>
 
-The URL of the subgraph that this coprocessor request pertains to.
-
-This value is present only for coprocessor requests from the router's `SubgraphService`.
+The full URI the subgraph request will be made to.
 
 </td>
 </tr>
 
 <tr>
-<td colspan="2">
+<td>
 
-**Data properties**
+##### `method`
+
+`string`
+
+</td>
+<td>
+
+The HTTP method that is used by the request.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `status_code`
+
+`number`
+
+</td>
+<td>
+
+The HTTP status code received by a response.
 
 </td>
 </tr>
