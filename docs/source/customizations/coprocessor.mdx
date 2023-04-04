@@ -189,6 +189,8 @@ Properties of the JSON body are divided into two high-level categories:
     }
   },
   "sdl": "..." // String omitted due to length
+  "uri": "/",
+  "method": "POST"
 }
 ```
 
@@ -249,6 +251,7 @@ Properties of the JSON body are divided into two high-level categories:
       "accepts-wildcard": true
     }
   },
+  "statusCode": 200,
   "sdl": "..." // Omitted due to length
 }
 ```
@@ -327,6 +330,7 @@ Properties of the JSON body are divided into two high-level categories:
     }
   },
   "uri": "https://reviews.demo.starstuff.dev/",
+  "method": "POST",
   "serviceName": "reviews"
 }
 
@@ -453,7 +457,8 @@ Properties of the JSON body are divided into two high-level categories:
       "apollo_telemetry::client_name": ""
     }
   },
-  "serviceName": "reviews"
+  "serviceName": "reviews",
+  "statusCode": 200
 }
 
 ```
