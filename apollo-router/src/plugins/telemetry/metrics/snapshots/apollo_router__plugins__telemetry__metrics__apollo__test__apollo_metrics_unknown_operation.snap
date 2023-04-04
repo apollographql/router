@@ -10,7 +10,9 @@ expression: results
         "stats_with_context": {
           "context": {
             "client_name": "test_client",
-            "client_version": "1.0-test"
+            "client_version": "1.0-test",
+            "operation_type": "",
+            "operation_subtype": ""
           },
           "query_latency_stats": {
             "latency": {

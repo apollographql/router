@@ -1143,6 +1143,9 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
+                                    // FIXME
+                                    operation_type: String::new(),
+                                    operation_subtype: String::new(),
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
