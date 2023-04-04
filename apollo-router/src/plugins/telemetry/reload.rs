@@ -183,10 +183,9 @@ where
             match current_span.id() {
                 // this is the root span, where we make the sampling decision
                 None => {
-                    let sampled = self.sample();
+                    //let sampled = self.sample();
                     //println!("sample:{sampled}");
-
-                    sampled
+                    self.sample()
                 }
                 // if not in the root span, we look at extensions in the parent span to see if it was sampled
                 // the parent span has been created because it might be used by other layers, but if this filter
