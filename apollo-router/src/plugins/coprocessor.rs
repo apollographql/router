@@ -179,7 +179,7 @@ pub(super) struct RouterResponseConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
-    /// Send the http status
+    /// Send the HTTP status
     pub(super) status_code: bool,
 }
 /// What information is passed to a subgraph request/response stage
@@ -194,7 +194,7 @@ pub(super) struct SubgraphRequestConf {
     pub(super) body: bool,
     /// Send the subgraph URI
     pub(super) uri: bool,
-    /// Send the subgraph URI
+    /// Send the method URI
     pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
