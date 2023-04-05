@@ -86,6 +86,13 @@ containerPorts:
 #       - containerPort: 4001
 extraContainers: []
 
+# -- A map of extra labels to apply to the router deploment and containers
+# Example:
+# extraLabels:
+#   label_one_name: "label_one_value"
+#   label_two_name: "label_two_value"
+extraLabels: {}
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
