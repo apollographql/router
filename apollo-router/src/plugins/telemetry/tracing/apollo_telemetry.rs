@@ -210,7 +210,11 @@ impl Exporter {
         span: LocalSpan,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        println!("[{}] extract_root_trace", line!());
+        println!(
+            "[{}] extract_root_trace child_nodes= {}",
+            line!(),
+            child_nodes.len()
+        );
         let http = if let SpanKind::Request { http } = span.kind {
             http
         } else {
@@ -256,7 +260,9 @@ impl Exporter {
                     variables_json,
                 } => {
                     root_trace.field_execution_weight = self.field_execution_weight;
+
                     root_trace.signature = operation_signature;
+                    println!("setting root trace signature to {}", root_trace.signature);
                     root_trace.details = Some(Details {
                         variables_json,
                         operation_name,
@@ -265,6 +271,8 @@ impl Exporter {
                 _ => panic!("should never have had other node types"),
             }
         }
+
+        println!("[{}] extract_root_trace", line!());
 
         Ok(Box::new(root_trace))
     }
@@ -296,7 +304,7 @@ impl Exporter {
         println!("[{}] extract_data_from_spans", line!());
 
         let (mut child_nodes, errors) = spans_by_parent_id
-            .remove(&span.parent)
+            .remove(&Some(span.id.clone()))
             .unwrap_or_default()
             .into_iter()
             .map(|span| self.extract_data_from_spans(span, spans_by_parent_id))
@@ -313,7 +321,11 @@ impl Exporter {
             return Err(Error::MultipleErrors(errors));
         }
 
-        println!("[{}] extract_data_from_spans", line!());
+        println!(
+            "[{}] extract_data_from_spans, child_nodes={}",
+            line!(),
+            child_nodes.len()
+        );
 
         Ok(match span.kind {
             SpanKind::Parallel => vec![TreeData::QueryPlanNode(QueryPlanNode {
@@ -462,25 +474,36 @@ impl Exporter {
         if let SpanKind::Request { .. } = span.kind {
             match self.extract_trace(span, spans_by_parent_id) {
                 Ok(mut trace) => {
+                    println!("[{}] generate_report", line!());
+
                     let mut operation_signature = Default::default();
                     std::mem::swap(&mut trace.signature, &mut operation_signature);
                     if !operation_signature.is_empty() {
+                        println!("[{}] generate_report", line!());
+
                         if let Err(e) = self.traces_sender.try_send((operation_signature, *trace)) {
+                            println!("[{}] generate_report: {e:?}", line!());
+
                             //error log
                         }
                     }
                 }
                 Err(Error::MultipleErrors(errors)) => {
+                    println!("[{}] generate_report", line!());
+
                     tracing::error!(
                         "failed to construct trace: {}, skipping",
                         Error::MultipleErrors(errors)
                     );
                 }
                 Err(error) => {
+                    println!("[{}] generate_report", line!());
+
                     tracing::error!("failed to construct trace: {}, skipping", error);
                 }
             }
         }
+        println!("[{}] generate_report", line!());
     }
 }
 
