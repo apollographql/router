@@ -8,6 +8,7 @@ use tower::BoxError;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config;
+use crate::plugins::telemetry::reload::reload_apollo;
 use crate::plugins::telemetry::tracing::apollo_telemetry;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
@@ -36,13 +37,18 @@ impl TracingConfigurator for Config {
                     .field_execution_sampler(field_level_instrumentation_sampler.clone())
                     .batch_config(batch_processor.clone())
                     .build()?;
-                builder.with_span_processor(
+                /*builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
                         .with_batch_config(batch_processor.clone().into())
                         .build(),
-                )
+                )*/
+                reload_apollo(Some(exporter));
+                builder
             }
-            _ => builder,
+            _ => {
+                reload_apollo(None);
+                builder
+            }
         })
     }
 }

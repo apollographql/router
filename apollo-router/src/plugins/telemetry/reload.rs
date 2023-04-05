@@ -144,3 +144,11 @@ pub(super) fn reload_fmt(
         handle.reload(layer).expect("fmt layer reload must succeed");
     }
 }
+
+pub(crate) fn reload_apollo(layer: Option<Exporter>) {
+    if let Some(handle) = APOLLO_LAYER_HANDLE.get() {
+        handle
+            .reload(layer)
+            .expect("metrics layer reload must succeed");
+    }
+}

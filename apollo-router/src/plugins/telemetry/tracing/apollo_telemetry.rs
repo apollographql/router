@@ -8,16 +8,11 @@ use std::time::SystemTimeError;
 use async_trait::async_trait;
 use derivative::Derivative;
 use futures::future::BoxFuture;
-use futures::stream::Stream;
-use futures::stream::StreamExt;
-use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
-use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
@@ -182,6 +177,7 @@ impl Exporter {
                     traces: vec![trace],
                 });
 
+                println!("will submit report: {:?}", report);
                 report_exporter
                     .submit_report(report)
                     .map_err(|e| TraceError::ExportFailed(Box::new(e)))
@@ -214,6 +210,7 @@ impl Exporter {
         span: LocalSpan,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
+        println!("[{}] extract_root_trace", line!());
         let http = if let SpanKind::Request { http } = span.kind {
             http
         } else {
@@ -231,6 +228,8 @@ impl Exporter {
         };
 
         for node in child_nodes {
+            println!("[{}] extract_root_trace", line!());
+
             match node {
                 TreeData::QueryPlanNode(query_plan) => {
                     root_trace.query_plan = Some(Box::new(query_plan))
@@ -273,8 +272,10 @@ impl Exporter {
     fn extract_trace(
         &self,
         span: LocalSpan,
-        mut spans_by_parent_id: HashMap<Id, Vec<LocalSpan>>,
+        mut spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
+        println!("[{}] extract_trace", line!());
+
         self.extract_data_from_spans(span, &mut spans_by_parent_id)?
             .pop()
             .and_then(|node| {
@@ -290,14 +291,18 @@ impl Exporter {
     fn extract_data_from_spans(
         &self,
         span: LocalSpan,
-        spans_by_parent_id: &mut HashMap<Id, Vec<LocalSpan>>,
+        spans_by_parent_id: &mut HashMap<Option<Id>, Vec<LocalSpan>>,
     ) -> Result<Vec<TreeData>, Error> {
+        println!("[{}] extract_data_from_spans", line!());
+
         let (mut child_nodes, errors) = spans_by_parent_id
             .remove(&span.parent)
             .unwrap_or_default()
             .into_iter()
             .map(|span| self.extract_data_from_spans(span, spans_by_parent_id))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
+                println!("[{}] extract_data_from_spans", line!());
+
                 match next {
                     Ok(mut children) => oks.append(&mut children),
                     Err(err) => errors.push(err),
@@ -307,6 +312,8 @@ impl Exporter {
         if !errors.is_empty() {
             return Err(Error::MultipleErrors(errors));
         }
+
+        println!("[{}] extract_data_from_spans", line!());
 
         Ok(match span.kind {
             SpanKind::Parallel => vec![TreeData::QueryPlanNode(QueryPlanNode {
@@ -442,7 +449,13 @@ impl Exporter {
         })
     }
 
-    fn generate_report(&self, span: LocalSpan, spans_by_parent_id: HashMap<Id, Vec<LocalSpan>>) {
+    fn generate_report(
+        &self,
+        span: LocalSpan,
+        spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
+    ) {
+        println!("[{}] generate_report", line!());
+
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
@@ -469,27 +482,11 @@ impl Exporter {
             }
         }
     }
-
-    /*async fn send_traces(&mut self) -> Result<(), TraceError> {
-        let traces = {
-            let mut v = Vec::new();
-            std::mem::swap(&mut v, &mut *self.traces.lock());
-            v
-        };
-        let mut report = telemetry::apollo::Report::default();
-        report += SingleReport::Traces(TracesReport { traces });
-        let exporter = self.report_exporter.clone();
-
-        exporter
-            .submit_report(report)
-            .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-            .await
-    }*/
 }
 
 struct LocalSpan {
     id: Id,
-    parent: Id,
+    parent: Option<Id>,
     kind: SpanKind,
     start_time: SystemTime,
     end_time: Option<SystemTime>,
@@ -538,15 +535,18 @@ enum SpanKind {
 }
 
 struct LocalTrace {
-    spans_by_parent_id: HashMap<Id, Vec<LocalSpan>>,
-    root: Option<LocalSpan>,
+    spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
 }
 
 impl LocalTrace {
     fn get_span_mut(&mut self, parent_id: &Id, id: &Id) -> Option<&mut LocalSpan> {
         self.spans_by_parent_id
-            .get_mut(parent_id)
+            .get_mut(&Some(parent_id.clone()))
             .and_then(|v| v.iter_mut().find(|span| &span.id == id))
+    }
+
+    fn remove(&mut self, parent_id: &Id, id: &Id) -> Option<LocalSpan> {
+        todo!()
     }
 }
 
@@ -563,6 +563,14 @@ where
         let parent_span = ctx.current_span();
 
         let span = ctx.span(id).expect("Span not found, this is a bug");
+        println!(
+            "[{}] on_new_span({:?}, {:?}): {}",
+            line!(),
+            parent_span.id(),
+            id,
+            span.name()
+        );
+
         let mut extensions = span.extensions_mut();
         let local_trace = parent_span
             .id()
@@ -574,185 +582,195 @@ where
             .unwrap_or_else(|| {
                 Arc::new(RwLock::new(LocalTrace {
                     spans_by_parent_id: HashMap::new(),
-                    root: None,
                 }))
             });
 
-        if let Some(parent_id) = parent_span.id() {
-            let kind = match span.name() {
-                REQUEST_SPAN_NAME => {
-                    //FIXME: why do we extract the HTTP data both at the request and router level?
-                    //FIXME: we should extract the response headers in on_record
-                    let mut method = None;
-                    let mut request = None;
-                    let mut response = None;
+        /*println!(
+            "[{}] on_new_span({:?}, {:?}): {}",
+            line!(),
+            parent_span.id(),
+            id,
+            span.name()
+        );*/
+        let kind = match span.name() {
+            REQUEST_SPAN_NAME => {
+                //FIXME: why do we extract the HTTP data both at the request and router level?
+                //FIXME: we should extract the response headers in on_record
+                let mut method = None;
+                let mut request = None;
+                let mut response = None;
 
-                    attrs
-                        .values()
-                        .record(&mut StrVisitor(|name: &str, value: &str| match name {
-                            "http.method" => {
-                                method = Some(match value {
-                                    "OPTIONS" => proto::reports::trace::http::Method::Options,
-                                    "GET" => proto::reports::trace::http::Method::Get,
-                                    "HEAD" => proto::reports::trace::http::Method::Head,
-                                    "POST" => proto::reports::trace::http::Method::Post,
-                                    "PUT" => proto::reports::trace::http::Method::Put,
-                                    "DELETE" => proto::reports::trace::http::Method::Delete,
-                                    "TRACE" => proto::reports::trace::http::Method::Trace,
-                                    "CONNECT" => proto::reports::trace::http::Method::Connect,
-                                    "PATCH" => proto::reports::trace::http::Method::Patch,
-                                    _ => proto::reports::trace::http::Method::Unknown,
-                                })
-                            }
-                            "apollo_private.http.request_headers" => {
-                                request =
-                                    serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                            }
-                            "apollo_private.http.response_headers" => {
-                                response =
-                                    serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                            }
-                            _ => {}
-                        }));
-                    let request_headers: HashMap<_, _> = request
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let response_headers: HashMap<_, _> = response
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| match name {
+                        "http.method" => {
+                            method = Some(match value {
+                                "OPTIONS" => proto::reports::trace::http::Method::Options,
+                                "GET" => proto::reports::trace::http::Method::Get,
+                                "HEAD" => proto::reports::trace::http::Method::Head,
+                                "POST" => proto::reports::trace::http::Method::Post,
+                                "PUT" => proto::reports::trace::http::Method::Put,
+                                "DELETE" => proto::reports::trace::http::Method::Delete,
+                                "TRACE" => proto::reports::trace::http::Method::Trace,
+                                "CONNECT" => proto::reports::trace::http::Method::Connect,
+                                "PATCH" => proto::reports::trace::http::Method::Patch,
+                                _ => proto::reports::trace::http::Method::Unknown,
+                            })
+                        }
+                        "apollo_private.http.request_headers" => {
+                            request =
+                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                        }
+                        "apollo_private.http.response_headers" => {
+                            response =
+                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                        }
+                        _ => {}
+                    }));
+                let request_headers: HashMap<_, _> = request
+                    .map(|h| {
+                        h.into_iter()
+                            .map(|(header_name, value)| {
+                                (header_name.to_lowercase(), Values { value })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let response_headers: HashMap<_, _> = response
+                    .map(|h| {
+                        h.into_iter()
+                            .map(|(header_name, value)| {
+                                (header_name.to_lowercase(), Values { value })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-                    SpanKind::Request {
-                        http: Http {
-                            method: method
-                                .unwrap_or(proto::reports::trace::http::Method::Unknown)
-                                .into(),
-                            request_headers,
-                            response_headers,
-                            // FIXME
-                            status_code: 0,
-                        },
-                    }
+                SpanKind::Request {
+                    http: Http {
+                        method: method
+                            .unwrap_or(proto::reports::trace::http::Method::Unknown)
+                            .into(),
+                        request_headers,
+                        response_headers,
+                        // FIXME
+                        status_code: 0,
+                    },
                 }
-                ROUTER_SPAN_NAME => {
-                    let mut method = None;
-                    let mut request = None;
-                    let mut response = None;
-                    let mut client_name = None;
-                    let mut client_version = None;
-                    attrs
-                        .values()
-                        .record(&mut StrVisitor(|name: &str, value: &str| match name {
-                            "http.method" => {
-                                method = Some(match value {
-                                    "OPTIONS" => proto::reports::trace::http::Method::Options,
-                                    "GET" => proto::reports::trace::http::Method::Get,
-                                    "HEAD" => proto::reports::trace::http::Method::Head,
-                                    "POST" => proto::reports::trace::http::Method::Post,
-                                    "PUT" => proto::reports::trace::http::Method::Put,
-                                    "DELETE" => proto::reports::trace::http::Method::Delete,
-                                    "TRACE" => proto::reports::trace::http::Method::Trace,
-                                    "CONNECT" => proto::reports::trace::http::Method::Connect,
-                                    "PATCH" => proto::reports::trace::http::Method::Patch,
-                                    _ => proto::reports::trace::http::Method::Unknown,
-                                })
-                            }
-                            "apollo_private.http.request_headers" => {
-                                request =
-                                    serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                            }
-                            "apollo_private.http.response_headers" => {
-                                response =
-                                    serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                            }
-                            "client.name" => client_name = Some(value.to_string()),
-                            "client.version" => client_version = Some(value.to_string()),
-                            _ => {}
-                        }));
-                    let request_headers: HashMap<_, _> = request
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-                    let response_headers: HashMap<_, _> = response
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
+            }
+            ROUTER_SPAN_NAME => {
+                let mut method = None;
+                let mut request = None;
+                let mut response = None;
+                let mut client_name = None;
+                let mut client_version = None;
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| match name {
+                        "http.method" => {
+                            method = Some(match value {
+                                "OPTIONS" => proto::reports::trace::http::Method::Options,
+                                "GET" => proto::reports::trace::http::Method::Get,
+                                "HEAD" => proto::reports::trace::http::Method::Head,
+                                "POST" => proto::reports::trace::http::Method::Post,
+                                "PUT" => proto::reports::trace::http::Method::Put,
+                                "DELETE" => proto::reports::trace::http::Method::Delete,
+                                "TRACE" => proto::reports::trace::http::Method::Trace,
+                                "CONNECT" => proto::reports::trace::http::Method::Connect,
+                                "PATCH" => proto::reports::trace::http::Method::Patch,
+                                _ => proto::reports::trace::http::Method::Unknown,
+                            })
+                        }
+                        "apollo_private.http.request_headers" => {
+                            request =
+                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                        }
+                        "apollo_private.http.response_headers" => {
+                            response =
+                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                        }
+                        "client.name" => client_name = Some(value.to_string()),
+                        "client.version" => client_version = Some(value.to_string()),
+                        _ => {}
+                    }));
+                let request_headers: HashMap<_, _> = request
+                    .map(|h| {
+                        h.into_iter()
+                            .map(|(header_name, value)| {
+                                (header_name.to_lowercase(), Values { value })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let response_headers: HashMap<_, _> = response
+                    .map(|h| {
+                        h.into_iter()
+                            .map(|(header_name, value)| {
+                                (header_name.to_lowercase(), Values { value })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
 
-                    SpanKind::Router {
-                        http: Box::new(Http {
-                            method: method
-                                .unwrap_or(proto::reports::trace::http::Method::Unknown)
-                                .into(),
-                            request_headers,
-                            response_headers,
-                            // FIXME
-                            status_code: 0,
-                        }),
-                        client_name,
-                        client_version,
-                        duration_ns: None,
-                    }
+                /*println!(
+                    "[{}] on_new_span({:?}, {:?}): {}",
+                    line!(),
+                    parent_span.id(),
+                    id,
+                    span.name()
+                );*/
+                SpanKind::Router {
+                    http: Box::new(Http {
+                        method: method
+                            .unwrap_or(proto::reports::trace::http::Method::Unknown)
+                            .into(),
+                        request_headers,
+                        response_headers,
+                        // FIXME
+                        status_code: 0,
+                    }),
+                    client_name,
+                    client_version,
+                    duration_ns: None,
                 }
-                SUPERGRAPH_SPAN_NAME => SpanKind::Supergraph {
-                    operation_name: None,
-                    operation_signature: None,
-                    variables_json: None,
-                },
-                SUBGRAPH_SPAN_NAME => SpanKind::Subgraph { trace: None },
-                CONDITION_SPAN_NAME => {
-                    let mut condition = None;
+            }
+            SUPERGRAPH_SPAN_NAME => SpanKind::Supergraph {
+                operation_name: None,
+                operation_signature: None,
+                variables_json: None,
+            },
+            SUBGRAPH_SPAN_NAME => SpanKind::Subgraph { trace: None },
+            CONDITION_SPAN_NAME => {
+                let mut condition = None;
 
-                    attrs
-                        .values()
-                        .record(&mut StrVisitor(|name: &str, value: &str| {
-                            //CONDITION
-                            if name == "graphql.condition" {
-                                condition = Some(value.to_string())
-                            }
-                        }));
-                    SpanKind::Condition { condition }
-                }
-                CONDITION_IF_SPAN_NAME => SpanKind::ConditionIf,
-                CONDITION_ELSE_SPAN_NAME => SpanKind::ConditionElse,
-                DEFER_SPAN_NAME => SpanKind::Defer,
-                DEFER_PRIMARY_SPAN_NAME => SpanKind::DeferPrimary,
-                DEFER_DEFERRED_SPAN_NAME => {
-                    let mut path = None;
-                    let mut depends = None;
-                    let mut label = None;
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| {
+                        //CONDITION
+                        if name == "graphql.condition" {
+                            condition = Some(value.to_string())
+                        }
+                    }));
+                SpanKind::Condition { condition }
+            }
+            CONDITION_IF_SPAN_NAME => SpanKind::ConditionIf,
+            CONDITION_ELSE_SPAN_NAME => SpanKind::ConditionElse,
+            DEFER_SPAN_NAME => SpanKind::Defer,
+            DEFER_PRIMARY_SPAN_NAME => SpanKind::DeferPrimary,
+            DEFER_DEFERRED_SPAN_NAME => {
+                let mut path = None;
+                let mut depends = None;
+                let mut label = None;
 
-                    attrs
-                        .values()
-                        .record(&mut StrVisitor(|name: &str, value: &str| {
-                            if name == "graphql.path" {
-                                path = Some(path_from_string(value.to_string()));
-                            }
-                            if name == "graphql.depends" {
-                                depends = Some(
-                                    serde_json::from_str::<Vec<crate::query_planner::Depends>>(
-                                        value,
-                                    )
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| {
+                        if name == "graphql.path" {
+                            path = Some(path_from_string(value.to_string()));
+                        }
+                        if name == "graphql.depends" {
+                            depends = Some(
+                                serde_json::from_str::<Vec<crate::query_planner::Depends>>(value)
                                     .ok()
                                     .unwrap_or_default()
                                     .iter()
@@ -761,74 +779,114 @@ where
                                         defer_label: d.defer_label.clone().unwrap_or_default(),
                                     })
                                     .collect(),
-                                );
-                            }
-                            if name == "graphql.label" {
-                                label = Some(value.to_string());
-                            }
-                        }));
-                    SpanKind::DeferDeferred {
-                        path: path.unwrap_or_default(),
-                        depends: depends.unwrap_or_default(),
-                        label: label.unwrap_or_default(),
-                    }
+                            );
+                        }
+                        if name == "graphql.label" {
+                            label = Some(value.to_string());
+                        }
+                    }));
+                SpanKind::DeferDeferred {
+                    path: path.unwrap_or_default(),
+                    depends: depends.unwrap_or_default(),
+                    label: label.unwrap_or_default(),
                 }
-                FETCH_SPAN_NAME => {
-                    let mut service_name = None;
-
-                    attrs
-                        .values()
-                        .record(&mut StrVisitor(|name: &str, value: &str| {
-                            if name == "apollo.subgraph.name" {
-                                service_name = Some(value.to_string())
-                            }
-                        }));
-
-                    SpanKind::Fetch {
-                        service_name: service_name.unwrap_or_else(|| "unknown service".to_string()),
-                        sent_time_offset: None,
-                    }
-                }
-                FLATTEN_SPAN_NAME => {
-                    let mut path = None;
-
-                    attrs
-                        .values()
-                        .record(&mut StrVisitor(|name: &str, value: &str| {
-                            if name == "graphql.path" {
-                                path = Some(path_from_string(value.to_string()));
-                            }
-                        }));
-
-                    SpanKind::Flatten {
-                        path: path.unwrap_or_default(),
-                    }
-                }
-                PARALLEL_SPAN_NAME => SpanKind::Parallel,
-                SEQUENCE_SPAN_NAME => SpanKind::Sequence,
-                _ => SpanKind::Other,
-            };
-
-            let local_span = LocalSpan {
-                id: id.clone(),
-                parent: parent_id.clone(),
-                kind,
-                start_time: SystemTime::now(),
-                end_time: None,
-            };
-
-            let span = ctx.span(&id).expect("Span not found, this is a bug");
-            let extensions = span.extensions();
-            if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
-                local_trace
-                    .write()
-                    .spans_by_parent_id
-                    .entry(parent_id.clone())
-                    .or_default()
-                    .push(local_span);
             }
+            FETCH_SPAN_NAME => {
+                let mut service_name = None;
+
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| {
+                        if name == "apollo.subgraph.name" {
+                            service_name = Some(value.to_string())
+                        }
+                    }));
+
+                SpanKind::Fetch {
+                    service_name: service_name.unwrap_or_else(|| "unknown service".to_string()),
+                    sent_time_offset: None,
+                }
+            }
+            FLATTEN_SPAN_NAME => {
+                let mut path = None;
+
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| {
+                        if name == "graphql.path" {
+                            path = Some(path_from_string(value.to_string()));
+                        }
+                    }));
+
+                SpanKind::Flatten {
+                    path: path.unwrap_or_default(),
+                }
+            }
+            PARALLEL_SPAN_NAME => SpanKind::Parallel,
+            SEQUENCE_SPAN_NAME => SpanKind::Sequence,
+            _ => SpanKind::Other,
+        };
+
+        let local_span = LocalSpan {
+            id: id.clone(),
+            parent: parent_span.id().cloned(),
+            kind,
+            start_time: SystemTime::now(),
+            end_time: None,
+        };
+
+        if let Some(parent_id) = parent_span.id() {
+            /*println!(
+                "[{}] on_new_span({:?}, {:?}): {}",
+                line!(),
+                parent_span.id(),
+                id,
+                span.name()
+            );*/
+            //let span = ctx.span(&id).expect("Span not found, this is a bug");
+            //let extensions = span.extensions();
+            //if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
+            /*println!(
+                "[{}] on_new_span({:?}, {:?}): {}",
+                line!(),
+                parent_span.id(),
+                id,
+                span.name()
+            );*/
+
+            local_trace
+                .write()
+                .spans_by_parent_id
+                .entry(Some(parent_id.clone()))
+                .or_default()
+                .push(local_span);
+            //}
+
+            /*println!(
+                "[{}] on_new_span({:?}, {:?}): {}",
+                line!(),
+                parent_span.id(),
+                id,
+                span.name()
+            );*/
+        } else {
+            println!("inserting span in None");
+            local_trace
+                .write()
+                .spans_by_parent_id
+                .entry(None)
+                .or_default()
+                .push(local_span);
         }
         extensions.insert(local_trace);
+
+        /*println!(
+            "[{}] on_new_span({:?}, {:?}): {} (end)",
+            line!(),
+            parent_span.id(),
+            id,
+            span.name()
+        );*/
     }
 
     fn on_record(
@@ -837,11 +895,22 @@ where
         values: &tracing_core::span::Record<'_>,
         ctx: Context<'_, S>,
     ) {
-        if let Some(parent_span) = ctx.span_scope(id).and_then(|mut scope| scope.next()) {
-            let span = ctx.span(id).expect("Span not found, this is a bug");
+        let span = ctx.span(id).expect("Span not found, this is a bug");
+        let parent_span = span.parent();
+        //let parent_id = parent_span.as_ref().map(|s| s.id());
+
+        if let Some(parent_span) = parent_span {
             let extensions = span.extensions();
             let local_trace = extensions.get::<Arc<RwLock<LocalTrace>>>().unwrap();
             let parent_id = parent_span.id();
+
+            println!(
+                "[{}] on_record({:?}, {:?}): {}",
+                line!(),
+                parent_id,
+                id,
+                span.name()
+            );
 
             match span.name() {
                 ROUTER_SPAN_NAME => {
@@ -939,17 +1008,54 @@ where
     }
 
     fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        let parent_span = ctx.current_span();
-        match parent_span.id() {
+        let span = ctx.span(&id).expect("Span not found, this is a bug");
+        let parent_id = span.parent().map(|s| s.id());
+
+        println!(
+            "[{}] on_close({:?}, {:?}): {}",
+            line!(),
+            parent_id,
+            id,
+            span.name()
+        );
+
+        match parent_id {
             None => {
+                println!(
+                    "[{}] on_close({:?}, {:?}): {}",
+                    line!(),
+                    None::<Id>,
+                    id,
+                    span.name()
+                );
                 // extract root here
-                let span = ctx.span(&id).expect("Span not found, this is a bug");
-                let mut extensions = span.extensions();
+                let extensions = span.extensions();
                 if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
-                    let mut local = local_trace.write();
+                    println!(
+                        "[{}] on_close({:?}, {:?}): {}",
+                        line!(),
+                        None::<Id>,
+                        id,
+                        span.name()
+                    );
                     let mut spans_by_parent_id = HashMap::new();
-                    std::mem::swap(&mut spans_by_parent_id, &mut local.spans_by_parent_id);
-                    if let Some(mut local_span) = local.root.take() {
+                    {
+                        let mut local = local_trace.write();
+                        std::mem::swap(&mut spans_by_parent_id, &mut local.spans_by_parent_id);
+                    }
+                    if let Some(mut local_span) =
+                        spans_by_parent_id.remove(&None).and_then(|mut v| {
+                            println!("spans for None parent:: {}", v.len());
+                            v.pop()
+                        })
+                    {
+                        println!(
+                            "[{}] on_close({:?}, {:?}): {}",
+                            line!(),
+                            None::<Id>,
+                            id,
+                            span.name()
+                        );
                         local_span.end_time = Some(SystemTime::now());
                         //FIXME: remove from list instead of cloning
                         self.generate_report(local_span, spans_by_parent_id);
@@ -957,23 +1063,12 @@ where
                 }
             }
             Some(parent_id) => {
-                let span = ctx.span(&id).expect("the current span should exist");
-
-                let mut extensions = span.extensions();
+                let extensions = span.extensions();
                 if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
                     let mut local = local_trace.write();
 
                     if let Some(mut local_span) = local.get_span_mut(&parent_id, &id) {
                         local_span.end_time = Some(SystemTime::now());
-
-                        /*self.new_spans_by_parent_id
-                            .get_or_insert(parent_id.clone(), Vec::new);
-                        //FIXME: remove from list instead of cloning
-
-                        self.new_spans_by_parent_id
-                            .get_mut(parent_id)
-                            .expect("capacity of cache was zero")
-                            .push(local_span);*/
                     }
                 }
             }
