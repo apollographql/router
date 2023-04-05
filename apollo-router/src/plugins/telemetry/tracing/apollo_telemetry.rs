@@ -470,7 +470,7 @@ impl Exporter {
         }
     }
 
-    async fn send_traces(&mut self) -> Result<(), TraceError> {
+    /*async fn send_traces(&mut self) -> Result<(), TraceError> {
         let traces = {
             let mut v = Vec::new();
             std::mem::swap(&mut v, &mut *self.traces.lock());
@@ -484,7 +484,7 @@ impl Exporter {
             .submit_report(report)
             .map_err(|e| TraceError::ExportFailed(Box::new(e)))
             .await
-    }
+    }*/
 }
 
 struct LocalSpan {
