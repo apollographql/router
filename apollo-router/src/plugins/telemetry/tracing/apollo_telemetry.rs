@@ -2,11 +2,14 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
 use derivative::Derivative;
 use futures::future::BoxFuture;
+use futures::stream::Stream;
+use futures::stream::StreamExt;
 use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
@@ -19,10 +22,13 @@ use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
 use opentelemetry::Value;
 use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
+use parking_lot::Mutex;
 use parking_lot::RwLock;
 use prost::Message;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
+use tokio::sync::mpsc::channel;
+use tokio::sync::mpsc::Sender;
 use tracing::Id;
 use tracing::Subscriber;
 use tracing_subscriber::field::Visit;
@@ -116,12 +122,13 @@ pub(crate) enum Error {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
-    spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
-    new_spans_by_parent_id: LruCache<Id, Vec<LocalSpan>>,
-
-    #[derivative(Debug = "ignore")]
-    report_exporter: Arc<ApolloExporter>,
+    //spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
+    //new_spans_by_parent_id: LruCache<Id, Vec<LocalSpan>>,
+    //#[derivative(Debug = "ignore")]
+    //report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
+    traces: Arc<Mutex<Vec<(String, proto::reports::Trace)>>>,
+    traces_sender: Sender<(String, proto::reports::Trace)>,
 }
 
 enum TreeData {
@@ -158,33 +165,64 @@ impl Exporter {
         batch_config: BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
+
+        let (traces_sender, mut traces_receiver) = channel::<(String, proto::reports::Trace)>(1000);
+        let report_exporter = ApolloExporter::new(
+            &endpoint,
+            &batch_config,
+            &apollo_key,
+            &apollo_graph_ref,
+            &schema_id,
+        )?;
+        tokio::task::spawn(async move {
+            //FIXME: handle batching
+            while let Some(trace) = traces_receiver.recv().await {
+                let mut report = telemetry::apollo::Report::default();
+                report += SingleReport::Traces(TracesReport {
+                    traces: vec![trace],
+                });
+
+                report_exporter
+                    .submit_report(report)
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                    .await;
+            }
+        });
+
         Ok(Self {
-            spans_by_parent_id: LruCache::new(buffer_size),
-            new_spans_by_parent_id: LruCache::new(buffer_size),
-            report_exporter: Arc::new(ApolloExporter::new(
+            //spans_by_parent_id: LruCache::new(buffer_size),
+            //new_spans_by_parent_id: LruCache::new(buffer_size),
+            /*report_exporter: Arc::new(ApolloExporter::new(
                 &endpoint,
                 &batch_config,
                 &apollo_key,
                 &apollo_graph_ref,
                 &schema_id,
-            )?),
+            )?),*/
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
                 SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
+            traces: Arc::new(Mutex::new(Vec::new())),
+            traces_sender,
         })
     }
 
     fn extract_root_trace(
-        &mut self,
-        span: &SpanData,
+        &self,
+        span: LocalSpan,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        let http = extract_http_data(span);
+        let http = if let SpanKind::Request { http } = span.kind {
+            http
+        } else {
+            unreachable!("we already tested that case in the caller");
+        };
+
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
-            end_time: Some(span.end_time.into()),
+            end_time: Some(span.end_time.unwrap_or_else(|| SystemTime::now()).into()),
             duration_ns: 0,
             root: None,
             details: None,
@@ -232,8 +270,12 @@ impl Exporter {
         Ok(Box::new(root_trace))
     }
 
-    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::reports::Trace>, Error> {
-        self.extract_data_from_spans(&span)?
+    fn extract_trace(
+        &self,
+        span: LocalSpan,
+        mut spans_by_parent_id: HashMap<Id, Vec<LocalSpan>>,
+    ) -> Result<Box<proto::reports::Trace>, Error> {
+        self.extract_data_from_spans(span, &mut spans_by_parent_id)?
             .pop()
             .and_then(|node| {
                 if let TreeData::Request(trace) = node {
@@ -245,14 +287,16 @@ impl Exporter {
             .expect("root trace must exist because it is constructed on the request span, qed")
     }
 
-    fn extract_data_from_spans(&mut self, span: &SpanData) -> Result<Vec<TreeData>, Error> {
-        let (mut child_nodes, errors) = self
-            .spans_by_parent_id
-            .pop_entry(&span.span_context.span_id())
-            .map(|(_, spans)| spans)
+    fn extract_data_from_spans(
+        &self,
+        span: LocalSpan,
+        spans_by_parent_id: &mut HashMap<Id, Vec<LocalSpan>>,
+    ) -> Result<Vec<TreeData>, Error> {
+        let (mut child_nodes, errors) = spans_by_parent_id
+            .remove(&span.parent)
             .unwrap_or_default()
             .into_iter()
-            .map(|span| self.extract_data_from_spans(&span))
+            .map(|span| self.extract_data_from_spans(span, spans_by_parent_id))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
                 match next {
                     Ok(mut children) => oks.append(&mut children),
@@ -264,117 +308,92 @@ impl Exporter {
             return Err(Error::MultipleErrors(errors));
         }
 
-        Ok(match span.name.as_ref() {
-            PARALLEL_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
+        Ok(match span.kind {
+            SpanKind::Parallel => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(proto::reports::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
                 )),
             })],
-            SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
+            SpanKind::Sequence => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(proto::reports::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
                 )),
             })],
-            FETCH_SPAN_NAME => {
+            SpanKind::Fetch {
+                service_name,
+                sent_time_offset,
+            } => {
                 let (trace_parsing_failed, trace) = match child_nodes.pop() {
                     Some(TreeData::Trace(Some(Ok(trace)))) => (false, Some(trace)),
                     Some(TreeData::Trace(Some(Err(_err)))) => (true, None),
                     _ => (false, None),
                 };
-                let service_name = (span
-                    .attributes
-                    .get(&SUBGRAPH_NAME)
-                    .cloned()
-                    .unwrap_or_else(|| Value::String("unknown service".into()))
-                    .as_str())
-                .to_string();
+
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
-                            service_name,
+                            service_name: service_name.clone(),
                             trace_parsing_failed,
                             trace,
-                            sent_time_offset: span
-                                .attributes
-                                .get(&APOLLO_PRIVATE_SENT_TIME_OFFSET)
-                                .and_then(extract_i64)
-                                .map(|f| f as u64)
-                                .unwrap_or_default(),
+                            sent_time_offset: sent_time_offset.unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
-                            received_time: Some(span.end_time.into()),
+                            received_time: Some(
+                                span.end_time.unwrap_or_else(|| SystemTime::now()).into(),
+                            ),
                         }),
                     )),
                 })]
             }
-            FLATTEN_SPAN_NAME => {
+            SpanKind::Flatten { path } => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
                         Box::new(FlattenNode {
-                            response_path: span
-                                .attributes
-                                .get(&PATH)
-                                .map(extract_path)
-                                .unwrap_or_default(),
+                            response_path: path,
                             node: child_nodes.remove_first_query_plan_node().map(Box::new),
                         }),
                     )),
                 })]
             }
-            SUBGRAPH_SPAN_NAME => {
-                vec![TreeData::Trace(
-                    span.attributes
-                        .get(&APOLLO_PRIVATE_FTV1)
-                        .and_then(extract_ftv1_trace),
-                )]
+            SpanKind::Subgraph { trace } => {
+                vec![TreeData::Trace(trace)]
             }
-            SUPERGRAPH_SPAN_NAME => {
+            SpanKind::Supergraph {
+                operation_name,
+                operation_signature,
+                variables_json,
+            } => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
-                    operation_signature: span
-                        .attributes
-                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
-                        .and_then(extract_string)
-                        .unwrap_or_default(),
-                    operation_name: span
-                        .attributes
-                        .get(&OPERATION_NAME)
-                        .and_then(extract_string)
-                        .unwrap_or_default(),
-                    variables_json: span
-                        .attributes
-                        .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
-                        .and_then(extract_json)
-                        .unwrap_or_default(),
+                    operation_signature: operation_signature.unwrap_or_default(),
+                    operation_name: operation_name.unwrap_or_default(),
+                    variables_json: variables_json.unwrap_or_default(),
                 });
                 child_nodes
             }
-            REQUEST_SPAN_NAME => {
+            SpanKind::Request { .. } => {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
             }
-            ROUTER_SPAN_NAME => {
+            SpanKind::Router {
+                http,
+                client_name,
+                client_version,
+                duration_ns,
+            } => {
                 child_nodes.push(TreeData::Router {
-                    http: Box::new(extract_http_data(span)),
-                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
-                    client_version: span
-                        .attributes
-                        .get(&CLIENT_VERSION)
-                        .and_then(extract_string),
-                    duration_ns: span
-                        .attributes
-                        .get(&APOLLO_PRIVATE_DURATION_NS)
-                        .and_then(extract_i64)
-                        .map(|e| e as u64)
-                        .unwrap_or_default(),
+                    http,
+                    client_name,
+                    client_version,
+                    duration_ns: duration_ns.unwrap_or_default(),
                 });
                 child_nodes
             }
-            DEFER_SPAN_NAME => {
+            SpanKind::Defer => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(Node::Defer(Box::new(DeferNode {
                         primary: child_nodes.remove_first_defer_primary_node().map(Box::new),
@@ -382,64 +401,89 @@ impl Exporter {
                     }))),
                 })]
             }
-            DEFER_PRIMARY_SPAN_NAME => {
+            SpanKind::DeferPrimary => {
                 vec![TreeData::DeferPrimary(DeferNodePrimary {
                     node: child_nodes.remove_first_query_plan_node().map(Box::new),
                 })]
             }
-            DEFER_DEFERRED_SPAN_NAME => {
+            SpanKind::DeferDeferred {
+                path,
+                depends,
+                label,
+            } => {
                 vec![TreeData::DeferDeferred(DeferredNode {
                     node: child_nodes.remove_first_query_plan_node(),
-                    path: span
-                        .attributes
-                        .get(&PATH)
-                        .map(extract_path)
-                        .unwrap_or_default(),
-                    // In theory we don't have to do the transformation here, but it is safer to do so.
-                    depends: span
-                        .attributes
-                        .get(&DEPENDS)
-                        .and_then(extract_json::<Vec<crate::query_planner::Depends>>)
-                        .unwrap_or_default()
-                        .iter()
-                        .map(|d| DeferredNodeDepends {
-                            id: d.id.clone(),
-                            defer_label: d.defer_label.clone().unwrap_or_default(),
-                        })
-                        .collect(),
-                    label: span
-                        .attributes
-                        .get(&LABEL)
-                        .and_then(extract_string)
-                        .unwrap_or_default(),
+                    path,
+                    depends,
+                    label,
                 })]
             }
-
-            CONDITION_SPAN_NAME => {
+            SpanKind::Condition { condition } => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(Node::Condition(Box::new(ConditionNode {
-                        condition: span
-                            .attributes
-                            .get(&CONDITION)
-                            .and_then(extract_string)
-                            .unwrap_or_default(),
+                        condition: condition.unwrap_or_default(),
                         if_clause: child_nodes.remove_first_condition_if_node().map(Box::new),
                         else_clause: child_nodes.remove_first_condition_else_node().map(Box::new),
                     }))),
                 })]
             }
-            CONDITION_IF_SPAN_NAME => {
+            SpanKind::ConditionIf => {
                 vec![TreeData::ConditionIf(
                     child_nodes.remove_first_query_plan_node(),
                 )]
             }
-            CONDITION_ELSE_SPAN_NAME => {
+            SpanKind::ConditionElse => {
                 vec![TreeData::ConditionElse(
                     child_nodes.remove_first_query_plan_node(),
                 )]
             }
+
             _ => child_nodes,
         })
+    }
+
+    fn generate_report(&self, span: LocalSpan, spans_by_parent_id: HashMap<Id, Vec<LocalSpan>>) {
+        // Exporting to apollo means that we must have complete trace as the entire trace must be built.
+        // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
+        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
+        if let SpanKind::Request { .. } = span.kind {
+            match self.extract_trace(span, spans_by_parent_id) {
+                Ok(mut trace) => {
+                    let mut operation_signature = Default::default();
+                    std::mem::swap(&mut trace.signature, &mut operation_signature);
+                    if !operation_signature.is_empty() {
+                        if let Err(e) = self.traces_sender.try_send((operation_signature, *trace)) {
+                            //error log
+                        }
+                    }
+                }
+                Err(Error::MultipleErrors(errors)) => {
+                    tracing::error!(
+                        "failed to construct trace: {}, skipping",
+                        Error::MultipleErrors(errors)
+                    );
+                }
+                Err(error) => {
+                    tracing::error!("failed to construct trace: {}, skipping", error);
+                }
+            }
+        }
+    }
+
+    async fn send_traces(&mut self) -> Result<(), TraceError> {
+        let traces = {
+            let mut v = Vec::new();
+            std::mem::swap(&mut v, &mut *self.traces.lock());
+            v
+        };
+        let mut report = telemetry::apollo::Report::default();
+        report += SingleReport::Traces(TracesReport { traces });
+        let exporter = self.report_exporter.clone();
+
+        exporter
+            .submit_report(report)
+            .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+            .await
     }
 }
 
@@ -447,10 +491,15 @@ struct LocalSpan {
     id: Id,
     parent: Id,
     kind: SpanKind,
+    start_time: SystemTime,
+    end_time: Option<SystemTime>,
 }
+
 enum SpanKind {
     Other,
-    Request,
+    Request {
+        http: Http,
+    },
     Router {
         http: Box<Http>,
         client_name: Option<String>,
@@ -490,6 +539,7 @@ enum SpanKind {
 
 struct LocalTrace {
     spans_by_parent_id: HashMap<Id, Vec<LocalSpan>>,
+    root: Option<LocalSpan>,
 }
 
 impl LocalTrace {
@@ -524,11 +574,77 @@ where
             .unwrap_or_else(|| {
                 Arc::new(RwLock::new(LocalTrace {
                     spans_by_parent_id: HashMap::new(),
+                    root: None,
                 }))
             });
 
         if let Some(parent_id) = parent_span.id() {
             let kind = match span.name() {
+                REQUEST_SPAN_NAME => {
+                    //FIXME: why do we extract the HTTP data both at the request and router level?
+                    //FIXME: we should extract the response headers in on_record
+                    let mut method = None;
+                    let mut request = None;
+                    let mut response = None;
+
+                    attrs
+                        .values()
+                        .record(&mut StrVisitor(|name: &str, value: &str| match name {
+                            "http.method" => {
+                                method = Some(match value {
+                                    "OPTIONS" => proto::reports::trace::http::Method::Options,
+                                    "GET" => proto::reports::trace::http::Method::Get,
+                                    "HEAD" => proto::reports::trace::http::Method::Head,
+                                    "POST" => proto::reports::trace::http::Method::Post,
+                                    "PUT" => proto::reports::trace::http::Method::Put,
+                                    "DELETE" => proto::reports::trace::http::Method::Delete,
+                                    "TRACE" => proto::reports::trace::http::Method::Trace,
+                                    "CONNECT" => proto::reports::trace::http::Method::Connect,
+                                    "PATCH" => proto::reports::trace::http::Method::Patch,
+                                    _ => proto::reports::trace::http::Method::Unknown,
+                                })
+                            }
+                            "apollo_private.http.request_headers" => {
+                                request =
+                                    serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                            }
+                            "apollo_private.http.response_headers" => {
+                                response =
+                                    serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                            }
+                            _ => {}
+                        }));
+                    let request_headers: HashMap<_, _> = request
+                        .map(|h| {
+                            h.into_iter()
+                                .map(|(header_name, value)| {
+                                    (header_name.to_lowercase(), Values { value })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let response_headers: HashMap<_, _> = response
+                        .map(|h| {
+                            h.into_iter()
+                                .map(|(header_name, value)| {
+                                    (header_name.to_lowercase(), Values { value })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    SpanKind::Request {
+                        http: Http {
+                            method: method
+                                .unwrap_or(proto::reports::trace::http::Method::Unknown)
+                                .into(),
+                            request_headers,
+                            response_headers,
+                            // FIXME
+                            status_code: 0,
+                        },
+                    }
+                }
                 ROUTER_SPAN_NAME => {
                     let mut method = None;
                     let mut request = None;
@@ -697,10 +813,12 @@ where
                 id: id.clone(),
                 parent: parent_id.clone(),
                 kind,
+                start_time: SystemTime::now(),
+                end_time: None,
             };
 
             let span = ctx.span(&id).expect("Span not found, this is a bug");
-            let mut extensions = span.extensions();
+            let extensions = span.extensions();
             if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
                 local_trace
                     .write()
@@ -721,7 +839,7 @@ where
     ) {
         if let Some(parent_span) = ctx.span_scope(id).and_then(|mut scope| scope.next()) {
             let span = ctx.span(id).expect("Span not found, this is a bug");
-            let mut extensions = span.extensions();
+            let extensions = span.extensions();
             let local_trace = extensions.get::<Arc<RwLock<LocalTrace>>>().unwrap();
             let parent_id = parent_span.id();
 
@@ -781,10 +899,11 @@ where
 
                     values.record(&mut StrVisitor(|name: &str, value: &str| {
                         if name == "apollo_private.ftv1" {
-                            if let Some(t) = decode_ftv1_trace(value) {
-                                ftv1_trace_opt = Some(Ok(Box::new(t)));
-                            }
-                            ftv1_trace_opt = Some(Err(Error::TraceParsingFailed));
+                            ftv1_trace_opt = if let Some(t) = decode_ftv1_trace(value) {
+                                Some(Ok(Box::new(t)))
+                            } else {
+                                Some(Err(Error::TraceParsingFailed))
+                            };
                         }
                     }));
 
@@ -826,50 +945,37 @@ where
                 // extract root here
                 let span = ctx.span(&id).expect("Span not found, this is a bug");
                 let mut extensions = span.extensions();
-                if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {}
+                if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
+                    let mut local = local_trace.write();
+                    let mut spans_by_parent_id = HashMap::new();
+                    std::mem::swap(&mut spans_by_parent_id, &mut local.spans_by_parent_id);
+                    if let Some(mut local_span) = local.root.take() {
+                        local_span.end_time = Some(SystemTime::now());
+                        //FIXME: remove from list instead of cloning
+                        self.generate_report(local_span, spans_by_parent_id);
+                    }
+                }
             }
             Some(parent_id) => {
                 let span = ctx.span(&id).expect("the current span should exist");
-                //let fields = span.metadata().
 
-                let kind = match span.name() {
-                    ROUTER_SPAN_NAME => {
-                        todo!()
-                    }
-                    SUPERGRAPH_SPAN_NAME => {
-                        todo!()
-                    }
-                    SUBGRAPH_SPAN_NAME => {
-                        todo!()
-                    }
-                    CONDITION_SPAN_NAME => {}
-                    CONDITION_IF_SPAN_NAME => {}
-                    CONDITION_ELSE_SPAN_NAME => {}
-                    DEFER_SPAN_NAME => {}
-                    DEFER_PRIMARY_SPAN_NAME => {}
-                    DEFER_DEFERRED_SPAN_NAME => {}
-                    FETCH_SPAN_NAME => {
-                        /*
+                let mut extensions = span.extensions();
+                if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
+                    let mut local = local_trace.write();
 
-                                 let (trace_parsing_failed, trace) = match child_nodes.pop() {
-                            Some(TreeData::Trace(Some(Ok(trace)))) => (false, Some(trace)),
-                            Some(TreeData::Trace(Some(Err(_err)))) => (true, None),
-                            _ => (false, None),
-                        };
-                                 */
-                        todo!()
+                    if let Some(mut local_span) = local.get_span_mut(&parent_id, &id) {
+                        local_span.end_time = Some(SystemTime::now());
+
+                        /*self.new_spans_by_parent_id
+                            .get_or_insert(parent_id.clone(), Vec::new);
+                        //FIXME: remove from list instead of cloning
+
+                        self.new_spans_by_parent_id
+                            .get_mut(parent_id)
+                            .expect("capacity of cache was zero")
+                            .push(local_span);*/
                     }
-                    FLATTEN_SPAN_NAME => {
-                        todo!()
-                    }
-                    PARALLEL_SPAN_NAME => {
-                        todo!()
-                    }
-                    SEQUENCE_SPAN_NAME => {
-                        todo!()
-                    }
-                    _ => {}
-                };
+                }
             }
         }
     }
@@ -1045,7 +1151,8 @@ fn extract_http_data(span: &SpanData) -> Http {
 impl SpanExporter for Exporter {
     /// Export spans to apollo telemetry
     fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        // Exporting to apollo means that we must have complete trace as the entire trace must be built.
+        todo!()
+        /*// Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
@@ -1092,6 +1199,7 @@ impl SpanExporter for Exporter {
                 .await
         };
         fut.boxed()
+        */
     }
 }
 
