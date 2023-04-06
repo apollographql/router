@@ -41,16 +41,16 @@ fn process_supergraph_request(request) {
     }
     let expected_query = `
 
-            query TopProducts($first: Int) { 
-                topProducts(first: $first) { 
-                    upc 
-                    name 
-                    reviews { 
-                        id 
-                        product { name } 
-                        author { id name } 
-                    } 
-                } 
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    upc
+                    name
+                    reviews {
+                        id
+                        product { name }
+                        author { id name }
+                    }
+                }
             }
         `;
     if request.body.query != expected_query {

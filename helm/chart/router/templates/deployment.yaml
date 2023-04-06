@@ -4,6 +4,9 @@ metadata:
   name: {{ include "router.fullname" . }}
   labels:
     {{- include "router.labels" . | nindent 4 }}
+    {{- if .Values.extraLabels }}
+    {{- toYaml .Values.extraLabels | nindent 4 }}
+    {{- end }}
   {{/* There may not be much configuration so check that there is something */}}
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
   annotations:
@@ -31,6 +34,9 @@ spec:
       {{- end }}
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
+        {{- if .Values.extraLabels }}
+        {{- toYaml .Values.extraLabels | nindent 8 }}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
