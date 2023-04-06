@@ -341,7 +341,7 @@ impl Exporter {
                 child_nodes.push(TreeData::Supergraph {
                     operation_signature: operation_signature.unwrap_or_default(),
                     operation_name: operation_name.unwrap_or_default(),
-                    variables_json: variables_json.unwrap_or_default(),
+                    variables_json,
                 });
                 child_nodes
             }
@@ -482,7 +482,7 @@ enum SpanKind {
     Supergraph {
         operation_name: Option<String>,
         operation_signature: Option<String>,
-        variables_json: Option<HashMap<String, String>>,
+        variables_json: HashMap<String, String>,
     },
     Subgraph {
         trace: Option<Result<Box<proto::reports::Trace>, Error>>,
@@ -567,10 +567,8 @@ where
         let kind = match span.name() {
             REQUEST_SPAN_NAME => {
                 //FIXME: why do we extract the HTTP data both at the request and router level?
-                //FIXME: we should extract the response headers in on_record
                 let mut method = None;
                 let mut request = None;
-                let mut response = None;
 
                 attrs
                     .values()
@@ -593,10 +591,7 @@ where
                             request =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
-                            response =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
+
                         _ => {}
                     }));
                 let request_headers: HashMap<_, _> = request
@@ -608,15 +603,15 @@ where
                             .collect()
                     })
                     .unwrap_or_default();
-                let response_headers: HashMap<_, _> = response
-                    .map(|h| {
-                        h.into_iter()
-                            .map(|(header_name, value)| {
-                                (header_name.to_lowercase(), Values { value })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let mut status_opt = None;
+
+                attrs
+                    .values()
+                    .record(&mut I64Visitor(|name: &str, value: i64| {
+                        if name == "http.status" {
+                            status_opt = Some(value as u32);
+                        }
+                    }));
 
                 SpanKind::Request {
                     http: Http {
@@ -624,16 +619,14 @@ where
                             .unwrap_or(proto::reports::trace::http::Method::Unknown)
                             .into(),
                         request_headers,
-                        response_headers,
-                        // FIXME
-                        status_code: 0,
+                        status_code: status_opt.unwrap_or(0),
+                        response_headers: HashMap::new(),
                     },
                 }
             }
             ROUTER_SPAN_NAME => {
                 let mut method = None;
                 let mut request = None;
-                let mut response = None;
                 let mut client_name = None;
                 let mut client_version = None;
                 attrs
@@ -657,10 +650,6 @@ where
                             request =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
-                            response =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
                         CLIENT_NAME => client_name = Some(value.to_string()),
                         CLIENT_VERSION => client_version = Some(value.to_string()),
                         _ => {}
@@ -674,31 +663,14 @@ where
                             .collect()
                     })
                     .unwrap_or_default();
-                let response_headers: HashMap<_, _> = response
-                    .map(|h| {
-                        h.into_iter()
-                            .map(|(header_name, value)| {
-                                (header_name.to_lowercase(), Values { value })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
 
-                /*println!(
-                    "[{}] on_new_span({:?}, {:?}): {}",
-                    line!(),
-                    parent_span.id(),
-                    id,
-                    span.name()
-                );*/
                 SpanKind::Router {
                     http: Box::new(Http {
                         method: method
                             .unwrap_or(proto::reports::trace::http::Method::Unknown)
                             .into(),
                         request_headers,
-                        response_headers,
-                        // FIXME
+                        response_headers: HashMap::new(),
                         status_code: 0,
                     }),
                     client_name,
@@ -706,11 +678,29 @@ where
                     duration_ns: None,
                 }
             }
-            SUPERGRAPH_SPAN_NAME => SpanKind::Supergraph {
-                operation_name: None,
-                operation_signature: None,
-                variables_json: None,
-            },
+            SUPERGRAPH_SPAN_NAME => {
+                let mut vars = None;
+
+                attrs
+                    .values()
+                    .record(&mut StrVisitor(|name: &str, value: &str| {
+                        println!("on_new_span supergraph span name={name}, value={value}");
+
+                        if name == APOLLO_PRIVATE_GRAPHQL_VARIABLES {
+                            vars = Some(value.to_string())
+                        }
+                    }));
+
+                let variables_json: HashMap<String, String> = vars
+                    .and_then(|v| serde_json::from_str(&v).ok())
+                    .unwrap_or_default();
+
+                SpanKind::Supergraph {
+                    operation_name: None,
+                    operation_signature: None,
+                    variables_json,
+                }
+            }
             SUBGRAPH_SPAN_NAME => SpanKind::Subgraph { trace: None },
             CONDITION_SPAN_NAME => {
                 let mut condition = None;
@@ -865,50 +855,104 @@ where
             );
 
             match span.name() {
+                REQUEST_SPAN_NAME => {
+                    let mut response = None;
+                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
+                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
+                            response =
+                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                        }
+                        _ => {}
+                    }));
+
+                    let rh: HashMap<_, _> = response
+                        .map(|h| {
+                            h.into_iter()
+                                .map(|(header_name, value)| {
+                                    (header_name.to_lowercase(), Values { value })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
+                    let mut local = local_trace.write();
+                    if let Some(span) = local.get_span_mut(&parent_id, id) {
+                        if let SpanKind::Request { http, .. } = &mut span.kind {
+                            http.response_headers = rh;
+                        }
+                    }
+                }
                 ROUTER_SPAN_NAME => {
+                    let mut response = None;
+                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
+                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
+                            response =
+                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                        }
+                        _ => {}
+                    }));
+
+                    let rh: HashMap<_, _> = response
+                        .map(|h| {
+                            h.into_iter()
+                                .map(|(header_name, value)| {
+                                    (header_name.to_lowercase(), Values { value })
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+
                     let mut duration_ns_opt = None;
+                    let mut status_opt = None;
 
                     values.record(&mut I64Visitor(|name: &str, value: i64| {
                         if name == APOLLO_PRIVATE_DURATION_NS {
                             duration_ns_opt = Some(value as u64)
                         }
+                        if name == "http.status" {
+                            status_opt = Some(value as u32);
+                        }
                     }));
 
                     let mut local = local_trace.write();
                     if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Router { duration_ns, .. } = &mut span.kind {
+                        if let SpanKind::Router {
+                            duration_ns, http, ..
+                        } = &mut span.kind
+                        {
                             *duration_ns = duration_ns_opt;
+                            if !rh.is_empty() {
+                                http.response_headers = rh;
+                            }
+                            http.status_code = status_opt.unwrap_or(0);
                         }
                     }
                 }
                 SUPERGRAPH_SPAN_NAME => {
                     let mut op_signature = None;
                     let mut op_name = None;
-                    let mut vars = None;
 
-                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        APOLLO_PRIVATE_OPERATION_SIGNATURE => {
-                            op_signature = Some(value.to_string())
+                    values.record(&mut StrVisitor(|name: &str, value: &str| {
+                        println!("on_record supergraph span name={name}, value={value}");
+                        match name {
+                            APOLLO_PRIVATE_OPERATION_SIGNATURE => {
+                                op_signature = Some(value.to_string())
+                            }
+                            OPERATION_NAME => op_name = Some(value.to_string()),
+                            _ => {}
                         }
-                        OPERATION_NAME => op_name = Some(value.to_string()),
-                        APOLLO_PRIVATE_GRAPHQL_VARIABLES => vars = Some(value.to_string()),
-                        _ => {}
                     }));
-
-                    let vars_json: Option<HashMap<String, String>> =
-                        vars.and_then(|v| serde_json::from_str(&v).ok());
 
                     let mut local = local_trace.write();
                     if let Some(span) = local.get_span_mut(&parent_id, id) {
                         if let SpanKind::Supergraph {
                             operation_name,
                             operation_signature,
-                            variables_json,
+                            ..
                         } = &mut span.kind
                         {
                             *operation_name = op_name;
                             *operation_signature = op_signature;
-                            *variables_json = vars_json;
                         }
                     }
                 }
@@ -1031,7 +1075,10 @@ impl<F> Visit for StrVisitor<F>
 where
     F: FnMut(&str, &str),
 {
-    fn record_debug(&mut self, _field: &tracing_core::Field, _value: &dyn std::fmt::Debug) {}
+    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
+        //FIXME: there's probably a smarter way to do this that avoids formatting for every value
+        (self.0)(field.name(), &format!("{:?}", value))
+    }
 
     fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
         (self.0)(field.name(), value)
