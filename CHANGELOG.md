@@ -12,14 +12,14 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 We've added the ability for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor) to have read-only access to additional contextual information at [the `RouterService` and `SubgraphService`](https://www.apollographql.com/docs/router/customizations/coprocessor/#how-it-works) stages:
 
-The `RouterService` stage now has read-only access to the **request** from the client:
+The `RouterService` stage now has read-only access to these **client request** properties:
   - `path` (e.g., `/graphql`)
   - `method` (e.g., `POST`, `GET`)
 
-The `RouterService` stage now has read-only access to the overall **response** to the client:
+The `RouterService` stage now has read-only access to these **client response** properties:
   - `status_code` (e.g. `403`, `200`)
 
-The `SubgraphService` stage now has read-only access to the **response** of the subgraph request:
+The `SubgraphService` stage now has read-only access to these **subgraph response** properties:
   - `status_code` (e.g., `503`, `200`)
 
 By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/2863
