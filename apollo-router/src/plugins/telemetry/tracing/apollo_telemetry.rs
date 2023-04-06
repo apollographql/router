@@ -878,7 +878,9 @@ where
                     let mut local = local_trace.write();
                     if let Some(span) = local.get_span_mut(&parent_id, id) {
                         if let SpanKind::Request { http, .. } = &mut span.kind {
-                            http.response_headers = rh;
+                            if !rh.is_empty() {
+                                http.response_headers = rh;
+                            }
                         }
                     }
                 }
@@ -920,11 +922,15 @@ where
                             duration_ns, http, ..
                         } = &mut span.kind
                         {
-                            *duration_ns = duration_ns_opt;
+                            if duration_ns_opt.is_some() {
+                                *duration_ns = duration_ns_opt;
+                            }
                             if !rh.is_empty() {
                                 http.response_headers = rh;
                             }
-                            http.status_code = status_opt.unwrap_or(0);
+                            if let Some(status) = status_opt {
+                                http.status_code = status;
+                            }
                         }
                     }
                 }
@@ -951,8 +957,13 @@ where
                             ..
                         } = &mut span.kind
                         {
-                            *operation_name = op_name;
-                            *operation_signature = op_signature;
+                            if op_name.is_some() {
+                                *operation_name = op_name;
+                            }
+
+                            if op_signature.is_some() {
+                                *operation_signature = op_signature;
+                            }
                         }
                     }
                 }
@@ -972,7 +983,9 @@ where
                     let mut local = local_trace.write();
                     if let Some(span) = local.get_span_mut(&parent_id, id) {
                         if let SpanKind::Subgraph { trace } = &mut span.kind {
-                            *trace = ftv1_trace_opt;
+                            if ftv1_trace_opt.is_some() {
+                                *trace = ftv1_trace_opt;
+                            }
                         }
                     }
                 }
@@ -991,7 +1004,9 @@ where
                             sent_time_offset, ..
                         } = &mut span.kind
                         {
-                            *sent_time_offset = sent_time_offset_opt;
+                            if sent_time_offset_opt.is_some() {
+                                *sent_time_offset = sent_time_offset_opt;
+                            }
                         }
                     }
                 }
