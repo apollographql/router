@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::io::Cursor;
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
@@ -133,7 +132,6 @@ impl Exporter {
         apollo_key: String,
         apollo_graph_ref: String,
         schema_id: String,
-        buffer_size: NonZeroUsize,
         field_execution_sampler: SamplerOption,
         batch_config: BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
@@ -1308,9 +1306,7 @@ mod test {
         let trace = Trace::default();
         let encoded = base64::encode(trace.encode_to_vec());
         assert_eq!(
-            *decode_ftv1_trace(encoded.as_str())
-                .expect("there was a trace here")
-                .expect("the trace must be decoded"),
+            decode_ftv1_trace(encoded.as_str()).expect("the trace must be decoded"),
             trace
         );
     }
