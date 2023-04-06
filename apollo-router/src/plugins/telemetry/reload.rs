@@ -14,14 +14,13 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
+use super::tracing::apollo_telemetry::Exporter;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::TextFormatter;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
-
-use super::tracing::apollo_telemetry::Exporter;
 
 type LayeredTracer = Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>;
 
