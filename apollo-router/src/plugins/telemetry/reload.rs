@@ -45,6 +45,7 @@ static METRICS_LAYER_HANDLE: OnceCell<
 type MetricsReloadLayer =
     tracing_subscriber::reload::Layer<MetricsLayer, Layered<FmtReloadLayer, LayeredTracer>>;
 
+#[allow(clippy::type_complexity)]
 static APOLLO_LAYER_HANDLE: OnceCell<
     Handle<Option<Exporter>, Layered<MetricsReloadLayer, Layered<FmtReloadLayer, LayeredTracer>>>,
 > = OnceCell::new();

@@ -170,7 +170,7 @@ impl Exporter {
 
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
-            end_time: Some(span.end_time.unwrap_or_else(|| SystemTime::now()).into()),
+            end_time: Some(span.end_time.unwrap_or_else(SystemTime::now).into()),
             duration_ns: 0,
             root: None,
             details: None,
@@ -285,13 +285,13 @@ impl Exporter {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
-                            service_name: service_name.clone(),
+                            service_name,
                             trace_parsing_failed,
                             trace,
                             sent_time_offset: sent_time_offset.unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
                             received_time: Some(
-                                span.end_time.unwrap_or_else(|| SystemTime::now()).into(),
+                                span.end_time.unwrap_or_else(SystemTime::now).into(),
                             ),
                         }),
                     )),
@@ -781,12 +781,11 @@ where
             match span.name() {
                 REQUEST_SPAN_NAME => {
                     let mut response = None;
-                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
+                    values.record(&mut StrVisitor(|name: &str, value: &str| {
+                        if name == APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS {
                             response =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        _ => {}
                     }));
 
                     let rh: HashMap<_, _> = response
@@ -810,12 +809,11 @@ where
                 }
                 ROUTER_SPAN_NAME => {
                     let mut response = None;
-                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
+                    values.record(&mut StrVisitor(|name: &str, value: &str| {
+                        if name == APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS {
                             response =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        _ => {}
                     }));
 
                     let rh: HashMap<_, _> = response
