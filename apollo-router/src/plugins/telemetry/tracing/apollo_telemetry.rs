@@ -162,11 +162,6 @@ impl Exporter {
         span: LocalSpan,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        println!(
-            "[{}] extract_root_trace child_nodes= {}",
-            line!(),
-            child_nodes.len()
-        );
         let http = if let SpanKind::Request { http } = span.kind {
             http
         } else {
@@ -184,8 +179,6 @@ impl Exporter {
         };
 
         for node in child_nodes {
-            println!("[{}] extract_root_trace", line!());
-
             match node {
                 TreeData::QueryPlanNode(query_plan) => {
                     root_trace.query_plan = Some(Box::new(query_plan))
@@ -214,7 +207,6 @@ impl Exporter {
                     root_trace.field_execution_weight = self.field_execution_weight;
 
                     root_trace.signature = operation_signature;
-                    println!("setting root trace signature to {}", root_trace.signature);
                     root_trace.details = Some(Details {
                         variables_json,
                         operation_name,
@@ -224,8 +216,6 @@ impl Exporter {
             }
         }
 
-        println!("[{}] extract_root_trace", line!());
-
         Ok(Box::new(root_trace))
     }
 
@@ -234,8 +224,6 @@ impl Exporter {
         span: LocalSpan,
         mut spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        println!("[{}] extract_trace", line!());
-
         self.extract_data_from_spans(span, &mut spans_by_parent_id)?
             .pop()
             .and_then(|node| {
@@ -253,16 +241,12 @@ impl Exporter {
         span: LocalSpan,
         spans_by_parent_id: &mut HashMap<Option<Id>, Vec<LocalSpan>>,
     ) -> Result<Vec<TreeData>, Error> {
-        println!("[{}] extract_data_from_spans", line!());
-
         let (mut child_nodes, errors) = spans_by_parent_id
             .remove(&Some(span.id.clone()))
             .unwrap_or_default()
             .into_iter()
             .map(|span| self.extract_data_from_spans(span, spans_by_parent_id))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
-                println!("[{}] extract_data_from_spans", line!());
-
                 match next {
                     Ok(mut children) => oks.append(&mut children),
                     Err(err) => errors.push(err),
@@ -272,12 +256,6 @@ impl Exporter {
         if !errors.is_empty() {
             return Err(Error::MultipleErrors(errors));
         }
-
-        println!(
-            "[{}] extract_data_from_spans, child_nodes={}",
-            line!(),
-            child_nodes.len()
-        );
 
         Ok(match span.kind {
             SpanKind::Parallel => vec![TreeData::QueryPlanNode(QueryPlanNode {
@@ -418,46 +396,33 @@ impl Exporter {
         span: LocalSpan,
         spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
     ) {
-        println!("[{}] generate_report", line!());
-
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         if let SpanKind::Request { .. } = span.kind {
             match self.extract_trace(span, spans_by_parent_id) {
                 Ok(mut trace) => {
-                    println!("[{}] generate_report", line!());
-
                     let mut operation_signature = Default::default();
                     std::mem::swap(&mut trace.signature, &mut operation_signature);
                     if !operation_signature.is_empty() {
-                        println!("[{}] generate_report", line!());
-
                         let report = SingleReport::Traces(TracesReport {
                             traces: vec![(operation_signature, *trace)],
                         });
-
-                        println!("will submit report: {:?}", report);
 
                         self.traces_sender.send(report);
                     }
                 }
                 Err(Error::MultipleErrors(errors)) => {
-                    println!("[{}] generate_report", line!());
-
                     tracing::error!(
                         "failed to construct trace: {}, skipping",
                         Error::MultipleErrors(errors)
                     );
                 }
                 Err(error) => {
-                    println!("[{}] generate_report", line!());
-
                     tracing::error!("failed to construct trace: {}, skipping", error);
                 }
             }
         }
-        println!("[{}] generate_report", line!());
     }
 }
 
@@ -535,13 +500,6 @@ where
         let parent_span = ctx.current_span();
 
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        println!(
-            "[{}] on_new_span({:?}, {:?}): {}",
-            line!(),
-            parent_span.id(),
-            id,
-            span.name()
-        );
 
         let mut extensions = span.extensions_mut();
         let local_trace = parent_span
@@ -557,13 +515,6 @@ where
                 }))
             });
 
-        /*println!(
-            "[{}] on_new_span({:?}, {:?}): {}",
-            line!(),
-            parent_span.id(),
-            id,
-            span.name()
-        );*/
         let kind = match span.name() {
             REQUEST_SPAN_NAME => {
                 //FIXME: why do we extract the HTTP data both at the request and router level?
@@ -684,8 +635,6 @@ where
                 attrs
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
-                        println!("on_new_span supergraph span name={name}, value={value}");
-
                         if name == APOLLO_PRIVATE_GRAPHQL_VARIABLES {
                             vars = Some(value.to_string())
                         }
@@ -803,16 +752,7 @@ where
                 .entry(Some(parent_id.clone()))
                 .or_default()
                 .push(local_span);
-
-            /*println!(
-                "[{}] on_new_span({:?}, {:?}): {}",
-                line!(),
-                parent_span.id(),
-                id,
-                span.name()
-            );*/
         } else {
-            println!("inserting span in None");
             local_trace
                 .write()
                 .spans_by_parent_id
@@ -821,14 +761,6 @@ where
                 .push(local_span);
         }
         extensions.insert(local_trace);
-
-        /*println!(
-            "[{}] on_new_span({:?}, {:?}): {} (end)",
-            line!(),
-            parent_span.id(),
-            id,
-            span.name()
-        );*/
     }
 
     fn on_record(
@@ -845,14 +777,6 @@ where
             let extensions = span.extensions();
             let local_trace = extensions.get::<Arc<RwLock<LocalTrace>>>().unwrap();
             let parent_id = parent_span.id();
-
-            println!(
-                "[{}] on_record({:?}, {:?}): {}",
-                line!(),
-                parent_id,
-                id,
-                span.name()
-            );
 
             match span.name() {
                 REQUEST_SPAN_NAME => {
@@ -938,15 +862,12 @@ where
                     let mut op_signature = None;
                     let mut op_name = None;
 
-                    values.record(&mut StrVisitor(|name: &str, value: &str| {
-                        println!("on_record supergraph span name={name}, value={value}");
-                        match name {
-                            APOLLO_PRIVATE_OPERATION_SIGNATURE => {
-                                op_signature = Some(value.to_string())
-                            }
-                            OPERATION_NAME => op_name = Some(value.to_string()),
-                            _ => {}
+                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE => {
+                            op_signature = Some(value.to_string())
                         }
+                        OPERATION_NAME => op_name = Some(value.to_string()),
+                        _ => {}
                     }));
 
                     let mut local = local_trace.write();
@@ -1019,53 +940,20 @@ where
         let span = ctx.span(&id).expect("Span not found, this is a bug");
         let parent_id = span.parent().map(|s| s.id());
 
-        println!(
-            "[{}] on_close({:?}, {:?}): {}",
-            line!(),
-            parent_id,
-            id,
-            span.name()
-        );
-
         match parent_id {
             None => {
-                println!(
-                    "[{}] on_close({:?}, {:?}): {}",
-                    line!(),
-                    None::<Id>,
-                    id,
-                    span.name()
-                );
                 // extract root here
                 let extensions = span.extensions();
                 if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
-                    println!(
-                        "[{}] on_close({:?}, {:?}): {}",
-                        line!(),
-                        None::<Id>,
-                        id,
-                        span.name()
-                    );
                     let mut spans_by_parent_id = HashMap::new();
                     {
                         let mut local = local_trace.write();
                         std::mem::swap(&mut spans_by_parent_id, &mut local.spans_by_parent_id);
                     }
                     if let Some(mut local_span) =
-                        spans_by_parent_id.remove(&None).and_then(|mut v| {
-                            println!("spans for None parent:: {}", v.len());
-                            v.pop()
-                        })
+                        spans_by_parent_id.remove(&None).and_then(|mut v| v.pop())
                     {
-                        println!(
-                            "[{}] on_close({:?}, {:?}): {}",
-                            line!(),
-                            None::<Id>,
-                            id,
-                            span.name()
-                        );
                         local_span.end_time = Some(SystemTime::now());
-                        //FIXME: remove from list instead of cloning
                         self.generate_report(local_span, spans_by_parent_id);
                     }
                 }
