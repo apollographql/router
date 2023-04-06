@@ -5,22 +5,13 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::SystemTimeError;
 
-use async_trait::async_trait;
 use derivative::Derivative;
-use futures::future::BoxFuture;
 use futures::TryFutureExt;
 use itertools::Itertools;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::trace::TraceError;
-use opentelemetry::Key;
-use opentelemetry::Value;
-use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use prost::Message;
-use serde::de::DeserializeOwned;
 use thiserror::Error;
 use tokio::sync::mpsc::channel;
 use tokio::sync::mpsc::Sender;
@@ -71,26 +62,21 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 
-const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
-const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
-    Key::from_static_str("apollo_private.sent_time_offset");
-const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
-    Key::from_static_str("apollo_private.graphql.variables");
-const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
-    Key::from_static_str("apollo_private.http.request_headers");
-const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
-    Key::from_static_str("apollo_private.http.response_headers");
-pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
-    Key::from_static_str("apollo_private.operation_signature");
-const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
-const PATH: Key = Key::from_static_str("graphql.path");
-const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
-const CLIENT_NAME: Key = Key::from_static_str("client.name");
-const CLIENT_VERSION: Key = Key::from_static_str("client.version");
-const DEPENDS: Key = Key::from_static_str("graphql.depends");
-const LABEL: Key = Key::from_static_str("graphql.label");
-const CONDITION: Key = Key::from_static_str("graphql.condition");
-const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
+const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
+const APOLLO_PRIVATE_SENT_TIME_OFFSET: &str = "apollo_private.sent_time_offset";
+const APOLLO_PRIVATE_GRAPHQL_VARIABLES: &str = "apollo_private.graphql.variables";
+const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: &str = "apollo_private.http.request_headers";
+const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: &str = "apollo_private.http.response_headers";
+pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: &str = "apollo_private.operation_signature";
+const APOLLO_PRIVATE_FTV1: &str = "apollo_private.ftv1";
+const SUBGRAPH_NAME: &str = "apollo.subgraph.name";
+const CLIENT_NAME: &str = "client.name";
+const CLIENT_VERSION: &str = "client.version";
+const PATH: &str = "graphql.path";
+const DEPENDS: &str = "graphql.depends";
+const LABEL: &str = "graphql.label";
+const CONDITION: &str = "graphql.condition";
+const OPERATION_NAME: &str = "graphql.operation.name";
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -110,17 +96,12 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 }
 
-/// A [`SpanExporter`] that writes to [`Reporter`].
+/// A [`tracing_subscriber::Layer`] that writes to [`Reporter`].
 ///
-/// [`SpanExporter`]: super::SpanExporter
 /// [`Reporter`]: crate::plugins::telemetry::Reporter
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
-    //spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
-    //new_spans_by_parent_id: LruCache<Id, Vec<LocalSpan>>,
-    //#[derivative(Debug = "ignore")]
-    //report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
     traces: Arc<Mutex<Vec<(String, proto::reports::Trace)>>>,
     traces_sender: Sender<(String, proto::reports::Trace)>,
@@ -178,23 +159,17 @@ impl Exporter {
                 });
 
                 println!("will submit report: {:?}", report);
-                report_exporter
+                if let Err(e) = report_exporter
                     .submit_report(report)
                     .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                    .await;
+                    .await
+                {
+                    tracing::error!("could not submit report: {e}")
+                }
             }
         });
 
         Ok(Self {
-            //spans_by_parent_id: LruCache::new(buffer_size),
-            //new_spans_by_parent_id: LruCache::new(buffer_size),
-            /*report_exporter: Arc::new(ApolloExporter::new(
-                &endpoint,
-                &batch_config,
-                &apollo_key,
-                &apollo_graph_ref,
-                &schema_id,
-            )?),*/
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
@@ -509,7 +484,6 @@ impl Exporter {
 
 struct LocalSpan {
     id: Id,
-    parent: Option<Id>,
     kind: SpanKind,
     start_time: SystemTime,
     end_time: Option<SystemTime>,
@@ -566,10 +540,6 @@ impl LocalTrace {
         self.spans_by_parent_id
             .get_mut(&Some(parent_id.clone()))
             .and_then(|v| v.iter_mut().find(|span| &span.id == id))
-    }
-
-    fn remove(&mut self, parent_id: &Id, id: &Id) -> Option<LocalSpan> {
-        todo!()
     }
 }
 
@@ -640,11 +610,11 @@ where
                                 _ => proto::reports::trace::http::Method::Unknown,
                             })
                         }
-                        "apollo_private.http.request_headers" => {
+                        APOLLO_PRIVATE_HTTP_REQUEST_HEADERS => {
                             request =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        "apollo_private.http.response_headers" => {
+                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
                             response =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
@@ -704,16 +674,16 @@ where
                                 _ => proto::reports::trace::http::Method::Unknown,
                             })
                         }
-                        "apollo_private.http.request_headers" => {
+                        APOLLO_PRIVATE_HTTP_REQUEST_HEADERS => {
                             request =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        "apollo_private.http.response_headers" => {
+                        APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS => {
                             response =
                                 serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
                         }
-                        "client.name" => client_name = Some(value.to_string()),
-                        "client.version" => client_version = Some(value.to_string()),
+                        CLIENT_NAME => client_name = Some(value.to_string()),
+                        CLIENT_VERSION => client_version = Some(value.to_string()),
                         _ => {}
                     }));
                 let request_headers: HashMap<_, _> = request
@@ -770,7 +740,7 @@ where
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
                         //CONDITION
-                        if name == "graphql.condition" {
+                        if name == CONDITION {
                             condition = Some(value.to_string())
                         }
                     }));
@@ -788,10 +758,10 @@ where
                 attrs
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == "graphql.path" {
+                        if name == PATH {
                             path = Some(path_from_string(value.to_string()));
                         }
-                        if name == "graphql.depends" {
+                        if name == DEPENDS {
                             depends = Some(
                                 serde_json::from_str::<Vec<crate::query_planner::Depends>>(value)
                                     .ok()
@@ -804,7 +774,7 @@ where
                                     .collect(),
                             );
                         }
-                        if name == "graphql.label" {
+                        if name == LABEL {
                             label = Some(value.to_string());
                         }
                     }));
@@ -820,7 +790,7 @@ where
                 attrs
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == "apollo.subgraph.name" {
+                        if name == SUBGRAPH_NAME {
                             service_name = Some(value.to_string())
                         }
                     }));
@@ -836,7 +806,7 @@ where
                 attrs
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == "graphql.path" {
+                        if name == PATH {
                             path = Some(path_from_string(value.to_string()));
                         }
                     }));
@@ -852,38 +822,18 @@ where
 
         let local_span = LocalSpan {
             id: id.clone(),
-            parent: parent_span.id().cloned(),
             kind,
             start_time: SystemTime::now(),
             end_time: None,
         };
 
         if let Some(parent_id) = parent_span.id() {
-            /*println!(
-                "[{}] on_new_span({:?}, {:?}): {}",
-                line!(),
-                parent_span.id(),
-                id,
-                span.name()
-            );*/
-            //let span = ctx.span(&id).expect("Span not found, this is a bug");
-            //let extensions = span.extensions();
-            //if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
-            /*println!(
-                "[{}] on_new_span({:?}, {:?}): {}",
-                line!(),
-                parent_span.id(),
-                id,
-                span.name()
-            );*/
-
             local_trace
                 .write()
                 .spans_by_parent_id
                 .entry(Some(parent_id.clone()))
                 .or_default()
                 .push(local_span);
-            //}
 
             /*println!(
                 "[{}] on_new_span({:?}, {:?}): {}",
@@ -940,7 +890,7 @@ where
                     let mut duration_ns_opt = None;
 
                     values.record(&mut I64Visitor(|name: &str, value: i64| {
-                        if name == "apollo_private.duration_ns" {
+                        if name == APOLLO_PRIVATE_DURATION_NS {
                             duration_ns_opt = Some(value as u64)
                         }
                     }));
@@ -958,14 +908,11 @@ where
                     let mut vars = None;
 
                     values.record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        //APOLLO_PRIVATE_OPERATION_SIGNATURE
-                        "apollo_private.operation_signature" => {
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE => {
                             op_signature = Some(value.to_string())
                         }
-                        //OPERATION_NAME
-                        "graphql.operation.name" => op_name = Some(value.to_string()),
-                        //APOLLO_PRIVATE_GRAPHQL_VARIABLES
-                        "apollo_private.graphql.variables" => vars = Some(value.to_string()),
+                        OPERATION_NAME => op_name = Some(value.to_string()),
+                        APOLLO_PRIVATE_GRAPHQL_VARIABLES => vars = Some(value.to_string()),
                         _ => {}
                     }));
 
@@ -990,7 +937,7 @@ where
                     let mut ftv1_trace_opt = None;
 
                     values.record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == "apollo_private.ftv1" {
+                        if name == APOLLO_PRIVATE_FTV1 {
                             ftv1_trace_opt = if let Some(t) = decode_ftv1_trace(value) {
                                 Some(Ok(Box::new(t)))
                             } else {
@@ -1010,7 +957,7 @@ where
                     let mut sent_time_offset_opt = None;
 
                     values.record(&mut I64Visitor(|name: &str, value: i64| {
-                        if name == "apollo_private.sent_time_offset" {
+                        if name == APOLLO_PRIVATE_SENT_TIME_OFFSET {
                             sent_time_offset_opt = Some(value as u64)
                         }
                     }));
@@ -1105,9 +1052,7 @@ impl<F> Visit for StrVisitor<F>
 where
     F: FnMut(&str, &str),
 {
-    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
-        //todo!()
-    }
+    fn record_debug(&mut self, _field: &tracing_core::Field, _value: &dyn std::fmt::Debug) {}
 
     fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
         (self.0)(field.name(), value)
@@ -1120,9 +1065,7 @@ impl<F> Visit for I64Visitor<F>
 where
     F: FnMut(&str, i64),
 {
-    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
-        //todo!()
-    }
+    fn record_debug(&mut self, _field: &tracing_core::Field, _value: &dyn std::fmt::Debug) {}
 
     fn record_i64(&mut self, field: &tracing_core::Field, value: i64) {
         (self.0)(field.name(), value)
@@ -1154,171 +1097,9 @@ fn path_from_string(v: String) -> Vec<ResponsePathElement> {
                 .collect()
 }
 
-fn extract_json<T: DeserializeOwned>(v: &Value) -> Option<T> {
-    extract_string(v)
-        .map(|v| serde_json::from_str(&v))
-        .transpose()
-        .unwrap_or(None)
-}
-
-fn extract_string(v: &Value) -> Option<String> {
-    if let Value::String(v) = v {
-        Some(v.to_string())
-    } else {
-        None
-    }
-}
-
-fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
-    extract_string(v)
-        .map(|v| {
-            v.split('/')
-                .filter(|v| !v.is_empty() && *v != "@")
-                .map(|v| {
-                    if let Ok(index) = v.parse::<u32>() {
-                        ResponsePathElement {
-                            id: Some(
-                                proto::reports::trace::query_plan_node::response_path_element::Id::Index(
-                                    index,
-                                ),
-                            ),
-                        }
-                    } else {
-                        ResponsePathElement {
-                            id: Some(
-                                proto::reports::trace::query_plan_node::response_path_element::Id::FieldName(
-                                    v.to_string(),
-                                ),
-                            ),
-                        }
-                    }
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-fn extract_i64(v: &Value) -> Option<i64> {
-    if let Value::I64(v) = v {
-        Some(*v)
-    } else {
-        None
-    }
-}
-
-fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::reports::Trace>, Error>> {
-    if let Value::String(s) = v {
-        if let Some(t) = decode_ftv1_trace(s.as_str()) {
-            return Some(Ok(Box::new(t)));
-        }
-        return Some(Err(Error::TraceParsingFailed));
-    }
-    None
-}
-
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
     let bytes = base64::decode(string).ok()?;
     proto::reports::Trace::decode(Cursor::new(bytes)).ok()
-}
-
-fn extract_http_data(span: &SpanData) -> Http {
-    let method = match span
-        .attributes
-        .get(&HTTP_METHOD)
-        .map(|data| data.as_str())
-        .unwrap_or_default()
-        .as_ref()
-    {
-        "OPTIONS" => proto::reports::trace::http::Method::Options,
-        "GET" => proto::reports::trace::http::Method::Get,
-        "HEAD" => proto::reports::trace::http::Method::Head,
-        "POST" => proto::reports::trace::http::Method::Post,
-        "PUT" => proto::reports::trace::http::Method::Put,
-        "DELETE" => proto::reports::trace::http::Method::Delete,
-        "TRACE" => proto::reports::trace::http::Method::Trace,
-        "CONNECT" => proto::reports::trace::http::Method::Connect,
-        "PATCH" => proto::reports::trace::http::Method::Patch,
-        _ => proto::reports::trace::http::Method::Unknown,
-    };
-    let request_headers = span
-        .attributes
-        .get(&APOLLO_PRIVATE_HTTP_REQUEST_HEADERS)
-        .and_then(extract_json::<HashMap<String, Vec<String>>>)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
-        .collect();
-    let response_headers = span
-        .attributes
-        .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
-        .and_then(extract_json::<HashMap<String, Vec<String>>>)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
-        .collect();
-
-    Http {
-        method: method.into(),
-        request_headers,
-        response_headers,
-        status_code: 0,
-    }
-}
-
-#[async_trait]
-impl SpanExporter for Exporter {
-    /// Export spans to apollo telemetry
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        todo!()
-        /*// Exporting to apollo means that we must have complete trace as the entire trace must be built.
-        // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
-        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
-        let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
-        for span in batch {
-            if span.name == REQUEST_SPAN_NAME {
-                match self.extract_trace(span) {
-                    Ok(mut trace) => {
-                        let mut operation_signature = Default::default();
-                        std::mem::swap(&mut trace.signature, &mut operation_signature);
-                        if !operation_signature.is_empty() {
-                            traces.push((operation_signature, *trace));
-                        }
-                    }
-                    Err(Error::MultipleErrors(errors)) => {
-                        tracing::error!(
-                            "failed to construct trace: {}, skipping",
-                            Error::MultipleErrors(errors)
-                        );
-                    }
-                    Err(error) => {
-                        tracing::error!("failed to construct trace: {}, skipping", error);
-                    }
-                }
-            } else {
-                // Not a root span, we may need it later so stash it.
-
-                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
-                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
-                self.spans_by_parent_id
-                    .get_or_insert(span.parent_span_id, Vec::new);
-                self.spans_by_parent_id
-                    .get_mut(&span.parent_span_id)
-                    .expect("capacity of cache was zero")
-                    .push(span);
-            }
-        }
-        let mut report = telemetry::apollo::Report::default();
-        report += SingleReport::Traces(TracesReport { traces });
-        let exporter = self.report_exporter.clone();
-        let fut = async move {
-            exporter
-                .submit_report(report)
-                .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                .await
-        };
-        fut.boxed()
-        */
-    }
 }
 
 trait ChildNodes {
@@ -1410,14 +1191,12 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
-    use opentelemetry::Value;
     use prost::Message;
-    use serde_json::json;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, TreeData, path_from_string, decode_ftv1_trace};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1526,26 +1305,9 @@ mod test {
     }
 
     #[test]
-    fn test_extract_json() {
-        let val = json!({"hi": "there"});
-        assert_eq!(
-            extract_json::<serde_json::Value>(&Value::String(val.to_string().into())),
-            Some(val)
-        );
-    }
-
-    #[test]
-    fn test_extract_string() {
-        assert_eq!(
-            extract_string(&Value::String("hi".into())),
-            Some("hi".to_string())
-        );
-    }
-
-    #[test]
     fn test_extract_path() {
         assert_eq!(
-            extract_path(&Value::String("/hi/3/there".into())),
+            path_from_string("/hi/3/there".to_string()),
             vec![
                 ResponsePathElement {
                     id: Some(Id::FieldName("hi".to_string())),
@@ -1561,16 +1323,11 @@ mod test {
     }
 
     #[test]
-    fn test_extract_i64() {
-        assert_eq!(extract_i64(&Value::I64(35)), Some(35));
-    }
-
-    #[test]
     fn test_extract_ftv1_trace() {
         let trace = Trace::default();
         let encoded = base64::encode(trace.encode_to_vec());
         assert_eq!(
-            *extract_ftv1_trace(&Value::String(encoded.into()))
+            *decode_ftv1_trace(encoded.as_str())
                 .expect("there was a trace here")
                 .expect("the trace must be decoded"),
             trace
