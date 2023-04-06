@@ -6,15 +6,11 @@ use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use derivative::Derivative;
-use futures::TryFutureExt;
 use itertools::Itertools;
-use opentelemetry::trace::TraceError;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use prost::Message;
 use thiserror::Error;
-use tokio::sync::mpsc::channel;
-use tokio::sync::mpsc::Sender;
 use tracing::Id;
 use tracing::Subscriber;
 use tracing_subscriber::field::Visit;
@@ -24,7 +20,6 @@ use tracing_subscriber::Layer;
 use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
-use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
@@ -43,6 +38,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
@@ -104,7 +100,8 @@ pub(crate) enum Error {
 pub(crate) struct Exporter {
     field_execution_weight: f64,
     traces: Arc<Mutex<Vec<(String, proto::reports::Trace)>>>,
-    traces_sender: Sender<(String, proto::reports::Trace)>,
+    #[derivative(Debug = "ignore")]
+    traces_sender: Sender,
 }
 
 enum TreeData {
@@ -142,7 +139,6 @@ impl Exporter {
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
 
-        let (traces_sender, mut traces_receiver) = channel::<(String, proto::reports::Trace)>(1000);
         let report_exporter = ApolloExporter::new(
             &endpoint,
             &batch_config,
@@ -150,24 +146,7 @@ impl Exporter {
             &apollo_graph_ref,
             &schema_id,
         )?;
-        tokio::task::spawn(async move {
-            //FIXME: handle batching
-            while let Some(trace) = traces_receiver.recv().await {
-                let mut report = telemetry::apollo::Report::default();
-                report += SingleReport::Traces(TracesReport {
-                    traces: vec![trace],
-                });
-
-                println!("will submit report: {:?}", report);
-                if let Err(e) = report_exporter
-                    .submit_report(report)
-                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                    .await
-                {
-                    tracing::error!("could not submit report: {e}")
-                }
-            }
-        });
+        let traces_sender = report_exporter.start();
 
         Ok(Self {
             field_execution_weight: match field_execution_sampler {
@@ -456,11 +435,13 @@ impl Exporter {
                     if !operation_signature.is_empty() {
                         println!("[{}] generate_report", line!());
 
-                        if let Err(e) = self.traces_sender.try_send((operation_signature, *trace)) {
-                            println!("[{}] generate_report: {e:?}", line!());
+                        let report = SingleReport::Traces(TracesReport {
+                            traces: vec![(operation_signature, *trace)],
+                        });
 
-                            //error log
-                        }
+                        println!("will submit report: {:?}", report);
+
+                        self.traces_sender.send(report);
                     }
                 }
                 Err(Error::MultipleErrors(errors)) => {
