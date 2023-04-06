@@ -26,7 +26,7 @@ By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollo
 
 ## 🐛 Fixes
 
-### Coprocessors: Empty body requests from `GET` requests are now deserialized without error 
+### Coprocessors: Empty body requests from `GET` requests are now deserialized without error
 
 Fixes a bug where a coprocessor operating at the `router_request` stage would fail to deserialize an empty body, which is typical for `GET` requests.
 
@@ -35,12 +35,14 @@ By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollo
 ## 📃 Configuration
 
 ### Helm: Router chart now supports `extraLabels` for Deployments/Pods
+
 Our Helm chart now supports a new value called `extraLabels`, which enables chart users to add custom labels to the Router Deployment and its Pods.
+
 By [@gscheibel(https://github.com/gscheibel/) in https://github.com/apollographql/router/pull/2903
 
-### `extraContainers` in Helm charts
+### Helm: Router chart now supports `extraContainers` to run sidecars
 
-Allow sidecars in router pods, most notably useful for coprocessors.
+Our Helm chart now supports `extraContainers` in an effort to simplify the ability to run containers alongside Router containers (sidecars) which is a useful pattern for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor/).
 
 By [@pcarrier(https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2881
 
@@ -58,13 +60,11 @@ The [External coprocessing documentation](https://www.apollographql.com/docs/rou
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2863
 
-### Add cache-control response header management example in Rhai
+### Example: Rhai-based `cache-control` response header management
 
-This recreates some of the behavior of Apollo Gateway's cache-control header behavior and partially addresses #326.
+A new Rhai example demonstrates how to recreate some of the behavior of Apollo Gateway's subgraph `cache-control` response header behavior.  This addresses some of the need identified in #326.
 
 By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/2759
-
-
 
 # [1.13.2] - 2023-04-03
 
