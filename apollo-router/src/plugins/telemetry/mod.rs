@@ -1741,6 +1741,7 @@ mod tests {
             .times(1)
             .returning(move |_req: SubgraphRequest| {
                 Err(Box::new(FetchError::SubrequestHttpError {
+                    status_code: None,
                     service: String::from("my_subgraph_name_error"),
                     reason: String::from("cannot contact the subgraph"),
                 }))
