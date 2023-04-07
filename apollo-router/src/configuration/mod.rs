@@ -368,6 +368,10 @@ impl Configuration {
 
         Ok(self)
     }
+
+    pub(crate) fn replace_listen_address(&mut self, listen_address: &ListenAddr) {
+        self.supergraph.listen = listen_address.clone();
+    }
 }
 
 /// Parse configuration from a string in YAML syntax

@@ -317,6 +317,9 @@ pub enum ConfigurationSource {
         /// `true` to watch the file for changes and hot apply them.
         watch: bool,
 
+        /// The address to listen on. If `None`, the address from the configuration file is used.
+        override_listen_address: Option<ListenAddr>,
+
         /// When watching, the delay to wait before applying the new configuration.
         /// Note: This variable is deprecated and has no effect.
         #[deprecated]
@@ -343,6 +346,7 @@ impl ConfigurationSource {
                 path,
                 watch,
                 delay: _,
+                override_listen_address,
             } => {
                 // Sanity check, does the config file exists, if it doesn't then bail.
                 if !path.exists() {
@@ -1020,6 +1024,7 @@ mod tests {
             path,
             watch: true,
             delay: None,
+            override_listen_address: None,
         }
         .into_stream()
         .boxed();
@@ -1053,6 +1058,7 @@ mod tests {
             path,
             watch: true,
             delay: None,
+            override_listen_address: None,
         }
         .into_stream();
 
@@ -1066,6 +1072,7 @@ mod tests {
             path: temp_dir().join("does_not_exit"),
             watch: true,
             delay: None,
+            override_listen_address: None,
         }
         .into_stream();
 
@@ -1083,6 +1090,7 @@ mod tests {
             path,
             watch: false,
             delay: None,
+            override_listen_address: None,
         }
         .into_stream();
         assert!(matches!(

@@ -4,6 +4,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::fmt;
 use std::fmt::Debug;
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -31,6 +32,7 @@ use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
+use crate::Configuration;
 use crate::EntitlementSource;
 
 // Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
@@ -230,6 +232,10 @@ pub struct Opt {
     /// Display version and exit.
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
+
+    /// Override the default address to listen on for only the supergraph.
+    #[clap(long = "listen")]
+    listen_address: Option<SocketAddr>,
 }
 
 /// Wrapper so that clap can display the default config path in the help message.
@@ -448,10 +454,23 @@ impl Executable {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
+                    override_listen_address: opt.listen_address.map(|addr| addr.into()),
                 }
             }) {
                 Some(configuration) => configuration,
-                None => Default::default(),
+                None => {
+                    tracing::warn!(
+                        "No configuration source specified, using default configuration"
+                    );
+
+                    let mut configuration: Configuration = Default::default();
+
+                    if let Some(listen_address) = opt.listen_address {
+                        configuration.replace_listen_address(&listen_address.into());
+                    }
+
+                    ConfigurationSource::Static(Box::new(configuration))
+                }
             },
         };
 
@@ -573,6 +592,7 @@ impl Executable {
             .entitlement(entitlement)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
             .start();
+
         if let Err(err) = router.await {
             tracing::error!("{}", err);
             return Err(err.into());
