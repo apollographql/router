@@ -38,13 +38,13 @@ By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollo
 
 Our Helm chart now supports a new value called `extraLabels`, which enables chart users to add custom labels to the Router Deployment and its Pods.
 
-By [@gscheibel(https://github.com/gscheibel/) in https://github.com/apollographql/router/pull/2903
+By [@gscheibel](https://github.com/gscheibel/) in https://github.com/apollographql/router/pull/2903
 
 ### Helm: Router chart now supports `extraContainers` to run sidecars
 
 Our Helm chart now supports `extraContainers` in an effort to simplify the ability to run containers alongside Router containers (sidecars) which is a useful pattern for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor/).
 
-By [@pcarrier(https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2881
+By [@pcarrier](https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2881
 
 ### Migrate away from unimplemented `coprocessor.subgraph.all.response.uri`
 
