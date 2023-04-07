@@ -96,7 +96,7 @@ pub(crate) enum Error {
 /// [`Reporter`]: crate::plugins::telemetry::Reporter
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(crate) struct Exporter {
+pub(crate) struct ApolloLayer {
     field_execution_weight: f64,
     traces: Arc<Mutex<Vec<(String, proto::reports::Trace)>>>,
     #[derivative(Debug = "ignore")]
@@ -125,7 +125,7 @@ enum TreeData {
 }
 
 #[buildstructor::buildstructor]
-impl Exporter {
+impl ApolloLayer {
     #[builder]
     pub(crate) fn new(
         endpoint: Url,
@@ -487,7 +487,7 @@ impl LocalTrace {
     }
 }
 
-impl<S> Layer<S> for Exporter
+impl<S> Layer<S> for ApolloLayer
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {

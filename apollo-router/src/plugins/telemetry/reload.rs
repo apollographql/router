@@ -14,7 +14,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
-use super::tracing::apollo_telemetry::Exporter;
+use super::tracing::apollo_telemetry::ApolloLayer;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::TextFormatter;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
@@ -47,7 +47,10 @@ type MetricsReloadLayer =
 
 #[allow(clippy::type_complexity)]
 static APOLLO_LAYER_HANDLE: OnceCell<
-    Handle<Option<Exporter>, Layered<MetricsReloadLayer, Layered<FmtReloadLayer, LayeredTracer>>>,
+    Handle<
+        Option<ApolloLayer>,
+        Layered<MetricsReloadLayer, Layered<FmtReloadLayer, LayeredTracer>>,
+    >,
 > = OnceCell::new();
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
@@ -145,7 +148,7 @@ pub(super) fn reload_fmt(
     }
 }
 
-pub(crate) fn reload_apollo(layer: Option<Exporter>) {
+pub(crate) fn reload_apollo(layer: Option<ApolloLayer>) {
     if let Some(handle) = APOLLO_LAYER_HANDLE.get() {
         handle
             .reload(layer)

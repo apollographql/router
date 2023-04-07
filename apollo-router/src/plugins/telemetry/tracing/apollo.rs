@@ -26,7 +26,7 @@ impl TracingConfigurator for Config {
             } => {
                 tracing::debug!("configuring exporter to Studio");
 
-                let exporter = apollo_telemetry::Exporter::builder()
+                let exporter = apollo_telemetry::ApolloLayer::builder()
                     .endpoint(endpoint.clone())
                     .apollo_key(key)
                     .apollo_graph_ref(reference)
