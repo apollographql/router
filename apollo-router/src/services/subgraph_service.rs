@@ -411,17 +411,15 @@ async fn call_http(
         );
     }
 
-    let status_code = parts.status.as_u16();
-
     let graphql: graphql::Response =
         tracing::debug_span!("parse_subgraph_response").in_scope(|| {
-            graphql::Response::from_bytes(&cloned_service_name, status_code, body).map_err(
-                |error| FetchError::SubrequestMalformedResponse {
-                    status_code: Some(status_code),
+            graphql::Response::from_bytes(&cloned_service_name, body).map_err(|error| {
+                FetchError::SubrequestMalformedResponse {
+                    status_code: Some(parts.status.as_u16()),
                     service: cloned_service_name.clone(),
                     reason: error.to_string(),
-                },
-            )
+                }
+            })
         })?;
 
     let resp = http::Response::from_parts(parts, graphql);

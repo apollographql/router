@@ -120,13 +120,30 @@ impl FetchError {
                 .or_insert_with(|| self.extension_code().into());
             // Following these specs https://www.apollographql.com/docs/apollo-server/data/errors/#including-custom-error-details
             match self {
-                FetchError::SubrequestMalformedResponse { service, .. }
-                | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestHttpError { service, .. }
+                FetchError::SubrequestUnexpectedPatchResponse { service }
                 | FetchError::CompressionError { service, .. } => {
                     extensions
                         .entry("service")
                         .or_insert_with(|| service.clone().into());
+                }
+                FetchError::SubrequestMalformedResponse {
+                    service,
+                    status_code,
+                    ..
+                }
+                | FetchError::SubrequestHttpError {
+                    service,
+                    status_code,
+                    ..
+                } => {
+                    extensions
+                        .entry("service")
+                        .or_insert_with(|| service.clone().into());
+                    if let Some(status_code) = status_code {
+                        extensions
+                            .entry("status_code")
+                            .or_insert(status_code.into());
+                    }
                 }
                 FetchError::ExecutionFieldNotFound { field, .. } => {
                     extensions
