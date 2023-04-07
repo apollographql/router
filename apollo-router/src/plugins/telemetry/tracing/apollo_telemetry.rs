@@ -934,8 +934,8 @@ where
         match parent_id {
             None => {
                 // extract root here
-                let extensions = span.extensions();
-                if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
+                let mut extensions = span.extensions_mut();
+                if let Some(local_trace) = extensions.remove::<Arc<RwLock<LocalTrace>>>() {
                     let mut spans_by_parent_id = HashMap::new();
                     {
                         let mut local = local_trace.write();
@@ -950,8 +950,8 @@ where
                 }
             }
             Some(parent_id) => {
-                let extensions = span.extensions();
-                if let Some(local_trace) = extensions.get::<Arc<RwLock<LocalTrace>>>() {
+                let mut extensions = span.extensions_mut();
+                if let Some(local_trace) = extensions.remove::<Arc<RwLock<LocalTrace>>>() {
                     let mut local = local_trace.write();
 
                     if let Some(mut local_span) = local.get_span_mut(&parent_id, &id) {
