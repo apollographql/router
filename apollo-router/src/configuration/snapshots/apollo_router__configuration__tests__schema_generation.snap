@@ -181,6 +181,15 @@ expression: "&schema"
                   "url"
                 ],
                 "properties": {
+                  "algorithms": {
+                    "description": "List of accepted algorithms. Possible values are `HS256`, `HS384`, `HS512`, `ES256`, `ES384`, `RS256`, `RS384`, `RS512`, `PS256`, `PS384`, `PS512`, `EdDSA`",
+                    "default": null,
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "nullable": true
+                  },
                   "issuer": {
                     "description": "Expected issuer for tokens verified by that JWKS",
                     "type": "string",
@@ -1322,7 +1331,7 @@ expression: "&schema"
               }
             },
             "buffer_size": {
-              "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
+              "description": "The buffer size for sending traces to Apollo. (deprecated, has no effect now)",
               "default": 10000,
               "type": "integer",
               "format": "uint",

@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.13.2"
+version = "1.14.0"
 dependencies = [
  "access-json",
  "ansi_term",
@@ -344,6 +344,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
  "p256 0.12.0",
+ "parking_lot 0.12.1",
  "paste",
  "pin-project-lite",
  "prometheus",
@@ -406,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.13.2"
+version = "1.14.0"
 dependencies = [
  "apollo-parser 0.4.1",
  "apollo-router",
@@ -422,7 +423,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.13.2"
+version = "1.14.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",

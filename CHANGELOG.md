@@ -4,6 +4,68 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.14.0] - 2023-04-06
+
+## 🚀 Features
+
+### GraphOS Enterprise: Coprocessor read access to request `uri`, `method` and HTTP response status codes ([Issue #2861](https://github.com/apollographql/router/issues/2861), [Issue #2861](https://github.com/apollographql/router/issues/2862))
+
+We've added the ability for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor) to have read-only access to additional contextual information at [the `RouterService` and `SubgraphService`](https://www.apollographql.com/docs/router/customizations/coprocessor/#how-it-works) stages:
+
+The `RouterService` stage now has read-only access to these **client request** properties:
+  - `path` (e.g., `/graphql`)
+  - `method` (e.g., `POST`, `GET`)
+
+The `RouterService` stage now has read-only access to these **client response** properties:
+  - `status_code` (e.g. `403`, `200`)
+
+The `SubgraphService` stage now has read-only access to these **subgraph response** properties:
+  - `status_code` (e.g., `503`, `200`)
+
+By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/2863
+
+## 🐛 Fixes
+
+### Coprocessors: Empty body requests from `GET` requests are now deserialized without error
+
+Fixes a bug where a coprocessor operating at the `router_request` stage would fail to deserialize an empty body, which is typical for `GET` requests.
+
+By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/2863
+
+## 📃 Configuration
+
+### Helm: Router chart now supports `extraLabels` for Deployments/Pods
+
+Our Helm chart now supports a new value called `extraLabels`, which enables chart users to add custom labels to the Router Deployment and its Pods.
+
+By [@gscheibel](https://github.com/gscheibel/) in https://github.com/apollographql/router/pull/2903
+
+### Helm: Router chart now supports `extraContainers` to run sidecars
+
+Our Helm chart now supports `extraContainers` in an effort to simplify the ability to run containers alongside Router containers (sidecars) which is a useful pattern for [coprocessors](https://www.apollographql.com/docs/router/customizations/coprocessor/).
+
+By [@pcarrier](https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2881
+
+### Migrate away from unimplemented `coprocessor.subgraph.all.response.uri`
+
+We have removed a completely unimplemented `coprocessor.subgraph.all.response.uri` key from our configuration.  It had no effect, but we will automatically migrate configurations which did use it, resulting in no breaking changes by this removal.
+
+By [@o0ignition0o](https://github.com/o0ignition0o) in https://github.com/apollographql/router/pull/2863
+
+## 📚 Documentation
+
+### Update coprocessor documentation to reflect newly added fields ([Issue #2886](https://github.com/apollographql/router/issues/2886))
+
+The [External coprocessing documentation](https://www.apollographql.com/docs/router/customizations/coprocessor) is now up to date, with a full configuration example, and the newly added fields.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2863
+
+### Example: Rhai-based `cache-control` response header management
+
+A new Rhai example demonstrates how to recreate some of the behavior of Apollo Gateway's subgraph `cache-control` response header behavior.  This addresses some of the need identified in #326.
+
+By [@lennyburdette](https://github.com/lennyburdette) in https://github.com/apollographql/router/pull/2759
+
 # [1.13.2] - 2023-04-03
 
 ## 🐛 Fixes
