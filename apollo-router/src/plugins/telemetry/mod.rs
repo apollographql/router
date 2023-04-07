@@ -541,10 +541,18 @@ impl Telemetry {
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
         let mut trace_config = tracing_config.trace_config.unwrap_or_default();
-        let sampling_rate = match trace_config.sampler {
-            config::SamplerOption::TraceIdRatioBased(rate) => rate,
-            config::SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
-            config::SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+        let sampling_rate = if tracing_config.jaeger.is_some()
+            || tracing_config.zipkin.is_some()
+            || tracing_config.datadog.is_some()
+            || tracing_config.otlp.is_some()
+        {
+            match trace_config.sampler {
+                config::SamplerOption::TraceIdRatioBased(rate) => rate,
+                config::SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                config::SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+            }
+        } else {
+            0.0
         };
 
         trace_config.sampler = config::SamplerOption::Always(Sampler::AlwaysOn);
