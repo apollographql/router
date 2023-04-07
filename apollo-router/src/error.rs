@@ -61,6 +61,8 @@ pub(crate) enum FetchError {
 
     /// service '{service}' response was malformed: {reason}
     SubrequestMalformedResponse {
+        status_code: Option<u16>,
+
         /// The service that responded with the malformed response.
         service: String,
 

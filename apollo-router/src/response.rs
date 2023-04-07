@@ -88,14 +88,20 @@ impl Response {
     /// Create a [`Response`] from the supplied [`Bytes`].
     ///
     /// This will return an error (identifying the faulty service) if the input is invalid.
-    pub(crate) fn from_bytes(service_name: &str, b: Bytes) -> Result<Response, FetchError> {
+    pub(crate) fn from_bytes(
+        service_name: &str,
+        status_code: u16,
+        b: Bytes,
+    ) -> Result<Response, FetchError> {
         let value =
             Value::from_bytes(b).map_err(|error| FetchError::SubrequestMalformedResponse {
+                status_code: Some(status_code),
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
         let mut object =
             ensure_object!(value).map_err(|error| FetchError::SubrequestMalformedResponse {
+                status_code: Some(status_code),
                 service: service_name.to_string(),
                 reason: error.to_string(),
             })?;
@@ -103,22 +109,25 @@ impl Response {
         let data = object.remove("data");
         let errors = extract_key_value_from_object!(object, "errors", Value::Array(v) => v)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
+                status_code: Some(status_code),
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?
             .into_iter()
             .flatten()
-            .map(|v| Error::from_value(service_name, v))
+            .map(|v| Error::from_value(service_name, status_code, v))
             .collect::<Result<Vec<Error>, FetchError>>()?;
         let extensions =
             extract_key_value_from_object!(object, "extensions", Value::Object(o) => o)
                 .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    status_code: Some(status_code),
                     service: service_name.to_string(),
                     reason: err.to_string(),
                 })?
                 .unwrap_or_default();
         let label = extract_key_value_from_object!(object, "label", Value::String(s) => s)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
+                status_code: Some(status_code),
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?
@@ -127,17 +136,20 @@ impl Response {
             .map(serde_json_bytes::from_value)
             .transpose()
             .map_err(|err| FetchError::SubrequestMalformedResponse {
+                status_code: Some(status_code),
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
         let has_next = extract_key_value_from_object!(object, "hasNext", Value::Bool(b) => b)
             .map_err(|err| FetchError::SubrequestMalformedResponse {
+                status_code: Some(status_code),
                 service: service_name.to_string(),
                 reason: err.to_string(),
             })?;
         let incremental =
             extract_key_value_from_object!(object, "incremental", Value::Array(a) => a).map_err(
                 |err| FetchError::SubrequestMalformedResponse {
+                    status_code: Some(status_code),
                     service: service_name.to_string(),
                     reason: err.to_string(),
                 },
@@ -148,6 +160,7 @@ impl Response {
                 .map(serde_json_bytes::from_value)
                 .collect::<Result<Vec<IncrementalResponse>, _>>()
                 .map_err(|err| FetchError::SubrequestMalformedResponse {
+                    status_code: Some(status_code),
                     service: service_name.to_string(),
                     reason: err.to_string(),
                 })?,
