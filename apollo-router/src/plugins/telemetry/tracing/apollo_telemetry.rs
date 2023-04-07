@@ -771,7 +771,6 @@ where
     ) {
         let span = ctx.span(id).expect("Span not found, this is a bug");
         let parent_span = span.parent();
-        //let parent_id = parent_span.as_ref().map(|s| s.id());
 
         if let Some(parent_span) = parent_span {
             let extensions = span.extensions();
