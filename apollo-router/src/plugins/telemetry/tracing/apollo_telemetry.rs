@@ -657,7 +657,6 @@ where
                 attrs
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
-                        //CONDITION
                         if name == CONDITION {
                             condition = Some(value.to_string())
                         }
@@ -677,17 +676,17 @@ where
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
                         if name == PATH {
-                            path = Some(path_from_string(value.to_string()));
+                            path = Some(path_from_string(value));
                         }
                         if name == DEPENDS {
                             depends = Some(
                                 serde_json::from_str::<Vec<crate::query_planner::Depends>>(value)
                                     .ok()
                                     .unwrap_or_default()
-                                    .iter()
+                                    .into_iter()
                                     .map(|d| DeferredNodeDepends {
-                                        id: d.id.clone(),
-                                        defer_label: d.defer_label.clone().unwrap_or_default(),
+                                        id: d.id,
+                                        defer_label: d.defer_label.unwrap_or_default(),
                                     })
                                     .collect(),
                             );
@@ -725,7 +724,7 @@ where
                     .values()
                     .record(&mut StrVisitor(|name: &str, value: &str| {
                         if name == PATH {
-                            path = Some(path_from_string(value.to_string()));
+                            path = Some(path_from_string(value));
                         }
                     }));
 
@@ -745,21 +744,13 @@ where
             end_time: None,
         };
 
-        if let Some(parent_id) = parent_span.id() {
-            local_trace
-                .write()
-                .spans_by_parent_id
-                .entry(Some(parent_id.clone()))
-                .or_default()
-                .push(local_span);
-        } else {
-            local_trace
-                .write()
-                .spans_by_parent_id
-                .entry(None)
-                .or_default()
-                .push(local_span);
-        }
+        local_trace
+            .write()
+            .spans_by_parent_id
+            .entry(parent_span.id().cloned())
+            .or_default()
+            .push(local_span);
+
         extensions.insert(local_trace);
     }
 
@@ -774,7 +765,10 @@ where
 
         if let Some(parent_span) = parent_span {
             let extensions = span.extensions();
-            let local_trace = extensions.get::<Arc<RwLock<LocalTrace>>>().unwrap();
+            let local_trace = match extensions.get::<Arc<RwLock<LocalTrace>>>() {
+                Some(trace) => trace,
+                None => return,
+            };
             let parent_id = parent_span.id();
 
             match span.name() {
@@ -998,7 +992,7 @@ where
     }
 }
 
-fn path_from_string(v: String) -> Vec<ResponsePathElement> {
+fn path_from_string(v: &str) -> Vec<ResponsePathElement> {
     v.split('/')
                 .filter(|v| !v.is_empty() && *v != "@")
                 .map(|v| {
@@ -1233,7 +1227,7 @@ mod test {
     #[test]
     fn test_extract_path() {
         assert_eq!(
-            path_from_string("/hi/3/there".to_string()),
+            path_from_string("/hi/3/there"),
             vec![
                 ResponsePathElement {
                     id: Some(Id::FieldName("hi".to_string())),
