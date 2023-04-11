@@ -928,6 +928,16 @@ where
         }
     }
 
+    fn on_enter(&self, id: &tracing_core::span::Id, ctx: Context<'_, S>) {
+        let span = ctx.span(&id).expect("Span not found, this is a bug");
+
+        println!("apollo_telemetry: on_enter({})", span.name());
+    }
+    fn on_exit(&self, id: &tracing_core::span::Id, ctx: Context<'_, S>) {
+        let span = ctx.span(&id).expect("Span not found, this is a bug");
+
+        println!("apollo_telemetry: on_exit({})", span.name());
+    }
     fn on_close(&self, id: Id, ctx: Context<'_, S>) {
         let span = ctx.span(&id).expect("Span not found, this is a bug");
         let parent_id = span.parent().map(|s| s.id());
