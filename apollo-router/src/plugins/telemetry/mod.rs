@@ -555,6 +555,8 @@ impl Telemetry {
             0.0
         };
 
+        println!("chosen sampling rate: {sampling_rate}");
+
         trace_config.sampler = config::SamplerOption::Always(Sampler::AlwaysOn);
         SPAN_SAMPLING_RATE.store(f64::to_bits(sampling_rate), Ordering::Relaxed);
 

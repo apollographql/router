@@ -500,6 +500,7 @@ where
         let parent_span = ctx.current_span();
 
         let span = ctx.span(id).expect("Span not found, this is a bug");
+        println!("apollo_telemetry on_new_span({}) id={id:?}", span.name());
 
         let mut extensions = span.extensions_mut();
         let local_trace = parent_span
@@ -931,6 +932,7 @@ where
         let span = ctx.span(&id).expect("Span not found, this is a bug");
         let parent_id = span.parent().map(|s| s.id());
 
+        println!("apollo_telemetry: on_close({})", span.name());
         match parent_id {
             None => {
                 // extract root here
@@ -945,6 +947,7 @@ where
                         spans_by_parent_id.remove(&None).and_then(|mut v| v.pop())
                     {
                         local_span.end_time = Some(SystemTime::now());
+                        println!("generate report");
                         self.generate_report(local_span, spans_by_parent_id);
                     }
                 }
