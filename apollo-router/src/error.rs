@@ -142,7 +142,7 @@ impl FetchError {
                     if let Some(status_code) = status_code {
                         extensions
                             .entry("status_code")
-                            .or_insert(status_code.into());
+                            .or_insert(*status_code.into());
                     }
                 }
                 FetchError::ExecutionFieldNotFound { field, .. } => {
