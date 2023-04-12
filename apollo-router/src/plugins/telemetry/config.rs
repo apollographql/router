@@ -21,12 +21,6 @@ use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugin::serde::deserialize_regex;
 use crate::plugins::telemetry::metrics;
 
-#[derive(thiserror::Error, Debug)]
-pub(crate) enum Error {
-    #[error("field level instrumentation sampler must sample less frequently than tracing level sampler")]
-    InvalidFieldLevelInstrumentationSampler,
-}
-
 pub(crate) trait GenericWith<T>
 where
     Self: Sized,
@@ -573,20 +567,17 @@ fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::s
 }
 
 impl Conf {
-    pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
-        Ok(
-            match self
-                .apollo
-                .clone()
-                .unwrap_or_default()
-                .field_level_instrumentation_sampler
-            {
-                // Error conditions
-                SamplerOption::TraceIdRatioBased(field_ratio) => field_ratio,
-                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
-                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
-            },
-        )
+    pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> f64 {
+        match self
+            .apollo
+            .clone()
+            .unwrap_or_default()
+            .field_level_instrumentation_sampler
+        {
+            SamplerOption::TraceIdRatioBased(field_ratio) => field_ratio,
+            SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+            SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
+        }
     }
 }
 

@@ -212,7 +212,7 @@ impl Plugin for Telemetry {
         config.logging.validate()?;
 
         let field_level_instrumentation_ratio =
-            config.calculate_field_level_instrumentation_ratio()?;
+            config.calculate_field_level_instrumentation_ratio();
         let mut metrics_builder = Self::create_metrics_builder(&config)?;
         let meter_provider = metrics_builder.meter_provider();
         Ok(Telemetry {
