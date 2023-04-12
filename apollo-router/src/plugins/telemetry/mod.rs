@@ -370,7 +370,7 @@ impl Plugin for Telemetry {
                             result,
                             start.elapsed(),
                         )
-                        .await;
+                            .await;
                         Self::update_metrics_on_last_response(
                             &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
                         )
@@ -595,15 +595,15 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Box<
         dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        ::tracing_subscriber::Registry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
+            ::tracing_subscriber::layer::Layered<
+                OpenTelemetryLayer<
                     ::tracing_subscriber::Registry,
+                    ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
                 >,
-            > + Send
-            + Sync,
+                ::tracing_subscriber::Registry,
+            >,
+        > + Send
+        + Sync,
     > {
         let logging = &config.logging;
         let fmt = match logging.format {
@@ -673,7 +673,7 @@ impl Telemetry {
         forward_rules: &ForwardValues,
     ) -> String {
         #[allow(clippy::mutable_key_type)] // False positive lint
-        let variables = variables
+            let variables = variables
             .iter()
             .map(|(name, value)| {
                 if match &forward_rules {
@@ -736,13 +736,13 @@ impl Telemetry {
                 let (first_response, rest) = stream.into_future().await;
 
                 if let Some(MetricsCommon {
-                    attributes:
-                        Some(MetricsAttributesConf {
-                            supergraph: Some(forward_attributes),
-                            ..
-                        }),
-                    ..
-                }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
+                                attributes:
+                                Some(MetricsAttributesConf {
+                                         supergraph: Some(forward_attributes),
+                                         ..
+                                     }),
+                                ..
+                            }) = &config.metrics.as_ref().and_then(|m| m.common.as_ref())
                 {
                     let attributes = forward_attributes.get_attributes_from_router_response(
                         &parts,
@@ -1456,7 +1456,7 @@ impl CustomTraceIdPropagator {
             true,
             TraceState::default(),
         )
-        .into()
+            .into()
     }
 }
 
@@ -1842,7 +1842,7 @@ mod tests {
                 }
             }"#,
                 )
-                .unwrap(),
+                    .unwrap(),
                 Default::default(),
             )
             .await
