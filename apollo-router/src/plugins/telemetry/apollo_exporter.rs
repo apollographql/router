@@ -65,7 +65,7 @@ impl Sender {
             Sender::Apollo(channel) => {
                 if let Err(err) = channel.to_owned().try_send(report) {
                     tracing::warn!(
-                        "could not send metrics to spaceport, metric will be dropped: {}",
+                        "could not send data to spaceport, metric will be dropped: {}",
                         err
                     );
                 }
@@ -257,7 +257,6 @@ impl ApolloExporter {
                     }
                 }
                 Err(e) => {
-                    println!("Got {e}");
                     // TODO: Ultimately need more sophisticated handling here. For example
                     // a redirect should not be treated the same way as a connect or a
                     // type builder error...

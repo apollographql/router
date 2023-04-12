@@ -319,7 +319,7 @@ impl Plugin for Telemetry {
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE,
                         usage_reporting.stats_report_key.as_str(),
                     );
                 }
@@ -1741,6 +1741,7 @@ mod tests {
             .times(1)
             .returning(move |_req: SubgraphRequest| {
                 Err(Box::new(FetchError::SubrequestHttpError {
+                    status_code: None,
                     service: String::from("my_subgraph_name_error"),
                     reason: String::from("cannot contact the subgraph"),
                 }))
