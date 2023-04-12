@@ -254,8 +254,10 @@ where
                                         .uri(parts.uri.clone())
                                         .version(parts.version.clone());
                                 let headers = supergraph_request_builder.headers_mut().unwrap();
-                                for (key, value) in parts.headers.clone() {
-                                    headers.insert(key.unwrap(), value);
+                                for (header_name, header_value) in parts.headers.clone() {
+                                    if let Some(name) = header_name {
+                                        headers.insert(name, header_value);
+                                    }
                                 }
                                 let supergraph_request = SupergraphRequest {
                                     // supergraph_request: http::Request::from_parts(Parts::from_request(router_request), request),
