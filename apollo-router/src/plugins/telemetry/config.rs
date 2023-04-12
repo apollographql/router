@@ -575,51 +575,16 @@ fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::s
 impl Conf {
     pub(crate) fn calculate_field_level_instrumentation_ratio(&self) -> Result<f64, Error> {
         Ok(
-            match (
-                self.tracing
-                    .clone()
-                    .unwrap_or_default()
-                    .trace_config
-                    .unwrap_or_default()
-                    .sampler,
-                self.apollo
-                    .clone()
-                    .unwrap_or_default()
-                    .field_level_instrumentation_sampler,
-            ) {
+            match self
+                .apollo
+                .clone()
+                .unwrap_or_default()
+                .field_level_instrumentation_sampler
+            {
                 // Error conditions
-                (
-                    SamplerOption::TraceIdRatioBased(global_ratio),
-                    SamplerOption::TraceIdRatioBased(field_ratio),
-                ) if field_ratio > global_ratio => {
-                    Err(Error::InvalidFieldLevelInstrumentationSampler)?
-                }
-                (
-                    SamplerOption::Always(Sampler::AlwaysOff),
-                    SamplerOption::Always(Sampler::AlwaysOn),
-                ) => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
-                (
-                    SamplerOption::Always(Sampler::AlwaysOff),
-                    SamplerOption::TraceIdRatioBased(ratio),
-                ) if ratio != 0.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
-                (
-                    SamplerOption::TraceIdRatioBased(ratio),
-                    SamplerOption::Always(Sampler::AlwaysOn),
-                ) if ratio != 1.0 => Err(Error::InvalidFieldLevelInstrumentationSampler)?,
-
-                // Happy paths
-                (_, SamplerOption::TraceIdRatioBased(ratio)) if ratio == 0.0 => 0.0,
-                (SamplerOption::TraceIdRatioBased(ratio), _) if ratio == 0.0 => 0.0,
-                (_, SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
-                (
-                    SamplerOption::TraceIdRatioBased(global_ratio),
-                    SamplerOption::TraceIdRatioBased(field_ratio),
-                ) => field_ratio / global_ratio,
-                (
-                    SamplerOption::Always(Sampler::AlwaysOn),
-                    SamplerOption::TraceIdRatioBased(field_ratio),
-                ) => field_ratio,
-                (_, _) => 0.0,
+                SamplerOption::TraceIdRatioBased(field_ratio) => field_ratio,
+                SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
+                SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
             },
         )
     }

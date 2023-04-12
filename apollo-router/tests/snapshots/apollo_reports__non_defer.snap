@@ -22,7 +22,7 @@ traces_per_query:
         duration_ns: "[duration_ns]"
         root: ~
         is_incomplete: false
-        signature: ""
+        signature: "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}"
         unexecuted_operation_body: ""
         unexecuted_operation_name: ""
         details:
@@ -36,8 +36,7 @@ traces_per_query:
         http:
           method: 4
           request_headers: {}
-          response_headers:
-            my_trace_id: "[my_trace_id]"
+          response_headers: {}
           status_code: 0
         cache_policy: ~
         query_plan:

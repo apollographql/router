@@ -277,16 +277,16 @@ impl Plugin for Telemetry {
 
                     let expose_trace_id = config.tracing.as_ref().cloned().unwrap_or_default().response_trace_id;
                     if let Ok(response) = &response {
+                        let mut headers: HashMap<String, Vec<String>> = HashMap::new();
                         if expose_trace_id.enabled {
                             if let Some(header_name) = &expose_trace_id.header_name {
-                                let mut headers: HashMap<String, Vec<String>> = HashMap::new();
                                 if let Some(value) = response.response.headers().get(header_name) {
                                     headers.insert(header_name.to_string(), vec![value.to_str().unwrap_or_default().to_string()]);
-                                    let response_headers = serde_json::to_string(&headers).unwrap_or_default();
-                                    span.record("apollo_private.http.response_headers",&response_headers);
                                 }
                             }
                         }
+                        let response_headers = serde_json::to_string(&headers).unwrap_or_default();
+                        span.record("apollo_private.http.response_headers",&response_headers);
 
                         if response.response.status() >= StatusCode::BAD_REQUEST {
                             span.record("otel.status_code", "Error");
@@ -554,8 +554,6 @@ impl Telemetry {
         } else {
             0.0
         };
-
-        println!("chosen sampling rate: {sampling_rate}");
 
         trace_config.sampler = config::SamplerOption::Always(Sampler::AlwaysOn);
         SPAN_SAMPLING_RATE.store(f64::to_bits(sampling_rate), Ordering::Relaxed);
@@ -1393,9 +1391,7 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 register_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
-    if req.context.contains_key(ENABLE_SUBGRAPH_FTV1)
-        && Span::current().context().span().span_context().is_sampled()
-    {
+    if req.context.contains_key(ENABLE_SUBGRAPH_FTV1) {
         req.subgraph_request.headers_mut().insert(
             "apollo-federation-include-trace",
             HeaderValue::from_static("ftv1"),

@@ -10,7 +10,9 @@ use parking_lot::Mutex;
 use parking_lot::RwLock;
 use prost::Message;
 use thiserror::Error;
+use tracing::Event;
 use tracing::Id;
+use tracing::Metadata;
 use tracing::Subscriber;
 use tracing_subscriber::field::Visit;
 use tracing_subscriber::layer::Context;
@@ -222,9 +224,9 @@ impl ApolloLayer {
     fn extract_trace(
         &self,
         span: LocalSpan,
-        mut spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
+        spans_by_parent_id: &mut HashMap<Option<Id>, Vec<LocalSpan>>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        self.extract_data_from_spans(span, &mut spans_by_parent_id)?
+        self.extract_data_from_spans(span, spans_by_parent_id)?
             .pop()
             .and_then(|node| {
                 if let TreeData::Request(trace) = node {
@@ -394,19 +396,17 @@ impl ApolloLayer {
     fn generate_report(
         &self,
         span: LocalSpan,
-        spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
+        spans_by_parent_id: &mut HashMap<Option<Id>, Vec<LocalSpan>>,
     ) {
         // Exporting to apollo means that we must have complete trace as the entire trace must be built.
         // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         if let SpanKind::Request { .. } = span.kind {
             match self.extract_trace(span, spans_by_parent_id) {
-                Ok(mut trace) => {
-                    let mut operation_signature = Default::default();
-                    std::mem::swap(&mut trace.signature, &mut operation_signature);
-                    if !operation_signature.is_empty() {
+                Ok(trace) => {
+                    if !trace.signature.is_empty() {
                         let report = SingleReport::Traces(TracesReport {
-                            traces: vec![(operation_signature, *trace)],
+                            traces: vec![(trace.signature.clone(), *trace)],
                         });
 
                         self.traces_sender.send(report);
@@ -500,7 +500,6 @@ where
         let parent_span = ctx.current_span();
 
         let span = ctx.span(id).expect("Span not found, this is a bug");
-        println!("apollo_telemetry on_new_span({}) id={id:?}", span.name());
 
         let mut extensions = span.extensions_mut();
         let local_trace = parent_span
@@ -773,34 +772,6 @@ where
             let parent_id = parent_span.id();
 
             match span.name() {
-                REQUEST_SPAN_NAME => {
-                    let mut response = None;
-                    values.record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS {
-                            response =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
-                    }));
-
-                    let rh: HashMap<_, _> = response
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let mut local = local_trace.write();
-                    if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Request { http, .. } = &mut span.kind {
-                            if !rh.is_empty() {
-                                http.response_headers = rh;
-                            }
-                        }
-                    }
-                }
                 ROUTER_SPAN_NAME => {
                     let mut response = None;
                     values.record(&mut StrVisitor(|name: &str, value: &str| {
@@ -925,40 +896,55 @@ where
                 }
                 _ => {}
             };
+        } else if span.name() == REQUEST_SPAN_NAME {
+            let mut response = None;
+            values.record(&mut StrVisitor(|name: &str, value: &str| {
+                if name == APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS {
+                    response = serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
+                }
+            }));
+
+            let rh: HashMap<_, _> = response
+                .map(|h| {
+                    h.into_iter()
+                        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let extensions = span.extensions();
+            let local_trace = match extensions.get::<Arc<RwLock<LocalTrace>>>() {
+                Some(trace) => trace,
+                None => return,
+            };
+            let mut local = local_trace.write();
+            if let Some(span) = local.get_span_mut(id, id) {
+                if let SpanKind::Request { http, .. } = &mut span.kind {
+                    if !rh.is_empty() {
+                        http.response_headers = rh;
+                    }
+                }
+            }
         }
     }
 
-    fn on_enter(&self, id: &tracing_core::span::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).expect("Span not found, this is a bug");
-
-        println!("apollo_telemetry: on_enter({})", span.name());
-    }
-    fn on_exit(&self, id: &tracing_core::span::Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).expect("Span not found, this is a bug");
-
-        println!("apollo_telemetry: on_exit({})", span.name());
-    }
     fn on_close(&self, id: Id, ctx: Context<'_, S>) {
         let span = ctx.span(&id).expect("Span not found, this is a bug");
         let parent_id = span.parent().map(|s| s.id());
 
-        println!("apollo_telemetry: on_close({})", span.name());
         match parent_id {
             None => {
                 // extract root here
                 let mut extensions = span.extensions_mut();
                 if let Some(local_trace) = extensions.remove::<Arc<RwLock<LocalTrace>>>() {
-                    let mut spans_by_parent_id = HashMap::new();
-                    {
-                        let mut local = local_trace.write();
-                        std::mem::swap(&mut spans_by_parent_id, &mut local.spans_by_parent_id);
-                    }
-                    if let Some(mut local_span) =
-                        spans_by_parent_id.remove(&None).and_then(|mut v| v.pop())
+                    let mut local = local_trace.write();
+                    if let Some(mut local_span) = local
+                        .spans_by_parent_id
+                        .remove(&None)
+                        .and_then(|mut v| v.pop())
                     {
                         local_span.end_time = Some(SystemTime::now());
                         println!("generate report");
-                        self.generate_report(local_span, spans_by_parent_id);
+                        self.generate_report(local_span, &mut local.spans_by_parent_id);
                     }
                 }
             }
@@ -973,6 +959,16 @@ where
                 }
             }
         }
+    }
+
+    #[inline]
+    fn enabled(&self, _metadata: &Metadata<'_>, _ctx: Context<'_, S>) -> bool {
+        true
+    }
+
+    #[inline]
+    fn event_enabled(&self, _event: &Event<'_>, _ctx: Context<'_, S>) -> bool {
+        true
     }
 }
 

@@ -191,39 +191,11 @@ where
     ) -> bool {
         let current_span = cx.current_span();
 
-        if meta.is_span() {
-            println!(
-                "sampling filter: parent span is_known={}, id={:?}, metadata={:?}\non_enabled meta = {:?}",
-                current_span.is_known(),
-                current_span.id(),
-                current_span.metadata().as_ref().map(|m| m.name()),
-                meta.name()
-            );
-
-            match current_span.id() {
-                // this is the root span, where we make the sampling decision
-                None => {
-                    let sampled = self.sample();
-                    println!("sample:{sampled}");
-                    //self.sample()
-                    sampled
-                }
-                // if not in the root span, we look at extensions in the parent span to see if it was sampled
-                // the parent span has been created because it might be used by other layers, but if this filter
-                // did not enable the span, then `on_new_span` was not valled and the extensions will not contain
-                // the `Sampled` struct
-                Some(id) => match cx.span(id) {
-                    None => false,
-                    Some(span_ref) => {
-                        let sampled = span_ref.extensions().get::<Sampled>().is_some();
-                        println!("parent span {} is sampled: {sampled}", span_ref.name());
-                        sampled
-                    }
-                },
-            }
-        } else {
-            true
-        }
+        !meta.is_span()
+            || current_span
+                .id()
+                .map(|id| cx.span(id).is_some())
+                .unwrap_or_else(|| self.sample())
     }
 
     // if the filter enabled the span, then we signal it in the extensions, so it can be looked up by the
@@ -234,10 +206,6 @@ where
         id: &tracing_core::span::Id,
         ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        println!(
-            "SamplingFilter on_new_span name={:?} id={id:?}",
-            ctx.current_span().metadata().as_ref().map(|m| m.name()),
-        );
         let span = ctx.span(id).expect("Span not found, this is a bug");
         let mut extensions = span.extensions_mut();
         extensions.insert(Sampled);
