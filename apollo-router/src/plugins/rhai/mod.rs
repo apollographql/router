@@ -919,7 +919,6 @@ macro_rules! gen_map_deferred_response {
                                     ..Default::default()
                                 };
                                 response.errors = vec![error];
-                                response.incremental.clear();
                                 return Some(response);
                             }
 
