@@ -39,7 +39,6 @@ use reqwest::Client;
 use reqwest::Method;
 use reqwest::StatusCode;
 use serde_json::json;
-use serde_json_bytes::Value;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
@@ -572,21 +571,20 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
         &HeaderValue::from_static("application/json")
     );
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let invalid_gql_req: graphql::Error = response.json().await.unwrap();
+    let response_json: serde_json::Value = response.json().await.unwrap();
+
+    assert_eq!(response_json.get("data"), None);
+    let error = &response_json.get("errors").unwrap()[0];
+    let error_message = error.get("message").unwrap().as_str().unwrap();
+    let extensions = error.get("extensions").unwrap().as_object().unwrap();
+    let error_code = extensions.get("code").unwrap().as_str().unwrap();
+    let error_details = extensions.get("details").unwrap().as_str().unwrap();
+    assert_eq!(error_code, "INVALID_GRAPHQL_REQUEST");
     assert_eq!(
-        invalid_gql_req.extensions.get("code").unwrap(),
-        &Value::from(String::from("INVALID_GRAPHQL_REQUEST"))
+        error_details,
+        "failed to deserialize the request body into JSON: expected value at line 1 column 1"
     );
-    assert_eq!(
-        invalid_gql_req.extensions.get("details").unwrap(),
-        &Value::from(String::from(
-            "failed to deserialize the request body into JSON: expected value at line 1 column 1"
-        ))
-    );
-    assert_eq!(
-        invalid_gql_req.message,
-        "Invalid GraphQL request".to_string()
-    );
+    assert_eq!(error_message, "Invalid GraphQL request");
     server.shutdown().await
 }
 

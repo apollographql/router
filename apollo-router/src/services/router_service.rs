@@ -396,23 +396,19 @@ where
                         error = %error,
                         %error
                     );
-                    Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.to_string())
-                            .body(Body::from(
-                                serde_json::to_string(
-                                    &graphql::Error::builder()
-                                        .message(String::from("Invalid GraphQL request"))
-                                        .extension_code("INVALID_GRAPHQL_REQUEST")
-                                        .extension("details", extension_details)
-                                        .build(),
-                                )
-                                .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
-                            ))
-                            .expect("cannot fail"),
-                        context,
-                    })
+
+                    router::Response::error_builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Invalid GraphQL request"))
+                                .extension_code("INVALID_GRAPHQL_REQUEST")
+                                .extension("details", extension_details)
+                                .build(),
+                        )
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.to_string())
+                        .context(context)
+                        .build()
                 }
             }
         };

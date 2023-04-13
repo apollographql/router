@@ -227,9 +227,13 @@ async fn empty_posts_should_not_work() {
     assert_eq!(1, actual.errors.len());
 
     let message = "Invalid GraphQL request";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "INVALID_GRAPHQL_REQUEST".into());
+    extensions_map.insert("details", "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0".into());
     let expected_error = graphql::Error::builder()
         .message(message)
         .extension_code("INVALID_GRAPHQL_REQUEST")
+        .extensions(extensions_map)
         .build();
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), hashmap! {});
