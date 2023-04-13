@@ -85,6 +85,9 @@ type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
 pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
 
+const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
+    "cannot access headers on a deferred response";
+
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let mut guard = self.lock().expect("poisoned mutex");
@@ -218,7 +221,7 @@ mod router_plugin {
     pub(crate) fn get_originating_headers_router_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -232,7 +235,7 @@ mod router_plugin {
     pub(crate) fn get_originating_headers_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -291,7 +294,7 @@ mod router_plugin {
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -308,7 +311,7 @@ mod router_plugin {
         _obj: &mut SharedMut<execution::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -907,7 +910,17 @@ macro_rules! gen_map_deferred_response {
                             );
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
-                                return None;
+                                let error_details = process_error(error);
+                                let mut guard = shared_response.lock().unwrap();
+                                let response_opt = guard.take();
+                                let $rhai_deferred_response { mut response, .. } = response_opt.unwrap();
+                                let error = Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                };
+                                response.errors = vec![error];
+                                response.incremental.clear();
+                                return Some(response);
                             }
 
                             let mut guard = shared_response.lock().unwrap();

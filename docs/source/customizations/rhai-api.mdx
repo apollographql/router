@@ -435,6 +435,24 @@ The following fields are identical in behavior to their `request` counterparts:
 * [`headers`](#requestheaders)
 * [`body.extensions`](#requestbodyextensions)
 
+Note: Be particularly careful when interacting with headers in a response context. For SupergraphService and ExecutionService, headers only exist for the first response in a deferred response stream. Since you have no way of knowing if a response is deferred or not, the best way to handle this is to wrap your `response.headers` interactions in a `try...catch` block and handle exceptions accordingly.
+
+Here's an example of how to handle this specific error:
+
+```rhai
+    try {
+        print(`all response headers: ${response.headers}`);
+    }
+    catch(err)
+    {
+        // ignore deferred header access errors
+        if err != "cannot access headers on a deferred response" {
+            log_error(`error: ${err}`);
+        }
+    }
+```
+
+
 Other fields are described below.
 
 ### `response.body.label`
