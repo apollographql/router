@@ -217,11 +217,25 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    #[rhai_fn(name = "is_primary", pure, return_raw)]
+    pub(crate) fn supergraph_response_is_primary(
+        _obj: &mut SharedMut<supergraph::Response>,
+    ) -> Result<bool, Box<EvalAltResult>> {
+        Ok(true)
+    }
+
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_router_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(name = "is_primary", pure, return_raw)]
+    pub(crate) fn supergraph_deferred_response_is_primary(
+        obj: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> Result<bool, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.is_primary()))
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -231,11 +245,25 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    #[rhai_fn(name = "is_primary", pure, return_raw)]
+    pub(crate) fn execution_response_is_primary(
+        _obj: &mut SharedMut<execution::Response>,
+    ) -> Result<bool, Box<EvalAltResult>> {
+        Ok(true)
+    }
+
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(name = "is_primary", pure, return_raw)]
+    pub(crate) fn execution_deferred_response_is_primary(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> Result<bool, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.is_primary()))
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]

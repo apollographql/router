@@ -161,3 +161,22 @@ fn process_subgraph_response_om_missing_message(response) {
         status: 400,
     };
 }
+
+fn process_supergraph_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
+    }
+}
+
+fn process_execution_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
+    }
+}
+

@@ -408,10 +408,26 @@ async fn it_can_process_supergraph_response() {
 }
 
 #[tokio::test]
+async fn it_can_process_supergraph_response_is_primary() {
+    gen_response_test!(
+        RhaiSupergraphResponse,
+        "process_supergraph_response_is_primary"
+    );
+}
+
+#[tokio::test]
 async fn it_can_process_supergraph_deferred_response() {
     gen_response_test!(
         RhaiSupergraphDeferredResponse,
         "process_supergraph_response"
+    );
+}
+
+#[tokio::test]
+async fn it_can_process_supergraph_deferred_response_is_primary() {
+    gen_response_test!(
+        RhaiSupergraphDeferredResponse,
+        "process_supergraph_response_is_primary"
     );
 }
 
@@ -421,8 +437,24 @@ async fn it_can_process_execution_response() {
 }
 
 #[tokio::test]
+async fn it_can_process_execution_response_is_primary() {
+    gen_response_test!(
+        RhaiExecutionResponse,
+        "process_execution_response_is_primary"
+    );
+}
+
+#[tokio::test]
 async fn it_can_process_execution_deferred_response() {
     gen_response_test!(RhaiExecutionDeferredResponse, "process_execution_response");
+}
+
+#[tokio::test]
+async fn it_can_process_execution_deferred_response_is_primary() {
+    gen_response_test!(
+        RhaiExecutionDeferredResponse,
+        "process_execution_response_is_primary"
+    );
 }
 
 #[tokio::test]
