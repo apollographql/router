@@ -60,7 +60,7 @@ pub(crate) struct Config {
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_version_header: HeaderName,
 
-    /// The buffer size for sending traces to Apollo. (deprecated, has no effect now)
+    /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.

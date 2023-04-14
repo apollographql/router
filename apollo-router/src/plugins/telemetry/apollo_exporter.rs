@@ -65,7 +65,7 @@ impl Sender {
             Sender::Apollo(channel) => {
                 if let Err(err) = channel.to_owned().try_send(report) {
                     tracing::warn!(
-                        "could not send data to spaceport, metric will be dropped: {}",
+                        "could not send metrics to spaceport, metric will be dropped: {}",
                         err
                     );
                 }
