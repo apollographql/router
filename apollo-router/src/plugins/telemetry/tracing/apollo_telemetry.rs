@@ -1,24 +1,31 @@
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::time::SystemTime;
 use std::time::SystemTimeError;
 
+use async_trait::async_trait;
 use derivative::Derivative;
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use futures::TryFutureExt;
 use itertools::Itertools;
-use parking_lot::Mutex;
-use parking_lot::RwLock;
+use lru::LruCache;
+use opentelemetry::sdk::export::trace::ExportResult;
+use opentelemetry::sdk::export::trace::SpanData;
+use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::trace::SpanId;
+use opentelemetry::trace::TraceError;
+use opentelemetry::Key;
+use opentelemetry::Value;
+use opentelemetry_semantic_conventions::trace::HTTP_METHOD;
 use prost::Message;
+use serde::de::DeserializeOwned;
 use thiserror::Error;
-use tracing::Id;
-use tracing::Subscriber;
-use tracing_subscriber::field::Visit;
-use tracing_subscriber::layer::Context;
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::Layer;
 use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
@@ -37,7 +44,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
-use crate::plugins::telemetry::apollo_exporter::Sender;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
@@ -57,21 +63,26 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 
-const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
-const APOLLO_PRIVATE_SENT_TIME_OFFSET: &str = "apollo_private.sent_time_offset";
-const APOLLO_PRIVATE_GRAPHQL_VARIABLES: &str = "apollo_private.graphql.variables";
-const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: &str = "apollo_private.http.request_headers";
-const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: &str = "apollo_private.http.response_headers";
-pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: &str = "apollo_private.operation_signature";
-const APOLLO_PRIVATE_FTV1: &str = "apollo_private.ftv1";
-const SUBGRAPH_NAME: &str = "apollo.subgraph.name";
-const CLIENT_NAME: &str = "client.name";
-const CLIENT_VERSION: &str = "client.version";
-const PATH: &str = "graphql.path";
-const DEPENDS: &str = "graphql.depends";
-const LABEL: &str = "graphql.label";
-const CONDITION: &str = "graphql.condition";
-const OPERATION_NAME: &str = "graphql.operation.name";
+const APOLLO_PRIVATE_DURATION_NS: Key = Key::from_static_str("apollo_private.duration_ns");
+const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
+    Key::from_static_str("apollo_private.sent_time_offset");
+const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
+    Key::from_static_str("apollo_private.graphql.variables");
+const APOLLO_PRIVATE_HTTP_REQUEST_HEADERS: Key =
+    Key::from_static_str("apollo_private.http.request_headers");
+const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
+    Key::from_static_str("apollo_private.http.response_headers");
+pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
+    Key::from_static_str("apollo_private.operation_signature");
+const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
+const PATH: Key = Key::from_static_str("graphql.path");
+const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
+const CLIENT_NAME: Key = Key::from_static_str("client.name");
+const CLIENT_VERSION: Key = Key::from_static_str("client.version");
+const DEPENDS: Key = Key::from_static_str("graphql.depends");
+const LABEL: Key = Key::from_static_str("graphql.label");
+const CONDITION: Key = Key::from_static_str("graphql.condition");
+const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -91,16 +102,17 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 }
 
-/// A [`tracing_subscriber::Layer`] that writes to [`Reporter`].
+/// A [`SpanExporter`] that writes to [`Reporter`].
 ///
+/// [`SpanExporter`]: super::SpanExporter
 /// [`Reporter`]: crate::plugins::telemetry::Reporter
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(crate) struct ApolloLayer {
-    field_execution_weight: f64,
-    traces: Arc<Mutex<Vec<(String, proto::reports::Trace)>>>,
+pub(crate) struct Exporter {
+    spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
     #[derivative(Debug = "ignore")]
-    traces_sender: Sender,
+    report_exporter: Arc<ApolloExporter>,
+    field_execution_weight: f64,
 }
 
 enum TreeData {
@@ -125,52 +137,44 @@ enum TreeData {
 }
 
 #[buildstructor::buildstructor]
-impl ApolloLayer {
+impl Exporter {
     #[builder]
     pub(crate) fn new(
         endpoint: Url,
         apollo_key: String,
         apollo_graph_ref: String,
         schema_id: String,
+        buffer_size: NonZeroUsize,
         field_execution_sampler: SamplerOption,
         batch_config: BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
-
-        let report_exporter = ApolloExporter::new(
-            &endpoint,
-            &batch_config,
-            &apollo_key,
-            &apollo_graph_ref,
-            &schema_id,
-        )?;
-        let traces_sender = report_exporter.start();
-
         Ok(Self {
+            spans_by_parent_id: LruCache::new(buffer_size),
+            report_exporter: Arc::new(ApolloExporter::new(
+                &endpoint,
+                &batch_config,
+                &apollo_key,
+                &apollo_graph_ref,
+                &schema_id,
+            )?),
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
                 SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
-            traces: Arc::new(Mutex::new(Vec::new())),
-            traces_sender,
         })
     }
 
     fn extract_root_trace(
-        &self,
-        span: LocalSpan,
+        &mut self,
+        span: &SpanData,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
-        let http = if let SpanKind::Request { http } = span.kind {
-            http
-        } else {
-            unreachable!("we already tested that case in the caller");
-        };
-
+        let http = extract_http_data(span);
         let mut root_trace = proto::reports::Trace {
             start_time: Some(span.start_time.into()),
-            end_time: Some(span.end_time.unwrap_or_else(SystemTime::now).into()),
+            end_time: Some(span.end_time.into()),
             duration_ns: 0,
             root: None,
             details: None,
@@ -205,7 +209,6 @@ impl ApolloLayer {
                     variables_json,
                 } => {
                     root_trace.field_execution_weight = self.field_execution_weight;
-
                     root_trace.signature = operation_signature;
                     root_trace.details = Some(Details {
                         variables_json,
@@ -219,12 +222,8 @@ impl ApolloLayer {
         Ok(Box::new(root_trace))
     }
 
-    fn extract_trace(
-        &self,
-        span: LocalSpan,
-        mut spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
-    ) -> Result<Box<proto::reports::Trace>, Error> {
-        self.extract_data_from_spans(span, &mut spans_by_parent_id)?
+    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::reports::Trace>, Error> {
+        self.extract_data_from_spans(&span)?
             .pop()
             .and_then(|node| {
                 if let TreeData::Request(trace) = node {
@@ -236,16 +235,14 @@ impl ApolloLayer {
             .expect("root trace must exist because it is constructed on the request span, qed")
     }
 
-    fn extract_data_from_spans(
-        &self,
-        span: LocalSpan,
-        spans_by_parent_id: &mut HashMap<Option<Id>, Vec<LocalSpan>>,
-    ) -> Result<Vec<TreeData>, Error> {
-        let (mut child_nodes, errors) = spans_by_parent_id
-            .remove(&Some(span.id.clone()))
+    fn extract_data_from_spans(&mut self, span: &SpanData) -> Result<Vec<TreeData>, Error> {
+        let (mut child_nodes, errors) = self
+            .spans_by_parent_id
+            .pop_entry(&span.span_context.span_id())
+            .map(|(_, spans)| spans)
             .unwrap_or_default()
             .into_iter()
-            .map(|span| self.extract_data_from_spans(span, spans_by_parent_id))
+            .map(|span| self.extract_data_from_spans(&span))
             .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
                 match next {
                     Ok(mut children) => oks.append(&mut children),
@@ -257,92 +254,117 @@ impl ApolloLayer {
             return Err(Error::MultipleErrors(errors));
         }
 
-        Ok(match span.kind {
-            SpanKind::Parallel => vec![TreeData::QueryPlanNode(QueryPlanNode {
+        Ok(match span.name.as_ref() {
+            PARALLEL_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(proto::reports::trace::query_plan_node::Node::Parallel(
                     ParallelNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
                 )),
             })],
-            SpanKind::Sequence => vec![TreeData::QueryPlanNode(QueryPlanNode {
+            SEQUENCE_SPAN_NAME => vec![TreeData::QueryPlanNode(QueryPlanNode {
                 node: Some(proto::reports::trace::query_plan_node::Node::Sequence(
                     SequenceNode {
                         nodes: child_nodes.remove_query_plan_nodes(),
                     },
                 )),
             })],
-            SpanKind::Fetch {
-                service_name,
-                sent_time_offset,
-            } => {
+            FETCH_SPAN_NAME => {
                 let (trace_parsing_failed, trace) = match child_nodes.pop() {
                     Some(TreeData::Trace(Some(Ok(trace)))) => (false, Some(trace)),
                     Some(TreeData::Trace(Some(Err(_err)))) => (true, None),
                     _ => (false, None),
                 };
-
+                let service_name = (span
+                    .attributes
+                    .get(&SUBGRAPH_NAME)
+                    .cloned()
+                    .unwrap_or_else(|| Value::String("unknown service".into()))
+                    .as_str())
+                .to_string();
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
                             service_name,
                             trace_parsing_failed,
                             trace,
-                            sent_time_offset: sent_time_offset.unwrap_or_default(),
+                            sent_time_offset: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_SENT_TIME_OFFSET)
+                                .and_then(extract_i64)
+                                .map(|f| f as u64)
+                                .unwrap_or_default(),
                             sent_time: Some(span.start_time.into()),
-                            received_time: Some(
-                                span.end_time.unwrap_or_else(SystemTime::now).into(),
-                            ),
+                            received_time: Some(span.end_time.into()),
                         }),
                     )),
                 })]
             }
-            SpanKind::Flatten { path } => {
+            FLATTEN_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Flatten(
                         Box::new(FlattenNode {
-                            response_path: path,
+                            response_path: span
+                                .attributes
+                                .get(&PATH)
+                                .map(extract_path)
+                                .unwrap_or_default(),
                             node: child_nodes.remove_first_query_plan_node().map(Box::new),
                         }),
                     )),
                 })]
             }
-            SpanKind::Subgraph { trace } => {
-                vec![TreeData::Trace(trace)]
+            SUBGRAPH_SPAN_NAME => {
+                vec![TreeData::Trace(
+                    span.attributes
+                        .get(&APOLLO_PRIVATE_FTV1)
+                        .and_then(extract_ftv1_trace),
+                )]
             }
-            SpanKind::Supergraph {
-                operation_name,
-                operation_signature,
-                variables_json,
-            } => {
+            SUPERGRAPH_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
-                    operation_signature: operation_signature.unwrap_or_default(),
-                    operation_name: operation_name.unwrap_or_default(),
-                    variables_json,
+                    operation_signature: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                    operation_name: span
+                        .attributes
+                        .get(&OPERATION_NAME)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                    variables_json: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
+                        .and_then(extract_json)
+                        .unwrap_or_default(),
                 });
                 child_nodes
             }
-            SpanKind::Request { .. } => {
+            REQUEST_SPAN_NAME => {
                 vec![TreeData::Request(
                     self.extract_root_trace(span, child_nodes),
                 )]
             }
-            SpanKind::Router {
-                http,
-                client_name,
-                client_version,
-                duration_ns,
-            } => {
+            ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
-                    http,
-                    client_name,
-                    client_version,
-                    duration_ns: duration_ns.unwrap_or_default(),
+                    http: Box::new(extract_http_data(span)),
+                    client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
+                    client_version: span
+                        .attributes
+                        .get(&CLIENT_VERSION)
+                        .and_then(extract_string),
+                    duration_ns: span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_DURATION_NS)
+                        .and_then(extract_i64)
+                        .map(|e| e as u64)
+                        .unwrap_or_default(),
                 });
                 child_nodes
             }
-            SpanKind::Defer => {
+            DEFER_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(Node::Defer(Box::new(DeferNode {
                         primary: child_nodes.remove_first_defer_primary_node().map(Box::new),
@@ -350,650 +372,86 @@ impl ApolloLayer {
                     }))),
                 })]
             }
-            SpanKind::DeferPrimary => {
+            DEFER_PRIMARY_SPAN_NAME => {
                 vec![TreeData::DeferPrimary(DeferNodePrimary {
                     node: child_nodes.remove_first_query_plan_node().map(Box::new),
                 })]
             }
-            SpanKind::DeferDeferred {
-                path,
-                depends,
-                label,
-            } => {
+            DEFER_DEFERRED_SPAN_NAME => {
                 vec![TreeData::DeferDeferred(DeferredNode {
                     node: child_nodes.remove_first_query_plan_node(),
-                    path,
-                    depends,
-                    label,
+                    path: span
+                        .attributes
+                        .get(&PATH)
+                        .map(extract_path)
+                        .unwrap_or_default(),
+                    // In theory we don't have to do the transformation here, but it is safer to do so.
+                    depends: span
+                        .attributes
+                        .get(&DEPENDS)
+                        .and_then(extract_json::<Vec<crate::query_planner::Depends>>)
+                        .unwrap_or_default()
+                        .iter()
+                        .map(|d| DeferredNodeDepends {
+                            id: d.id.clone(),
+                            defer_label: d.defer_label.clone().unwrap_or_default(),
+                        })
+                        .collect(),
+                    label: span
+                        .attributes
+                        .get(&LABEL)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
                 })]
             }
-            SpanKind::Condition { condition } => {
+
+            CONDITION_SPAN_NAME => {
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(Node::Condition(Box::new(ConditionNode {
-                        condition: condition.unwrap_or_default(),
+                        condition: span
+                            .attributes
+                            .get(&CONDITION)
+                            .and_then(extract_string)
+                            .unwrap_or_default(),
                         if_clause: child_nodes.remove_first_condition_if_node().map(Box::new),
                         else_clause: child_nodes.remove_first_condition_else_node().map(Box::new),
                     }))),
                 })]
             }
-            SpanKind::ConditionIf => {
+            CONDITION_IF_SPAN_NAME => {
                 vec![TreeData::ConditionIf(
                     child_nodes.remove_first_query_plan_node(),
                 )]
             }
-            SpanKind::ConditionElse => {
+            CONDITION_ELSE_SPAN_NAME => {
                 vec![TreeData::ConditionElse(
                     child_nodes.remove_first_query_plan_node(),
                 )]
             }
-
             _ => child_nodes,
         })
     }
+}
 
-    fn generate_report(
-        &self,
-        span: LocalSpan,
-        spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
-    ) {
-        // Exporting to apollo means that we must have complete trace as the entire trace must be built.
-        // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
-        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
-        if let SpanKind::Request { .. } = span.kind {
-            match self.extract_trace(span, spans_by_parent_id) {
-                Ok(mut trace) => {
-                    let mut operation_signature = Default::default();
-                    std::mem::swap(&mut trace.signature, &mut operation_signature);
-                    if !operation_signature.is_empty() {
-                        let report = SingleReport::Traces(TracesReport {
-                            traces: vec![(operation_signature, *trace)],
-                        });
+fn extract_json<T: DeserializeOwned>(v: &Value) -> Option<T> {
+    extract_string(v)
+        .map(|v| serde_json::from_str(&v))
+        .transpose()
+        .unwrap_or(None)
+}
 
-                        self.traces_sender.send(report);
-                    }
-                }
-                Err(Error::MultipleErrors(errors)) => {
-                    tracing::error!(
-                        "failed to construct trace: {}, skipping",
-                        Error::MultipleErrors(errors)
-                    );
-                }
-                Err(error) => {
-                    tracing::error!("failed to construct trace: {}, skipping", error);
-                }
-            }
-        }
+fn extract_string(v: &Value) -> Option<String> {
+    if let Value::String(v) = v {
+        Some(v.to_string())
+    } else {
+        None
     }
 }
 
-struct LocalSpan {
-    id: Id,
-    kind: SpanKind,
-    start_time: SystemTime,
-    end_time: Option<SystemTime>,
-}
-
-enum SpanKind {
-    Other,
-    Request {
-        http: Http,
-    },
-    Router {
-        http: Box<Http>,
-        client_name: Option<String>,
-        client_version: Option<String>,
-        duration_ns: Option<u64>,
-    },
-    Supergraph {
-        operation_name: Option<String>,
-        operation_signature: Option<String>,
-        variables_json: HashMap<String, String>,
-    },
-    Subgraph {
-        trace: Option<Result<Box<proto::reports::Trace>, Error>>,
-    },
-    Condition {
-        condition: Option<String>,
-    },
-    ConditionIf,
-    ConditionElse,
-    Defer,
-    DeferPrimary,
-    DeferDeferred {
-        path: Vec<ResponsePathElement>,
-        depends: Vec<DeferredNodeDepends>,
-        label: String,
-    },
-    Fetch {
-        service_name: String, /*trace parsing failed, Trace proto */
-        sent_time_offset: Option<u64>,
-    },
-    Flatten {
-        path: Vec<ResponsePathElement>,
-    },
-    Parallel,
-    Sequence,
-}
-
-struct LocalTrace {
-    spans_by_parent_id: HashMap<Option<Id>, Vec<LocalSpan>>,
-}
-
-impl LocalTrace {
-    fn get_span_mut(&mut self, parent_id: &Id, id: &Id) -> Option<&mut LocalSpan> {
-        self.spans_by_parent_id
-            .get_mut(&Some(parent_id.clone()))
-            .and_then(|v| v.iter_mut().find(|span| &span.id == id))
-    }
-}
-
-impl<S> Layer<S> for ApolloLayer
-where
-    S: Subscriber + for<'span> LookupSpan<'span>,
-{
-    fn on_new_span(
-        &self,
-        attrs: &tracing_core::span::Attributes<'_>,
-        id: &tracing_core::span::Id,
-        ctx: Context<'_, S>,
-    ) {
-        let parent_span = ctx.current_span();
-
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-
-        let mut extensions = span.extensions_mut();
-        let local_trace = parent_span
-            .id()
-            .and_then(|id| {
-                let span_ref = ctx.span(id).expect("Span not found, this is a bug");
-                let extensions = span_ref.extensions();
-                extensions.get::<Arc<RwLock<LocalTrace>>>().cloned()
-            })
-            .unwrap_or_else(|| {
-                Arc::new(RwLock::new(LocalTrace {
-                    spans_by_parent_id: HashMap::new(),
-                }))
-            });
-
-        let kind = match span.name() {
-            REQUEST_SPAN_NAME => {
-                //FIXME: why do we extract the HTTP data both at the request and router level?
-                let mut method = None;
-                let mut request = None;
-
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        "http.method" => {
-                            method = Some(match value {
-                                "OPTIONS" => proto::reports::trace::http::Method::Options,
-                                "GET" => proto::reports::trace::http::Method::Get,
-                                "HEAD" => proto::reports::trace::http::Method::Head,
-                                "POST" => proto::reports::trace::http::Method::Post,
-                                "PUT" => proto::reports::trace::http::Method::Put,
-                                "DELETE" => proto::reports::trace::http::Method::Delete,
-                                "TRACE" => proto::reports::trace::http::Method::Trace,
-                                "CONNECT" => proto::reports::trace::http::Method::Connect,
-                                "PATCH" => proto::reports::trace::http::Method::Patch,
-                                _ => proto::reports::trace::http::Method::Unknown,
-                            })
-                        }
-                        APOLLO_PRIVATE_HTTP_REQUEST_HEADERS => {
-                            request =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
-
-                        _ => {}
-                    }));
-                let request_headers: HashMap<_, _> = request
-                    .map(|h| {
-                        h.into_iter()
-                            .map(|(header_name, value)| {
-                                (header_name.to_lowercase(), Values { value })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                let mut status_opt = None;
-
-                attrs
-                    .values()
-                    .record(&mut I64Visitor(|name: &str, value: i64| {
-                        if name == "http.status" {
-                            status_opt = Some(value as u32);
-                        }
-                    }));
-
-                SpanKind::Request {
-                    http: Http {
-                        method: method
-                            .unwrap_or(proto::reports::trace::http::Method::Unknown)
-                            .into(),
-                        request_headers,
-                        status_code: status_opt.unwrap_or(0),
-                        response_headers: HashMap::new(),
-                    },
-                }
-            }
-            ROUTER_SPAN_NAME => {
-                let mut method = None;
-                let mut request = None;
-                let mut client_name = None;
-                let mut client_version = None;
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        "http.method" => {
-                            method = Some(match value {
-                                "OPTIONS" => proto::reports::trace::http::Method::Options,
-                                "GET" => proto::reports::trace::http::Method::Get,
-                                "HEAD" => proto::reports::trace::http::Method::Head,
-                                "POST" => proto::reports::trace::http::Method::Post,
-                                "PUT" => proto::reports::trace::http::Method::Put,
-                                "DELETE" => proto::reports::trace::http::Method::Delete,
-                                "TRACE" => proto::reports::trace::http::Method::Trace,
-                                "CONNECT" => proto::reports::trace::http::Method::Connect,
-                                "PATCH" => proto::reports::trace::http::Method::Patch,
-                                _ => proto::reports::trace::http::Method::Unknown,
-                            })
-                        }
-                        APOLLO_PRIVATE_HTTP_REQUEST_HEADERS => {
-                            request =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
-                        CLIENT_NAME => client_name = Some(value.to_string()),
-                        CLIENT_VERSION => client_version = Some(value.to_string()),
-                        _ => {}
-                    }));
-                let request_headers: HashMap<_, _> = request
-                    .map(|h| {
-                        h.into_iter()
-                            .map(|(header_name, value)| {
-                                (header_name.to_lowercase(), Values { value })
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default();
-
-                SpanKind::Router {
-                    http: Box::new(Http {
-                        method: method
-                            .unwrap_or(proto::reports::trace::http::Method::Unknown)
-                            .into(),
-                        request_headers,
-                        response_headers: HashMap::new(),
-                        status_code: 0,
-                    }),
-                    client_name,
-                    client_version,
-                    duration_ns: None,
-                }
-            }
-            SUPERGRAPH_SPAN_NAME => {
-                let mut vars = None;
-
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == APOLLO_PRIVATE_GRAPHQL_VARIABLES {
-                            vars = Some(value.to_string())
-                        }
-                    }));
-
-                let variables_json: HashMap<String, String> = vars
-                    .and_then(|v| serde_json::from_str(&v).ok())
-                    .unwrap_or_default();
-
-                SpanKind::Supergraph {
-                    operation_name: None,
-                    operation_signature: None,
-                    variables_json,
-                }
-            }
-            SUBGRAPH_SPAN_NAME => SpanKind::Subgraph { trace: None },
-            CONDITION_SPAN_NAME => {
-                let mut condition = None;
-
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == CONDITION {
-                            condition = Some(value.to_string())
-                        }
-                    }));
-                SpanKind::Condition { condition }
-            }
-            CONDITION_IF_SPAN_NAME => SpanKind::ConditionIf,
-            CONDITION_ELSE_SPAN_NAME => SpanKind::ConditionElse,
-            DEFER_SPAN_NAME => SpanKind::Defer,
-            DEFER_PRIMARY_SPAN_NAME => SpanKind::DeferPrimary,
-            DEFER_DEFERRED_SPAN_NAME => {
-                let mut path = None;
-                let mut depends = None;
-                let mut label = None;
-
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == PATH {
-                            path = Some(path_from_string(value));
-                        }
-                        if name == DEPENDS {
-                            depends = Some(
-                                serde_json::from_str::<Vec<crate::query_planner::Depends>>(value)
-                                    .ok()
-                                    .unwrap_or_default()
-                                    .into_iter()
-                                    .map(|d| DeferredNodeDepends {
-                                        id: d.id,
-                                        defer_label: d.defer_label.unwrap_or_default(),
-                                    })
-                                    .collect(),
-                            );
-                        }
-                        if name == LABEL {
-                            label = Some(value.to_string());
-                        }
-                    }));
-                SpanKind::DeferDeferred {
-                    path: path.unwrap_or_default(),
-                    depends: depends.unwrap_or_default(),
-                    label: label.unwrap_or_default(),
-                }
-            }
-            FETCH_SPAN_NAME => {
-                let mut service_name = None;
-
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == SUBGRAPH_NAME {
-                            service_name = Some(value.to_string())
-                        }
-                    }));
-
-                SpanKind::Fetch {
-                    service_name: service_name.unwrap_or_else(|| "unknown service".to_string()),
-                    sent_time_offset: None,
-                }
-            }
-            FLATTEN_SPAN_NAME => {
-                let mut path = None;
-
-                attrs
-                    .values()
-                    .record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == PATH {
-                            path = Some(path_from_string(value));
-                        }
-                    }));
-
-                SpanKind::Flatten {
-                    path: path.unwrap_or_default(),
-                }
-            }
-            PARALLEL_SPAN_NAME => SpanKind::Parallel,
-            SEQUENCE_SPAN_NAME => SpanKind::Sequence,
-            _ => SpanKind::Other,
-        };
-
-        let local_span = LocalSpan {
-            id: id.clone(),
-            kind,
-            start_time: SystemTime::now(),
-            end_time: None,
-        };
-
-        local_trace
-            .write()
-            .spans_by_parent_id
-            .entry(parent_span.id().cloned())
-            .or_default()
-            .push(local_span);
-
-        extensions.insert(local_trace);
-    }
-
-    fn on_record(
-        &self,
-        id: &tracing_core::span::Id,
-        values: &tracing_core::span::Record<'_>,
-        ctx: Context<'_, S>,
-    ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let parent_span = span.parent();
-
-        if let Some(parent_span) = parent_span {
-            let extensions = span.extensions();
-            let local_trace = match extensions.get::<Arc<RwLock<LocalTrace>>>() {
-                Some(trace) => trace,
-                None => return,
-            };
-            let parent_id = parent_span.id();
-
-            match span.name() {
-                REQUEST_SPAN_NAME => {
-                    let mut response = None;
-                    values.record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS {
-                            response =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
-                    }));
-
-                    let rh: HashMap<_, _> = response
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let mut local = local_trace.write();
-                    if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Request { http, .. } = &mut span.kind {
-                            if !rh.is_empty() {
-                                http.response_headers = rh;
-                            }
-                        }
-                    }
-                }
-                ROUTER_SPAN_NAME => {
-                    let mut response = None;
-                    values.record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS {
-                            response =
-                                serde_json::from_str::<HashMap<String, Vec<String>>>(value).ok()
-                        }
-                    }));
-
-                    let rh: HashMap<_, _> = response
-                        .map(|h| {
-                            h.into_iter()
-                                .map(|(header_name, value)| {
-                                    (header_name.to_lowercase(), Values { value })
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default();
-
-                    let mut duration_ns_opt = None;
-                    let mut status_opt = None;
-
-                    values.record(&mut I64Visitor(|name: &str, value: i64| {
-                        if name == APOLLO_PRIVATE_DURATION_NS {
-                            duration_ns_opt = Some(value as u64)
-                        }
-                        if name == "http.status" {
-                            status_opt = Some(value as u32);
-                        }
-                    }));
-
-                    let mut local = local_trace.write();
-                    if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Router {
-                            duration_ns, http, ..
-                        } = &mut span.kind
-                        {
-                            if duration_ns_opt.is_some() {
-                                *duration_ns = duration_ns_opt;
-                            }
-                            if !rh.is_empty() {
-                                http.response_headers = rh;
-                            }
-                            if let Some(status) = status_opt {
-                                http.status_code = status;
-                            }
-                        }
-                    }
-                }
-                SUPERGRAPH_SPAN_NAME => {
-                    let mut op_signature = None;
-                    let mut op_name = None;
-
-                    values.record(&mut StrVisitor(|name: &str, value: &str| match name {
-                        APOLLO_PRIVATE_OPERATION_SIGNATURE => {
-                            op_signature = Some(value.to_string())
-                        }
-                        OPERATION_NAME => op_name = Some(value.to_string()),
-                        _ => {}
-                    }));
-
-                    let mut local = local_trace.write();
-                    if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Supergraph {
-                            operation_name,
-                            operation_signature,
-                            ..
-                        } = &mut span.kind
-                        {
-                            if op_name.is_some() {
-                                *operation_name = op_name;
-                            }
-
-                            if op_signature.is_some() {
-                                *operation_signature = op_signature;
-                            }
-                        }
-                    }
-                }
-                SUBGRAPH_SPAN_NAME => {
-                    let mut ftv1_trace_opt = None;
-
-                    values.record(&mut StrVisitor(|name: &str, value: &str| {
-                        if name == APOLLO_PRIVATE_FTV1 {
-                            ftv1_trace_opt = if let Some(t) = decode_ftv1_trace(value) {
-                                Some(Ok(Box::new(t)))
-                            } else {
-                                Some(Err(Error::TraceParsingFailed))
-                            };
-                        }
-                    }));
-
-                    let mut local = local_trace.write();
-                    if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Subgraph { trace } = &mut span.kind {
-                            if ftv1_trace_opt.is_some() {
-                                *trace = ftv1_trace_opt;
-                            }
-                        }
-                    }
-                }
-                FETCH_SPAN_NAME => {
-                    let mut sent_time_offset_opt = None;
-
-                    values.record(&mut I64Visitor(|name: &str, value: i64| {
-                        if name == APOLLO_PRIVATE_SENT_TIME_OFFSET {
-                            sent_time_offset_opt = Some(value as u64)
-                        }
-                    }));
-
-                    let mut local = local_trace.write();
-                    if let Some(span) = local.get_span_mut(&parent_id, id) {
-                        if let SpanKind::Fetch {
-                            sent_time_offset, ..
-                        } = &mut span.kind
-                        {
-                            if sent_time_offset_opt.is_some() {
-                                *sent_time_offset = sent_time_offset_opt;
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            };
-        }
-    }
-
-    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        let span = ctx.span(&id).expect("Span not found, this is a bug");
-        let parent_id = span.parent().map(|s| s.id());
-
-        match parent_id {
-            None => {
-                // extract root here
-                let mut extensions = span.extensions_mut();
-                if let Some(local_trace) = extensions.remove::<Arc<RwLock<LocalTrace>>>() {
-                    let mut spans_by_parent_id = HashMap::new();
-                    {
-                        let mut local = local_trace.write();
-                        std::mem::swap(&mut spans_by_parent_id, &mut local.spans_by_parent_id);
-                    }
-                    if let Some(mut local_span) =
-                        spans_by_parent_id.remove(&None).and_then(|mut v| v.pop())
-                    {
-                        local_span.end_time = Some(SystemTime::now());
-                        self.generate_report(local_span, spans_by_parent_id);
-                    }
-                }
-            }
-            Some(parent_id) => {
-                let mut extensions = span.extensions_mut();
-                if let Some(local_trace) = extensions.remove::<Arc<RwLock<LocalTrace>>>() {
-                    let mut local = local_trace.write();
-
-                    if let Some(mut local_span) = local.get_span_mut(&parent_id, &id) {
-                        local_span.end_time = Some(SystemTime::now());
-                    }
-                }
-            }
-        }
-    }
-}
-
-struct StrVisitor<F>(F);
-
-impl<F> Visit for StrVisitor<F>
-where
-    F: FnMut(&str, &str),
-{
-    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn std::fmt::Debug) {
-        //FIXME: there's probably a smarter way to do this that avoids formatting for every value
-        (self.0)(field.name(), &format!("{:?}", value))
-    }
-
-    fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
-        (self.0)(field.name(), value)
-    }
-}
-
-struct I64Visitor<F>(F);
-
-impl<F> Visit for I64Visitor<F>
-where
-    F: FnMut(&str, i64),
-{
-    fn record_debug(&mut self, _field: &tracing_core::Field, _value: &dyn std::fmt::Debug) {}
-
-    fn record_i64(&mut self, field: &tracing_core::Field, value: i64) {
-        (self.0)(field.name(), value)
-    }
-}
-
-fn path_from_string(v: &str) -> Vec<ResponsePathElement> {
-    v.split('/')
+fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
+    extract_string(v)
+        .map(|v| {
+            v.split('/')
                 .filter(|v| !v.is_empty() && *v != "@")
                 .map(|v| {
                     if let Ok(index) = v.parse::<u32>() {
@@ -1015,11 +473,129 @@ fn path_from_string(v: &str) -> Vec<ResponsePathElement> {
                     }
                 })
                 .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn extract_i64(v: &Value) -> Option<i64> {
+    if let Value::I64(v) = v {
+        Some(*v)
+    } else {
+        None
+    }
+}
+
+fn extract_ftv1_trace(v: &Value) -> Option<Result<Box<proto::reports::Trace>, Error>> {
+    if let Value::String(s) = v {
+        if let Some(t) = decode_ftv1_trace(s.as_str()) {
+            return Some(Ok(Box::new(t)));
+        }
+        return Some(Err(Error::TraceParsingFailed));
+    }
+    None
 }
 
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
     let bytes = base64::decode(string).ok()?;
     proto::reports::Trace::decode(Cursor::new(bytes)).ok()
+}
+
+fn extract_http_data(span: &SpanData) -> Http {
+    let method = match span
+        .attributes
+        .get(&HTTP_METHOD)
+        .map(|data| data.as_str())
+        .unwrap_or_default()
+        .as_ref()
+    {
+        "OPTIONS" => proto::reports::trace::http::Method::Options,
+        "GET" => proto::reports::trace::http::Method::Get,
+        "HEAD" => proto::reports::trace::http::Method::Head,
+        "POST" => proto::reports::trace::http::Method::Post,
+        "PUT" => proto::reports::trace::http::Method::Put,
+        "DELETE" => proto::reports::trace::http::Method::Delete,
+        "TRACE" => proto::reports::trace::http::Method::Trace,
+        "CONNECT" => proto::reports::trace::http::Method::Connect,
+        "PATCH" => proto::reports::trace::http::Method::Patch,
+        _ => proto::reports::trace::http::Method::Unknown,
+    };
+    let request_headers = span
+        .attributes
+        .get(&APOLLO_PRIVATE_HTTP_REQUEST_HEADERS)
+        .and_then(extract_json::<HashMap<String, Vec<String>>>)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+        .collect();
+    let response_headers = span
+        .attributes
+        .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
+        .and_then(extract_json::<HashMap<String, Vec<String>>>)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(header_name, value)| (header_name.to_lowercase(), Values { value }))
+        .collect();
+
+    Http {
+        method: method.into(),
+        request_headers,
+        response_headers,
+        status_code: 0,
+    }
+}
+
+#[async_trait]
+impl SpanExporter for Exporter {
+    /// Export spans to apollo telemetry
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+        // Exporting to apollo means that we must have complete trace as the entire trace must be built.
+        // We do what we can, and if there are any traces that are not complete then we keep them for the next export event.
+        // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
+        let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
+        for span in batch {
+            if span.name == REQUEST_SPAN_NAME {
+                match self.extract_trace(span) {
+                    Ok(mut trace) => {
+                        let mut operation_signature = Default::default();
+                        std::mem::swap(&mut trace.signature, &mut operation_signature);
+                        if !operation_signature.is_empty() {
+                            traces.push((operation_signature, *trace));
+                        }
+                    }
+                    Err(Error::MultipleErrors(errors)) => {
+                        tracing::error!(
+                            "failed to construct trace: {}, skipping",
+                            Error::MultipleErrors(errors)
+                        );
+                    }
+                    Err(error) => {
+                        tracing::error!("failed to construct trace: {}, skipping", error);
+                    }
+                }
+            } else {
+                // Not a root span, we may need it later so stash it.
+
+                // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
+                // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
+                self.spans_by_parent_id
+                    .get_or_insert(span.parent_span_id, Vec::new);
+                self.spans_by_parent_id
+                    .get_mut(&span.parent_span_id)
+                    .expect("capacity of cache was zero")
+                    .push(span);
+            }
+        }
+        let mut report = telemetry::apollo::Report::default();
+        report += SingleReport::Traces(TracesReport { traces });
+        let exporter = self.report_exporter.clone();
+        let fut = async move {
+            exporter
+                .submit_report(report)
+                .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                .await
+        };
+        fut.boxed()
+    }
 }
 
 trait ChildNodes {
@@ -1111,12 +687,14 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
+    use opentelemetry::Value;
     use prost::Message;
+    use serde_json::json;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, TreeData, path_from_string, decode_ftv1_trace};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1225,9 +803,26 @@ mod test {
     }
 
     #[test]
+    fn test_extract_json() {
+        let val = json!({"hi": "there"});
+        assert_eq!(
+            extract_json::<serde_json::Value>(&Value::String(val.to_string().into())),
+            Some(val)
+        );
+    }
+
+    #[test]
+    fn test_extract_string() {
+        assert_eq!(
+            extract_string(&Value::String("hi".into())),
+            Some("hi".to_string())
+        );
+    }
+
+    #[test]
     fn test_extract_path() {
         assert_eq!(
-            path_from_string("/hi/3/there"),
+            extract_path(&Value::String("/hi/3/there".into())),
             vec![
                 ResponsePathElement {
                     id: Some(Id::FieldName("hi".to_string())),
@@ -1243,11 +838,18 @@ mod test {
     }
 
     #[test]
+    fn test_extract_i64() {
+        assert_eq!(extract_i64(&Value::I64(35)), Some(35));
+    }
+
+    #[test]
     fn test_extract_ftv1_trace() {
         let trace = Trace::default();
         let encoded = base64::encode(trace.encode_to_vec());
         assert_eq!(
-            decode_ftv1_trace(encoded.as_str()).expect("the trace must be decoded"),
+            *extract_ftv1_trace(&Value::String(encoded.into()))
+                .expect("there was a trace here")
+                .expect("the trace must be decoded"),
             trace
         );
     }
