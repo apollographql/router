@@ -1090,7 +1090,7 @@ async fn test_previous_health_check_returns_four_oh_four() {
 }
 
 #[test(tokio::test)]
-async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
+async fn it_errors_on_bad_content_type_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
@@ -1121,14 +1121,14 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"errors":[{"message":"'content-type' header must be one of \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_CONTENT_TYPE_HEADER"}}]}"#
+        r#"{"errors":[{"message":"'content-type' header must be one of: \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_CONTENT_TYPE_HEADER"}}]}"#
     );
 
     server.shutdown().await
 }
 
 #[test(tokio::test)]
-async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
+async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
@@ -1160,7 +1160,7 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"errors":[{"message":"'accept' header must be one of \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
+        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
     );
 
     server.shutdown().await

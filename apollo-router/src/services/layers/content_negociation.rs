@@ -95,7 +95,7 @@ where
                                     "errors": [
                                         graphql::Error::builder()
                                             .message(format!(
-                                                r#"'accept' header must be one of \"*/*\", {:?}, {:?} or {:?}"#,
+                                                r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
                                                 APPLICATION_JSON.essence_str(),
                                                 GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                                                 MULTIPART_DEFER_CONTENT_TYPE
