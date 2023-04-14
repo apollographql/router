@@ -233,9 +233,9 @@ mod router_plugin {
 
     #[rhai_fn(name = "is_primary", pure, return_raw)]
     pub(crate) fn supergraph_deferred_response_is_primary(
-        obj: &mut SharedMut<supergraph::DeferredResponse>,
+        _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<bool, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| response.response.is_primary()))
+        Ok(false)
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -261,9 +261,9 @@ mod router_plugin {
 
     #[rhai_fn(name = "is_primary", pure, return_raw)]
     pub(crate) fn execution_deferred_response_is_primary(
-        obj: &mut SharedMut<execution::DeferredResponse>,
+        _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<bool, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| response.response.is_primary()))
+        Ok(false)
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]

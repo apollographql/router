@@ -424,10 +424,10 @@ async fn it_can_process_supergraph_deferred_response() {
 }
 
 #[tokio::test]
-async fn it_can_process_supergraph_deferred_response_is_primary() {
+async fn it_can_process_supergraph_deferred_response_is_not_primary() {
     gen_response_test!(
         RhaiSupergraphDeferredResponse,
-        "process_supergraph_response_is_primary"
+        "process_supergraph_deferred_response_is_not_primary"
     );
 }
 
@@ -450,10 +450,10 @@ async fn it_can_process_execution_deferred_response() {
 }
 
 #[tokio::test]
-async fn it_can_process_execution_deferred_response_is_primary() {
+async fn it_can_process_execution_deferred_response_is_not_primary() {
     gen_response_test!(
         RhaiExecutionDeferredResponse,
-        "process_execution_response_is_primary"
+        "process_execution_deferred_response_is_not_primary"
     );
 }
 

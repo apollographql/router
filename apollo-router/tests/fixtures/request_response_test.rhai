@@ -180,3 +180,21 @@ fn process_execution_response_is_primary(response) {
     }
 }
 
+fn process_supergraph_deferred_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+
+fn process_execution_deferred_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+
