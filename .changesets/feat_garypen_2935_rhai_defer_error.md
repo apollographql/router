@@ -1,6 +1,7 @@
-### Improve handling of deferred response errors from rhai scripts ([Issue #2935](https://github.com/apollographql/router/issues/2935))
+### Improve handling of deferred response errors from rhai scripts ([Issue #2935](https://github.com/apollographql/router/issues/2935)) ([Issue #2936](https://github.com/apollographql/router/issues/2936))
 
-Currently, if a rhai script errors in rhai, the rhai plugin ignores the error and returns None in the stream of results. This has two unfortunate aspects:
+
+Whilst processing a deferred response; if a rhai script errors in rhai the router ignores the error and returns None in the stream of results. This has two unfortunate aspects:
 
  - the error is not propagated to the client
  - the stream is terminated (silently)
