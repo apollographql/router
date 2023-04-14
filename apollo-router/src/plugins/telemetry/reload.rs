@@ -14,7 +14,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
-use super::tracing::apollo_telemetry::ApolloLayer;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::TextFormatter;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
@@ -30,27 +29,22 @@ pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     ReloadTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
 
-static FMT_LAYER_HANDLE: OnceCell<
-    Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
-> = OnceCell::new();
-
-type FmtReloadLayer =
-    tracing_subscriber::reload::Layer<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>;
-
 #[allow(clippy::type_complexity)]
 static METRICS_LAYER_HANDLE: OnceCell<
-    Handle<MetricsLayer, Layered<FmtReloadLayer, LayeredTracer>>,
+    Handle<
+        MetricsLayer,
+        Layered<
+            tracing_subscriber::reload::Layer<
+                Box<dyn Layer<LayeredTracer> + Send + Sync>,
+                LayeredTracer,
+            >,
+            LayeredTracer,
+        >,
+    >,
 > = OnceCell::new();
 
-type MetricsReloadLayer =
-    tracing_subscriber::reload::Layer<MetricsLayer, Layered<FmtReloadLayer, LayeredTracer>>;
-
-#[allow(clippy::type_complexity)]
-static APOLLO_LAYER_HANDLE: OnceCell<
-    Handle<
-        Option<ApolloLayer>,
-        Layered<MetricsReloadLayer, Layered<FmtReloadLayer, LayeredTracer>>,
-    >,
+static FMT_LAYER_HANDLE: OnceCell<
+    Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
@@ -90,8 +84,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let (metrics_layer, metrics_handle) =
         tracing_subscriber::reload::Layer::new(MetricsLayer::new(&NoopMeterProvider::default()));
 
-    let (apollo_layer, apollo_handle) = tracing_subscriber::reload::Layer::new(None);
-
     // Stash the reload handles so that we can hot reload later
     OPENTELEMETRY_TRACER_HANDLE
         .get_or_try_init(move || {
@@ -104,7 +96,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
                 .with(metrics_layer)
-                .with(apollo_layer)
                 .with(EnvFilter::try_new(log_level)?)
                 .try_init()?;
 
@@ -116,10 +107,6 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
         .map_err(|_| anyhow!("failed to set metrics layer handle"))?;
     FMT_LAYER_HANDLE
         .set(fmt_handle)
-        .map_err(|_| anyhow!("failed to set fmt layer handle"))?;
-
-    APOLLO_LAYER_HANDLE
-        .set(apollo_handle)
         .map_err(|_| anyhow!("failed to set fmt layer handle"))?;
 
     Ok(())
@@ -145,13 +132,5 @@ pub(super) fn reload_fmt(
 ) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
-    }
-}
-
-pub(crate) fn reload_apollo(layer: Option<ApolloLayer>) {
-    if let Some(handle) = APOLLO_LAYER_HANDLE.get() {
-        handle
-            .reload(layer)
-            .expect("metrics layer reload must succeed");
     }
 }
