@@ -53,20 +53,22 @@ where
                     let response: http::Response<hyper::Body> = http::Response::builder()
                         .status(StatusCode::UNSUPPORTED_MEDIA_TYPE)
                         .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                        .body(
-                            hyper::Body::from(
-                                serde_json::json!({
-                                    "errors": [
-                                        graphql::Error::builder()
-                                            .message(format!(
-                                                r#"'content-type' header must be one of: {:?} or {:?}"#,
-                                                APPLICATION_JSON.essence_str(),
-                                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                            ))
-                                            .extension_code("INVALID_CONTENT_TYPE_HEADER")
-                                            .build()
-                                    ]
-                                }).to_string())).expect("cannot fail");
+                        .body(hyper::Body::from(
+                            serde_json::json!({
+                                "errors": [
+                                    graphql::Error::builder()
+                                        .message(format!(
+                                            r#"'content-type' header must be one of: {:?} or {:?}"#,
+                                            APPLICATION_JSON.essence_str(),
+                                            GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                        ))
+                                        .extension_code("INVALID_CONTENT_TYPE_HEADER")
+                                        .build()
+                                ]
+                            })
+                            .to_string(),
+                        ))
+                        .expect("cannot fail");
 
                     return Ok(ControlFlow::Break(response.into()));
                 }
