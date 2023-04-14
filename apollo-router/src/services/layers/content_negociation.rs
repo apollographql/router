@@ -59,7 +59,7 @@ where
                                     "errors": [
                                         graphql::Error::builder()
                                             .message(format!(
-                                                r#"'content-type' header can't be different from {:?} or {:?}"#,
+                                                r#"'content-type' header must be one of: {:?} or {:?}"#,
                                                 APPLICATION_JSON.essence_str(),
                                                 GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
                                             ))
