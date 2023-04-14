@@ -319,7 +319,7 @@ impl Plugin for Telemetry {
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
-                        APOLLO_PRIVATE_OPERATION_SIGNATURE,
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
                         usage_reporting.stats_report_key.as_str(),
                     );
                 }
