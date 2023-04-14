@@ -127,7 +127,7 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 For monitoring, observability and debugging requirements around Uplink-related behaviors (those which occur as part of Managed Federation) the router now emits better log messages and emits new metrics around these facilities.  The new metrics are:
 
-- `apollo_router_uplink_duration_seconds_bucket`: A _histogram_ of durations with the following attributes:
+- `apollo_router_uplink_fetch_duration_seconds_bucket`: A _histogram_ of durations with the following attributes:
 
   - `url`: The URL that was polled
   - `query`: `SupergraphSdl` or `Entitlement`
