@@ -196,7 +196,7 @@ where
                         })
                     })
                     .unwrap_or_else(|| {
-                        Err(("missing query string", "missing query string".to_string()))
+                        Err(("Request missing query parameter in URL", "Request missing query parameter in URL".to_string()))
                     })
             } else {
                 hyper::body::to_bytes(body)
