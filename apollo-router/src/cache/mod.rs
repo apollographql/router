@@ -9,11 +9,10 @@ use tokio::sync::oneshot;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 
-use crate::cache::storage::CacheStorageName;
-
 use self::storage::CacheStorage;
 use self::storage::KeyType;
 use self::storage::ValueType;
+use crate::cache::storage::CacheStorageName;
 
 pub(crate) mod redis;
 pub(crate) mod storage;
