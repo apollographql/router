@@ -4,6 +4,8 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
 use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,7 +19,6 @@ use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
 use http::header::USER_AGENT;
 use opentelemetry::ExportError;
-use parking_lot::Mutex;
 pub(crate) use prost::*;
 use reqwest::Client;
 use serde::ser::SerializeStruct;
@@ -90,7 +91,7 @@ pub(crate) struct ApolloExporter {
     apollo_key: String,
     header: proto::reports::ReportHeader,
     client: Client,
-    strip_traces: Arc<Mutex<bool>>,
+    strip_traces: Arc<AtomicBool>,
 }
 
 impl ApolloExporter {
@@ -125,7 +126,7 @@ impl ApolloExporter {
                 .build()
                 .map_err(BoxError::from)?,
             header,
-            strip_traces: Default::default(),
+            strip_traces: Arc::new(AtomicBool::default()),
         })
     }
 
@@ -213,7 +214,7 @@ impl ApolloExporter {
                     .is_empty()
             {
                 has_traces = true;
-                if *self.strip_traces.lock() {
+                if self.strip_traces.load(Ordering::Relaxed) {
                     traces_and_stats.trace.clear();
                     traces_and_stats
                         .internal_traces_contributing_to_stats
@@ -244,12 +245,12 @@ impl ApolloExporter {
                         msg = data;
                     } else {
                         tracing::debug!("ingress response text: {:?}", data);
-                        if has_traces && !*self.strip_traces.lock() {
+                        if has_traces && !self.strip_traces.load(Ordering::Relaxed) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
                             if let Ok(response) = serde_json::Value::from_str(&data) {
                                 if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
                                     tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
-                                    *self.strip_traces.lock() = true;
+                                    self.strip_traces.store(true, Ordering::Relaxed);
                                 }
                             }
                         }
