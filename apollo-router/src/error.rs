@@ -78,6 +78,8 @@ pub(crate) enum FetchError {
     ///
     /// note that this relates to a transport error and not a GraphQL error
     SubrequestHttpError {
+        status_code: Option<u16>,
+
         /// The service failed.
         service: String,
 
