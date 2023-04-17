@@ -5,9 +5,6 @@
 // Read more: https://github.com/hyperium/tonic/issues/1056
 #![allow(clippy::derive_partial_eq_without_eq)]
 
-use std::str::FromStr;
-use std::time::SystemTime;
-
 use graphql_client::GraphQLQuery;
 
 use crate::uplink::schema_stream::supergraph_sdl_query::FetchErrorCode;
@@ -40,13 +37,6 @@ impl From<supergraph_sdl_query::ResponseData> for UplinkResponse<String> {
     fn from(response: supergraph_sdl_query::ResponseData) -> Self {
         match response.router_config {
             SupergraphSdlQueryRouterConfig::RouterConfigResult(result) => UplinkResponse::New {
-                ordering_id: humantime::Timestamp::from_str(result.id.as_str())
-                    .map(Into::into)
-                    .unwrap_or_else(|e|{
-                        // There's not much we can do if we didn't understand the timestamp from uplink
-                        tracing::error!("uplink response had a malformed system time. This uplink event will be ignored. If you are not using a custom uplink proxy then this is a bug, please report to Apollo. Error was: {}", e);
-                        SystemTime::UNIX_EPOCH
-                    }),
                 response: result.supergraph_sdl,
                 id: result.id,
                 // this will truncate the number of seconds to under u64::MAX, which should be

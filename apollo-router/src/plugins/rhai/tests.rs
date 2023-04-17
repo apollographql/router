@@ -505,8 +505,8 @@ fn it_can_create_unix_now() {
     let st = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("can get system time")
-        .as_secs();
-    let unix_now: u64 = engine
+        .as_secs() as i64;
+    let unix_now: i64 = engine
         .eval(r#"unix_now()"#)
         .expect("can get unix_now() timestamp");
     // Always difficult to do timing tests. unix_now() should execute within a second of st,

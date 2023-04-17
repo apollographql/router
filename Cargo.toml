@@ -6,6 +6,7 @@ members = [
     "apollo-router-scaffold",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
+    "examples/cache-control/rhai",
     "examples/context/rust",
     "examples/cookies-to-headers/rhai",
     "examples/data-response-mutate/rhai",
@@ -34,7 +35,7 @@ strip = "debuginfo"
 incremental = false
 
 # If building a dhat feature, you must use this profile
-# e.g. heap allocation tracing: cargo build --profile release-dhat --features dhat-heap 
+# e.g. heap allocation tracing: cargo build --profile release-dhat --features dhat-heap
 # e.g. heap and ad-hoc allocation tracing: cargo build --profile release-dhat --features dhat-heap,dhat-ad-hoc
 [profile.release-dhat]
 inherits = "release"

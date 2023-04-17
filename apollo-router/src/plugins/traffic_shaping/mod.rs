@@ -477,13 +477,13 @@ mod test {
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::services::SupergraphResponse;
-    use crate::spec::Schema;
     use crate::Configuration;
 
     static EXPECTED_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -558,7 +558,6 @@ mod test {
         let schema = include_str!(
             "../../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql"
         );
-        let schema: Arc<Schema> = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
         let config: Configuration = serde_yaml::from_str(
             r#"
@@ -569,9 +568,13 @@ mod test {
         .unwrap();
 
         let config = Arc::new(config);
+        let planner = BridgeQueryPlanner::new(schema.to_string(), config.clone())
+            .await
+            .unwrap();
+        let schema = planner.schema();
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone())
-            .with_configuration(config.clone());
+        let mut builder =
+            PluggableSupergraphServiceBuilder::new(planner).with_configuration(config.clone());
 
         for (name, plugin) in create_plugins(
             &config,

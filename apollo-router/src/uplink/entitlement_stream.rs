@@ -42,7 +42,7 @@ impl From<UplinkRequest> for entitlement_query::Variables {
         entitlement_query::Variables {
             api_key: req.api_key,
             graph_ref: req.graph_ref,
-            unless_id: req.id,
+            if_after_id: req.id,
         }
     }
 }
@@ -54,11 +54,6 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
                 if let Some(entitlement) = result.entitlement {
                     match Entitlement::from_str(&entitlement.jwt) {
                         Ok(jwt) => UplinkResponse::New {
-                            ordering_id: jwt
-                                .claims
-                                .as_ref()
-                                .map(|c| c.halt_at)
-                                .unwrap_or(SystemTime::UNIX_EPOCH),
                             response: jwt,
                             id: result.id,
                             // this will truncate the number of seconds to under u64::MAX, which should be
@@ -73,7 +68,6 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
                     }
                 } else {
                     UplinkResponse::New {
-                        ordering_id: SystemTime::UNIX_EPOCH,
                         response: Entitlement::default(),
                         id: result.id,
                         // this will truncate the number of seconds to under u64::MAX, which should be

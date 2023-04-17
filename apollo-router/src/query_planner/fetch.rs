@@ -257,6 +257,7 @@ impl FetchNode {
             // Unfortunately, not easy to fix here, because at this point we don't
             // know if we should be redacting errors for this subgraph...
             .map_err(|e| FetchError::SubrequestHttpError {
+                status_code: None,
                 service: service_name.to_string(),
                 reason: e.to_string(),
             })?

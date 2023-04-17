@@ -17,6 +17,8 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
 use directories::ProjectDirs;
+#[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
+use once_cell::sync::OnceCell;
 use url::ParseError;
 use url::Url;
 
