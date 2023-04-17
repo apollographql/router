@@ -540,13 +540,19 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
+        println!("tracing_config={tracing_config:?}",);
+
         let mut trace_config = tracing_config.trace_config.unwrap_or_default();
 
         let sampling_rate = if tracing_config.jaeger.is_some()
             || tracing_config.zipkin.is_some()
             || tracing_config.datadog.is_some()
             || tracing_config.otlp.is_some()
-            || config.apollo.is_some()
+            || config
+                .apollo
+                .as_ref()
+                .map(|c| c.apollo_key.is_some() && c.apollo_graph_ref.is_some())
+                .unwrap_or(false)
         {
             match trace_config.sampler {
                 config::SamplerOption::TraceIdRatioBased(rate) => rate,
