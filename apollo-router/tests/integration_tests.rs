@@ -540,7 +540,7 @@ async fn query_just_under_recursion_limit() {
 #[tokio::test(flavor = "multi_thread")]
 async fn query_just_at_recursion_limit() {
     let config = serde_json::json!({
-        "server": {"experimental_parser_recursion_limit": 11_usize}
+        "server": {"experimental_parser_recursion_limit": 5_usize}
     });
     let request = supergraph::Request::fake_builder()
         .query(r#"{ me { reviews { author { reviews { author { name } } } } } }"#)
@@ -552,9 +552,7 @@ async fn query_just_at_recursion_limit() {
     let (actual, registry) = query_rust_with_config(request, config).await;
 
     assert_eq!(1, actual.errors.len());
-    assert!(actual.errors[0]
-        .message
-        .contains("parser limit(11) reached"));
+    assert!(actual.errors[0].message.contains("parser limit(5) reached"));
     assert_eq!(registry.totals(), expected_service_hits);
 }
 

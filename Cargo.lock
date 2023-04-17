@@ -207,12 +207,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "0.7.2"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f2ac73f66d5f39aad9f4c6b888c048046f4bd59c6678a30164fc16fb7ccb6a2"
+checksum = "adfb4c7364494ca41e3fec600b6a4570320db83ae0aa938ca70036632bb9365e"
 dependencies = [
  "apollo-ariadne",
- "apollo-parser 0.5.0",
+ "apollo-parser 0.5.1",
  "indexmap",
  "ordered-float 2.10.0",
  "rowan",
@@ -262,9 +262,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bde1ede19cfd36f4ebdce836fd571a1791e08b634f6d63648203e885b8fba9f4"
+checksum = "22cee3beb80302b36d9d1d3d2feaf3d4a47a4da18d8a4088e71948989a494999"
 dependencies = [
  "rowan",
  "thiserror",
@@ -278,7 +278,7 @@ dependencies = [
  "ansi_term",
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.5.0",
+ "apollo-parser 0.5.1",
  "arc-swap",
  "askama",
  "async-compression",
@@ -913,9 +913,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.8.8"
+version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6828446789083ba7a028638e2033176eeb854397e75bdebcfdd04fa001c31d6f"
+checksum = "21a5530a79425d641868d027a01ffd47ef14ff7804860ee51b4e3a32e374075e"
 dependencies = [
  "anyhow",
  "buildstructor 0.3.2",
@@ -2431,9 +2431,9 @@ checksum = "ad0a93d233ebf96623465aad4046a8d3aa4da22d4f4beba5388838c8a434bbb4"
 
 [[package]]
 name = "git2"
-version = "0.14.4"
+version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d0155506aab710a86160ddb504a480d2964d7ab5b9e62419be69e0032bc5931c"
+checksum = "ccf7f68c2995f392c49fffb4f95ae2c873297830eb25c6bc4c114ce8f4562acc"
 dependencies = [
  "bitflags",
  "libc",
@@ -3175,9 +3175,9 @@ dependencies = [
 
 [[package]]
 name = "libgit2-sys"
-version = "0.13.5+1.4.5"
+version = "0.14.2+1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "51e5ea06c26926f1002dd553fded6cfcdc9784c1f60feeb58368b4d9b07b6dba"
+checksum = "7f3d95f6b51075fe9810a7ae22c7095f12b98005ab364d8544797a825ce946a4"
 dependencies = [
  "cc",
  "libc",
