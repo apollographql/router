@@ -152,7 +152,7 @@ where
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub(super) struct RouterConf {
+pub(super) struct RouterRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -161,12 +161,31 @@ pub(super) struct RouterConf {
     pub(super) body: bool,
     /// Send the SDL
     pub(super) sdl: bool,
+    /// Send the path
+    pub(super) path: bool,
+    /// Send the method
+    pub(super) method: bool,
 }
 
+/// What information is passed to a router request/response stage
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct RouterResponseConf {
+    /// Send the headers
+    pub(super) headers: bool,
+    /// Send the context
+    pub(super) context: bool,
+    /// Send the body
+    pub(super) body: bool,
+    /// Send the SDL
+    pub(super) sdl: bool,
+    /// Send the HTTP status
+    pub(super) status_code: bool,
+}
 /// What information is passed to a subgraph request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
-pub(super) struct SubgraphConf {
+pub(super) struct SubgraphRequestConf {
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -175,8 +194,26 @@ pub(super) struct SubgraphConf {
     pub(super) body: bool,
     /// Send the subgraph URI
     pub(super) uri: bool,
+    /// Send the method URI
+    pub(super) method: bool,
     /// Send the service name
     pub(super) service_name: bool,
+}
+
+/// What information is passed to a subgraph request/response stage
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub(super) struct SubgraphResponseConf {
+    /// Send the headers
+    pub(super) headers: bool,
+    /// Send the context
+    pub(super) context: bool,
+    /// Send the body
+    pub(super) body: bool,
+    /// Send the service name
+    pub(super) service_name: bool,
+    /// Send the http status
+    pub(super) status_code: bool,
 }
 
 /// Configures the externalization plugin
@@ -206,9 +243,9 @@ fn default_timeout() -> Duration {
 #[serde(default)]
 pub(super) struct RouterStage {
     /// The request configuration
-    pub(super) request: RouterConf,
+    pub(super) request: RouterRequestConf,
     /// The response configuration
-    pub(super) response: RouterConf,
+    pub(super) response: RouterResponseConf,
 }
 
 impl RouterStage {
@@ -322,9 +359,9 @@ pub(super) struct SubgraphStages {
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphStage {
     #[serde(default)]
-    pub(super) request: SubgraphConf,
+    pub(super) request: SubgraphRequestConf,
     #[serde(default)]
-    pub(super) response: SubgraphConf,
+    pub(super) response: SubgraphResponseConf,
 }
 
 impl SubgraphStage {
@@ -429,7 +466,7 @@ async fn process_router_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: router::Request,
-    request_config: RouterConf,
+    request_config: RouterRequestConf,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -450,10 +487,15 @@ where
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
 
+    // HTTP GET requests don't have a body
     let body_to_send = request_config
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
-        .transpose()?;
+        .transpose()
+        .unwrap_or_default();
+
+    let path_to_send = request_config.path.then(|| parts.uri.to_string());
+
     let context_to_send = request_config.context.then(|| request.context.clone());
     let sdl = request_config.sdl.then(|| sdl.clone().to_string());
 
@@ -467,7 +509,10 @@ where
         context: context_to_send,
         sdl,
         uri: None,
+        path: path_to_send,
+        method: Some(parts.method.to_string()),
         service_name: None,
+        status_code: None,
     };
 
     tracing::debug!(?payload, "externalized output");
@@ -551,7 +596,7 @@ async fn process_router_response_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut response: router::Response,
-    response_config: RouterConf,
+    response_config: RouterResponseConf,
 ) -> Result<router::Response, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -575,6 +620,7 @@ where
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
         .transpose()?;
+    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());
     let sdl = response_config.sdl.then(|| sdl.clone().to_string());
 
@@ -586,8 +632,11 @@ where
         headers: headers_to_send,
         body: body_to_send,
         context: context_to_send,
+        status_code: status_to_send,
         sdl,
         uri: None,
+        path: None,
+        method: None,
         service_name: None,
     };
 
@@ -633,7 +682,7 @@ async fn process_subgraph_request_stage<C>(
     coprocessor_url: String,
     service_name: String,
     mut request: subgraph::Request,
-    request_config: SubgraphConf,
+    request_config: SubgraphRequestConf,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -672,7 +721,10 @@ where
         context: context_to_send,
         sdl: None,
         service_name,
+        path: None,
         uri,
+        method: Some(parts.method.to_string()),
+        status_code: None,
     };
 
     tracing::debug!(?payload, "externalized output");
@@ -758,7 +810,7 @@ async fn process_subgraph_response_stage<C>(
     coprocessor_url: String,
     service_name: String,
     mut response: subgraph::Response,
-    response_config: SubgraphConf,
+    response_config: SubgraphResponseConf,
 ) -> Result<subgraph::Response, BoxError>
 where
     C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -780,6 +832,8 @@ where
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
 
+    let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
+
     let body_to_send = response_config
         .body
         .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
@@ -795,8 +849,11 @@ where
         headers: headers_to_send,
         body: body_to_send,
         context: context_to_send,
+        status_code: status_to_send,
         sdl: None,
         uri: None,
+        path: None,
+        method: None,
         service_name,
     };
 

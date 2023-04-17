@@ -63,6 +63,7 @@ impl Plugin for IncludeSubgraphErrors {
                     // Create a redacted error to replace whatever error we have
                     tracing::info!("redacted subgraph({sub_name_error}) error");
                     _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                        status_code: None,
                         service: "redacted".to_string(),
                         reason: "redacted".to_string(),
                     });
