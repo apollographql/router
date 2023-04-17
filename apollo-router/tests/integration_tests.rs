@@ -17,6 +17,7 @@ use apollo_router::Context;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
+use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http::Uri;
@@ -204,6 +205,36 @@ async fn simple_queries_should_not_work() {
         actual.errors.len(),
         "CSRF should have rejected this query"
     );
+    assert_eq!(expected_error, actual.errors[0]);
+    assert_eq!(registry.totals(), hashmap! {});
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn empty_posts_should_not_work() {
+    let request = http::Request::builder()
+        .header(
+            CONTENT_TYPE,
+            HeaderValue::from_static(APPLICATION_JSON.essence_str()),
+        )
+        .method(Method::POST)
+        .body(hyper::Body::empty())
+        .unwrap();
+
+    let (router, registry) = setup_router_and_registry(serde_json::json!({})).await;
+
+    let actual = query_with_router(router, request.into()).await;
+
+    assert_eq!(1, actual.errors.len());
+
+    let message = "Invalid GraphQL request";
+    let mut extensions_map = serde_json_bytes::map::Map::new();
+    extensions_map.insert("code", "INVALID_GRAPHQL_REQUEST".into());
+    extensions_map.insert("details", "failed to deserialize the request body into JSON: EOF while parsing a value at line 1 column 0".into());
+    let expected_error = graphql::Error::builder()
+        .message(message)
+        .extension_code("INVALID_GRAPHQL_REQUEST")
+        .extensions(extensions_map)
+        .build();
     assert_eq!(expected_error, actual.errors[0]);
     assert_eq!(registry.totals(), hashmap! {});
 }

@@ -338,6 +338,7 @@ async fn call_http(
                     cloned_context.leave_active_request();
 
                     return Err(FetchError::SubrequestHttpError {
+                        status_code: None,
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }.into());
@@ -364,6 +365,7 @@ async fn call_http(
 
                         Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
+                            status_code: Some(parts.status.as_u16()),
                             reason: format!(
                                 "{}: {}",
                                 parts.status.as_str(),
@@ -372,6 +374,7 @@ async fn call_http(
                         }))
                     } else {
                         Err(BoxError::from(FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})", APPLICATION_JSON.essence_str()),
                         }))
@@ -389,6 +392,7 @@ async fn call_http(
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
 
                 return Err(FetchError::SubrequestHttpError {
+                    status_code: None,
                     service: service_name.clone(),
                     reason: err.to_string(),
                 }.into())
