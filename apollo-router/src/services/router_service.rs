@@ -362,28 +362,22 @@ where
                                 Ok(RouterResponse { response, context })
                             } else {
                                 // this should be unreachable due to a previous check, but just to be sure...
-                                Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::NOT_ACCEPTABLE)
-                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                                    .body(
-                                    Body::from(
-                                        serde_json::to_string(
-                                            &graphql::Error::builder()
-                                                .message(format!(
-                                                    r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                                    APPLICATION_JSON.essence_str(),
-                                                    GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                                    MULTIPART_DEFER_CONTENT_TYPE
-                                                ))
-                                                .extension_code("INVALID_ACCEPT_HEADER")
-                                                .build(),
-                                        )
-                                        .unwrap_or_else(|_| String::from("Invalid request"))
+                                router::Response::error_builder()
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(format!(
+                                                r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
+                                                APPLICATION_JSON.essence_str(),
+                                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                                MULTIPART_DEFER_CONTENT_TYPE
+                                            ))
+                                            .extension_code("INVALID_ACCEPT_HEADER")
+                                            .build(),
                                     )
-                                ).expect("cannot fail"),
-                                context,
-                            })
+                                    .status_code(StatusCode::NOT_ACCEPTABLE)
+                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                                    .context(context)
+                                    .build()
                             }
                         }
                     }
@@ -396,23 +390,19 @@ where
                         error = %error,
                         %error
                     );
-                    Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.to_string())
-                            .body(Body::from(
-                                serde_json::to_string(
-                                    &graphql::Error::builder()
-                                        .message(String::from("Invalid GraphQL request"))
-                                        .extension_code("INVALID_GRAPHQL_REQUEST")
-                                        .extension("details", extension_details)
-                                        .build(),
-                                )
-                                .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
-                            ))
-                            .expect("cannot fail"),
-                        context,
-                    })
+
+                    router::Response::error_builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Invalid GraphQL request"))
+                                .extension_code("INVALID_GRAPHQL_REQUEST")
+                                .extension("details", extension_details)
+                                .build(),
+                        )
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .context(context)
+                        .build()
                 }
             }
         };

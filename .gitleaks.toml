@@ -1,0 +1,18 @@
+
+[[ rules ]]
+    id = "generic-api-key"
+    [ rules.allowlist ]
+        commits = [
+            "f12bcddc663aa4c4d90218a1bb718fe74e0e7be3",
+            "e1e6f93341aea383da2ec6b36a9bfcf7e63a111e",
+            "e5590027506337381887dadef9baadd063e05830",
+            
+        ]
+
+[[ rules ]]
+    id = "private-key"
+    [ rules.allowlist ]
+        commits = [
+            "7fdb0a5a0831d309524e98503760c16bd3de160c",
+            
+        ]
