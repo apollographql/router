@@ -80,20 +80,22 @@ impl BridgeQueryPlanner {
     }
 
     pub(crate) async fn new_from_planner(
-        planner: Arc<Planner<QueryPlanResult>>,
+        old_planner: Arc<Planner<QueryPlanResult>>,
         schema: String,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
-        planner
-            .update(
-                schema.clone(),
-                QueryPlannerConfig {
-                    incremental_delivery: Some(IncrementalDeliverySupport {
-                        enable_defer: Some(configuration.supergraph.defer_support),
-                    }),
-                },
-            )
-            .await?;
+        let planner = Arc::new(
+            old_planner
+                .update(
+                    schema.clone(),
+                    QueryPlannerConfig {
+                        incremental_delivery: Some(IncrementalDeliverySupport {
+                            enable_defer: Some(configuration.supergraph.defer_support),
+                        }),
+                    },
+                )
+                .await?,
+        );
 
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse(&api_schema.schema, &configuration, None)?;
