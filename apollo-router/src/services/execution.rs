@@ -67,7 +67,6 @@ impl Request {
         context: Context,
     ) -> Request {
         let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
-
         Self {
             supergraph_request,
             query_plan,
