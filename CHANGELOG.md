@@ -18,9 +18,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Invalid requests now return proper GraphQL-shaped errors ([Issue #2934](https://github.com/apollographql/router/issues/2934)), ([Issue #2946](https://github.com/apollographql/router/issues/2946))
 
-Certain invalid HTTP requests — such as when an unacceptable `content-type` header, or an unsupported `accept` header are received — now return proper GraphQL errors nested as elements in a top-level `errors` array, rather than returning a single GraphQL error JSON object, which was unintentional.
+Unsupported `content-type` and `accept` headers sent on requests now return proper GraphQL errors nested as elements in a top-level `errors` array, rather than returning a single GraphQL error JSON object.
 
-This also introduced a more semantically-correct error code, `INVALID_CONTENT_TYPE_HEADER`, rather than using `INVALID_ACCEPT_HEADER` when an invalid `content-type` header was received.
+This also introduces a new error code, `INVALID_CONTENT_TYPE_HEADER`, rather than using `INVALID_ACCEPT_HEADER` when an invalid `content-type` header was received.
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/2947
 
@@ -28,7 +28,7 @@ By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https:/
 
 ### Remove redundant `println!()` that broke json formatted logging ([PR #2923](https://github.com/apollographql/router/pull/2923))
 
-The `println!()` statement being used in our trace transmission logic was redundant since it was already covered by a pre-existing `WARN` log line.  Most disruptively though, it broken JSON logging.
+The `println!()` statement being used in our trace transmission logic was redundant since it was already covered by a pre-existing `WARN` log line.  Most disruptively though, it broke JSON logging.
 
 For example, this previously showed as:
 
@@ -43,7 +43,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Adds HTTP status code to subgraph HTTP error type
 
-When contextually available, the `SubrequestHttpError` now includes the HTTP status code. This provides plugins the ability to access the status code directly. Previously, parsing the `reason` value as a string was the only way to determine the status code.
+When contextually available, the `SubrequestHttpError` now includes the HTTP status code. This provides plugins with the ability to access the status code directly. Previously, parsing the `reason` value as a string was the only way to determine the status code.
 
 By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2902
 
@@ -55,7 +55,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Update to Federation v2.4.1 ([2937](https://github.com/apollographql/router/issues/2937))
 
-The version of Federation supported by the Router has been updated to v2.4.1, which includes [a fix involving `@interfaceObject`](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#241).
+The Router has been updated to use Federation v2.4.1, which includes [a fix involving `@interfaceObject`](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#241).
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2957
 
