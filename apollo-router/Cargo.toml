@@ -157,7 +157,7 @@ reqwest = { version = "0.11.15", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "=0.2.0+v2.4.0"
+router-bridge = "=0.2.1+v2.4.1"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
