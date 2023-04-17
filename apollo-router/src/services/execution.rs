@@ -49,8 +49,7 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
-        let compiler = tracing::info_span!("snapshot uncached_compiler")
-            .in_scope(|| query_plan.query.uncached_compiler(None).snapshot());
+        let compiler = query_plan.query.uncached_compiler(None).snapshot();
         Self {
             supergraph_request,
             query_plan,
@@ -67,7 +66,7 @@ impl Request {
         schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.snapshot_compiler(Some(schema));
+        let compiler = query_plan.query.compiler(Some(schema)).await.snapshot();
 
         Self {
             supergraph_request,
