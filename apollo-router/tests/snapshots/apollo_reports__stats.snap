@@ -17,6 +17,8 @@ traces_per_query:
       - context:
           client_name: ""
           client_version: ""
+          operation_type: ""
+          operation_subtype: ""
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1
@@ -120,5 +122,6 @@ traces_per_query:
     internal_traces_contributing_to_stats: []
 end_time: "[end_time]"
 operation_count: 1
+operation_count_by_type: []
 traces_pre_aggregated: true
 

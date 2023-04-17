@@ -140,6 +140,7 @@ impl Response {
         extensions: Object,
         status_code: Option<StatusCode>,
         context: Context,
+        headers: Option<http::HeaderMap<http::HeaderValue>>,
     ) -> Response {
         // Build a response
         let res = graphql::Response::builder()
@@ -151,10 +152,12 @@ impl Response {
             .build();
 
         // Build an http Response
-        let response = http::Response::builder()
+        let mut response = http::Response::builder()
             .status(status_code.unwrap_or(StatusCode::OK))
             .body(res)
             .expect("Response is serializable; qed");
+
+        *response.headers_mut() = headers.unwrap_or_default();
 
         Self { response, context }
     }
@@ -174,6 +177,7 @@ impl Response {
         extensions: JsonMap<ByteString, Value>,
         status_code: Option<StatusCode>,
         context: Option<Context>,
+        headers: Option<http::HeaderMap<http::HeaderValue>>,
     ) -> Response {
         Response::new(
             label,
@@ -183,6 +187,7 @@ impl Response {
             extensions,
             status_code,
             context.unwrap_or_default(),
+            headers,
         )
     }
 
@@ -203,6 +208,7 @@ impl Response {
             Default::default(),
             status_code,
             context,
+            Default::default(),
         ))
     }
 }
