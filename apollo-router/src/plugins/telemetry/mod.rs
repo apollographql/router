@@ -1166,6 +1166,9 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
+                                    // FIXME
+                                    operation_type: String::new(),
+                                    operation_subtype: String::new(),
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
@@ -1764,6 +1767,7 @@ mod tests {
             .times(1)
             .returning(move |_req: SubgraphRequest| {
                 Err(Box::new(FetchError::SubrequestHttpError {
+                    status_code: None,
                     service: String::from("my_subgraph_name_error"),
                     reason: String::from("cannot contact the subgraph"),
                 }))
