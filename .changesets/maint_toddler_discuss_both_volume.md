@@ -1,4 +1,4 @@
-### Update to federation 2.4.1
+### Update to federation 2.4.1 ([2937](https://github.com/apollographql/router/issues/2937))
 
 Update to federation 2.4.1, which includes a fix around [`@interfaceObject`](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#241)
 
