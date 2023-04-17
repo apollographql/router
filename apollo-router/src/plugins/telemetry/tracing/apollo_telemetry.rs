@@ -222,7 +222,6 @@ impl Exporter {
         Ok(Box::new(root_trace))
     }
 
-
     fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::reports::Trace>, Error> {
         self.extract_data_from_spans(&span)?
             .pop()
@@ -434,7 +433,6 @@ impl Exporter {
     }
 }
 
-
 fn extract_json<T: DeserializeOwned>(v: &Value) -> Option<T> {
     extract_string(v)
         .map(|v| serde_json::from_str(&v))
@@ -449,7 +447,6 @@ fn extract_string(v: &Value) -> Option<String> {
         None
     }
 }
-
 
 fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
     extract_string(v)

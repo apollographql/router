@@ -49,9 +49,6 @@ static FMT_LAYER_HANDLE: OnceCell<
 pub(super) static SPAN_SAMPLING_RATE: AtomicU64 =
     AtomicU64::new(unsafe { mem::transmute::<f64, u64>(0.0) });
 
-type FmtReloadLayer =
-    tracing_subscriber::reload::Layer<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>;
-
 #[allow(clippy::type_complexity)]
 static METRICS_LAYER_HANDLE: OnceCell<
     Handle<
