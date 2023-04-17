@@ -10,12 +10,16 @@ expression: aggregated_metrics
         [
           {
             "client_name": "client_1",
-            "client_version": "version_1"
+            "client_version": "version_1",
+            "operation_type": "",
+            "operation_subtype": ""
           },
           {
             "context": {
               "client_name": "client_1",
-              "client_version": "version_1"
+              "client_version": "version_1",
+              "operation_type": "",
+              "operation_subtype": ""
             },
             "query_latency_stats": {
               "request_latencies": {
