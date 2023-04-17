@@ -8,9 +8,9 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### allow JWT algorithms restrictions ([Issue #2714](https://github.com/apollographql/router/issues/2714))
+### GraphOS Enterprise: Allow JWT algorithm restrictions ([Issue #2714](https://github.com/apollographql/router/issues/2714))
 
-Issuers can provide a JWKS containing keys usable with multiple algorithms, so we might want to restrict the list of accepted algorithms to a well known set
+It is now possible to restrict the list of accepted algorthms to a well-known set for cases where an issuer's JSON Web Key Set (JWKS) contains keys which are usable with multiple algorithms.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2852
 
@@ -26,37 +26,38 @@ By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https:/
 
 ## 🛠 Maintenance
 
-### Remove redundant `println!()` that breaks json formatted logging ([PR #2923](https://github.com/apollographql/router/pull/2923))
+### Remove redundant `println!()` that broke json formatted logging ([PR #2923](https://github.com/apollographql/router/pull/2923))
 
-The println!() statement is redundant with the nearby WARN log line and, more importantly, disrupts json logging. e.g.
-(log extract)
+The `println!()` statement being used in our trace transmission logic was redundant since it was already covered by a pre-existing `WARN` log line.  Most disruptively though, it broken JSON logging.
+
+For example, this previously showed as:
 
 ```
-Got error sending request for url (https://engine-staging-report.apollodata.com/api/ingress/traces): connection error: unexpected end of file
-{"timestamp":"2023-04-11T06:36:27.986412Z","level":"WARN","message":"attempt: 1, could not transfer: error sending request for url (https://engine-staging-report.apollodata.com/api/ingress/traces): connection error: unexpected end of file"}
+Got error sending request for url (https://example.com/api/ingress/traces): connection error: unexpected end of file
+{"timestamp":"2023-04-11T06:36:27.986412Z","level":"WARN","message":"attempt: 1, could not transfer: error sending request for url (https://example.com/api/ingress/traces): connection error: unexpected end of file"}
 ```
+
+It will now merely log the second line.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2923
 
-### Adds HTTP status code to Subgraph HTTP error type
+### Adds HTTP status code to subgraph HTTP error type
 
-When contextually available, includes the HTTP status code with `SubrequestHttpError`. This provides plugins the ability to access the status code directly. Currently string parsing of the `reason` is the only way to determine the status.
+When contextually available, the `SubrequestHttpError` now includes the HTTP status code. This provides plugins the ability to access the status code directly. Previously, parsing the `reason` value as a string was the only way to determine the status code.
 
 By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2902
 
-### Fix the router-bridge version 
+### Pin the `router-bridge` version
 
-When using the router as a library, router-bridge versions can be automatically updated, which can result in incompatibilities. We want to ensure that the router and router-bridge always work with vetted versions, so we fix it in Cargo.toml and update it manually
+When using the router as a library, `router-bridge` versions can be automatically updated, which can result in incompatibilities. We want to ensure that the Router and `router-bridge` always work with vetted versions, so we now pin it in our `Cargo.toml` and update it using our tooling.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2916
 
-### Update to federation 2.4.1 ([2937](https://github.com/apollographql/router/issues/2937))
+### Update to Federation v2.4.1 ([2937](https://github.com/apollographql/router/issues/2937))
 
-Update to federation 2.4.1, which includes a fix around [`@interfaceObject`](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#241)
+The version of Federation supported by the Router has been updated to v2.4.1, which includes [a fix involving `@interfaceObject`](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#241).
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2957
-
-
 
 # [1.14.0] - 2023-04-06
 
