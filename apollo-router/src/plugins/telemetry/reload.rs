@@ -170,25 +170,14 @@ where
     ) -> bool {
         let current_span = cx.current_span();
 
+        //
         !meta.is_span()
+            // this span is enabled if:
             || current_span
                 .id()
+                // - there's a parent span and it was enabled
                 .map(|id| cx.span(id).is_some())
+                // - there's no parent span (it's the root), so we make the sampling decision
                 .unwrap_or_else(|| self.sample())
     }
-
-    // if the filter enabled the span, then we signal it in the extensions, so it can be looked up by the
-    // next span
-    fn on_new_span(
-        &self,
-        _attrs: &tracing_core::span::Attributes<'_>,
-        id: &tracing_core::span::Id,
-        ctx: tracing_subscriber::layer::Context<'_, S>,
-    ) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        extensions.insert(Sampled);
-    }
 }
-
-struct Sampled;
