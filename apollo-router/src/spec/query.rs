@@ -266,9 +266,8 @@ impl Query {
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let query = query.into();
-        let mut compiler = ApolloCompiler::with_recursion_limit(
-            configuration.server.experimental_parser_recursion_limit,
-        );
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let id = compiler.add_executable(&query, "query");
         let ast = compiler.db.ast(id);
 
