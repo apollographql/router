@@ -15,7 +15,10 @@ use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
+use self::extensions::Extensions;
 use crate::json_ext::Value;
+
+pub(crate) mod extensions;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -36,6 +39,9 @@ pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
 
+    #[serde(skip, default)]
+    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
+
     /// Creation time
     #[serde(skip)]
     #[serde(default = "Instant::now")]
@@ -50,6 +56,7 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
+            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }
