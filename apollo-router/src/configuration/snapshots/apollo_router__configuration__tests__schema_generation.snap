@@ -1331,7 +1331,7 @@ expression: "&schema"
               }
             },
             "buffer_size": {
-              "description": "The buffer size for sending traces to Apollo. (deprecated, has no effect now)",
+              "description": "The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.",
               "default": 10000,
               "type": "integer",
               "format": "uint",

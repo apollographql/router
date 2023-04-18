@@ -4,6 +4,105 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.15.1] - 2023-04-18
+
+## 🐛 Fixes
+
+### Resolve Docker `unrecognized subcommand` error ([Issue #2966](https://github.com/apollographql/router/issues/2966))
+
+We've repaired the Docker build of the v1.15.0 release which broke due to the introduction of syntax in the Dockerfile which can only be used by the the `docker buildx` tooling [which leverages Moby BuildKit](https://www.docker.com/blog/introduction-to-heredocs-in-dockerfiles/).
+
+Furthermore, the change didn't apply to the `diy` ("do-it-yourself") image, and we'd like to prevent the two Dockerfiles from deviating more than necessary.
+
+Overall, this reverts [apollographql/router#2925](https://github.com/apollographql/router/pull/2925).
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2968
+
+### Helm Chart `extraContainers`
+
+This is another iteration on the functionality for supporting side-cars within Helm charts, which is quite useful for [coprocessor](https://www.apollographql.com/docs/router/customizations/coprocessor/) configurations.
+
+By [@pcarrier](https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2967
+
+## 📃 Configuration
+
+### Treat Helm `extraLabels` as templates
+
+It is now possible to use data from Helm's `Values` or `Chart` objects to add additional labels to Kubernetes Deployments of Pods.
+
+As of this release, the following example:
+
+```yaml
+extraLabels:
+  env: {{ .Chart.AppVersion }}
+```
+
+... will now result in:
+
+```yaml
+labels:
+  env: "v1.2.3"
+```
+
+Previously, this would have resulted in merely emitting the untemplatized `{{ .Chart.AppVersion }}` value, resulting in an invalid label.
+
+By [@gscheibel](https://github.com/gscheibel) in https://github.com/apollographql/router/pull/2962
+
+# [1.15.0] - 2023-04-17
+
+## 🚀 Features
+
+### GraphOS Enterprise: Allow JWT algorithm restrictions ([Issue #2714](https://github.com/apollographql/router/issues/2714))
+
+It is now possible to restrict the list of accepted algorthms to a well-known set for cases where an issuer's JSON Web Key Set (JWKS) contains keys which are usable with multiple algorithms.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2852
+
+## 🐛 Fixes
+
+### Invalid requests now return proper GraphQL-shaped errors ([Issue #2934](https://github.com/apollographql/router/issues/2934)), ([Issue #2946](https://github.com/apollographql/router/issues/2946))
+
+Unsupported `content-type` and `accept` headers sent on requests now return proper GraphQL errors nested as elements in a top-level `errors` array, rather than returning a single GraphQL error JSON object.
+
+This also introduces a new error code, `INVALID_CONTENT_TYPE_HEADER`, rather than using `INVALID_ACCEPT_HEADER` when an invalid `content-type` header was received.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/2947
+
+## 🛠 Maintenance
+
+### Remove redundant `println!()` that broke json formatted logging ([PR #2923](https://github.com/apollographql/router/pull/2923))
+
+The `println!()` statement being used in our trace transmission logic was redundant since it was already covered by a pre-existing `WARN` log line.  Most disruptively though, it broke JSON logging.
+
+For example, this previously showed as:
+
+```
+Got error sending request for url (https://example.com/api/ingress/traces): connection error: unexpected end of file
+{"timestamp":"2023-04-11T06:36:27.986412Z","level":"WARN","message":"attempt: 1, could not transfer: error sending request for url (https://example.com/api/ingress/traces): connection error: unexpected end of file"}
+```
+
+It will now merely log the second line.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2923
+
+### Adds HTTP status code to subgraph HTTP error type
+
+When contextually available, the `SubrequestHttpError` now includes the HTTP status code. This provides plugins with the ability to access the status code directly. Previously, parsing the `reason` value as a string was the only way to determine the status code.
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/2902
+
+### Pin the `router-bridge` version
+
+When using the router as a library, `router-bridge` versions can be automatically updated, which can result in incompatibilities. We want to ensure that the Router and `router-bridge` always work with vetted versions, so we now pin it in our `Cargo.toml` and update it using our tooling.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2916
+
+### Update to Federation v2.4.1 ([2937](https://github.com/apollographql/router/issues/2937))
+
+The Router has been updated to use Federation v2.4.1, which includes [a fix involving `@interfaceObject`](https://github.com/apollographql/federation/blob/main/gateway-js/CHANGELOG.md#241).
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/2957
+
 # [1.14.0] - 2023-04-06
 
 ## 🚀 Features
@@ -127,7 +226,7 @@ By [@geal](https://github.com/geal) in https://github.com/apollographql/router/p
 
 For monitoring, observability and debugging requirements around Uplink-related behaviors (those which occur as part of Managed Federation) the router now emits better log messages and emits new metrics around these facilities.  The new metrics are:
 
-- `apollo_router_uplink_duration_seconds_bucket`: A _histogram_ of durations with the following attributes:
+- `apollo_router_uplink_fetch_duration_seconds_bucket`: A _histogram_ of durations with the following attributes:
 
   - `url`: The URL that was polled
   - `query`: `SupergraphSdl` or `Entitlement`

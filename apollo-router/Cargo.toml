@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.14.0"
+version = "1.15.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
@@ -41,8 +41,8 @@ askama = "0.11.1"
 access-json = "0.1.0"
 anyhow = "1.0.68"
 ansi_term = "0.12"
-apollo-compiler = "0.7.0"
-apollo-parser = "0.5.0"
+apollo-compiler = "0.8.0"
+apollo-parser = "0.5.1"
 arc-swap = "1.6.0"
 async-compression = { version = "0.3.15", features = [
     "tokio",
@@ -157,7 +157,7 @@ reqwest = { version = "0.11.15", default-features = false, features = [
     "json",
     "stream",
 ] }
-router-bridge = "=0.2.0+v2.4.0"
+router-bridge = "=0.2.1+v2.4.1"
 rust-embed="6.4.2"
 rustls = "0.20.8"
 rustls-pemfile = "1.0.2"
@@ -203,7 +203,6 @@ yaml-rust = "0.4.5"
 wsl = "0.1.0"
 tokio-rustls = "0.23.4"
 http-serde = "1.1.2"
-parking_lot = "0.12.1"
 
 [target.'cfg(macos)'.dependencies]
 uname = "0.1.1"
