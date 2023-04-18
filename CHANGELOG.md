@@ -22,7 +22,7 @@ By [@abernix](https://github.com/abernix) in https://github.com/apollographql/ro
 
 This is another iteration on the functionality for supporting side-cars within Helm charts, which is quite useful for [coprocessor](https://www.apollographql.com/docs/router/customizations/coprocessor/) configurations.
 
-By [@pcarrier(https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2967
+By [@pcarrier](https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2967
 
 ## 📃 Configuration
 
@@ -47,7 +47,6 @@ labels:
 Previously, this would have resulted in merely emitting the untemplatized `{{ .Chart.AppVersion }}` value, resulting in an invalid label.
 
 By [@gscheibel](https://github.com/gscheibel) in https://github.com/apollographql/router/pull/2962
-
 
 # [1.15.0] - 2023-04-17
 
