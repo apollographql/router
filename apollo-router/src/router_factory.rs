@@ -211,9 +211,8 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
 
         if let Some(router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {
-                let cache_keys = router
-                    .cache_keys(configuration.supergraph.query_planning.warmed_up_queries)
-                    .await;
+                let cache_keys =
+                    router.cache_keys(configuration.supergraph.query_planning.warmed_up_queries);
 
                 if !cache_keys.is_empty() {
                     tracing::info!(
