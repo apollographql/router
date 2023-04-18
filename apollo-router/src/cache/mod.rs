@@ -124,7 +124,7 @@ where
         let _ = sender.send(value);
     }
 
-    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
+    pub(crate) fn in_memory_keys(&self) -> Vec<K> {
         self.storage.in_memory_keys()
     }
 }
