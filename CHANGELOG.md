@@ -12,43 +12,41 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 We've repaired the Docker build of the v1.15.0 release which broke due to the introduction of syntax in the Dockerfile which can only be used by the the `docker buildx` tooling [which leverages Moby BuildKit](https://www.docker.com/blog/introduction-to-heredocs-in-dockerfiles/).
 
-Furthermore, the change didn't apply to the "`diy`" (do it yourself), and we'd like to prevent the two Dockerfiles from deviating more than necessary.
+Furthermore, the change didn't apply to the `diy` ("do-it-yourself") image, and we'd like to prevent the two Dockerfiles from deviating more than necessary.
 
 Overall, this reverts [apollographql/router#2925](https://github.com/apollographql/router/pull/2925).
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2968
 
+### Helm Chart `extraContainers`
+
+This is another iteration on the functionality for supporting side-cars within Helm charts, which is quite useful for [coprocessor](https://www.apollographql.com/docs/router/customizations/coprocessor/) configurations.
+
+By [@pcarrier(https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2967
+
 ## 📃 Configuration
 
-### Treat helm extra labels values as templates
+### Treat Helm `extraLabels` as templates
 
-When a helm chart users add extra labels to the Kubernetes Deployment and pods (via the helm chart), they may want to use a piece of data from the `Values` or the `Chart` eg using the Chart version as a label value.
+It is now possible to use data from Helm's `Values` or `Chart` objects to add additional labels to Kubernetes Deployments of Pods.
 
-At the moment doing something like:
-```
+As of this release, the following example:
+
+```yaml
 extraLabels:
   env: {{ .Chart.AppVersion }}
 ```
-is interpreted as:
-```
-labels:
-  env: {{ .Chart.AppVersion }}
-```
 
-This is "normal" because by default strings are not interpolated. The fix basically iterates over the `extraLabels` and uses the `tpl` function on the values (only). The result being then
-```
+... will now result in:
+
+```yaml
 labels:
   env: "v1.2.3"
 ```
 
+Previously, this would have resulted in merely emitting the untemplatized `{{ .Chart.AppVersion }}` value, resulting in an invalid label.
+
 By [@gscheibel](https://github.com/gscheibel) in https://github.com/apollographql/router/pull/2962
-
-### `extraContainers` in Helm charts, fixed
-
-Allow sidecars in router pods, most notably useful for coprocessors.
-
-By [@pcarrier(https://github.com/pcarrier) in https://github.com/apollographql/router/pull/2967
-
 
 
 # [1.15.0] - 2023-04-17
