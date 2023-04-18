@@ -12,7 +12,6 @@ use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
 use apollo_compiler::Snapshot;
 use derivative::Derivative;
-use once_cell::sync::OnceCell;
 use parking_lot::Mutex;
 use serde::de::Visitor;
 use serde::Deserialize;
@@ -46,7 +45,7 @@ pub(crate) struct Query {
     string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
     #[serde(skip)]
-    compiler: OnceCell<Mutex<ApolloCompiler>>,
+    compiler: Mutex<Option<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -298,7 +297,7 @@ impl Query {
 
         Ok(Query {
             string: query,
-            compiler: OnceCell::from(Mutex::new(compiler)),
+            compiler: Mutex::new(Some(compiler)),
             fragments,
             operations,
             subselections: HashMap::new(),
@@ -307,11 +306,15 @@ impl Query {
 
     #[allow(clippy::expect_used)]
     pub(crate) fn snapshot_compiler(&self, schema: Option<&Schema>) -> Snapshot {
-        let compiler1 = self
-            .compiler
-            .get_or_init(|| Mutex::new(self.uncached_compiler(schema)))
-            .lock();
-        compiler1.snapshot()
+        let mut compiler = self.compiler.lock();
+        if compiler.is_none() {
+            *compiler = Some(self.uncached_compiler(schema));
+        }
+
+        compiler
+            .as_ref()
+            .expect("we just initialized the compiler")
+            .snapshot()
     }
 
     /// Create a new compiler for this query, without caching it
