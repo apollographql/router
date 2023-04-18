@@ -99,3 +99,20 @@ Usage:
 "/metrics"
 {{- end }}
 {{- end -}}
+
+{{/*
+This function takes the `extraLabels` map and templatizes the values.
+This allows to pass references from the values and interprates them as template.
+A use case for this usage is to add a custom label to the deployment referencing the version of the chart.
+For example:
+
+```
+extraLabels:
+  custom-version: {{ .Chart.AppVersion }}
+```
+*/}}
+{{- define "common.templatizeExtraLabels" -}}
+{{- range $key, $value := .Values.extraLabels }}
+{{ printf "%s: %s" $key (include  "common.tplvalues.render" ( dict "value" $value "context" $))}}
+{{- end -}}
+{{- end -}}

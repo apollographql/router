@@ -34,12 +34,10 @@ use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
-use super::layers::content_negociation::ACCEPTS_JSON_CONTEXT_KEY;
-use super::layers::content_negociation::ACCEPTS_MULTIPART_CONTEXT_KEY;
-use super::layers::content_negociation::ACCEPTS_WILDCARD_CONTEXT_KEY;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
+use super::router::ClientRequestAccepts;
 use super::supergraph;
 use super::HasPlugins;
 #[cfg(test)]
@@ -257,17 +255,15 @@ where
                             Ok(request) => supergraph_creator.create().oneshot(request).await?,
                         };
 
-                    let accepts_wildcard: bool = context
-                        .get(ACCEPTS_WILDCARD_CONTEXT_KEY)
-                        .unwrap_or_default()
-                        .unwrap_or_default();
-                    let accepts_json: bool = context
-                        .get(ACCEPTS_JSON_CONTEXT_KEY)
-                        .unwrap_or_default()
-                        .unwrap_or_default();
-                    let accepts_multipart: bool = context
-                        .get(ACCEPTS_MULTIPART_CONTEXT_KEY)
-                        .unwrap_or_default()
+                    let ClientRequestAccepts {
+                        wildcard: accepts_wildcard,
+                        json: accepts_json,
+                        multipart: accepts_multipart,
+                    } = context
+                        .private_entries
+                        .lock()
+                        .get()
+                        .cloned()
                         .unwrap_or_default();
 
                     let (mut parts, mut body) = response.into_parts();
@@ -519,8 +515,8 @@ where
 }
 
 impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
-    pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
-        self.supergraph_creator.cache_keys(count).await
+    pub(crate) fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
+        self.supergraph_creator.cache_keys(count)
     }
 
     pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
