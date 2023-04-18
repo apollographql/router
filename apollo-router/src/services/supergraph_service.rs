@@ -213,6 +213,7 @@ where
                         ExecutionRequest::internal_builder()
                             .supergraph_request(req.supergraph_request)
                             .query_plan(plan.clone())
+                            .schema(&schema)
                             .context(context)
                             .build()
                             .await,

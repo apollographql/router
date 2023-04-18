@@ -8,6 +8,7 @@ use static_assertions::assert_impl_all;
 use tower::BoxError;
 
 use crate::graphql;
+use crate::spec::Schema;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -48,7 +49,7 @@ impl Request {
         query_plan: Arc<QueryPlan>,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.snapshot_compiler();
+        let compiler = query_plan.query.uncached_compiler(None).snapshot();
         Self {
             supergraph_request,
             query_plan,
@@ -59,12 +60,13 @@ impl Request {
 
     #[builder(visibility = "pub(crate)")]
     #[allow(clippy::needless_lifetimes)] // needed by buildstructor-generated code
-    async fn internal_new(
+    async fn internal_new<'a>(
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
+        schema: &'a Schema,
         context: Context,
     ) -> Request {
-        let compiler = query_plan.query.snapshot_compiler();
+        let compiler = query_plan.query.snapshot_compiler(Some(schema));
         Self {
             supergraph_request,
             query_plan,
