@@ -7,6 +7,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
+use std::time::Instant;
 
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
@@ -16,7 +17,10 @@ use futures::stream::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
+use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
+use http::StatusCode;
+use once_cell::sync::Lazy;
 use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use reqwest::Client;
@@ -33,6 +37,7 @@ use super::apollo::SingleReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
+static STUDIO_BACKOFF: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now()));
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ApolloExportError {
@@ -163,6 +168,15 @@ impl ApolloExporter {
     }
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
+        // If studio has previously told us not to submit reports, throw it away
+        if Instant::now() < *STUDIO_BACKOFF.lock().unwrap() {
+            tracing::info!(
+                "studio is not accepting reports, discarding report containing {} operations",
+                report.operation_count
+            );
+            return Ok(());
+        }
+
         // We may be sending traces but with no operation count
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return Ok(());
@@ -228,6 +242,7 @@ impl ApolloExporter {
             match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();
+                    let opt_header_retry = v.headers().get(RETRY_AFTER).cloned();
                     let data = v
                         .text()
                         .await
@@ -242,6 +257,22 @@ impl ApolloExporter {
                     } else if status.is_server_error() {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
                         msg = data;
+                        if status == StatusCode::TOO_MANY_REQUESTS {
+                            // We should have a Retry-After header to go with the status code
+                            // If we don't have the header, or it isn't a valid string or we can't
+                            // convert it to u64, just ignore it. Otherwise, interpret it as a
+                            // number of seconds for which we should not attempt to send any more
+                            // reports.
+                            if let Some(retry_after) =
+                                opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+                            {
+                                *STUDIO_BACKOFF.lock().unwrap() =
+                                    Instant::now() + Duration::from_secs(retry_after);
+                            }
+                            // Even if we can't update the STUDIO_BACKUP, we should not continue to
+                            // retry here. We'd better just return the error.
+                            break;
+                        }
                     } else {
                         tracing::debug!("ingress response text: {:?}", data);
                         if has_traces && !*self.strip_traces.lock().expect("lock poisoned") {
