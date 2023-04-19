@@ -451,11 +451,12 @@ impl TrafficShaping {
     }
 
     pub(crate) fn enable_subgraph_http2(&self, service_name: &str) -> bool {
-        self.config
-            .subgraphs
-            .get(service_name)
-            .and_then(|subgraph| subgraph.shaping.experimental_enable_http2)
-            .unwrap_or(true)
+        Self::merge_config(
+            self.config.all.as_ref(),
+            self.config.subgraphs.get(service_name),
+        )
+        .and_then(|config| config.shaping.experimental_enable_http2)
+        .unwrap_or(true)
     }
 }
 
@@ -690,6 +691,72 @@ mod test {
             TrafficShaping::merge_config(None, config.subgraphs.get("products")).as_ref(),
             config.subgraphs.get("products")
         );
+    }
+
+    #[test]
+    fn test_merge_http2_all() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_enable_http2: false
+        subgraphs: 
+          products:
+            experimental_enable_http2: true
+          reviews:
+            experimental_enable_http2: false
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        assert!(TrafficShaping::merge_config(
+            config.all.as_ref(),
+            config.subgraphs.get("products")
+        )
+        .unwrap()
+        .shaping
+        .experimental_enable_http2
+        .unwrap());
+        assert!(!TrafficShaping::merge_config(
+            config.all.as_ref(),
+            config.subgraphs.get("reviews")
+        )
+        .unwrap()
+        .shaping
+        .experimental_enable_http2
+        .unwrap());
+        assert!(!TrafficShaping::merge_config(config.all.as_ref(), None)
+            .unwrap()
+            .shaping
+            .experimental_enable_http2
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_enable_subgraph_http2() {
+        let config = serde_yaml::from_str::<Config>(
+            r#"
+        all:
+          experimental_enable_http2: false
+        subgraphs: 
+          products:
+            experimental_enable_http2: true
+          reviews:
+            experimental_enable_http2: false
+        router:
+          timeout: 65s
+        "#,
+        )
+        .unwrap();
+
+        let shaping_config = TrafficShaping::new(PluginInit::fake_new(config, Default::default()))
+            .await
+            .unwrap();
+
+        assert!(shaping_config.enable_subgraph_http2("products"));
+        assert!(!shaping_config.enable_subgraph_http2("reviews"));
+        assert!(!shaping_config.enable_subgraph_http2("this_doesnt_exist"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
