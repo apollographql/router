@@ -49,6 +49,7 @@ use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
@@ -83,6 +84,7 @@ const DEPENDS: Key = Key::from_static_str("graphql.depends");
 const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
+const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -133,6 +135,7 @@ enum TreeData {
     DeferDeferred(DeferredNode),
     ConditionIf(Option<QueryPlanNode>),
     ConditionElse(Option<QueryPlanNode>),
+    Execution(String),
     Trace(Option<Result<Box<proto::reports::Trace>, Error>>),
 }
 
@@ -214,6 +217,9 @@ impl Exporter {
                         variables_json,
                         operation_name,
                     });
+                }
+                TreeData::Execution(operation_type) => {
+                    root_trace.operation_type = operation_type;
                 }
                 _ => panic!("should never have had other node types"),
             }
@@ -427,6 +433,15 @@ impl Exporter {
                 vec![TreeData::ConditionElse(
                     child_nodes.remove_first_query_plan_node(),
                 )]
+            }
+            EXECUTION_SPAN_NAME => {
+                child_nodes.push(TreeData::Execution(
+                    span.attributes
+                        .get(&OPERATION_TYPE)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                ));
+                child_nodes
             }
             _ => child_nodes,
         })
@@ -708,6 +723,7 @@ mod test {
                 TreeData::ConditionIf(_) => elements.push("condition_if"),
                 TreeData::ConditionElse(_) => elements.push("condition_else"),
                 TreeData::Trace(_) => elements.push("trace"),
+                TreeData::Execution(_) => elements.push("execution"),
                 TreeData::Router { .. } => elements.push("router"),
             }
         }
