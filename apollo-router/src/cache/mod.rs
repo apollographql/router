@@ -214,7 +214,6 @@ where
         Self::remove_from_wait_map(&self.wait_map, key);
     }
 
-
     pub(crate) fn in_memory_keys(&self) -> Vec<K> {
         self.storage.in_memory_keys()
     }
