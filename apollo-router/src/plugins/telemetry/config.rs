@@ -26,6 +26,7 @@ pub(crate) enum Error {
     #[error("field level instrumentation sampler must sample less frequently than tracing level sampler")]
     InvalidFieldLevelInstrumentationSampler,
 }
+
 pub(crate) trait GenericWith<T>
 where
     Self: Sized,
