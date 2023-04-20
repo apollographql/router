@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "router.labels" . | nindent 4 }}
     {{- if .Values.extraLabels }}
-    {{- toYaml .Values.extraLabels | nindent 4 }}
+    {{- include "common.templatizeExtraLabels" . | nindent 4 }}
     {{- end }}
   {{/* There may not be much configuration so check that there is something */}}
   {{- if (((((.Values.router).configuration).telemetry).metrics).prometheus).enabled }}
@@ -35,7 +35,7 @@ spec:
       labels:
         {{- include "router.selectorLabels" . | nindent 8 }}
         {{- if .Values.extraLabels }}
-        {{- toYaml .Values.extraLabels | nindent 8 }}
+        {{- include "common.templatizeExtraLabels" . | nindent 8 }}
         {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -126,9 +126,9 @@ spec:
               {{- include "common.tplvalues.render" (dict "value" .Values.extraVolumeMounts "context" $) | nindent 12 }}
             {{- end }}
           {{- end }}
-          {{- if .Values.extraContainers }}
-          {{- tpl (toYaml .Values.extraContainers) $ | nindent 10 }}
-          {{- end }}
+        {{- if .Values.extraContainers }}
+          {{- include "common.tplvalues.render" (dict "value" .Values.extraContainers "context" $) | nindent 8 }}
+        {{- end }}
       {{- if or .Values.router.configuration .Values.extraVolumes }}
       volumes:
         {{- if .Values.router.configuration }}

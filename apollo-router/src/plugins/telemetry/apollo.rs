@@ -1,6 +1,7 @@
 //! Configuration for apollo telemetry.
 // This entire file is license key functionality
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
 use std::time::SystemTime;
@@ -9,6 +10,7 @@ use derivative::Derivative;
 use http::header::HeaderName;
 use itertools::Itertools;
 use schemars::JsonSchema;
+use serde::ser::SerializeMap;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
@@ -25,6 +27,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::query_planner::OperationKind;
 use crate::services::apollo_graph_reference;
 use crate::services::apollo_key;
 
@@ -60,7 +63,7 @@ pub(crate) struct Config {
     #[serde(deserialize_with = "deserialize_header_name")]
     pub(crate) client_version_header: HeaderName,
 
-    /// The buffer size for sending traces to Apollo. (deprecated, has no effect now)
+    /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
@@ -209,7 +212,69 @@ pub(crate) enum SingleReport {
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct Report {
     pub(crate) traces_per_query: HashMap<String, TracesAndStats>,
+    #[serde(serialize_with = "serialize_operation_count_by_type")]
+    pub(crate) operation_count_by_type:
+        HashMap<(OperationKind, Option<OperationSubType>), OperationCountByType>,
+}
+
+#[derive(Default, Debug, Serialize, PartialEq, Eq, Hash)]
+pub(crate) struct OperationCountByType {
+    pub(crate) r#type: OperationKind,
+    pub(crate) subtype: Option<OperationSubType>,
     pub(crate) operation_count: u64,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq, Hash, Clone, Copy)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum OperationSubType {
+    // TODO
+}
+
+impl OperationSubType {
+    pub(crate) const fn as_str(&self) -> &'static str {
+        ""
+    }
+}
+
+impl Display for OperationSubType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "")
+    }
+}
+
+impl From<OperationCountByType>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::report::OperationCountByType
+{
+    fn from(value: OperationCountByType) -> Self {
+        Self {
+            r#type: value.r#type.as_apollo_operation_type().to_string(),
+            subtype: value.subtype.map(|s| s.to_string()).unwrap_or_default(),
+            operation_count: value.operation_count,
+        }
+    }
+}
+
+fn serialize_operation_count_by_type<S>(
+    elt: &HashMap<(OperationKind, Option<OperationSubType>), OperationCountByType>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    let mut map_ser = serializer.serialize_map(Some(elt.len()))?;
+    for ((op_type, op_subtype), v) in elt {
+        map_ser.serialize_entry(
+            &format!(
+                "{}{}",
+                op_type.as_apollo_operation_type(),
+                op_subtype
+                    .map(|o| "/".to_owned() + o.as_str())
+                    .unwrap_or_default()
+            ),
+            v,
+        )?;
+    }
+    map_ser.end()
 }
 
 impl Report {
@@ -229,7 +294,11 @@ impl Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
             end_time: Some(SystemTime::now().into()),
-            operation_count: self.operation_count,
+            operation_count_by_type: self
+                .operation_count_by_type
+                .into_values()
+                .map(|op| op.into())
+                .collect(),
             traces_pre_aggregated: true,
             ..Default::default()
         };
@@ -269,7 +338,18 @@ impl AddAssign<SingleStatsReport> for Report {
             *self.traces_per_query.entry(k).or_default() += v;
         }
 
-        self.operation_count += report.operation_count;
+        if let Some(operation_count_by_type) = report.operation_count_by_type {
+            let key = (
+                operation_count_by_type.r#type,
+                operation_count_by_type.subtype,
+            );
+            self.operation_count_by_type
+                .entry(key)
+                .and_modify(|e| {
+                    e.operation_count += 1;
+                })
+                .or_insert(operation_count_by_type);
+        }
     }
 }
 

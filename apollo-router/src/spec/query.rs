@@ -267,9 +267,8 @@ impl Query {
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let query = query.into();
-        let mut compiler = ApolloCompiler::with_recursion_limit(
-            configuration.server.experimental_parser_recursion_limit,
-        );
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
         let id = compiler.add_executable(&query, "query");
         let ast = compiler.db.ast(id);
 
@@ -961,7 +960,7 @@ impl Query {
         })
     }
 
-    fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+    pub(crate) fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
         match operation_name {
             Some(name) => self
                 .operations

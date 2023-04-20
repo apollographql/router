@@ -32,7 +32,7 @@ traces_per_query:
           operation_name: ""
         client_name: ""
         client_version: ""
-        operation_type: ""
+        operation_type: query
         operation_subtype: ""
         agent_version: "[agent_version]"
         http:
