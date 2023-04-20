@@ -5,7 +5,7 @@ expression: stats
 context:
   client_name: ""
   client_version: ""
-  operation_type: ""
+  operation_type: query
   operation_subtype: ""
 query_latency_stats:
   latency_count: "[latency_count]"

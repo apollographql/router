@@ -6,6 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
+use crate::plugins::telemetry::apollo::OperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
@@ -13,7 +14,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,
     pub(crate) stats: HashMap<String, SingleStats>,
-    pub(crate) operation_count: u64,
+    pub(crate) operation_count_by_type: Option<OperationCountByType>,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -269,6 +270,7 @@ mod test {
 
     use super::*;
     use crate::plugins::telemetry::apollo::Report;
+    use crate::query_planner::OperationKind;
 
     #[test]
     fn test_aggregation() {
@@ -317,7 +319,12 @@ mod test {
 
         SingleStatsReport {
             request_id: Uuid::default(),
-            operation_count: count.inc_u64(),
+            operation_count_by_type: OperationCountByType {
+                r#type: OperationKind::Query,
+                subtype: None,
+                operation_count: count.inc_u64(),
+            }
+            .into(),
             stats: HashMap::from([(
                 stats_report_key.to_string(),
                 SingleStats {
