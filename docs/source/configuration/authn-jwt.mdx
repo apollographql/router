@@ -205,7 +205,7 @@ fn subgraph_service(service, subgraph) {
     }
     // Add each claim key-value pair as a separate HTTP header
     for key in claims.keys() {
-      request.subgraph.headers[key] = claims[key];
+      request.subgraph.headers[key] = claims[key].to_string();
     }
   };
 
