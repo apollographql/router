@@ -153,8 +153,14 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
-                            tracing::error!("failed to submit Apollo report: {}", e)
+                        match self.submit_report(std::mem::take(&mut report)).await {
+                            Ok(opt_report) => {
+                                if let Some(unsubmitted) = opt_report {
+                                    tracing::info!("Apollo Studio not ready to receive report.");
+                                    report = unsubmitted;
+                                }
+                            }
+                            Err(e) => tracing::error!("failed to submit Apollo report: {}", e)
                         }
                     }
                 };
@@ -167,19 +173,18 @@ impl ApolloExporter {
         Sender::Apollo(tx)
     }
 
-    pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
-        // If studio has previously told us not to submit reports, throw it away
+    pub(crate) async fn submit_report(
+        &self,
+        report: Report,
+    ) -> Result<Option<Report>, ApolloExportError> {
+        // If studio has previously told us not to submit reports, return for further processing
         if Instant::now() < *STUDIO_BACKOFF.lock().unwrap() {
-            tracing::info!(
-                "studio is not accepting reports, discarding report containing {} operations",
-                report.operation_count
-            );
-            return Ok(());
+            return Ok(Some(report));
         }
 
         // We may be sending traces but with no operation count
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
@@ -284,7 +289,7 @@ impl ApolloExporter {
                                 }
                             }
                         }
-                        return Ok(());
+                        return Ok(None);
                     }
                 }
                 Err(e) => {
