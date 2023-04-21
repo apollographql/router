@@ -50,6 +50,15 @@ impl OperationKind {
             OperationKind::Subscription => "Subscription",
         }
     }
+
+    /// Only for apollo studio exporter
+    pub(crate) const fn as_apollo_operation_type(&self) -> &'static str {
+        match self {
+            OperationKind::Query => "query",
+            OperationKind::Mutation => "mutation",
+            OperationKind::Subscription => "subscription",
+        }
+    }
 }
 
 impl Default for OperationKind {

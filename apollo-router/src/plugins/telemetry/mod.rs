@@ -53,6 +53,8 @@ use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
+use self::apollo::OperationCountByType;
+use self::apollo::OperationSubType;
 use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
@@ -90,6 +92,7 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::query_planner::OperationKind;
 use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
@@ -127,6 +130,7 @@ const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
 const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
 const ENABLE_SUBGRAPH_FTV1: &str = "apollo_telemetry::enable_subgraph_ftv1";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
+const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -373,7 +377,7 @@ impl Plugin for Telemetry {
                             start.elapsed(),
                         )
                         .await;
-                        Self::update_metrics_on_last_response(
+                        Self::update_metrics_on_response_events(
                             &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
                         )
                     }
@@ -385,8 +389,28 @@ impl Plugin for Telemetry {
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
-            .instrument(move |_req: &ExecutionRequest| {
-                info_span!("execution", "otel.kind" = "INTERNAL",)
+            .instrument(move |req: &ExecutionRequest| {
+                let operation_kind = req
+                    .query_plan
+                    .query
+                    .operation(req.supergraph_request.body().operation_name.as_deref())
+                    .map(|op| *op.kind());
+                let _ = req
+                    .context
+                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default());
+
+                match operation_kind {
+                    Some(operation_kind) => {
+                        info_span!(
+                            EXECUTION_SPAN_NAME,
+                            "otel.kind" = "INTERNAL",
+                            "graphql.operation.type" = operation_kind.as_apollo_operation_type()
+                        )
+                    }
+                    None => {
+                        info_span!(EXECUTION_SPAN_NAME, "otel.kind" = "INTERNAL",)
+                    }
+                }
             })
             .service(service)
             .boxed()
@@ -1030,7 +1054,7 @@ impl Telemetry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn update_metrics_on_last_response(
+    fn update_metrics_on_response_events(
         ctx: &Context,
         config: Arc<Conf>,
         field_level_instrumentation_ratio: f64,
@@ -1039,6 +1063,9 @@ impl Telemetry {
         start: Instant,
         result: Result<supergraph::Response, BoxError>,
     ) -> Result<supergraph::Response, BoxError> {
+        let operation_kind: OperationKind =
+            ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
+
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
@@ -1048,6 +1075,8 @@ impl Telemetry {
                         sender,
                         true,
                         start.elapsed(),
+                        operation_kind,
+                        None,
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1077,6 +1106,7 @@ impl Telemetry {
             }
             Ok(router_response) => {
                 let mut has_errors = !router_response.response.status().is_success();
+
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
@@ -1096,8 +1126,11 @@ impl Telemetry {
                                     sender.clone(),
                                     has_errors,
                                     start.elapsed(),
+                                    operation_kind,
+                                    None,
                                 );
                             }
+
                             response
                         })
                         .boxed()
@@ -1112,6 +1145,8 @@ impl Telemetry {
         sender: Sender,
         has_errors: bool,
         duration: Duration,
+        operation_kind: OperationKind,
+        operation_subtype: Option<OperationSubType>,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .get::<_, UsageReporting>(USAGE_REPORTING)
@@ -1128,7 +1163,13 @@ impl Telemetry {
             {
                 // The request was excluded don't report the details, but do report the operation count
                 SingleStatsReport {
-                    operation_count,
+                    operation_count_by_type: (operation_count > 0).then_some(
+                        OperationCountByType {
+                            r#type: operation_kind,
+                            subtype: operation_subtype,
+                            operation_count,
+                        },
+                    ),
                     ..Default::default()
                 }
             } else {
@@ -1144,7 +1185,13 @@ impl Telemetry {
                             .trace_id()
                             .to_bytes(),
                     ),
-                    operation_count,
+                    operation_count_by_type: (operation_count > 0).then_some(
+                        OperationCountByType {
+                            r#type: operation_kind,
+                            subtype: operation_subtype,
+                            operation_count,
+                        },
+                    ),
                     stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
                         SingleStats {
@@ -1158,9 +1205,12 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
-                                    // FIXME
-                                    operation_type: String::new(),
-                                    operation_subtype: String::new(),
+                                    operation_type: operation_kind
+                                        .as_apollo_operation_type()
+                                        .to_string(),
+                                    operation_subtype: operation_subtype
+                                        .map(|op| op.to_string())
+                                        .unwrap_or_default(),
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
@@ -1183,7 +1233,12 @@ impl Telemetry {
         } else {
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
-                operation_count: 1,
+                operation_count_by_type: OperationCountByType {
+                    r#type: operation_kind,
+                    subtype: operation_subtype,
+                    operation_count: 1,
+                }
+                .into(),
                 ..Default::default()
             }
         };
