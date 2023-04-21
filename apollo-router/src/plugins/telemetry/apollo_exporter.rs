@@ -177,15 +177,16 @@ impl ApolloExporter {
         &self,
         report: Report,
     ) -> Result<Option<Report>, ApolloExportError> {
-        // If studio has previously told us not to submit reports, return for further processing
-        if Instant::now() < *STUDIO_BACKOFF.lock().unwrap() {
-            return Ok(Some(report));
-        }
-
         // We may be sending traces but with no operation count
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
             return Ok(None);
         }
+
+        // If studio has previously told us not to submit reports, return for further processing
+        if *STUDIO_BACKOFF.lock().unwrap() > Instant::now() {
+            return Ok(Some(report));
+        }
+
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
