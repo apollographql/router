@@ -4,7 +4,6 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
 use std::time::Instant;
@@ -20,7 +19,6 @@ use http::header::CONTENT_TYPE;
 use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
 use http::StatusCode;
-use once_cell::sync::Lazy;
 use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use reqwest::Client;
@@ -37,7 +35,6 @@ use super::apollo::SingleReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
-static STUDIO_BACKOFF: Lazy<Mutex<Instant>> = Lazy::new(|| Mutex::new(Instant::now()));
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ApolloExportError {
@@ -91,14 +88,14 @@ impl Default for Sender {
 /// The Apollo exporter is responsible for attaching report header information for individual requests
 /// Retrying when sending fails.
 /// Sending periodically (in the case of metrics).
-#[derive(Clone)]
 pub(crate) struct ApolloExporter {
     batch_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
     client: Client,
-    strip_traces: Arc<Mutex<bool>>,
+    strip_traces: Mutex<bool>,
+    studio_backoff: Mutex<Instant>,
 }
 
 impl ApolloExporter {
@@ -134,6 +131,7 @@ impl ApolloExporter {
                 .map_err(BoxError::from)?,
             header,
             strip_traces: Default::default(),
+            studio_backoff: Mutex::new(Instant::now()),
         })
     }
 
@@ -183,7 +181,7 @@ impl ApolloExporter {
         }
 
         // If studio has previously told us not to submit reports, return for further processing
-        let expires_at = *STUDIO_BACKOFF.lock().unwrap();
+        let expires_at = *self.studio_backoff.lock().unwrap();
         let now = Instant::now();
         if expires_at > now {
             let remaining = expires_at - now;
@@ -278,10 +276,10 @@ impl ApolloExporter {
                             if let Some(retry_after) =
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
-                                *STUDIO_BACKOFF.lock().unwrap() =
+                                *self.studio_backoff.lock().unwrap() =
                                     Instant::now() + Duration::from_secs(retry_after);
                             }
-                            // Even if we can't update the STUDIO_BACKUP, we should not continue to
+                            // Even if we can't update the studio_backoff, we should not continue to
                             // retry here. We'd better just return the error.
                             break;
                         }
