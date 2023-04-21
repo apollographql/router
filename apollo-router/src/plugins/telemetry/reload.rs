@@ -48,7 +48,7 @@ static FMT_LAYER_HANDLE: OnceCell<
 > = OnceCell::new();
 
 pub(super) static SPAN_SAMPLING_RATE: AtomicU64 =
-    AtomicU64::new(unsafe { mem::transmute::<f64, u64>(0.0) });
+    AtomicU64::new(0);
 
 #[allow(clippy::type_complexity)]
 static METRICS_LAYER_HANDLE: OnceCell<
