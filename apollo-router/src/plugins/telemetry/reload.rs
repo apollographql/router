@@ -1,4 +1,3 @@
-use std::mem;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
@@ -47,8 +46,7 @@ static FMT_LAYER_HANDLE: OnceCell<
     Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
 > = OnceCell::new();
 
-pub(super) static SPAN_SAMPLING_RATE: AtomicU64 =
-    AtomicU64::new(0);
+pub(super) static SPAN_SAMPLING_RATE: AtomicU64 = AtomicU64::new(0);
 
 #[allow(clippy::type_complexity)]
 static METRICS_LAYER_HANDLE: OnceCell<
@@ -182,9 +180,9 @@ where
                 .map(|id| cx.span(id).is_some())
                 // - there's no parent span (it's the root), so we make the sampling decision
                 .unwrap_or_else(|| self.sample())
-      }
+    }
 }
-              
+
 /// prevents span fields from being formatted to a string when writing logs
 pub(crate) struct NullFieldFormatter;
 
