@@ -194,8 +194,8 @@ impl ApolloExporter {
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let mut report = report.into_report(self.header.clone());
-        prost::Message::encode(&report, &mut content)
+        let mut proto_report = report.build_proto_report(self.header.clone());
+        prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -230,7 +230,7 @@ impl ApolloExporter {
         let mut msg = "default error message".to_string();
         let mut has_traces = false;
 
-        for (_, traces_and_stats) in report.traces_per_query.iter_mut() {
+        for (_, traces_and_stats) in proto_report.traces_per_query.iter_mut() {
             if !traces_and_stats.trace.is_empty()
                 || !traces_and_stats
                     .internal_traces_contributing_to_stats
@@ -273,15 +273,17 @@ impl ApolloExporter {
                             // convert it to u64, just ignore it. Otherwise, interpret it as a
                             // number of seconds for which we should not attempt to send any more
                             // reports.
-                            if let Some(retry_after) =
+                            let mut retry_after = 5;
+                            if let Some(returned_retry_after) =
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
+                                retry_after = returned_retry_after;
                                 *self.studio_backoff.lock().unwrap() =
                                     Instant::now() + Duration::from_secs(retry_after);
                             }
                             // Even if we can't update the studio_backoff, we should not continue to
                             // retry here. We'd better just return the error.
-                            break;
+                            return Err(ApolloExportError::StudioBackoff(report, retry_after));
                         }
                     } else {
                         tracing::debug!("ingress response text: {:?}", data);
