@@ -537,7 +537,6 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        println!("tracing_config={tracing_config:?}",);
 
         let mut trace_config = tracing_config.trace_config.unwrap_or_default();
 
