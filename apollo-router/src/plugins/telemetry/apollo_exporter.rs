@@ -273,7 +273,7 @@ impl ApolloExporter {
                             // convert it to u64, just ignore it. Otherwise, interpret it as a
                             // number of seconds for which we should not attempt to send any more
                             // reports.
-                            let mut retry_after = 5;
+                            let mut retry_after = 0;
                             if let Some(returned_retry_after) =
                                 opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
                             {
