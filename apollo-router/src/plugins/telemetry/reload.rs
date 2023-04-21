@@ -14,6 +14,7 @@ use tower::BoxError;
 use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::filter::Filtered;
+use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
@@ -81,6 +82,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
                     .with_target(false),
                 filter_metric_events,
             ))
+            .fmt_fields(NullFieldFormatter)
             .boxed()
     } else {
         tracing_subscriber::fmt::Layer::new()
@@ -94,6 +96,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
                     filter_metric_events,
                 )
             })
+            .fmt_fields(NullFieldFormatter)
             .boxed()
     };
 
@@ -179,5 +182,18 @@ where
                 .map(|id| cx.span(id).is_some())
                 // - there's no parent span (it's the root), so we make the sampling decision
                 .unwrap_or_else(|| self.sample())
+      }
+}
+              
+/// prevents span fields from being formatted to a string when writing logs
+pub(crate) struct NullFieldFormatter;
+
+impl<'writer> FormatFields<'writer> for NullFieldFormatter {
+    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
+        &self,
+        _writer: tracing_subscriber::fmt::format::Writer<'writer>,
+        _fields: R,
+    ) -> std::fmt::Result {
+        Ok(())
     }
 }
