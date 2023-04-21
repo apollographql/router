@@ -43,7 +43,6 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
-use crate::plugins::telemetry::apollo_exporter::ApolloExportError;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
@@ -592,7 +591,6 @@ impl SpanExporter for Exporter {
         let fut = async move {
             exporter
                 .submit_report(report)
-                .map(|_r| Ok::<(), ApolloExportError>(()))
                 .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                 .await
         };

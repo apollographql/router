@@ -49,6 +49,9 @@ pub(crate) enum ApolloExportError {
 
     #[error("Apollo exporter unavailable error: {0}")]
     Unavailable(String),
+
+    #[error("Apollo Studio not accepting reports for {1} seconds")]
+    StudioBackoff(Report, u64),
 }
 
 impl ExportError for ApolloExportError {
@@ -153,14 +156,14 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        match self.submit_report(std::mem::take(&mut report)).await {
-                            Ok(opt_report) => {
-                                if let Some(unsubmitted) = opt_report {
-                                    tracing::info!("Apollo Studio not ready to receive report.");
-                                    report = unsubmitted;
-                                }
+                        if let Err(err) =  self.submit_report(std::mem::take(&mut report)).await {
+                            match err {
+                                ApolloExportError::StudioBackoff(unsubmitted, remaining) => {
+                                        tracing::warn!("Apollo Studio not accepting reports for {remaining} seconds");
+                                        report = unsubmitted;
+                                },
+                                _ => tracing::error!("failed to submit Apollo report: {}", err)
                             }
-                            Err(e) => tracing::error!("failed to submit Apollo report: {}", e)
                         }
                     }
                 };
@@ -173,18 +176,21 @@ impl ApolloExporter {
         Sender::Apollo(tx)
     }
 
-    pub(crate) async fn submit_report(
-        &self,
-        report: Report,
-    ) -> Result<Option<Report>, ApolloExportError> {
+    pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
         // We may be sending traces but with no operation count
         if report.operation_count == 0 && report.traces_per_query.is_empty() {
-            return Ok(None);
+            return Ok(());
         }
 
         // If studio has previously told us not to submit reports, return for further processing
-        if *STUDIO_BACKOFF.lock().unwrap() > Instant::now() {
-            return Ok(Some(report));
+        let expires_at = *STUDIO_BACKOFF.lock().unwrap();
+        let now = Instant::now();
+        if expires_at > now {
+            let remaining = expires_at - now;
+            return Err(ApolloExportError::StudioBackoff(
+                report,
+                remaining.as_secs(),
+            ));
         }
 
         tracing::debug!("submitting report: {:?}", report);
@@ -290,7 +296,7 @@ impl ApolloExporter {
                                 }
                             }
                         }
-                        return Ok(None);
+                        return Ok(());
                     }
                 }
                 Err(e) => {
