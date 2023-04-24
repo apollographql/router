@@ -32,10 +32,7 @@ use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower_http::compression::predicate::NotForContentType;
 use tower_http::compression::CompressionLayer;
-use tower_http::compression::DefaultPredicate;
-use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
 
 use super::listeners::ensure_endpoints_consistency;
@@ -332,9 +329,7 @@ where
         .layer(cors)
         // Compress the response body, except for multipart responses such as with `@defer`.
         // This is a work-around for https://github.com/apollographql/router/issues/1572
-        .layer(CompressionLayer::new().compress_when(
-            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
-        ));
+        .layer(CompressionLayer::new());
 
     let route = endpoints_on_main_listener
         .into_iter()
