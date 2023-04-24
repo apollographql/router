@@ -1,11 +1,13 @@
+use brotli::enc::BrotliEncoderParams;
 use bytes::{Bytes, BytesMut};
+use flate2::Compression;
 use futures::{Stream, StreamExt};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 
 use self::{
-    codec::{DeflateEncoder, Encode, GzipEncoder},
+    codec::{BrotliEncoder, DeflateEncoder, Encode, GzipEncoder, ZstdEncoder},
     util::PartialBuffer,
 };
 
@@ -14,16 +16,41 @@ pub(crate) mod unshared;
 pub(crate) mod util;
 
 pub(crate) enum Compressor {
-    //Identity,
     Deflate(DeflateEncoder),
     Gzip(GzipEncoder),
-    //Brotli(BrotliEncoder),
-    //Zstd,
-    //others?
+    Brotli(BrotliEncoder),
+    Zstd(ZstdEncoder),
 }
 
 //FIXME: we should call finish at the end
 impl Compressor {
+    pub(crate) fn new<'a, It: 'a>(it: It) -> Option<Self>
+    where
+        It: Iterator<Item = &'a str>,
+    {
+        for s in it {
+            match s {
+                "gzip" => return Some(Compressor::Gzip(GzipEncoder::new(Compression::fast()))),
+                "deflate" => {
+                    return Some(Compressor::Deflate(
+                        DeflateEncoder::new(Compression::fast()),
+                    ))
+                }
+                // FIXME: find the "fast" brotli encoder params
+                "br" => {
+                    return Some(Compressor::Brotli(BrotliEncoder::new(
+                        BrotliEncoderParams::default(),
+                    )))
+                }
+                "zstd" => {
+                    return Some(Compressor::Zstd(ZstdEncoder::new(zstd_safe::min_c_level())))
+                }
+                _ => {}
+            }
+        }
+        None
+    }
+
     pub(crate) fn process(
         mut self,
         mut stream: hyper::Body,
@@ -110,6 +137,8 @@ impl Encode for Compressor {
         match self {
             Compressor::Deflate(e) => e.encode(input, output),
             Compressor::Gzip(e) => e.encode(input, output),
+            Compressor::Brotli(e) => e.encode(input, output),
+            Compressor::Zstd(e) => e.encode(input, output),
         }
     }
 
@@ -120,6 +149,8 @@ impl Encode for Compressor {
         match self {
             Compressor::Deflate(e) => e.flush(output),
             Compressor::Gzip(e) => e.flush(output),
+            Compressor::Brotli(e) => e.flush(output),
+            Compressor::Zstd(e) => e.flush(output),
         }
     }
 
@@ -130,6 +161,8 @@ impl Encode for Compressor {
         match self {
             Compressor::Deflate(e) => e.finish(output),
             Compressor::Gzip(e) => e.finish(output),
+            Compressor::Brotli(e) => e.finish(output),
+            Compressor::Zstd(e) => e.finish(output),
         }
     }
 }
