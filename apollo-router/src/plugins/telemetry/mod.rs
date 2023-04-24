@@ -1416,7 +1416,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
         .private_entries
         .lock()
         .contains_key::<EnableSubgraphFtv1>()
-        && !Span::current().is_disabled()
+        && Span::current().context().span().span_context().is_sampled()
     {
         req.subgraph_request.headers_mut().insert(
             "apollo-federation-include-trace",
