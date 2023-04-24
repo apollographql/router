@@ -109,10 +109,10 @@ where {
                                 match self.flush(&mut partial_output) {
                                     Err(e) => panic!("{e:?}"),
                                     Ok(_) => {
-                                        let flushed = partial_output.written().len() - written;
-                                        //println!("flush with buffer of size {flushed}");
+                                        let len = partial_output.written().len();
+                                        //println!("flush(b={b}) with buffer of size {len}");
                                         let _ = partial_output.into_inner();
-                                        buf.resize(flushed, 0);
+                                        buf.resize(len, 0);
                                         if let Err(_) = tx.send(Ok(buf.freeze())).await {
                                             return;
                                         }
