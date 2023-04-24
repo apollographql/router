@@ -62,7 +62,9 @@ where {
             while let Some(data) = stream.next().await {
                 match data {
                     Err(e) => {
-                        tx.send(Err(e.into())).await;
+                        if let Err(_) = tx.send(Err(e.into())).await {
+                            return;
+                        }
                     }
                     Ok(data) => {
                         let mut buf = BytesMut::zeroed(1024);
@@ -98,7 +100,9 @@ where {
                                         println!("flush with buffer of size {flushed}");
                                         let _ = partial_output.into_inner();
                                         buf.resize(flushed, 0);
-                                        tx.send(Ok(buf.freeze())).await;
+                                        if let Err(_) = tx.send(Ok(buf.freeze())).await {
+                                            return;
+                                        }
                                         break;
                                     }
                                 }
@@ -113,13 +117,15 @@ where {
 
             match self.finish(&mut partial_output) {
                 Err(e) => panic!("{e:?}"),
-                Ok(b) => {
+                Ok(_) => {
                     let len = partial_output.written().len();
                     println!("finish with buffer of size {}", len);
 
                     let mut buf = partial_output.into_inner();
                     buf.resize(len, 0);
-                    tx.send(Ok(buf.freeze())).await;
+                    if let Err(_) = tx.send(Ok(buf.freeze())).await {
+                        return;
+                    }
                 }
             }
             //tx.send(partial_output.into_inner().freeze());

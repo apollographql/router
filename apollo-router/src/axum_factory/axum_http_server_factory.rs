@@ -15,7 +15,6 @@ use axum::middleware::Next;
 use axum::response::*;
 use axum::routing::get;
 use axum::Router;
-use flate2::Compression;
 use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;
@@ -38,7 +37,6 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tower_http::trace::TraceLayer;
 
-use super::compression::codec::DeflateEncoder;
 use super::listeners::ensure_endpoints_consistency;
 use super::listeners::ensure_listenaddrs_consistency;
 use super::listeners::extra_endpoints;
@@ -472,19 +470,19 @@ async fn handle_graphql(
             let (mut parts, body) = response.response.into_parts();
 
             println!("will compress response, accept-encoding == {accept_encoding:?}");
-            let first: Option<&str> = accept_encoding
+
+            let opt_compressor = accept_encoding
                 .as_ref()
                 .and_then(|value| value.to_str().ok())
-                .and_then(|v| v.split(',').map(|s| s.trim()).next());
-            println!("first: {first:?}");
-            let body = if first.is_none() {
-                body
-            } else {
-                let compressor = Compressor::Deflate(DeflateEncoder::new(Compression::fast()));
-                parts
-                    .headers
-                    .insert(CONTENT_ENCODING, HeaderValue::from_static("deflate"));
-                Body::wrap_stream(compressor.process(body))
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => {
+                    parts
+                        .headers
+                        .insert(CONTENT_ENCODING, HeaderValue::from_static("deflate"));
+                    Body::wrap_stream(compressor.process(body))
+                }
             };
 
             http::Response::from_parts(parts, body).into_response()
