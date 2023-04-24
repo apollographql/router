@@ -469,7 +469,7 @@ async fn handle_graphql(
             tracing::info!(counter.apollo_router_session_count_active = -1,);
             let (mut parts, body) = response.response.into_parts();
 
-            println!("will compress response, accept-encoding == {accept_encoding:?}");
+            //println!("will compress response, accept-encoding == {accept_encoding:?}");
 
             let opt_compressor = accept_encoding
                 .as_ref()

@@ -33,7 +33,7 @@ impl BrotliEncoder {
         op: BrotliEncoderOperation,
     ) -> Result<()> {
         let in_buf = input.unwritten();
-        let mut out_buf = output.unwritten_mut();
+        let out_buf = output.unwritten_mut();
 
         let mut input_len = 0;
         let mut output_len = 0;

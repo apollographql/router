@@ -80,9 +80,9 @@ where {
                                 Ok(()) => {}
                             }
 
-                            let read = partial_input.written().len();
+                            //let read = partial_input.written().len();
                             written += partial_output.written().len();
-                            println!("encode: read from input: {read}, written = {written}");
+                            //println!("encode: read from input: {read}, written = {written}");
 
                             if !partial_input.unwritten().is_empty() {
                                 // there was not enough space in the output buffer to compress everything,
@@ -97,7 +97,7 @@ where {
                                     Err(e) => panic!("{e:?}"),
                                     Ok(_) => {
                                         let flushed = partial_output.written().len() - written;
-                                        println!("flush with buffer of size {flushed}");
+                                        //println!("flush with buffer of size {flushed}");
                                         let _ = partial_output.into_inner();
                                         buf.resize(flushed, 0);
                                         if let Err(_) = tx.send(Ok(buf.freeze())).await {
@@ -119,7 +119,7 @@ where {
                 Err(e) => panic!("{e:?}"),
                 Ok(_) => {
                     let len = partial_output.written().len();
-                    println!("finish with buffer of size {}", len);
+                    //println!("finish with buffer of size {}", len);
 
                     let mut buf = partial_output.into_inner();
                     buf.resize(len, 0);
@@ -128,7 +128,6 @@ where {
                     }
                 }
             }
-            //tx.send(partial_output.into_inner().freeze());
         });
         ReceiverStream::new(rx)
     }
