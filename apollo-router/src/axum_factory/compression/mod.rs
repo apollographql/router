@@ -1,15 +1,19 @@
 use brotli::enc::BrotliEncoderParams;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
+use bytes::BytesMut;
 use flate2::Compression;
-use futures::{Stream, StreamExt};
+use futures::Stream;
+use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 
-use self::{
-    codec::{BrotliEncoder, DeflateEncoder, Encode, GzipEncoder, ZstdEncoder},
-    util::PartialBuffer,
-};
+use self::codec::BrotliEncoder;
+use self::codec::DeflateEncoder;
+use self::codec::Encode;
+use self::codec::GzipEncoder;
+use self::codec::ZstdEncoder;
+use self::util::PartialBuffer;
 
 pub(crate) mod codec;
 pub(crate) mod unshared;

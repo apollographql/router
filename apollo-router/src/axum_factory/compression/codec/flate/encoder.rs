@@ -1,10 +1,16 @@
 // All code from this module is extracted from https://github.com/Nemo157/async-compression and is under MIT or Apache-2 licence
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
-use std::io::{Error, ErrorKind, Result};
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 
-use flate2::{Compress, Compression, FlushCompress, Status};
+use flate2::Compress;
+use flate2::Compression;
+use flate2::FlushCompress;
+use flate2::Status;
 
-use crate::axum_factory::compression::{codec::Encode, util::PartialBuffer};
+use crate::axum_factory::compression::codec::Encode;
+use crate::axum_factory::compression::util::PartialBuffer;
 
 #[derive(Debug)]
 pub(crate) struct FlateEncoder {

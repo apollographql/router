@@ -2,9 +2,11 @@
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
 use std::io::Result;
 
-use flate2::{Compression, Crc};
+use flate2::Compression;
+use flate2::Crc;
 
-use crate::axum_factory::compression::codec::{Encode, FlateEncoder};
+use crate::axum_factory::compression::codec::Encode;
+use crate::axum_factory::compression::codec::FlateEncoder;
 use crate::axum_factory::compression::util::PartialBuffer;
 
 #[derive(Debug)]

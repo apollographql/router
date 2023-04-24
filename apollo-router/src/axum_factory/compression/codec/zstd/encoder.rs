@@ -2,9 +2,12 @@
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
 use std::io::Result;
 
-use zstd::stream::raw::{Encoder, Operation};
+use zstd::stream::raw::Encoder;
+use zstd::stream::raw::Operation;
 
-use crate::axum_factory::compression::{codec::Encode, unshared::Unshared, util::PartialBuffer};
+use crate::axum_factory::compression::codec::Encode;
+use crate::axum_factory::compression::unshared::Unshared;
+use crate::axum_factory::compression::util::PartialBuffer;
 
 #[derive(Debug)]
 pub(crate) struct ZstdEncoder {

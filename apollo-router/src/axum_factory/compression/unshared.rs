@@ -2,7 +2,8 @@
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
 #![allow(dead_code)] // unused without any features
 
-use core::fmt::{self, Debug};
+use core::fmt::Debug;
+use core::fmt::{self};
 
 /// Wraps a type and only allows unique borrowing, the main usecase is to wrap a `!Sync` type and
 /// implement `Sync` for it as this type blocks having multiple shared references to the inner

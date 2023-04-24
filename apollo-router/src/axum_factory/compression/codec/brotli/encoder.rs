@@ -1,19 +1,21 @@
 // All code from this module is extracted from https://github.com/Nemo157/async-compression and is under MIT or Apache-2 licence
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
-use crate::axum_factory::compression::{codec::Encode, util::PartialBuffer};
-use std::{
-    fmt,
-    io::{Error, ErrorKind, Result},
-};
+use std::fmt;
+use std::io::Error;
+use std::io::ErrorKind;
+use std::io::Result;
 
-use brotli::enc::{
-    backward_references::BrotliEncoderParams,
-    encode::{
-        BrotliEncoderCompressStream, BrotliEncoderCreateInstance, BrotliEncoderHasMoreOutput,
-        BrotliEncoderIsFinished, BrotliEncoderOperation, BrotliEncoderStateStruct,
-    },
-    StandardAlloc,
-};
+use brotli::enc::backward_references::BrotliEncoderParams;
+use brotli::enc::encode::BrotliEncoderCompressStream;
+use brotli::enc::encode::BrotliEncoderCreateInstance;
+use brotli::enc::encode::BrotliEncoderHasMoreOutput;
+use brotli::enc::encode::BrotliEncoderIsFinished;
+use brotli::enc::encode::BrotliEncoderOperation;
+use brotli::enc::encode::BrotliEncoderStateStruct;
+use brotli::enc::StandardAlloc;
+
+use crate::axum_factory::compression::codec::Encode;
+use crate::axum_factory::compression::util::PartialBuffer;
 
 pub(crate) struct BrotliEncoder {
     state: BrotliEncoderStateStruct<StandardAlloc>,

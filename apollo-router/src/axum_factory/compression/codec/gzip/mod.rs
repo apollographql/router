@@ -3,4 +3,4 @@
 mod encoder;
 mod header;
 
-pub(crate) use self::{encoder::GzipEncoder};
+pub(crate) use self::encoder::GzipEncoder;
