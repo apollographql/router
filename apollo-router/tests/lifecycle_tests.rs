@@ -122,3 +122,20 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_force_hot_reload() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(
+            "experimental_chaos:
+                force_hot_reload: 10s",
+        )
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    router.assert_reloaded().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
