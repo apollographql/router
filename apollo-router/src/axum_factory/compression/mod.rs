@@ -55,6 +55,15 @@ impl Compressor {
         None
     }
 
+    pub(crate) fn content_encoding(&self) -> &'static str {
+        match self {
+            Compressor::Deflate(_) => "deflate",
+            Compressor::Gzip(_) => "gzip",
+            Compressor::Brotli(_) => "br",
+            Compressor::Zstd(_) => "zstd",
+        }
+    }
+
     pub(crate) fn process(
         mut self,
         mut stream: hyper::Body,

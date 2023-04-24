@@ -478,9 +478,10 @@ async fn handle_graphql(
             let body = match opt_compressor {
                 None => body,
                 Some(compressor) => {
-                    parts
-                        .headers
-                        .insert(CONTENT_ENCODING, HeaderValue::from_static("deflate"));
+                    parts.headers.insert(
+                        CONTENT_ENCODING,
+                        HeaderValue::from_static(compressor.content_encoding()),
+                    );
                     Body::wrap_stream(compressor.process(body))
                 }
             };
