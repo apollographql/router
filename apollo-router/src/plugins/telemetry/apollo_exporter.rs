@@ -140,6 +140,7 @@ impl ApolloExporter {
         tokio::spawn(async move {
             let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
+            let mut backoff_warn = true;
 
             tokio::pin!(timeout);
 
@@ -154,13 +155,19 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        if let Err(err) =  self.submit_report(std::mem::take(&mut report)).await {
-                            match err {
-                                ApolloExportError::StudioBackoff(unsubmitted, remaining) => {
-                                        tracing::warn!("Apollo Studio not accepting reports for {remaining} seconds");
+                        match self.submit_report(std::mem::take(&mut report)).await {
+                            Ok(_) => backoff_warn = true,
+                            Err(err) => {
+                                match err {
+                                    ApolloExportError::StudioBackoff(unsubmitted, remaining) => {
+                                        if backoff_warn {
+                                            tracing::warn!("Apollo Studio not accepting reports for {remaining} seconds");
+                                            backoff_warn = false;
+                                        }
                                         report = unsubmitted;
-                                },
-                                _ => tracing::error!("failed to submit Apollo report: {}", err)
+                                    },
+                                    _ => tracing::error!("failed to submit Apollo report: {}", err)
+                                }
                             }
                         }
                     }
