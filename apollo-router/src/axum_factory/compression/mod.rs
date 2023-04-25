@@ -26,7 +26,6 @@ pub(crate) enum Compressor {
     Zstd(ZstdEncoder),
 }
 
-//FIXME: we should call finish at the end
 impl Compressor {
     pub(crate) fn new<'a, It: 'a>(it: It) -> Option<Self>
     where
@@ -89,13 +88,14 @@ where {
                             partial_output.advance(written);
 
                             match self.encode(&mut partial_input, &mut partial_output) {
-                                Err(e) => panic!("{e:?}"),
+                                Err(e) => {
+                                    let _ = tx.send(Err(e.into())).await;
+                                    return;
+                                }
                                 Ok(()) => {}
                             }
 
-                            //let read = partial_input.written().len();
                             written += partial_output.written().len();
-                            //println!("encode: read from input: {read}, written = {written}");
 
                             if !partial_input.unwritten().is_empty() {
                                 // there was not enough space in the output buffer to compress everything,
@@ -105,12 +105,13 @@ where {
                                     buf.reserve(written);
                                 }
                             } else {
-                                // FIXME: what happens if we try to flush in a full buffer
                                 match self.flush(&mut partial_output) {
-                                    Err(e) => panic!("{e:?}"),
+                                    Err(e) => {
+                                        let _ = tx.send(Err(e.into())).await;
+                                        return;
+                                    }
                                     Ok(_) => {
                                         let len = partial_output.written().len();
-                                        //println!("flush(b={b}) with buffer of size {len}");
                                         let _ = partial_output.into_inner();
                                         buf.resize(len, 0);
                                         if let Err(_) = tx.send(Ok(buf.freeze())).await {
@@ -129,10 +130,12 @@ where {
             let mut partial_output = PartialBuffer::new(buf);
 
             match self.finish(&mut partial_output) {
-                Err(e) => panic!("{e:?}"),
+                Err(e) => {
+                    let _ = tx.send(Err(e.into())).await;
+                    return;
+                }
                 Ok(_) => {
                     let len = partial_output.written().len();
-                    //println!("finish with buffer of size {}", len);
 
                     let mut buf = partial_output.into_inner();
                     buf.resize(len, 0);
