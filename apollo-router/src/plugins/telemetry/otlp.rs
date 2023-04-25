@@ -82,8 +82,14 @@ impl Config {
             }
             Protocol::Http => {
                 let http = self.http.clone();
+                let client = reqwest::Client::builder()
+                    .connect_timeout(self.batch_processor.max_export_timeout)
+                    .timeout(self.batch_processor.max_export_timeout)
+                    .build()?;
+
                 let exporter = opentelemetry_otlp::new_exporter()
                     .http()
+                    .with_http_client(client)
                     .with_env()
                     .with_timeout(self.batch_processor.max_export_timeout)
                     .with_endpoint(endpoint.as_str())
