@@ -32,7 +32,6 @@ use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
-use crate::Configuration;
 use crate::EntitlementSource;
 
 // Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
@@ -233,9 +232,16 @@ pub struct Opt {
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
 
-    /// Override the default address to listen on for only the supergraph.
-    #[clap(long = "listen")]
-    listen_address: Option<SocketAddr>,
+    /// Options that override the some of the configuration options.
+    #[clap(flatten)]
+    override_yaml_opts: OverrideYamlOpts,
+}
+
+#[derive(Parser, Debug)]
+pub(crate) struct OverrideYamlOpts {
+    /// Set the listen address for the router. This argument overrides the `supergraph.listen` property in the router configuration file.
+    #[clap(long = "listen", env = "APOLLO_ROUTER_SUPERGRAPH_LISTEN")]
+    supergraph_listen: Option<SocketAddr>,
 }
 
 /// Wrapper so that clap can display the default config path in the help message.
@@ -454,23 +460,10 @@ impl Executable {
                     path,
                     watch: opt.hot_reload,
                     delay: None,
-                    override_listen_address: opt.listen_address.map(|addr| addr.into()),
                 }
             }) {
                 Some(configuration) => configuration,
-                None => {
-                    tracing::warn!(
-                        "No configuration source specified, using default configuration"
-                    );
-
-                    let mut configuration: Configuration = Default::default();
-
-                    if let Some(listen_address) = opt.listen_address {
-                        configuration.replace_listen_address(&listen_address.into());
-                    }
-
-                    ConfigurationSource::Static(Box::new(configuration))
-                }
+                None => Default::default(),
             },
         };
 

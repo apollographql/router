@@ -10,6 +10,7 @@ use proteus::Parser;
 use proteus::TransformBuilder;
 use serde_json::Value;
 
+use super::default_graphql_listen;
 use super::ConfigurationError;
 use crate::executable::APOLLO_ROUTER_DEV_ENV;
 
@@ -65,6 +66,13 @@ impl Expansion {
                     .config_path("telemetry.apollo.endpoint")
                     .env_name("APOLLO_USAGE_REPORTING_INGRESS_URL")
                     .default("https://usage-reporting.api.apollographql.com/api/ingress/traces")
+                    .build(),
+            )
+            .default(
+                ConfigDefault::builder()
+                    .config_path("supergraph.listen")
+                    .env_name("APOLLO_ROUTER_SUPERGRAPH_LISTEN")
+                    .default(default_graphql_listen())
                     .build(),
             )
             .defaults(dev_mode_defaults)
@@ -225,6 +233,7 @@ impl Expansion {
         }
         // The expansion may have resulted in a primitive, reparse and replace
         if let Some(expanded) = expanded {
+            tracing::info!("Expanded {} to {}", value, expanded);
             *value = coerce(&expanded)
         }
         Ok(())
