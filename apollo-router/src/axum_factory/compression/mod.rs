@@ -22,7 +22,7 @@ pub(crate) mod util;
 pub(crate) enum Compressor {
     Deflate(DeflateEncoder),
     Gzip(GzipEncoder),
-    Brotli(BrotliEncoder),
+    Brotli(Box<BrotliEncoder>),
     Zstd(ZstdEncoder),
 }
 
@@ -41,9 +41,9 @@ impl Compressor {
                 }
                 // FIXME: find the "fast" brotli encoder params
                 "br" => {
-                    return Some(Compressor::Brotli(BrotliEncoder::new(
+                    return Some(Compressor::Brotli(Box::new(BrotliEncoder::new(
                         BrotliEncoderParams::default(),
-                    )))
+                    ))))
                 }
                 "zstd" => {
                     return Some(Compressor::Zstd(ZstdEncoder::new(zstd_safe::min_c_level())))
@@ -74,7 +74,7 @@ where {
             while let Some(data) = stream.next().await {
                 match data {
                     Err(e) => {
-                        if let Err(_) = tx.send(Err(e.into())).await {
+                        if (tx.send(Err(e.into())).await).is_err() {
                             return;
                         }
                     }
@@ -87,12 +87,9 @@ where {
                             let mut partial_output = PartialBuffer::new(&mut buf);
                             partial_output.advance(written);
 
-                            match self.encode(&mut partial_input, &mut partial_output) {
-                                Err(e) => {
-                                    let _ = tx.send(Err(e.into())).await;
-                                    return;
-                                }
-                                Ok(()) => {}
+                            if let Err(e) = self.encode(&mut partial_input, &mut partial_output) {
+                                let _ = tx.send(Err(e.into())).await;
+                                return;
                             }
 
                             written += partial_output.written().len();
@@ -114,7 +111,7 @@ where {
                                         let len = partial_output.written().len();
                                         let _ = partial_output.into_inner();
                                         buf.resize(len, 0);
-                                        if let Err(_) = tx.send(Ok(buf.freeze())).await {
+                                        if (tx.send(Ok(buf.freeze())).await).is_err() {
                                             return;
                                         }
                                         break;
@@ -132,16 +129,13 @@ where {
             match self.finish(&mut partial_output) {
                 Err(e) => {
                     let _ = tx.send(Err(e.into())).await;
-                    return;
                 }
                 Ok(_) => {
                     let len = partial_output.written().len();
 
                     let mut buf = partial_output.into_inner();
                     buf.resize(len, 0);
-                    if let Err(_) = tx.send(Ok(buf.freeze())).await {
-                        return;
-                    }
+                    let _ = tx.send(Ok(buf.freeze())).await;
                 }
             }
         });
