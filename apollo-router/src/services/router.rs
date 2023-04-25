@@ -246,10 +246,3 @@ impl Response {
         )
     }
 }
-
-#[derive(Clone, Default)]
-pub(crate) struct ClientRequestAccepts {
-    pub(crate) multipart: bool,
-    pub(crate) json: bool,
-    pub(crate) wildcard: bool,
-}

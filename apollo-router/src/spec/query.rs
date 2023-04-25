@@ -26,7 +26,7 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
-use crate::json_ext::ResponsePathElement;
+use crate::json_ext::PathElement;
 use crate::json_ext::Value;
 use crate::query_planner::fetch::OperationKind;
 use crate::spec::FieldType;
@@ -158,7 +158,7 @@ impl Query {
                                         &mut parameters,
                                         &mut input,
                                         &mut output,
-                                        &mut Vec::new(),
+                                        &mut Path::default(),
                                     ) {
                                         Ok(()) => output.into(),
                                         Err(InvalidValue) => Value::Null,
@@ -214,7 +214,7 @@ impl Query {
                             &mut parameters,
                             &mut input,
                             &mut output,
-                            &mut Vec::new(),
+                            &mut Path::default(),
                         ) {
                             Ok(()) => output.into(),
                             Err(InvalidValue) => Value::Null,
@@ -327,15 +327,15 @@ impl Query {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn format_value<'a: 'b, 'b>(
-        &'a self,
+    fn format_value(
+        &self,
         parameters: &mut FormatParameters,
         field_type: &FieldType,
         input: &mut Value,
         output: &mut Value,
-        path: &mut Vec<ResponsePathElement<'b>>,
+        path: &mut Path,
         parent_type: &FieldType,
-        selection_set: &'a [Selection],
+        selection_set: &[Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
         // and return Ok(()), because values are optional by default
@@ -357,17 +357,17 @@ impl Query {
                     Ok(_) => {
                         if output.is_null() {
                             let message = match path.last() {
-                                Some(ResponsePathElement::Key(k)) => format!(
+                                Some(PathElement::Key(k)) => format!(
                                     "Cannot return null for non-nullable field {parent_type}.{k}"
                                 ),
-                                Some(ResponsePathElement::Index(i)) => format!(
+                                Some(PathElement::Index(i)) => format!(
                                     "Cannot return null for non-nullable array element of type {inner_type} at index {i}"
                                 ),
                                 _ => todo!(),
                             };
                             parameters.errors.push(Error {
                                 message,
-                                path: Some(Path::from_response_slice(path)),
+                                path: Some(path.clone()),
                                 ..Error::default()
                             });
 
@@ -397,7 +397,7 @@ impl Query {
                         .iter_mut()
                         .enumerate()
                         .try_for_each(|(i, element)| {
-                            path.push(ResponsePathElement::Index(i));
+                            path.push(PathElement::Index(i));
                             let res = self.format_value(
                                 parameters,
                                 inner_type,
@@ -411,7 +411,7 @@ impl Query {
                             res
                         }) {
                         Err(InvalidValue) => {
-                            parameters.nullified.push(Path::from_response_slice(path));
+                            parameters.nullified.push(path.clone());
                             *output = Value::Null;
                             Ok(())
                         }
@@ -457,7 +457,7 @@ impl Query {
                             if !parameters.schema.object_types.contains_key(input_type)
                                 && !parameters.schema.interfaces.contains_key(input_type)
                             {
-                                parameters.nullified.push(Path::from_response_slice(path));
+                                parameters.nullified.push(path.clone());
                                 *output = Value::Null;
                                 return Ok(());
                             }
@@ -479,14 +479,14 @@ impl Query {
                             )
                             .is_err()
                         {
-                            parameters.nullified.push(Path::from_response_slice(path));
+                            parameters.nullified.push(path.clone());
                             *output = Value::Null;
                         }
 
                         Ok(())
                     }
                     _ => {
-                        parameters.nullified.push(Path::from_response_slice(path));
+                        parameters.nullified.push(path.clone());
                         *output = Value::Null;
                         Ok(())
                     }
@@ -547,13 +547,13 @@ impl Query {
         }
     }
 
-    fn apply_selection_set<'a: 'b, 'b>(
-        &'a self,
-        selection_set: &'a [Selection],
+    fn apply_selection_set(
+        &self,
+        selection_set: &[Selection],
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
-        path: &mut Vec<ResponsePathElement<'b>>,
+        path: &mut Path,
         parent_type: &FieldType,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
@@ -596,7 +596,7 @@ impl Query {
                                 }
                             }
                         } else {
-                            path.push(ResponsePathElement::Key(field_name.as_str()));
+                            path.push(PathElement::Key(field_name.as_str().to_string()));
                             let res = self.format_value(
                                 parameters,
                                 field_type,
@@ -619,7 +619,7 @@ impl Query {
                                     "Cannot return null for non-nullable field {parent_type}.{}",
                                     field_name.as_str()
                                 ),
-                                path: Some(Path::from_response_slice(path)),
+                                path: Some(path.clone()),
                                 ..Error::default()
                             });
 
@@ -721,13 +721,13 @@ impl Query {
         Ok(())
     }
 
-    fn apply_root_selection_set<'a: 'b, 'b>(
-        &'a self,
-        operation: &'a Operation,
+    fn apply_root_selection_set(
+        &self,
+        operation: &Operation,
         parameters: &mut FormatParameters,
         input: &mut Object,
         output: &mut Object,
-        path: &mut Vec<ResponsePathElement<'b>>,
+        path: &mut Path,
     ) -> Result<(), InvalidValue> {
         for selection in &operation.selection_set {
             match selection {
@@ -758,7 +758,7 @@ impl Query {
                         let selection_set = selection_set.as_deref().unwrap_or_default();
                         let output_value =
                             output.entry((*field_name).clone()).or_insert(Value::Null);
-                        path.push(ResponsePathElement::Key(field_name_str));
+                        path.push(PathElement::Key(field_name_str.to_string()));
                         let res = self.format_value(
                             parameters,
                             field_type,
@@ -783,7 +783,7 @@ impl Query {
                                 "Cannot return null for non-nullable field {}.{field_name_str}",
                                 operation.kind
                             ),
-                            path: Some(Path::from_response_slice(path)),
+                            path: Some(path.clone()),
                             ..Error::default()
                         });
                         return Err(InvalidValue);
