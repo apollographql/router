@@ -65,7 +65,6 @@ use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
-use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
 use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
@@ -94,6 +93,7 @@ use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::query_planner::OperationKind;
+use crate::query_planner::USAGE_REPORTING;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -126,6 +126,9 @@ pub(crate) const ROUTER_SPAN_NAME: &str = "router";
 pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
+const ATTRIBUTES: &str = "apollo_telemetry::metrics_attributes";
+const SUBGRAPH_ATTRIBUTES: &str = "apollo_telemetry::subgraph_metrics_attributes";
+const ENABLE_SUBGRAPH_FTV1: &str = "apollo_telemetry::enable_subgraph_ftv1";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
@@ -317,8 +320,8 @@ impl Plugin for Telemetry {
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) =
-                    resp.context.private_entries.lock().get::<UsageReporting>()
+                if let Ok(Some(usage_reporting)) =
+                    resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
                     // Record the operation signature on the router span
                     Span::current().record(
@@ -638,7 +641,6 @@ impl Telemetry {
                         .with_target(logging.display_target),
                     filter_metric_events,
                 ))
-                .fmt_fields(NullFieldFormatter)
                 .boxed(),
             config::LoggingFormat::Json => tracing_subscriber::fmt::layer()
                 .json()
@@ -654,7 +656,6 @@ impl Telemetry {
                         filter_metric_events,
                     )
                 })
-                .fmt_fields(NullFieldFormatter)
                 .map_fmt_fields(|_f| JsonFields::default())
                 .boxed(),
         };
@@ -738,21 +739,17 @@ impl Telemetry {
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
     ) -> Result<SupergraphResponse, BoxError> {
-        let mut metric_attrs = {
-            context
-                .private_entries
-                .lock()
-                .get::<MetricsAttributes>()
-                .cloned()
-        }
-        .map(|attrs| {
-            attrs
-                .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                .collect::<Vec<KeyValue>>()
-        })
-        .unwrap_or_default();
+        let mut metric_attrs = context
+            .get::<_, HashMap<String, String>>(ATTRIBUTES)
+            .ok()
+            .flatten()
+            .map(|attrs| {
+                attrs
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
@@ -881,13 +878,10 @@ impl Telemetry {
                 attributes.extend(router_attributes_conf.get_attributes_from_context(context));
             }
 
-            let _ = context
-                .private_entries
-                .lock()
-                .insert(MetricsAttributes(attributes));
+            let _ = context.insert(ATTRIBUTES, attributes);
         }
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
-            context.private_entries.lock().insert(EnableSubgraphFtv1);
+            context.insert_json_value(ENABLE_SUBGRAPH_FTV1, json!(true));
         }
     }
 
@@ -973,9 +967,8 @@ impl Telemetry {
         }
         sub_request
             .context
-            .private_entries
-            .lock()
-            .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
+            .insert(SUBGRAPH_ATTRIBUTES, attributes)
+            .unwrap();
     }
 
     fn store_subgraph_response_attributes(
@@ -986,21 +979,17 @@ impl Telemetry {
         now: Instant,
         result: &Result<Response, BoxError>,
     ) {
-        let mut metric_attrs = {
-            context
-                .private_entries
-                .lock()
-                .get::<SubgraphMetricsAttributes>()
-                .cloned()
-        }
-        .map(|attrs| {
-            attrs
-                .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                .collect::<Vec<KeyValue>>()
-        })
-        .unwrap_or_default();
+        let mut metric_attrs = context
+            .get::<_, HashMap<String, String>>(SUBGRAPH_ATTRIBUTES)
+            .ok()
+            .flatten()
+            .map(|attrs| {
+                attrs
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         metric_attrs.push(subgraph_attribute);
         // Fill attributes from context
         if let Some(subgraph_attributes_conf) = &*attribute_forward_config {
@@ -1160,10 +1149,8 @@ impl Telemetry {
         operation_subtype: Option<OperationSubType>,
     ) {
         let metrics = if let Some(usage_reporting) = context
-            .private_entries
-            .lock()
-            .get::<UsageReporting>()
-            .cloned()
+            .get::<_, UsageReporting>(USAGE_REPORTING)
+            .unwrap_or_default()
         {
             let operation_count = operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
@@ -1493,11 +1480,7 @@ fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
 register_plugin!("apollo", "telemetry", Telemetry);
 
 fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
-    if req
-        .context
-        .private_entries
-        .lock()
-        .contains_key::<EnableSubgraphFtv1>()
+    if req.context.contains_key(ENABLE_SUBGRAPH_FTV1)
         && Span::current().context().span().span_context().is_sampled()
     {
         req.subgraph_request.headers_mut().insert(
@@ -1510,12 +1493,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
 
 fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphResponse {
     // Stash the FTV1 data
-    if resp
-        .context
-        .private_entries
-        .lock()
-        .contains_key::<EnableSubgraphFtv1>()
-    {
+    if resp.context.contains_key(ENABLE_SUBGRAPH_FTV1) {
         if let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")
         {
@@ -1602,13 +1580,6 @@ impl TextMapPropagator for CustomTraceIdPropagator {
     }
 }
 
-#[derive(Clone)]
-struct MetricsAttributes(HashMap<String, AttributeValue>);
-
-#[derive(Clone)]
-struct SubgraphMetricsAttributes(HashMap<String, AttributeValue>);
-
-struct EnableSubgraphFtv1;
 //
 // Please ensure that any tests added to the tests module use the tokio multi-threaded test executor.
 //

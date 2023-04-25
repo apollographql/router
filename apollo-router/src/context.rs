@@ -10,16 +10,12 @@ use std::time::Instant;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
-use derivative::Derivative;
-use parking_lot::Mutex;
+use futures::lock::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
-use self::extensions::Extensions;
 use crate::json_ext::Value;
-
-pub(crate) mod extensions;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -35,14 +31,10 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// [`crate::services::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
-#[derive(Clone, Deserialize, Serialize, Derivative)]
-#[derivative(Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
-
-    #[serde(skip, default)]
-    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
@@ -50,7 +42,6 @@ pub struct Context {
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
-    #[derivative(Debug = "ignore")]
     busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
@@ -59,7 +50,6 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
-            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }
@@ -196,18 +186,18 @@ impl Context {
     }
 
     /// Notify the busy timer that we're waiting on a network request
-    pub(crate) fn enter_active_request(&self) {
-        self.busy_timer.lock().increment_active_requests()
+    pub(crate) async fn enter_active_request(&self) {
+        self.busy_timer.lock().await.increment_active_requests()
     }
 
     /// Notify the busy timer that we stopped waiting on a network request
-    pub(crate) fn leave_active_request(&self) {
-        self.busy_timer.lock().decrement_active_requests()
+    pub(crate) async fn leave_active_request(&self) {
+        self.busy_timer.lock().await.decrement_active_requests()
     }
 
     /// How much time was spent working on the request
-    pub(crate) fn busy_time(&self) -> Duration {
-        self.busy_timer.lock().current()
+    pub(crate) async fn busy_time(&self) -> Duration {
+        self.busy_timer.lock().await.current()
     }
 }
 
