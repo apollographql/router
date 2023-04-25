@@ -960,7 +960,7 @@ impl Query {
         })
     }
 
-    fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+    pub(crate) fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
         match operation_name {
             Some(name) => self
                 .operations

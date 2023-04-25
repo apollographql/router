@@ -36,15 +36,16 @@ LABEL org.opencontainers.image.source="https://github.com/apollographql/router"
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config/router.yaml"
 
 # Create a wrapper script to run the router, use exec to ensure signals are handled correctly
-COPY <<EOF /dist/router_wrapper.sh
-#!/usr/bin/env bash
-set -e
-if [ -f "/usr/bin/heaptrack" ]; then
-  exec heaptrack -o /dist/data/router_heaptrack /dist/router "$@"
-else
-  exec /dist/router "$@"
-fi
-EOF
+RUN \
+  echo '#!/usr/bin/env bash \
+\nset -e \
+\n \
+\nif [ -f "/usr/bin/heaptrack" ]; then \
+\n    exec heaptrack -o /dist/data/router_heaptrack /dist/router "$@" \
+\nelse \
+\n    exec /dist/router "$@" \
+\nfi \
+' > /dist/router_wrapper.sh
 
 # Make sure we can run our wrapper
 RUN chmod 755 /dist/router_wrapper.sh

@@ -13,6 +13,7 @@ use ::tracing::field;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use dashmap::DashMap;
 use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
@@ -23,6 +24,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use multimap::MultiMap;
+use once_cell::sync::OnceCell;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -51,6 +53,8 @@ use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
 
 use self::apollo::ForwardValues;
+use self::apollo::OperationCountByType;
+use self::apollo::OperationSubType;
 use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
@@ -91,6 +95,7 @@ use crate::plugins::telemetry::metrics::MetricsExporterHandle;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
@@ -124,6 +129,7 @@ pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
+const OPERATION_KIND: &str = "apollo_telemetry::operation_kind";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
@@ -370,7 +376,7 @@ impl Plugin for Telemetry {
                             start.elapsed(),
                         )
                         .await;
-                        Self::update_metrics_on_last_response(
+                        Self::update_metrics_on_response_events(
                             &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
                         )
                     }
@@ -382,8 +388,28 @@ impl Plugin for Telemetry {
 
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
-            .instrument(move |_req: &ExecutionRequest| {
-                info_span!("execution", "otel.kind" = "INTERNAL",)
+            .instrument(move |req: &ExecutionRequest| {
+                let operation_kind = req
+                    .query_plan
+                    .query
+                    .operation(req.supergraph_request.body().operation_name.as_deref())
+                    .map(|op| *op.kind());
+                let _ = req
+                    .context
+                    .insert(OPERATION_KIND, operation_kind.unwrap_or_default());
+
+                match operation_kind {
+                    Some(operation_kind) => {
+                        info_span!(
+                            EXECUTION_SPAN_NAME,
+                            "otel.kind" = "INTERNAL",
+                            "graphql.operation.type" = operation_kind.as_apollo_operation_type()
+                        )
+                    }
+                    None => {
+                        info_span!(EXECUTION_SPAN_NAME, "otel.kind" = "INTERNAL",)
+                    }
+                }
             })
             .service(service)
             .boxed()
@@ -1051,7 +1077,7 @@ impl Telemetry {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn update_metrics_on_last_response(
+    fn update_metrics_on_response_events(
         ctx: &Context,
         config: Arc<Conf>,
         field_level_instrumentation_ratio: f64,
@@ -1060,6 +1086,9 @@ impl Telemetry {
         start: Instant,
         result: Result<supergraph::Response, BoxError>,
     ) -> Result<supergraph::Response, BoxError> {
+        let operation_kind: OperationKind =
+            ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
+
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
@@ -1069,6 +1098,8 @@ impl Telemetry {
                         sender,
                         true,
                         start.elapsed(),
+                        operation_kind,
+                        None,
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1098,6 +1129,7 @@ impl Telemetry {
             }
             Ok(router_response) => {
                 let mut has_errors = !router_response.response.status().is_success();
+
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
@@ -1117,8 +1149,11 @@ impl Telemetry {
                                     sender.clone(),
                                     has_errors,
                                     start.elapsed(),
+                                    operation_kind,
+                                    None,
                                 );
                             }
+
                             response
                         })
                         .boxed()
@@ -1133,6 +1168,8 @@ impl Telemetry {
         sender: Sender,
         has_errors: bool,
         duration: Duration,
+        operation_kind: OperationKind,
+        operation_subtype: Option<OperationSubType>,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .private_entries
@@ -1151,7 +1188,13 @@ impl Telemetry {
             {
                 // The request was excluded don't report the details, but do report the operation count
                 SingleStatsReport {
-                    operation_count,
+                    operation_count_by_type: (operation_count > 0).then_some(
+                        OperationCountByType {
+                            r#type: operation_kind,
+                            subtype: operation_subtype,
+                            operation_count,
+                        },
+                    ),
                     ..Default::default()
                 }
             } else {
@@ -1167,7 +1210,13 @@ impl Telemetry {
                             .trace_id()
                             .to_bytes(),
                     ),
-                    operation_count,
+                    operation_count_by_type: (operation_count > 0).then_some(
+                        OperationCountByType {
+                            r#type: operation_kind,
+                            subtype: operation_subtype,
+                            operation_count,
+                        },
+                    ),
                     stats: HashMap::from([(
                         usage_reporting.stats_report_key.to_string(),
                         SingleStats {
@@ -1181,9 +1230,12 @@ impl Telemetry {
                                         .get(CLIENT_VERSION)
                                         .unwrap_or_default()
                                         .unwrap_or_default(),
-                                    // FIXME
-                                    operation_type: String::new(),
-                                    operation_subtype: String::new(),
+                                    operation_type: operation_kind
+                                        .as_apollo_operation_type()
+                                        .to_string(),
+                                    operation_subtype: operation_subtype
+                                        .map(|op| op.to_string())
+                                        .unwrap_or_default(),
                                 },
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
@@ -1206,7 +1258,12 @@ impl Telemetry {
         } else {
             // Usage reporting was missing, so it counts as one operation.
             SingleStatsReport {
-                operation_count: 1,
+                operation_count_by_type: OperationCountByType {
+                    r#type: operation_kind,
+                    subtype: operation_subtype,
+                    operation_count: 1,
+                }
+                .into(),
                 ..Default::default()
             }
         };
@@ -1391,19 +1448,56 @@ fn convert(
     }
 }
 
+#[derive(Eq, PartialEq, Hash)]
+enum ErrorType {
+    Trace,
+    Metric,
+    Other,
+}
+static OTEL_ERROR_LAST_LOGGED: OnceCell<DashMap<ErrorType, Instant>> = OnceCell::new();
+
 fn handle_error<T: Into<opentelemetry::global::Error>>(err: T) {
-    match err.into() {
-        opentelemetry::global::Error::Trace(err) => {
-            ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
-        }
-        opentelemetry::global::Error::Metric(err_msg) => {
-            ::tracing::error!("OpenTelemetry metric error occurred: {}", err_msg)
-        }
-        opentelemetry::global::Error::Other(err_msg) => {
-            ::tracing::error!("OpenTelemetry error occurred: {}", err_msg)
-        }
-        other => {
-            ::tracing::error!("OpenTelemetry error occurred: {:?}", other)
+    // We have to rate limit these errors because when they happen they are very frequent.
+    // Use a dashmap to store the message type with the last time it was logged.
+    let last_logged_map = OTEL_ERROR_LAST_LOGGED.get_or_init(DashMap::new);
+    let err = err.into();
+
+    // We don't want the dashmap to get big, so we key the error messages by type.
+    let error_type = match err {
+        opentelemetry::global::Error::Trace(_) => ErrorType::Trace,
+        opentelemetry::global::Error::Metric(_) => ErrorType::Metric,
+        _ => ErrorType::Other,
+    };
+    #[cfg(not(test))]
+    let threshold = Duration::from_secs(10);
+    #[cfg(test)]
+    let threshold = Duration::from_millis(100);
+
+    // Copy here so that we don't retain a mutable reference into the dashmap and lock the shard
+    let now = Instant::now();
+    let last_logged = *last_logged_map
+        .entry(error_type)
+        .and_modify(|last_logged| {
+            if last_logged.elapsed() > threshold {
+                *last_logged = now;
+            }
+        })
+        .or_insert_with(|| now);
+
+    if last_logged == now {
+        match err {
+            opentelemetry::global::Error::Trace(err) => {
+                ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
+            }
+            opentelemetry::global::Error::Metric(err) => {
+                ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
+            }
+            opentelemetry::global::Error::Other(err) => {
+                ::tracing::error!("OpenTelemetry error occurred: {}", err)
+            }
+            other => {
+                ::tracing::error!("OpenTelemetry error occurred: {:?}", other)
+            }
         }
     }
 }
@@ -1532,7 +1626,12 @@ struct EnableSubgraphFtv1;
 //
 #[cfg(test)]
 mod tests {
+    use std::fmt::Debug;
+    use std::ops::DerefMut;
     use std::str::FromStr;
+    use std::sync::Arc;
+    use std::sync::Mutex;
+    use std::time::Duration;
 
     use axum::headers::HeaderName;
     use http::HeaderMap;
@@ -1546,6 +1645,14 @@ mod tests {
     use tower::util::BoxService;
     use tower::Service;
     use tower::ServiceExt;
+    use tracing_core::field::Visit;
+    use tracing_core::Event;
+    use tracing_core::Field;
+    use tracing_core::Subscriber;
+    use tracing_futures::WithSubscriber;
+    use tracing_subscriber::layer::Context;
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::Layer;
 
     use super::apollo::ForwardHeaders;
     use crate::error::FetchError;
@@ -1556,6 +1663,7 @@ mod tests {
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
+    use crate::plugins::telemetry::handle_error;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
@@ -2036,5 +2144,73 @@ mod tests {
         );
         let filtered_headers = super::filter_headers(&headers, &ForwardHeaders::None);
         assert_eq!(filtered_headers.as_str(), "{}");
+    }
+
+    #[tokio::test]
+    async fn test_handle_error_throttling() {
+        // Set up a fake subscriber so we can check log events. If this is useful then maybe it can be factored out into something reusable
+        #[derive(Default)]
+        struct TestVisitor {
+            log_entries: Vec<String>,
+        }
+
+        #[derive(Default, Clone)]
+        struct TestLayer {
+            visitor: Arc<Mutex<TestVisitor>>,
+        }
+        impl TestLayer {
+            fn assert_log_entry_count(&self, message: &str, expected: usize) {
+                let log_entries = self.visitor.lock().unwrap().log_entries.clone();
+                let actual = log_entries.iter().filter(|e| e.contains(message)).count();
+                assert_eq!(actual, expected);
+            }
+        }
+        impl Visit for TestVisitor {
+            fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+                self.log_entries
+                    .push(format!("{}={:?}", field.name(), value));
+            }
+        }
+
+        impl<S> Layer<S> for TestLayer
+        where
+            S: Subscriber,
+            Self: 'static,
+        {
+            fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+                event.record(self.visitor.lock().unwrap().deref_mut())
+            }
+        }
+
+        let test_layer = TestLayer::default();
+
+        async {
+            // Log twice rapidly, they should get deduped
+            handle_error(opentelemetry::global::Error::Other(
+                "other error".to_string(),
+            ));
+            handle_error(opentelemetry::global::Error::Other(
+                "other error".to_string(),
+            ));
+            handle_error(opentelemetry::global::Error::Trace(
+                "trace error".to_string().into(),
+            ));
+        }
+        .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
+        .await;
+
+        test_layer.assert_log_entry_count("other error", 1);
+        test_layer.assert_log_entry_count("trace error", 1);
+
+        // Sleep a bit and then log again, it should get logged
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        async {
+            handle_error(opentelemetry::global::Error::Other(
+                "other error".to_string(),
+            ));
+        }
+        .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
+        .await;
+        test_layer.assert_log_entry_count("other error", 2);
     }
 }

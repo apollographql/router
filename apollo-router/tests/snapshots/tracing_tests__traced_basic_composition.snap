@@ -279,6 +279,10 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
+                      ],
+                      [
+                        "graphql.operation.type",
+                        "query"
                       ]
                     ],
                     "metadata": {
@@ -288,7 +292,8 @@ expression: get_spans()
                       "module_path": "apollo_router::plugins::telemetry",
                       "fields": {
                         "names": [
-                          "otel.kind"
+                          "otel.kind",
+                          "graphql.operation.type"
                         ]
                       }
                     }
