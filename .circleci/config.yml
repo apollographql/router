@@ -655,7 +655,7 @@ jobs:
 
               # If the VERSION contains a dash, consider it a pre-release version.
               # This is in-line with SemVer's expectations/designations!
-              *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSIOn artifacts/* ;;
+              *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSION artifacts/* ;;
 
               # In all other cases, publish it as the latest version.
               *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
