@@ -171,15 +171,13 @@ where
     ) -> bool {
         let current_span = cx.current_span();
 
-        //
-        !meta.is_span()
-            // this span is enabled if:
-            || current_span
-                .id()
-                // - there's a parent span and it was enabled
-                .map(|id| cx.span(id).is_some())
-                // - there's no parent span (it's the root), so we make the sampling decision
-                .unwrap_or_else(|| self.sample())
+        // this span is enabled if:
+        current_span
+            .id()
+            // - there's a parent span and it was enabled
+            .map(|id| cx.span(id).is_some())
+            // - there's no parent span (it's the root), so we make the sampling decision
+            .unwrap_or_else(|| self.sample())
     }
 }
 
