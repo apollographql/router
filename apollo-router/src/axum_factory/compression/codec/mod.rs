@@ -15,7 +15,6 @@ pub(crate) use self::brotli::BrotliEncoder;
 pub(crate) use self::deflate::DeflateEncoder;
 pub(crate) use self::flate::FlateEncoder;
 pub(crate) use self::gzip::GzipEncoder;
-//pub(crate) use self::zlib::ZlibEncoder;
 pub(crate) use self::zstd::ZstdEncoder;
 
 pub(crate) trait Encode {
