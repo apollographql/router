@@ -206,6 +206,19 @@ expression: "&schema"
         }
       }
     },
+    "authorization": {
+      "description": "Authorization plugin",
+      "type": "object",
+      "required": [
+        "require_authentication"
+      ],
+      "properties": {
+        "require_authentication": {
+          "description": "Reject unauthenticated requests",
+          "type": "boolean"
+        }
+      }
+    },
     "coprocessor": {
       "description": "Configures the externalization plugin",
       "type": "object",
@@ -1090,18 +1103,6 @@ expression: "&schema"
         }
       },
       "additionalProperties": false
-    },
-    "require_authentication": {
-      "type": "object",
-      "required": [
-        "enabled"
-      ],
-      "properties": {
-        "enabled": {
-          "description": "Enable",
-          "type": "boolean"
-        }
-      }
     },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",

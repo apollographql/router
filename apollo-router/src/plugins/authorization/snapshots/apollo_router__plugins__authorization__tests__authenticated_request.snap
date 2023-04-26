@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/plugins/authorization/require_authentication.rs
+source: apollo-router/src/plugins/authorization/mod.rs
 expression: response
 ---
 {
