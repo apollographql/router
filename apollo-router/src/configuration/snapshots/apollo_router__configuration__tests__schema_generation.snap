@@ -1091,6 +1091,18 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "require_authentication": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Enable",
+          "type": "boolean"
+        }
+      }
+    },
     "rhai": {
       "description": "Configuration for the Rhai Plugin",
       "type": "object",
