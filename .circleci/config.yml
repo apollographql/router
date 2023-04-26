@@ -649,8 +649,19 @@ jobs:
           command: >
             cd artifacts && sha1sum *.tar.gz > sha1sums.txt
       - run:
+          name: Create GitHub Release
           command: >
-            gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/*
+            case "$VERSION" in
+
+              # If the VERSION contains a dash, consider it a pre-release version.
+              # This is in-line with SemVer's expectations/designations!
+              *-*) gh release create $VERSION --prerelease --notes-file /dev/null --title $VERSIOn artifacts/* ;;
+
+              # In all other cases, publish it as the latest version.
+              *) gh release create $VERSION --notes-file /dev/null --title $VERSION artifacts/* ;;
+
+            esac
+
       - setup_remote_docker:
           version: 20.10.11
           docker_layer_caching: true
