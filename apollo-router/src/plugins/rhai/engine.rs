@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::Mutex;
-
 use std::time::SystemTime;
 
 use http::header::HeaderName;
@@ -12,7 +11,6 @@ use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
 use http::HeaderMap;
-use http::StatusCode;
 use http::Uri;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -23,11 +21,9 @@ use rhai::Dynamic;
 use rhai::Engine;
 use rhai::EvalAltResult;
 use rhai::FnPtr;
-use rhai::FuncArgs;
 use rhai::Instant;
 use rhai::Map;
 use rhai::Scope;
-use rhai::Shared;
 use rhai::AST;
 use tower::BoxError;
 use uuid::Uuid;
@@ -44,10 +40,6 @@ use crate::http_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::services::ExecutionRequest;
-use crate::services::ExecutionResponse;
-use crate::services::SupergraphRequest;
-use crate::services::SupergraphResponse;
 use crate::tracer::TraceId;
 use crate::Context;
 
