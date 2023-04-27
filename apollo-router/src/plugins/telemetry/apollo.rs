@@ -66,10 +66,8 @@ pub(crate) struct Config {
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     pub(crate) buffer_size: NonZeroUsize,
 
-    /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
-    /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
-    /// Value MUST be less than global sampling rate
-    pub(crate) field_level_instrumentation_sampler: SamplerOption,
+    /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
+    pub(crate) field_level_instrumentation: FieldLevelInstrumentation,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -83,6 +81,25 @@ pub(crate) struct Config {
 
     /// Configuration for batch processing.
     pub(crate) batch_processor: BatchProcessorConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct FieldLevelInstrumentation {
+    /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
+    /// Value MUST be less than global sampling rate
+    pub(crate) sampler: SamplerOption,
+    /// Redact errors coming from ftv1 traces
+    pub(crate) redact_errors: bool,
+}
+
+impl Default for FieldLevelInstrumentation {
+    fn default() -> Self {
+        Self {
+            sampler: default_field_level_instrumentation_sampler(),
+            redact_errors: false,
+        }
+    }
 }
 
 fn default_field_level_instrumentation_sampler() -> SamplerOption {
@@ -123,7 +140,7 @@ impl Default for Config {
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
-            field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
+            field_level_instrumentation: FieldLevelInstrumentation::default(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),

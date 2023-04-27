@@ -21,7 +21,7 @@ impl TracingConfigurator for Config {
                 apollo_graph_ref: Some(reference),
                 schema_id,
                 buffer_size,
-                field_level_instrumentation_sampler,
+                field_level_instrumentation,
                 batch_processor,
                 ..
             } => {
@@ -33,7 +33,7 @@ impl TracingConfigurator for Config {
                     .apollo_graph_ref(reference)
                     .schema_id(schema_id)
                     .buffer_size(*buffer_size)
-                    .field_execution_sampler(field_level_instrumentation_sampler.clone())
+                    .field_execution_sampler(field_level_instrumentation.sampler.clone())
                     .batch_config(batch_processor.clone())
                     .build()?;
                 builder.with_span_processor(
