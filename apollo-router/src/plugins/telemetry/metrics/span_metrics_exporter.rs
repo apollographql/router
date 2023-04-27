@@ -1,9 +1,9 @@
 use async_trait::async_trait;
-use futures::future::BoxFuture;
-use futures::FutureExt;
-use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::sdk::trace::Span;
+use opentelemetry::sdk::trace::SpanProcessor;
+use opentelemetry::trace::TraceResult;
+use opentelemetry::Context;
 use opentelemetry::Key;
 use opentelemetry::Value;
 
@@ -26,15 +26,13 @@ const IDLE_NS_ATTRIBUTE_NAME: Key = Key::from_static_str("idle_ns");
 const SUBGRAPH_ATTRIBUTE_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 
 #[derive(Debug, Default)]
-pub(crate) struct Exporter {}
+pub(crate) struct Processor {}
 #[async_trait]
-impl SpanExporter for Exporter {
+impl SpanProcessor for Processor {
+    fn on_start(&self, _span: &mut Span, _cx: &Context) {}
     /// Export spans metrics to real metrics
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        for span in batch
-            .into_iter()
-            .filter(|s| SPAN_NAMES.contains(&s.name.as_ref()))
-        {
+    fn on_end(&self, span: SpanData) {
+        if SPAN_NAMES.contains(&span.name.as_ref()) {
             let busy = span
                 .attributes
                 .get(&BUSY_NS_ATTRIBUTE_NAME)
@@ -75,7 +73,13 @@ impl SpanExporter for Exporter {
                 ::tracing::info!(histogram.apollo_router_span = busy, kind = %"busy", span = %span.name);
             }
         }
+    }
 
-        async { Ok(()) }.boxed()
+    fn force_flush(&self) -> TraceResult<()> {
+        Ok(())
+    }
+
+    fn shutdown(&mut self) -> TraceResult<()> {
+        Ok(())
     }
 }
