@@ -71,7 +71,7 @@ impl Discussed {
         urls: &HashMap<String, String>,
         stage_description: &str,
     ) {
-        let used = get_configurations(conf, prefix);
+        let used = get_configurations(conf, &format!("{prefix}_"));
         let needed_discussions = used
             .into_iter()
             .filter_map(|config_key| {
