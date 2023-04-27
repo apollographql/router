@@ -4,6 +4,6 @@ expression: new_config
 ---
 ---
 supergraph:
-  limits:
+  preview_limits:
     parser_max_recursion: 100
 

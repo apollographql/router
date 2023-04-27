@@ -25,13 +25,13 @@ Configuration yaml:
   .traffic_shaping..experimental_entity_caching
 
 * Operation depth limiting
-  .supergraph.limits.max_depth
+  .supergraph.preview_limits.max_depth
 
 * Operation height limiting
-  .supergraph.limits.max_height
+  .supergraph.preview_limits.max_height
 
 * Operation root fields limiting
-  .supergraph.limits.max_root_fields
+  .supergraph.preview_limits.max_root_fields
 
 * Operation aliases limiting
-  .supergraph.limits.max_aliases
+  .supergraph.preview_limits.max_aliases

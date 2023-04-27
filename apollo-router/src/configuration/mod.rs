@@ -465,8 +465,10 @@ pub(crate) struct Supergraph {
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
 
-    /// Query complexity limiting
-    pub(crate) limits: Limits,
+    // NOTE: when renaming this to move out of preview, also update paths
+    // in `configuration/expansion.rs` and `uplink/entitlement.rs`.
+    /// Operation limits
+    pub(crate) preview_limits: Limits,
 }
 
 fn default_defer_support() -> bool {
@@ -490,7 +492,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            limits: limits.unwrap_or_default(),
+            preview_limits: limits.unwrap_or_default(),
         }
     }
 }
@@ -513,7 +515,7 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            limits: limits.unwrap_or_default(),
+            preview_limits: limits.unwrap_or_default(),
         }
     }
 }
@@ -541,7 +543,7 @@ impl Supergraph {
     }
 }
 
-/// Configuration options pertaining to the supergraph server component.
+/// Configuration for operation limits
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]

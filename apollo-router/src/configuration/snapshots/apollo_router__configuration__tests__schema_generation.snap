@@ -1155,7 +1155,7 @@ expression: "&schema"
           },
           "warmed_up_queries": 0
         },
-        "limits": {
+        "preview_limits": {
           "max_depth": null,
           "max_height": null,
           "max_root_fields": null,
@@ -1177,8 +1177,27 @@ expression: "&schema"
           "default": false,
           "type": "boolean"
         },
-        "limits": {
-          "description": "Query complexity limiting",
+        "listen": {
+          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
+          "default": "127.0.0.1:4000",
+          "anyOf": [
+            {
+              "description": "Socket address.",
+              "type": "string"
+            },
+            {
+              "description": "Unix socket.",
+              "type": "string"
+            }
+          ]
+        },
+        "path": {
+          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
+          "default": "/",
+          "type": "string"
+        },
+        "preview_limits": {
+          "description": "Operation limits",
           "default": {
             "max_depth": null,
             "max_height": null,
@@ -1243,25 +1262,6 @@ expression: "&schema"
             }
           },
           "additionalProperties": false
-        },
-        "listen": {
-          "description": "The socket address and port to listen on Defaults to 127.0.0.1:4000",
-          "default": "127.0.0.1:4000",
-          "anyOf": [
-            {
-              "description": "Socket address.",
-              "type": "string"
-            },
-            {
-              "description": "Unix socket.",
-              "type": "string"
-            }
-          ]
-        },
-        "path": {
-          "description": "The HTTP path on which GraphQL requests will be served. default: \"/\"",
-          "default": "/",
-          "type": "string"
         },
         "query_planning": {
           "description": "Query planning options",
