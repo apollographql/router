@@ -17,7 +17,7 @@ You define operation limits in your router's [YAML config file](./configuration/
 
 ```yaml title="router.yaml"
 supergraph:
-  limits:
+  preview_limits:
     max_depth: 100
     max_height: 200
     max_aliases: 30
@@ -109,7 +109,7 @@ query GetTopProducts {
 If you run your router in `warn_only` mode, operations that exceed defined limits are _not_ rejected. Instead, the router processes these operations as usual and emits a `WARN` trace that notes all exceeded limits, like so:
 
 ```
-2023-03-15T19:08:23.123456Z WARN apollo_router::limits: max_depth exceeded, max_depth: 3, current_op_depth: 5, operation: "query GetOwnerLocation {cat {owner {location {postalCode}}}}"
+2023-03-15T19:08:23.123456Z WARN apollo_router::operation_limits: max_depth exceeded, max_depth: 3, current_op_depth: 5, operation: "query GetOwnerLocation {cat {owner {location {postalCode}}}}"
 ```
 
 Running in `warn_only` mode can be useful while you're testing to determine the most appropriate limits to set for your supergraph.

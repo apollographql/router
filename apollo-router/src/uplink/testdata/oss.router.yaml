@@ -3,5 +3,5 @@ health_check:
 homepage:
   enabled: false
 supergraph:
-  limits:
+  preview_limits:
     parser_max_recursion: 1000

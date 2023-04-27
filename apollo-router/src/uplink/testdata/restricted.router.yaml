@@ -19,7 +19,7 @@ supergraph:
           - https://example.com
       in_memory:
         limit: 1000
-  limits:
+  preview_limits:
     max_depth: 20
     max_height: 100
     max_aliases: 100
