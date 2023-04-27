@@ -100,6 +100,19 @@ mod router_base64 {
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
 mod router_plugin {
+    pub(crate) type Context = crate::Context;
+    pub(crate) type HeaderMap = http::HeaderMap;
+    //pub(crate) type Option<HeaderName> = Option<http::header::HeaderName>;
+    pub(crate) type HeaderName = http::header::HeaderName;
+    pub(crate) type HeaderValue = http::header::HeaderValue;
+    pub(crate) type Request = crate::graphql::Request;
+    pub(crate) type Response = crate::graphql::Response;
+    pub(crate) type Object = crate::json_ext::Object;
+    pub(crate) type Value = crate::json_ext::Value;
+    pub(crate) type Error = crate::error::Error;
+    pub(crate) type Uri = http::Uri;
+    pub(crate) type TraceId = crate::tracer::TraceId;
+
     // It would be nice to generate get_originating_headers and
     // set_originating_headers for all response types.
     // However, variations in the composition
@@ -370,6 +383,158 @@ mod router_plugin {
             .service
             .map_response(rhai_service.clone(), callback)
     }
+
+    // Register a contains function for HeaderMap so that "in" works
+    #[rhai_fn(name = "contains")]
+    pub(crate) fn header_map_contains(x: &mut HeaderMap, key: &str) -> bool {
+        match HeaderName::from_str(key) {
+            Ok(hn) => x.contains_key(hn),
+            Err(_e) => false,
+        }
+    }
+
+    // Register a contains function for Context so that "in" works
+    #[rhai_fn(name = "contains")]
+    pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
+        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+    }
+
+    // Register urlencode/decode functions
+    pub(crate) fn urlencode(x: &mut ImmutableString) -> String {
+        urlencoding::encode(x).into_owned()
+    }
+
+    #[rhai_fn(return_raw)]
+    pub(crate) fn urldecode(x: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
+        Ok(urlencoding::decode(x)
+            .map_err(|e| e.to_string())?
+            .into_owned())
+    }
+
+    #[rhai_fn(name = "headers_are_available")]
+    pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::Response>) -> bool {
+        true
+    }
+
+    #[rhai_fn(name = "headers_are_available")]
+    pub(crate) fn supergraph_deferred_response(
+        _: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> bool {
+        false
+    }
+
+    #[rhai_fn(name = "headers_are_available")]
+    pub(crate) fn execution_response(_: &mut SharedMut<execution::Response>) -> bool {
+        true
+    }
+
+    #[rhai_fn(name = "headers_are_available")]
+    pub(crate) fn execution_deferred_response(
+        _: &mut SharedMut<execution::DeferredResponse>,
+    ) -> bool {
+        false
+    }
+
+    // Register a HeaderMap indexer so we can get/set headers
+    #[rhai_fn(index_get, return_raw)]
+    pub(crate) fn header_map_get(
+        x: &mut HeaderMap,
+        key: &str,
+    ) -> Result<String, Box<EvalAltResult>> {
+        let search_name =
+            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+        Ok(x.get(search_name)
+            .ok_or("")?
+            .to_str()
+            .map_err(|e| e.to_string())?
+            .to_string())
+    }
+
+    // Register an additional getter which allows us to get multiple values for the same
+    // key.
+    // Note: We can't register this as an indexer, because that would simply override the
+    // existing one, which would break code. When router 2.0 is released, we should replace
+    // the existing indexer_get for HeaderMap with this function and mark it as an
+    // incompatible change.
+    #[rhai_fn(name = "values", return_raw)]
+    pub(crate) fn header_map_values(
+        x: &mut HeaderMap,
+        key: &str,
+    ) -> Result<Array, Box<EvalAltResult>> {
+        let search_name =
+            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+        let mut response = Array::new();
+        for value in x.get_all(search_name).iter() {
+            response.push(
+                value
+                    .to_str()
+                    .map_err(|e| e.to_string())?
+                    .to_string()
+                    .into(),
+            )
+        }
+        Ok(response)
+    }
+
+    // Register a Context indexer so we can get/set context
+    #[rhai_fn(index_get, return_raw)]
+    pub(crate) fn context_get(x: &mut Context, key: &str) -> Result<Dynamic, Box<EvalAltResult>> {
+        x.get(key)
+            .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
+            .map_err(|e: BoxError| e.to_string().into())
+    }
+
+    //Register Context.upsert()
+    #[rhai_fn(name = "upsert", return_raw)]
+    pub(crate) fn context_upsert(
+        context: NativeCallContext,
+        x: &mut Context,
+        key: &str,
+        callback: FnPtr,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.upsert(key, |v: Dynamic| -> Dynamic {
+            // Note: Context::upsert() does not allow the callback to fail, although it
+            // can. If call_within_context() fails, return the original provided
+            // value.
+            callback
+                .call_within_context(&context, (v.clone(),))
+                .unwrap_or(v)
+        })
+        .map_err(|e: BoxError| e.to_string().into())
+    }
+
+    // Request.query
+    #[rhai_fn(get = "query")]
+    pub(crate)fn request_query_get(x: &mut Request) -> Dynamic {
+        x.query.clone().map_or(Dynamic::UNIT, Dynamic::from)
+    }
+
+    #[rhai_fn(set = "query")]
+    pub(crate)fn request_query_set(x: &mut Request, value: &str) {
+        x.query = Some(value.to_string());
+    }
+
+    // Request.operation_name
+    #[rhai_fn(get = "operation_name")]
+    pub(crate)fn request_operation_name_get(x: &mut Request) -> Dynamic {
+        x.operation_name
+        .clone()
+        .map_or(Dynamic::UNIT, Dynamic::from)    }
+
+    #[rhai_fn(set = "operation_name")]
+    pub(crate)fn request_operation_name_set(x: &mut Request, value: &str) {
+        x.operation_name = Some(value.to_string());
+    }
+
+
+
+    #[rhai_fn(return_raw)]
+    pub(crate) fn unix_now() -> Result<i64, Box<EvalAltResult>> {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| e.to_string().into())
+            .map(|x| x.as_secs() as i64)
+    }
 }
 
 #[derive(Default)]
@@ -585,72 +750,12 @@ impl Rhai {
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
             // Register types accessible in plugin scripts
-            .register_type::<Context>()
-            .register_type::<HeaderMap>()
+
             .register_type::<Option<HeaderName>>()
-            .register_type::<HeaderName>()
-            .register_type::<HeaderValue>()
             .register_type::<(Option<HeaderName>, HeaderValue)>()
-            .register_type::<Request>()
-            .register_type::<Object>()
-            .register_type::<Response>()
-            .register_type::<Value>()
-            .register_type::<Error>()
-            .register_type::<Uri>()
-            .register_type::<TraceId>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
-            // Register a contains function for HeaderMap so that "in" works
-            .register_fn("contains", |x: &mut HeaderMap, key: &str| -> bool {
-                match HeaderName::from_str(key) {
-                    Ok(hn) => x.contains_key(hn),
-                    Err(_e) => false,
-                }
-            })
-            // Register a contains function for Context so that "in" works
-            .register_fn("contains", |x: &mut Context, key: &str| -> bool {
-                x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
-            })
-            // Register urlencode/decode functions
-            .register_fn("urlencode", |x: &mut ImmutableString| -> String {
-                urlencoding::encode(x).into_owned()
-            })
-            .register_fn(
-                "urldecode",
-                |x: &mut ImmutableString| -> Result<String, Box<EvalAltResult>> {
-                    Ok(urlencoding::decode(x)
-                        .map_err(|e| e.to_string())?
-                        .into_owned())
-                },
-            )
-            .register_fn(
-                "headers_are_available",
-                |_: &mut SharedMut<supergraph::Response>| -> bool { true },
-            )
-            .register_fn(
-                "headers_are_available",
-                |_: &mut SharedMut<supergraph::DeferredResponse>| -> bool { false },
-            )
-            .register_fn(
-                "headers_are_available",
-                |_: &mut SharedMut<execution::Response>| -> bool { true },
-            )
-            .register_fn(
-                "headers_are_available",
-                |_: &mut SharedMut<execution::DeferredResponse>| -> bool { false },
-            )
-            // Register a HeaderMap indexer so we can get/set headers
-            .register_indexer_get(
-                |x: &mut HeaderMap, key: &str| -> Result<String, Box<EvalAltResult>> {
-                    let search_name =
-                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-                    Ok(x.get(search_name)
-                        .ok_or("")?
-                        .to_str()
-                        .map_err(|e| e.to_string())?
-                        .to_string())
-                },
-            )
+
             .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
                 x.insert(
                     HeaderName::from_str(key).map_err(|e| e.to_string())?,
@@ -658,27 +763,7 @@ impl Rhai {
                 );
                 Ok(())
             })
-            // Register an additional getter which allows us to get multiple values for the same
-            // key.
-            // Note: We can't register this as an indexer, because that would simply override the
-            // existing one, which would break code. When router 2.0 is released, we should replace
-            // the existing indexer_get for HeaderMap with this function and mark it as an
-            // incompatible change.
-            .register_fn("values",
-                |x: &mut HeaderMap, key: &str| -> Result<Array, Box<EvalAltResult>> {
-                    let search_name =
-                        HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-                    let mut response = Array::new();
-                    for value in x.get_all(search_name).iter() {
-                        response.push(value
-                            .to_str()
-                            .map_err(|e| e.to_string())?
-                            .to_string()
-                            .into())
-                    }
-                    Ok(response)
-                }
-            )
+
             // Register an additional setter which allows us to set multiple values for the same
             // key.
             .register_indexer_set(|x: &mut HeaderMap, key: &str, value: Array| {
@@ -692,38 +777,13 @@ impl Rhai {
                 Ok(())
             })
             // Register a Context indexer so we can get/set context
-            .register_indexer_get(
-                |x: &mut Context, key: &str| -> Result<Dynamic, Box<EvalAltResult>> {
-                    x.get(key)
-                        .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-                        .map_err(|e: BoxError| e.to_string().into())
-                },
-            )
             .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
                 let _= x.insert(key, value)
                     .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
                     .map_err(|e: BoxError| e.to_string())?;
                 Ok(())
             })
-            // Register Context.upsert()
-            .register_fn(
-                "upsert",
-                |context: NativeCallContext,
-                 x: &mut Context,
-                 key: &str,
-                 callback: FnPtr|
-                 -> Result<(), Box<EvalAltResult>> {
-                    x.upsert(key, |v: Dynamic| -> Dynamic {
-                        // Note: Context::upsert() does not allow the callback to fail, although it
-                        // can. If call_within_context() fails, return the original provided
-                        // value.
-                        callback
-                            .call_within_context(&context, (v.clone(),))
-                            .unwrap_or(v)
-                    })
-                    .map_err(|e: BoxError| e.to_string().into())
-                },
-            )
+   
             // Register get for Header Name/Value from a tuple pair
             .register_get("name", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.0.clone()
@@ -731,22 +791,7 @@ impl Rhai {
             .register_get("value", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.1.clone()
             })
-            // Request.query
-            .register_get("query", |x: &mut Request| {
-                x.query.clone().map_or(Dynamic::UNIT, Dynamic::from)
-            })
-            .register_set("query", |x: &mut Request, value: &str| {
-                x.query = Some(value.to_string());
-            })
-            // Request.operation_name
-            .register_get("operation_name", |x: &mut Request| {
-                x.operation_name
-                    .clone()
-                    .map_or(Dynamic::UNIT, Dynamic::from)
-            })
-            .register_set("operation_name", |x: &mut Request, value: &str| {
-                x.operation_name = Some(value.to_string());
-            })
+   
             // Request.variables
             .register_get("variables", |x: &mut Request| {
                 to_dynamic(x.variables.clone())
@@ -924,12 +969,12 @@ impl Rhai {
             .register_fn("uuid_v4", || -> String {
                 Uuid::new_v4().to_string()
             })
-            .register_fn("unix_now", ||-> Result<i64, Box<EvalAltResult>> {
+            /* .register_fn("unix_now", ||-> Result<i64, Box<EvalAltResult>> {
                 SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .map_err(|e| e.to_string().into())
                     .map(|x| x.as_secs() as i64)
-            })
+            })*/
             // Add query plan getter to execution request
             .register_get(
                 "query_plan",
