@@ -136,6 +136,11 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) apq: Apq,
 
+    /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
+    /// You probably don’t want this in production!
+    #[serde(default)]
+    pub(crate) experimental_chaos: Chaos,
+
     /// Plugin configuration
     #[serde(default)]
     plugins: UserPlugins,
@@ -167,6 +172,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
+            experimental_chaos: Chaos,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -181,6 +187,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
+            .chaos(ad_hoc.experimental_chaos)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
     }
@@ -212,6 +219,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
         apq: Option<Apq>,
+        chaos: Option<Chaos>,
     ) -> Result<Self, ConfigurationError> {
         let conf = Self {
             validated_yaml: Default::default(),
@@ -222,6 +230,7 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
+            experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -280,6 +289,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
         apq: Option<Apq>,
+        chaos: Option<Chaos>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -289,6 +299,7 @@ impl Configuration {
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
+            experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
             },
@@ -944,6 +955,19 @@ impl Default for Server {
     fn default() -> Self {
         Self::builder().build()
     }
+}
+
+/// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
+/// You probably don’t want this in production!
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[serde(default)]
+pub(crate) struct Chaos {
+    /// Force a hot reload of the Router (as if the schema or configuration had changed)
+    /// at a regular time interval.
+    #[serde(with = "humantime_serde")]
+    #[schemars(with = "Option<String>")]
+    pub(crate) force_hot_reload: Option<std::time::Duration>,
 }
 
 /// Listening address.
