@@ -597,7 +597,7 @@ impl Telemetry {
         builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
         builder = setup_tracing(builder, &config.apollo, &trace_config)?;
         // For metrics
-        builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
+        builder = builder.with_span_processor(metrics::span_metrics_exporter::Processor::default());
 
         let tracer_provider = builder.build();
         Ok(tracer_provider)
