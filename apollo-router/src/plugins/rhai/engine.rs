@@ -33,14 +33,10 @@ use super::subgraph;
 use super::supergraph;
 use super::Rhai;
 use super::ServiceStep;
-use crate::error::Error;
 use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::http_ext;
-use crate::json_ext::Object;
-use crate::json_ext::Value;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
-use crate::tracer::TraceId;
 use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
@@ -689,7 +685,10 @@ mod router_plugin {
     }
 
     #[rhai_fn(set = "errors", return_raw)]
-    pub(crate) fn response_errors_set(x: &mut Response, value: Dynamic) -> Result<(), Box<EvalAltResult>> {
+    pub(crate) fn response_errors_set(
+        x: &mut Response,
+        value: Dynamic,
+    ) -> Result<(), Box<EvalAltResult>> {
         x.errors = from_dynamic(&value)?;
         Ok(())
     }
@@ -709,12 +708,157 @@ mod router_plugin {
         Ok(())
     }
 
+    // TraceId support
+    #[rhai_fn(return_raw)]
+    pub(crate) fn traceid() -> Result<TraceId, Box<EvalAltResult>> {
+        TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn traceid_to_string(id: &mut TraceId) -> String {
+        id.to_string()
+    }
+
+    // Register a series of logging functions
+    pub(crate) fn log_trace(out: Dynamic) {
+        tracing::trace!(%out, "rhai_trace");
+    }
+    pub(crate) fn log_debug(out: Dynamic) {
+        tracing::debug!(%out, "rhai_debug");
+    }
+    pub(crate) fn log_info(out: Dynamic) {
+        tracing::info!(%out, "rhai_info");
+    }
+    pub(crate) fn log_warn(out: Dynamic) {
+        tracing::warn!(%out, "rhai_warn");
+    }
+    pub(crate) fn log_error(out: Dynamic) {
+        tracing::error!(%out, "rhai_error");
+    }
+
+    // Register a function for printing to stderr
+    pub(crate) fn eprint(x: &str) {
+        eprintln!("{x}");
+    }
+
+    // Default representation in rhai is the "type", so
+    // we need to register a to_string function for all our registered
+    // types so we can interact meaningfully with them.
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn context_to_string(x: &mut Context) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_name_to_string(x: &mut HeaderName) -> String {
+        x.to_string()
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_value_to_string(x: &mut HeaderValue) -> String {
+        x.to_str().map_or("".to_string(), |v| v.to_string())
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_map_to_string(x: &mut HeaderMap) -> String {
+        let mut msg = String::new();
+        for pair in x.iter() {
+            let line = format!(
+                "{}: {}",
+                pair.0,
+                pair.1.to_str().map_or("".to_string(), |v| v.to_string())
+            );
+            msg.push_str(line.as_ref());
+            msg.push('\n');
+        }
+        msg
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn request_to_string(x: &mut Request) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn response_to_string(x: &mut Response) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn error_to_string(x: &mut Error) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn object_to_string(x: &mut Object) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn value_to_string(x: &mut Value) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn uri_to_string(x: &mut Uri) -> String {
+        format!("{x:?}")
+    }
+
+    pub(crate) fn uuid_v4() -> String {
+        Uuid::new_v4().to_string()
+    }
+
     #[rhai_fn(return_raw)]
     pub(crate) fn unix_now() -> Result<i64, Box<EvalAltResult>> {
         SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map_err(|e| e.to_string().into())
             .map(|x| x.as_secs() as i64)
+    }
+
+    // Add query plan getter to execution request
+    #[rhai_fn(get = "query_plan")]
+    pub(crate) fn execution_request_query_plan_get(
+        obj: &mut SharedMut<execution::Request>,
+    ) -> String {
+        obj.with_mut(|request| {
+            request
+                .query_plan
+                .formatted_query_plan
+                .clone()
+                .unwrap_or_default()
+        })
+    }
+
+    // Add context getter/setters for deferred responses
+    #[rhai_fn(get = "context", return_raw)]
+    pub(crate) fn supergraph_deferred_response_context_get(
+        obj: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn supergraph_deferred_response_context_set(
+        obj: &mut SharedMut<supergraph::DeferredResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
+    #[rhai_fn(get = "context", return_raw)]
+    pub(crate) fn execution_deferred_response_context_get(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn execution_deferred_response_context_set(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
     }
 }
 
@@ -931,12 +1075,10 @@ impl Rhai {
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
             // Register types accessible in plugin scripts
-
             .register_type::<Option<HeaderName>>()
             .register_type::<(Option<HeaderName>, HeaderValue)>()
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
-
             // Register get for Header Name/Value from a tuple pair
             .register_get("name", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.0.clone()
@@ -944,64 +1086,11 @@ impl Rhai {
             .register_get("value", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.1.clone()
             })
-   
-            
-  
-            // TraceId support
-            .register_fn("traceid", || -> Result<TraceId, Box<EvalAltResult>> {
-                TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
-            })
-            .register_fn("to_string", |id: &mut TraceId| -> String { id.to_string() })
-            // Register a series of logging functions
-            .register_fn("log_trace", |out: Dynamic| {
-                tracing::trace!(%out, "rhai_trace");
-            })
-            .register_fn("log_debug", |out: Dynamic| {
-                tracing::debug!(%out, "rhai_debug");
-            })
-            .register_fn("log_info", |out: Dynamic| {
-                tracing::info!(%out, "rhai_info");
-            })
-            .register_fn("log_warn", |out: Dynamic| {
-                tracing::warn!(%out, "rhai_warn");
-            })
-            .register_fn("log_error", |out: Dynamic| {
-                tracing::error!(%out, "rhai_error");
-            })
-            // Register a function for printing to stderr
-            .register_fn("eprint", |x: &str| {
-                eprintln!("{x}");
-            })
-            // Default representation in rhai is the "type", so
-            // we need to register a to_string function for all our registered
-            // types so we can interact meaningfully with them.
-            .register_fn("to_string", |x: &mut Context| -> String {
-                format!("{x:?}")
-            })
             .register_fn("to_string", |x: &mut Option<HeaderName>| -> String {
                 match x {
                     Some(v) => v.to_string(),
                     None => "None".to_string(),
                 }
-            })
-            .register_fn("to_string", |x: &mut HeaderName| -> String {
-                x.to_string()
-            })
-            .register_fn("to_string", |x: &mut HeaderValue| -> String {
-                x.to_str().map_or("".to_string(), |v| v.to_string())
-            })
-            .register_fn("to_string", |x: &mut HeaderMap| -> String {
-                let mut msg = String::new();
-                for pair in x.iter() {
-                    let line = format!(
-                        "{}: {}",
-                        pair.0,
-                        pair.1.to_str().map_or("".to_string(), |v| v.to_string())
-                    );
-                    msg.push_str(line.as_ref());
-                    msg.push('\n');
-                }
-                msg
             })
             .register_fn(
                 "to_string",
@@ -1014,71 +1103,6 @@ impl Rhai {
                         },
                         x.1.to_str().map_or("".to_string(), |v| v.to_string())
                     )
-                },
-            )
-            .register_fn("to_string", |x: &mut Request| -> String {
-                format!("{x:?}")
-            })
-            .register_fn("to_string", |x: &mut Response| -> String {
-                format!("{x:?}")
-            })
-            .register_fn("to_string", |x: &mut Error| -> String {
-                format!("{x:?}")
-            })
-            .register_fn("to_string", |x: &mut Object| -> String {
-                format!("{x:?}")
-            })
-            .register_fn("to_string", |x: &mut Value| -> String {
-                format!("{x:?}")
-            })
-            .register_fn("to_string", |x: &mut Uri| -> String { format!("{x:?}") })
-            .register_fn("uuid_v4", || -> String {
-                Uuid::new_v4().to_string()
-            })
-            /* .register_fn("unix_now", ||-> Result<i64, Box<EvalAltResult>> {
-                SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .map_err(|e| e.to_string().into())
-                    .map(|x| x.as_secs() as i64)
-            })*/
-            // Add query plan getter to execution request
-            .register_get(
-                "query_plan",
-                |obj: &mut SharedMut<execution::Request>| -> String {
-                    obj.with_mut(|request| {
-                        request
-                            .query_plan
-                            .formatted_query_plan
-                            .clone()
-                            .unwrap_or_default()
-                    })
-                },
-            )
-            // Add context getter/setters for deferred responses
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<supergraph::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                },
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<supergraph::DeferredResponse>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
-                },
-            )
-            .register_get(
-                "context",
-                |obj: &mut SharedMut<execution::DeferredResponse>| -> Result<Context, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.context.clone()))
-                },
-            )
-            .register_set(
-                "context",
-                |obj: &mut SharedMut<execution::DeferredResponse>, context: Context| {
-                    obj.with_mut(|response| response.context = context);
-                    Ok(())
                 },
             );
         // Add common getter/setters for different types
