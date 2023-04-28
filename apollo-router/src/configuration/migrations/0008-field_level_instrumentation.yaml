@@ -1,5 +1,5 @@
 description: apollo.field_level_instrumentation_sampler moved into apollo.field_level_instrumentation.sampler
 actions:
   - type: move
-    from: apollo.field_level_instrumentation_sampler
-    to: apollo.field_level_instrumentation.sampler
+    from: telemetry.apollo.field_level_instrumentation_sampler
+    to: telemetry.apollo.field_level_instrumentation.sampler

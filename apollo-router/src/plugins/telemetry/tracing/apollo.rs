@@ -35,6 +35,7 @@ impl TracingConfigurator for Config {
                     .buffer_size(*buffer_size)
                     .field_execution_sampler(field_level_instrumentation.sampler.clone())
                     .batch_config(batch_processor.clone())
+                    .redact_errors(field_level_instrumentation.redact_errors)
                     .build()?;
                 builder.with_span_processor(
                     BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
