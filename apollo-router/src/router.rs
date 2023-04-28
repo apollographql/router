@@ -4,7 +4,6 @@
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
@@ -234,9 +233,17 @@ impl SchemaSource {
                             if watch {
                                 crate::files::watch(&path)
                                     .filter_map(move |_| {
-                                        future::ready(std::fs::read_to_string(&path).ok())
+                                        let path = path.clone();
+                                        async move {
+                                            match tokio::fs::read_to_string(&path).await {
+                                                Ok(schema) => Some(UpdateSchema(schema)),
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
+                                            }
+                                        }
                                     })
-                                    .map(UpdateSchema)
                                     .boxed()
                             } else {
                                 stream::once(future::ready(UpdateSchema(schema))).boxed()
@@ -344,59 +351,71 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
-                } else if watch {
-                    crate::files::watch(&path)
-                        .map(move |_| match ConfigurationSource::read_config(&path) {
-                            Ok(config) => UpdateConfiguration(config),
-                            Err(err) => {
-                                tracing::error!("{}", err);
-                                NoMoreConfiguration
-                            }
-                        })
-                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
                         Ok(configuration) => {
-                            #[cfg(any(test, not(unix)))]
-                            {
-                                stream::once(future::ready(UpdateConfiguration(configuration)))
-                                    .boxed()
-                            }
-
-                            #[cfg(all(not(test), unix))]
-                            {
-                                let mut sighup_stream = tokio::signal::unix::signal(
-                                    tokio::signal::unix::SignalKind::hangup(),
-                                )
-                                .expect("Failed to install SIGHUP signal handler");
-
-                                let (mut tx, rx) = futures::channel::mpsc::channel(1);
-                                tokio::task::spawn(async move {
-                                    while let Some(()) = sighup_stream.recv().await {
-                                        tx.send(()).await.unwrap();
-                                    }
-                                });
-                                futures::stream::select(
-                                    stream::once(future::ready(UpdateConfiguration(configuration)))
-                                        .boxed(),
-                                    rx.filter_map(
-                                        move |()| match ConfigurationSource::read_config(&path) {
-                                            Ok(configuration) => future::ready(Some(
-                                                UpdateConfiguration(configuration),
-                                            )),
-                                            Err(err) => {
-                                                tracing::error!("{}", err);
-                                                future::ready(None)
+                            if watch {
+                                crate::files::watch(&path)
+                                    .filter_map(move |_| {
+                                        let path = path.clone();
+                                        async move {
+                                            match ConfigurationSource::read_config_async(&path)
+                                                .await
+                                            {
+                                                Ok(configuration) => {
+                                                    Some(UpdateConfiguration(configuration))
+                                                }
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
                                             }
-                                        },
+                                        }
+                                    })
+                                    .boxed()
+                            } else {
+                                #[cfg(any(test, not(unix)))]
+                                {
+                                    stream::once(future::ready(UpdateConfiguration(configuration)))
+                                        .boxed()
+                                }
+                                #[cfg(all(not(test), unix))]
+                                {
+                                    let mut signal = tokio::signal::unix::signal(
+                                        tokio::signal::unix::SignalKind::hangup(),
                                     )
-                                    .boxed(),
-                                )
-                                .boxed()
+                                    .expect("Failed to install SIGHUP signal handler");
+
+                                    let signal_stream =
+                                        futures::stream::poll_fn(move |cx| signal.poll_recv(cx))
+                                            .filter_map(move |_| {
+                                                let path = path.clone();
+                                                async move {
+                                                    match ConfigurationSource::read_config_async(
+                                                        &path,
+                                                    )
+                                                    .await
+                                                    {
+                                                        Ok(configuration) => {
+                                                            Some(UpdateConfiguration(configuration))
+                                                        }
+                                                        Err(err) => {
+                                                            tracing::error!("{}", err);
+                                                            None
+                                                        }
+                                                    }
+                                                }
+                                            })
+                                            .boxed();
+                                    stream::once(future::ready(UpdateConfiguration(configuration)))
+                                        .boxed()
+                                        .chain(signal_stream)
+                                        .boxed()
+                                }
                             }
                         }
                         Err(err) => {
-                            tracing::error!("{}", err);
+                            tracing::error!("Failed to read configuration: {}", err);
                             stream::empty().boxed()
                         }
                     }
@@ -408,7 +427,11 @@ impl ConfigurationSource {
     }
 
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
-        let config = fs::read_to_string(path)?;
+        let config = std::fs::read_to_string(path)?;
+        config.parse().map_err(ReadConfigError::Validation)
+    }
+    async fn read_config_async(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = tokio::fs::read_to_string(path).await?;
         config.parse().map_err(ReadConfigError::Validation)
     }
 }
