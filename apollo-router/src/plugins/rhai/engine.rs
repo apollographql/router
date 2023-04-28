@@ -450,6 +450,37 @@ mod router_plugin {
             .to_string())
     }
 
+    #[rhai_fn(index_set, return_raw)]
+    pub(crate) fn header_map_set_string(
+        x: &mut HeaderMap,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.insert(
+            HeaderName::from_str(key).map_err(|e| e.to_string())?,
+            HeaderValue::from_str(value).map_err(|e| e.to_string())?,
+        );
+        Ok(())
+    }
+
+    // Register an additional setter which allows us to set multiple values for the same
+    // key.
+    #[rhai_fn(index_set, return_raw)]
+    pub(crate) fn header_map_set_array(
+        x: &mut HeaderMap,
+        key: &str,
+        value: Array,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+        for v in value {
+            x.append(
+                h_key.clone(),
+                HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+            );
+        }
+        Ok(())
+    }
+
     // Register an additional getter which allows us to get multiple values for the same
     // key.
     // Note: We can't register this as an indexer, because that would simply override the
@@ -484,6 +515,19 @@ mod router_plugin {
             .map_err(|e: BoxError| e.to_string().into())
     }
 
+    #[rhai_fn(index_set, return_raw)]
+    pub(crate) fn context_set(
+        x: &mut Context,
+        key: &str,
+        value: Dynamic,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let _ = x
+            .insert(key, value)
+            .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
+            .map_err(|e: BoxError| e.to_string())?;
+        Ok(())
+    }
+
     //Register Context.upsert()
     #[rhai_fn(name = "upsert", return_raw)]
     pub(crate) fn context_upsert(
@@ -505,28 +549,165 @@ mod router_plugin {
 
     // Request.query
     #[rhai_fn(get = "query")]
-    pub(crate)fn request_query_get(x: &mut Request) -> Dynamic {
+    pub(crate) fn request_query_get(x: &mut Request) -> Dynamic {
         x.query.clone().map_or(Dynamic::UNIT, Dynamic::from)
     }
 
     #[rhai_fn(set = "query")]
-    pub(crate)fn request_query_set(x: &mut Request, value: &str) {
+    pub(crate) fn request_query_set(x: &mut Request, value: &str) {
         x.query = Some(value.to_string());
     }
 
     // Request.operation_name
     #[rhai_fn(get = "operation_name")]
-    pub(crate)fn request_operation_name_get(x: &mut Request) -> Dynamic {
+    pub(crate) fn request_operation_name_get(x: &mut Request) -> Dynamic {
         x.operation_name
-        .clone()
-        .map_or(Dynamic::UNIT, Dynamic::from)    }
+            .clone()
+            .map_or(Dynamic::UNIT, Dynamic::from)
+    }
 
     #[rhai_fn(set = "operation_name")]
-    pub(crate)fn request_operation_name_set(x: &mut Request, value: &str) {
+    pub(crate) fn request_operation_name_set(x: &mut Request, value: &str) {
         x.operation_name = Some(value.to_string());
     }
 
+    // Request.variables
+    #[rhai_fn(get = "variables", return_raw)]
+    pub(crate) fn request_variables_get(x: &mut Request) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.variables.clone())
+    }
 
+    #[rhai_fn(set = "variables", return_raw)]
+    pub(crate) fn request_variables_set(
+        x: &mut Request,
+        om: Map,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.variables = from_dynamic(&om.into())?;
+        Ok(())
+    }
+
+    // Request.extensions
+    #[rhai_fn(get = "extensions", return_raw)]
+    pub(crate) fn request_extensions_get(x: &mut Request) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.extensions.clone())
+    }
+
+    #[rhai_fn(set = "extensions", return_raw)]
+    pub(crate) fn request_extensions_set(
+        x: &mut Request,
+        om: Map,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.extensions = from_dynamic(&om.into())?;
+        Ok(())
+    }
+
+    // Uri.path
+    #[rhai_fn(get = "path", return_raw)]
+    pub(crate) fn uri_path_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.path())
+    }
+
+    #[rhai_fn(set = "path", return_raw)]
+    pub(crate) fn uri_path_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        // Because there is no simple way to update parts on an existing
+        // Uri (no parts_mut()), then we need to create a new Uri from our
+        // existing parts, preserving any query, and update our existing
+        // Uri.
+        let mut parts: Parts = x.clone().into_parts();
+        parts.path_and_query = match parts
+            .path_and_query
+            .ok_or("path and query are missing")?
+            .query()
+        {
+            Some(query) => Some(
+                PathAndQuery::from_maybe_shared(format!("{value}?{query}"))
+                    .map_err(|e| e.to_string())?,
+            ),
+            None => Some(PathAndQuery::from_str(value).map_err(|e| e.to_string())?),
+        };
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // Uri.host
+    #[rhai_fn(get = "host", return_raw)]
+    pub(crate) fn uri_host_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.host())
+    }
+
+    #[rhai_fn(set = "host", return_raw)]
+    pub(crate) fn uri_host_set(x: &mut Uri, value: &str) -> Result<(), Box<EvalAltResult>> {
+        // Because there is no simple way to update parts on an existing
+        // Uri (no parts_mut()), then we need to create a new Uri from our
+        // existing parts, preserving any port, and update our existing
+        // Uri.
+        let mut parts: Parts = x.clone().into_parts();
+        let new_authority = match parts.authority {
+            Some(old_authority) => {
+                if let Some(port) = old_authority.port() {
+                    Authority::from_maybe_shared(format!("{value}:{port}"))
+                        .map_err(|e| e.to_string())?
+                } else {
+                    Authority::from_str(value).map_err(|e| e.to_string())?
+                }
+            }
+            None => Authority::from_str(value).map_err(|e| e.to_string())?,
+        };
+        parts.authority = Some(new_authority);
+        *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // Response.label
+    #[rhai_fn(get = "label")]
+    pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
+        x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
+    }
+
+    #[rhai_fn(set = "label")]
+    pub(crate) fn response_label_set(x: &mut Response, value: &str) {
+        x.label = Some(value.to_string());
+    }
+
+    // Response.data
+    #[rhai_fn(get = "data", return_raw)]
+    pub(crate) fn response_data_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.data.clone())
+    }
+
+    #[rhai_fn(set = "data", return_raw)]
+    pub(crate) fn response_data_set(x: &mut Response, om: Map) -> Result<(), Box<EvalAltResult>> {
+        x.data = from_dynamic(&om.into())?;
+        Ok(())
+    }
+
+    // Response.path (Not Implemented)
+    // Response.errors
+    #[rhai_fn(get = "errors", return_raw)]
+    pub(crate) fn response_errors_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.errors.clone())
+    }
+
+    #[rhai_fn(set = "errors", return_raw)]
+    pub(crate) fn response_errors_set(x: &mut Response, value: Dynamic) -> Result<(), Box<EvalAltResult>> {
+        x.errors = from_dynamic(&value)?;
+        Ok(())
+    }
+
+    // Response.extensions
+    #[rhai_fn(get = "extensions", return_raw)]
+    pub(crate) fn response_extensions_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
+        to_dynamic(x.extensions.clone())
+    }
+
+    #[rhai_fn(set = "extensions", return_raw)]
+    pub(crate) fn response_extensions_set(
+        x: &mut Response,
+        om: Map,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.extensions = from_dynamic(&om.into())?;
+        Ok(())
+    }
 
     #[rhai_fn(return_raw)]
     pub(crate) fn unix_now() -> Result<i64, Box<EvalAltResult>> {
@@ -756,34 +937,6 @@ impl Rhai {
             // Register HeaderMap as an iterator so we can loop over contents
             .register_iterator::<HeaderMap>()
 
-            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: &str| {
-                x.insert(
-                    HeaderName::from_str(key).map_err(|e| e.to_string())?,
-                    HeaderValue::from_str(value).map_err(|e| e.to_string())?,
-                );
-                Ok(())
-            })
-
-            // Register an additional setter which allows us to set multiple values for the same
-            // key.
-            .register_indexer_set(|x: &mut HeaderMap, key: &str, value: Array| {
-                let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
-                for v in value {
-                    x.append(
-                        h_key.clone(),
-                        HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
-                    );
-                }
-                Ok(())
-            })
-            // Register a Context indexer so we can get/set context
-            .register_indexer_set(|x: &mut Context, key: &str, value: Dynamic| {
-                let _= x.insert(key, value)
-                    .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-                    .map_err(|e: BoxError| e.to_string())?;
-                Ok(())
-            })
-   
             // Register get for Header Name/Value from a tuple pair
             .register_get("name", |x: &mut (Option<HeaderName>, HeaderValue)| {
                 x.0.clone()
@@ -792,95 +945,8 @@ impl Rhai {
                 x.1.clone()
             })
    
-            // Request.variables
-            .register_get("variables", |x: &mut Request| {
-                to_dynamic(x.variables.clone())
-            })
-            .register_set("variables", |x: &mut Request, om: Map| {
-                x.variables = from_dynamic(&om.into())?;
-                Ok(())
-            })
-            // Request.extensions
-            .register_get("extensions", |x: &mut Request| {
-                to_dynamic(x.extensions.clone())
-            })
-            .register_set("extensions", |x: &mut Request, om: Map| {
-                x.extensions = from_dynamic(&om.into())?;
-                Ok(())
-            })
-            // Request.uri.path
-            .register_get("path", |x: &mut Uri| to_dynamic(x.path()))
-            .register_set("path", |x: &mut Uri, value: &str| {
-                // Because there is no simple way to update parts on an existing
-                // Uri (no parts_mut()), then we need to create a new Uri from our
-                // existing parts, preserving any query, and update our existing
-                // Uri.
-                let mut parts: Parts = x.clone().into_parts();
-                parts.path_and_query = match parts
-                    .path_and_query
-                    .ok_or("path and query are missing")?
-                    .query()
-                {
-                    Some(query) => Some(
-                        PathAndQuery::from_maybe_shared(format!("{value}?{query}"))
-                            .map_err(|e| e.to_string())?,
-                    ),
-                    None => Some(PathAndQuery::from_str(value).map_err(|e| e.to_string())?),
-                };
-                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
-                Ok(())
-            })
-            // Request.uri.host
-            .register_get("host", |x: &mut Uri| to_dynamic(x.host()))
-            .register_set("host", |x: &mut Uri, value: &str| {
-                // Because there is no simple way to update parts on an existing
-                // Uri (no parts_mut()), then we need to create a new Uri from our
-                // existing parts, preserving any port, and update our existing
-                // Uri.
-                let mut parts: Parts = x.clone().into_parts();
-                let new_authority = match parts.authority {
-                    Some(old_authority) => {
-                        if let Some(port) = old_authority.port() {
-                            Authority::from_maybe_shared(format!("{value}:{port}"))
-                                .map_err(|e| e.to_string())?
-                        } else {
-                            Authority::from_str(value).map_err(|e| e.to_string())?
-                        }
-                    }
-                    None => Authority::from_str(value).map_err(|e| e.to_string())?,
-                };
-                parts.authority = Some(new_authority);
-                *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
-                Ok(())
-            })
-            // Response.label
-            .register_get("label", |x: &mut Response| {
-                x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
-            })
-            .register_set("label", |x: &mut Response, value: &str| {
-                x.label = Some(value.to_string());
-            })
-            // Response.data
-            .register_get("data", |x: &mut Response| to_dynamic(x.data.clone()))
-            .register_set("data", |x: &mut Response, om: Map| {
-                x.data = from_dynamic(&om.into())?;
-                Ok(())
-            })
-            // Response.path (Not Implemented)
-            // Response.errors
-            .register_get("errors", |x: &mut Response| to_dynamic(x.errors.clone()))
-            .register_set("errors", |x: &mut Response, value: Dynamic| {
-                x.errors = from_dynamic(&value)?;
-                Ok(())
-            })
-            // Response.extensions
-            .register_get("extensions", |x: &mut Response| {
-                to_dynamic(x.extensions.clone())
-            })
-            .register_set("extensions", |x: &mut Response, om: Map| {
-                x.extensions = from_dynamic(&om.into())?;
-                Ok(())
-            })
+            
+  
             // TraceId support
             .register_fn("traceid", || -> Result<TraceId, Box<EvalAltResult>> {
                 TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
