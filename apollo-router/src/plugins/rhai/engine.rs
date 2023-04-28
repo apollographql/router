@@ -106,7 +106,6 @@ impl Iterator for RhaiHeaderMapIterator {
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
 mod router_base64 {
-
     #[rhai_fn(pure, return_raw)]
     pub(crate) fn decode(input: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
         String::from_utf8(base64::decode(input.as_bytes()).map_err(|e| e.to_string())?)
@@ -119,16 +118,158 @@ mod router_base64 {
     }
 }
 
+#[export_module]
+mod router_header_map {
+    pub(crate) type HeaderMap = RhaiHeaderMap;
+    pub(crate) type OptionalHeaderName = Option<http::header::HeaderName>;
+    pub(crate) type HeaderName = http::header::HeaderName;
+    pub(crate) type HeaderValue = http::header::HeaderValue;
+    pub(crate) type HeaderPair = super::HeaderPair;
+
+    // Register get for Header Name/Value from a tuple pair
+    #[rhai_fn(get = "name")]
+    pub(crate) fn header_pair_name_get(x: &mut HeaderPair) -> OptionalHeaderName {
+        x.name.clone()
+    }
+    #[rhai_fn(get = "value")]
+    pub(crate) fn header_pair_value_get(x: &mut HeaderPair) -> HeaderValue {
+        x.value.clone()
+    }
+
+    // Register a contains function for HeaderMap so that "in" works
+    #[rhai_fn(name = "contains")]
+    pub(crate) fn header_map_contains(x: &mut RhaiHeaderMap, key: &str) -> bool {
+        match HeaderName::from_str(key) {
+            Ok(hn) => x.0.contains_key(hn),
+            Err(_e) => false,
+        }
+    }
+
+    // Register a HeaderMap indexer so we can get/set headers
+    #[rhai_fn(index_get, return_raw)]
+    pub(crate) fn header_map_get(
+        x: &mut RhaiHeaderMap,
+        key: &str,
+    ) -> Result<String, Box<EvalAltResult>> {
+        let search_name =
+            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+        Ok(x.0
+            .get(search_name)
+            .ok_or("")?
+            .to_str()
+            .map_err(|e| e.to_string())?
+            .to_string())
+    }
+
+    #[rhai_fn(index_set, return_raw)]
+    pub(crate) fn header_map_set_string(
+        x: &mut RhaiHeaderMap,
+        key: &str,
+        value: &str,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.0.insert(
+            HeaderName::from_str(key).map_err(|e| e.to_string())?,
+            HeaderValue::from_str(value).map_err(|e| e.to_string())?,
+        );
+        Ok(())
+    }
+
+    // Register an additional setter which allows us to set multiple values for the same
+    // key.
+    #[rhai_fn(index_set, return_raw)]
+    pub(crate) fn header_map_set_array(
+        x: &mut RhaiHeaderMap,
+        key: &str,
+        value: Array,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
+        for v in value {
+            x.0.append(
+                h_key.clone(),
+                HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
+            );
+        }
+        Ok(())
+    }
+
+    // Register an additional getter which allows us to get multiple values for the same
+    // key.
+    // Note: We can't register this as an indexer, because that would simply override the
+    // existing one, which would break code. When router 2.0 is released, we should replace
+    // the existing indexer_get for HeaderMap with this function and mark it as an
+    // incompatible change.
+    #[rhai_fn(name = "values", return_raw)]
+    pub(crate) fn header_map_values(
+        x: &mut RhaiHeaderMap,
+        key: &str,
+    ) -> Result<Array, Box<EvalAltResult>> {
+        let search_name =
+            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
+        let mut response = Array::new();
+        for value in x.0.get_all(search_name).iter() {
+            response.push(
+                value
+                    .to_str()
+                    .map_err(|e| e.to_string())?
+                    .to_string()
+                    .into(),
+            )
+        }
+        Ok(response)
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn optional_header_name_to_string(x: &mut OptionalHeaderName) -> String {
+        match x {
+            Some(v) => v.to_string(),
+            None => "None".to_string(),
+        }
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_name_to_string(x: &mut HeaderName) -> String {
+        x.to_string()
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_value_to_string(x: &mut HeaderValue) -> String {
+        x.to_str().map_or("".to_string(), |v| v.to_string())
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_map_to_string(x: &mut RhaiHeaderMap) -> String {
+        let mut msg = String::new();
+        for pair in x.0.iter() {
+            let line = format!(
+                "{}: {}",
+                pair.0,
+                pair.1.to_str().map_or("".to_string(), |v| v.to_string())
+            );
+            msg.push_str(line.as_ref());
+            msg.push('\n');
+        }
+        msg
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn header_pair_to_string(x: &mut HeaderPair) -> String {
+        format!(
+            "{}: {}",
+            match &x.name {
+                Some(v) => v.to_string(),
+                None => "None".to_string(),
+            },
+            x.value.to_str().map_or("".to_string(), |v| v.to_string())
+        )
+    }
+}
+
 // We have to keep the modules that we export using `export_module` inline because
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
 mod router_plugin {
     pub(crate) type Context = crate::Context;
     pub(crate) type HeaderMap = RhaiHeaderMap;
-    pub(crate) type OptionalHeaderName = Option<http::header::HeaderName>;
-    pub(crate) type HeaderName = http::header::HeaderName;
-    pub(crate) type HeaderValue = http::header::HeaderValue;
-    pub(crate) type HeaderPair = super::HeaderPair;
     pub(crate) type Request = crate::graphql::Request;
     pub(crate) type Response = crate::graphql::Response;
     pub(crate) type Object = crate::json_ext::Object;
@@ -408,15 +549,6 @@ mod router_plugin {
             .map_response(rhai_service.clone(), callback)
     }
 
-    // Register a contains function for HeaderMap so that "in" works
-    #[rhai_fn(name = "contains")]
-    pub(crate) fn header_map_contains(x: &mut RhaiHeaderMap, key: &str) -> bool {
-        match HeaderName::from_str(key) {
-            Ok(hn) => x.0.contains_key(hn),
-            Err(_e) => false,
-        }
-    }
-
     // Register a contains function for Context so that "in" works
     #[rhai_fn(name = "contains")]
     pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
@@ -459,79 +591,6 @@ mod router_plugin {
         false
     }
 
-    // Register a HeaderMap indexer so we can get/set headers
-    #[rhai_fn(index_get, return_raw)]
-    pub(crate) fn header_map_get(
-        x: &mut RhaiHeaderMap,
-        key: &str,
-    ) -> Result<String, Box<EvalAltResult>> {
-        let search_name =
-            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        Ok(x.0
-            .get(search_name)
-            .ok_or("")?
-            .to_str()
-            .map_err(|e| e.to_string())?
-            .to_string())
-    }
-
-    #[rhai_fn(index_set, return_raw)]
-    pub(crate) fn header_map_set_string(
-        x: &mut RhaiHeaderMap,
-        key: &str,
-        value: &str,
-    ) -> Result<(), Box<EvalAltResult>> {
-        x.0.insert(
-            HeaderName::from_str(key).map_err(|e| e.to_string())?,
-            HeaderValue::from_str(value).map_err(|e| e.to_string())?,
-        );
-        Ok(())
-    }
-
-    // Register an additional setter which allows us to set multiple values for the same
-    // key.
-    #[rhai_fn(index_set, return_raw)]
-    pub(crate) fn header_map_set_array(
-        x: &mut RhaiHeaderMap,
-        key: &str,
-        value: Array,
-    ) -> Result<(), Box<EvalAltResult>> {
-        let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
-        for v in value {
-            x.0.append(
-                h_key.clone(),
-                HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
-            );
-        }
-        Ok(())
-    }
-
-    // Register an additional getter which allows us to get multiple values for the same
-    // key.
-    // Note: We can't register this as an indexer, because that would simply override the
-    // existing one, which would break code. When router 2.0 is released, we should replace
-    // the existing indexer_get for HeaderMap with this function and mark it as an
-    // incompatible change.
-    #[rhai_fn(name = "values", return_raw)]
-    pub(crate) fn header_map_values(
-        x: &mut RhaiHeaderMap,
-        key: &str,
-    ) -> Result<Array, Box<EvalAltResult>> {
-        let search_name =
-            HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        let mut response = Array::new();
-        for value in x.0.get_all(search_name).iter() {
-            response.push(
-                value
-                    .to_str()
-                    .map_err(|e| e.to_string())?
-                    .to_string()
-                    .into(),
-            )
-        }
-        Ok(response)
-    }
-
     // Register a Context indexer so we can get/set context
     #[rhai_fn(index_get, return_raw)]
     pub(crate) fn context_get(x: &mut Context, key: &str) -> Result<Dynamic, Box<EvalAltResult>> {
@@ -570,16 +629,6 @@ mod router_plugin {
                 .unwrap_or(v)
         })
         .map_err(|e: BoxError| e.to_string().into())
-    }
-
-    // Register get for Header Name/Value from a tuple pair
-    #[rhai_fn(get = "name")]
-    pub(crate) fn header_pair_name_get(x: &mut HeaderPair) -> OptionalHeaderName {
-        x.name.clone()
-    }
-    #[rhai_fn(get = "value")]
-    pub(crate) fn header_pair_value_get(x: &mut HeaderPair) -> HeaderValue {
-        x.value.clone()
     }
 
     // Request.query
@@ -786,51 +835,6 @@ mod router_plugin {
     #[rhai_fn(name = "to_string")]
     pub(crate) fn context_to_string(x: &mut Context) -> String {
         format!("{x:?}")
-    }
-
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn optional_header_name_to_string(x: &mut OptionalHeaderName) -> String {
-        match x {
-            Some(v) => v.to_string(),
-            None => "None".to_string(),
-        }
-    }
-
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn header_name_to_string(x: &mut HeaderName) -> String {
-        x.to_string()
-    }
-
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn header_value_to_string(x: &mut HeaderValue) -> String {
-        x.to_str().map_or("".to_string(), |v| v.to_string())
-    }
-
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn header_map_to_string(x: &mut RhaiHeaderMap) -> String {
-        let mut msg = String::new();
-        for pair in x.0.iter() {
-            let line = format!(
-                "{}: {}",
-                pair.0,
-                pair.1.to_str().map_or("".to_string(), |v| v.to_string())
-            );
-            msg.push_str(line.as_ref());
-            msg.push('\n');
-        }
-        msg
-    }
-
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn header_pair_to_string(x: &mut HeaderPair) -> String {
-        format!(
-            "{}: {}",
-            match &x.name {
-                Some(v) => v.to_string(),
-                None => "None".to_string(),
-            },
-            x.value.to_str().map_or("".to_string(), |v| v.to_string())
-        )
     }
 
     #[rhai_fn(name = "to_string")]
@@ -1119,7 +1123,8 @@ impl Rhai {
         }
 
         // The macro call creates a Rhai module from the plugin module.
-        let module = exported_module!(router_plugin);
+        let mut module = exported_module!(router_plugin);
+        combine_with_exported_module!(&mut module, "header", router_header_map);
 
         let base64_module = exported_module!(router_base64);
 
