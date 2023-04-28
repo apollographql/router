@@ -52,6 +52,7 @@ helm show values oci://ghcr.io/apollographql/helm-charts/router
 | extraVolumeMounts | list | `[]` |  |
 | extraVolumes | list | `[]` |  |
 | fullnameOverride | string | `""` |  |
+| image.name | string | `""` | Full image name. Stands in for the split repository/tag values, if present. Example: "ghcr.io/apollographql/router@sha256:8bce670..." |
 | image.pullPolicy | string | `"IfNotPresent"` |  |
 | image.repository | string | `"ghcr.io/apollographql/router"` |  |
 | image.tag | string | `""` |  |

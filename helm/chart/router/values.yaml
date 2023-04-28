@@ -64,6 +64,8 @@ extraVolumeMounts: []
 extraVolumes: []
 
 image:
+  # -- Full image name. Stands in for the split repository/tag values, if present. Example: "ghcr.io/apollographql/router@sha256:8bce670..."
+  name: ""
   repository: ghcr.io/apollographql/router
   pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
