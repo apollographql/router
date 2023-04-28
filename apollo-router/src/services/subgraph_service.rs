@@ -415,6 +415,7 @@ async fn call_http(
         tracing::debug_span!("parse_subgraph_response").in_scope(|| {
             graphql::Response::from_bytes(&cloned_service_name, body).map_err(|error| {
                 FetchError::SubrequestMalformedResponse {
+                    status_code: Some(parts.status.as_u16()),
                     service: cloned_service_name.clone(),
                     reason: error.to_string(),
                 }
