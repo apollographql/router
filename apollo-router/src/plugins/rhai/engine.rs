@@ -120,7 +120,6 @@ mod router_base64 {
 
 #[export_module]
 mod router_header_map {
-    pub(crate) type HeaderMap = RhaiHeaderMap;
     pub(crate) type OptionalHeaderName = Option<http::header::HeaderName>;
     pub(crate) type HeaderName = http::header::HeaderName;
     pub(crate) type HeaderValue = http::header::HeaderValue;
