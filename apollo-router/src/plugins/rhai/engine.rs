@@ -263,6 +263,22 @@ mod router_header_map {
     }
 }
 
+#[export_module]
+mod router_json {
+    pub(crate) type Object = crate::json_ext::Object;
+    pub(crate) type Value = crate::json_ext::Value;
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn object_to_string(x: &mut Object) -> String {
+        format!("{x:?}")
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn value_to_string(x: &mut Value) -> String {
+        format!("{x:?}")
+    }
+}
+
 // We have to keep the modules that we export using `export_module` inline because
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
@@ -271,8 +287,6 @@ mod router_plugin {
     pub(crate) type HeaderMap = RhaiHeaderMap;
     pub(crate) type Request = crate::graphql::Request;
     pub(crate) type Response = crate::graphql::Response;
-    pub(crate) type Object = crate::json_ext::Object;
-    pub(crate) type Value = crate::json_ext::Value;
     pub(crate) type Error = crate::error::Error;
     pub(crate) type Uri = http::Uri;
     pub(crate) type TraceId = crate::tracer::TraceId;
@@ -835,16 +849,6 @@ mod router_plugin {
     }
 
     #[rhai_fn(name = "to_string")]
-    pub(crate) fn object_to_string(x: &mut Object) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn value_to_string(x: &mut Value) -> String {
-        format!("{x:?}")
-    }
-
-    #[rhai_fn(name = "to_string")]
     pub(crate) fn uri_to_string(x: &mut Uri) -> String {
         format!("{x:?}")
     }
@@ -1107,6 +1111,7 @@ impl Rhai {
         // The macro call creates a Rhai module from the plugin module.
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
+        combine_with_exported_module!(&mut module, "json", router_json);
 
         let base64_module = exported_module!(router_base64);
 
