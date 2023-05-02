@@ -211,7 +211,7 @@ async fn test_experimental_notice() {
     let logs: Vec<_> = log_lines
         .iter()
         .map(|line| {
-            let log = serde_json::from_str::<Log>(&line).unwrap();
+            let log = serde_json::from_str::<Log>(line).unwrap();
             format!("{}: {}", log.level, log.message)
         })
         .collect();
