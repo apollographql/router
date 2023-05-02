@@ -76,7 +76,11 @@ impl EngineBlock {
         main: PathBuf,
         sdl: Arc<String>,
     ) -> Result<Self, BoxError> {
-        let engine = Arc::new(Rhai::new_rhai_engine(scripts, sdl.to_string()));
+        let engine = Arc::new(Rhai::new_rhai_engine(
+            scripts,
+            sdl.to_string(),
+            main.clone(),
+        ));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0

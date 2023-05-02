@@ -807,23 +807,6 @@ mod router_plugin {
         id.to_string()
     }
 
-    // Register a series of logging functions
-    pub(crate) fn log_trace(out: Dynamic) {
-        tracing::trace!(%out, "rhai_trace");
-    }
-    pub(crate) fn log_debug(out: Dynamic) {
-        tracing::debug!(%out, "rhai_debug");
-    }
-    pub(crate) fn log_info(out: Dynamic) {
-        tracing::info!(%out, "rhai_info");
-    }
-    pub(crate) fn log_warn(out: Dynamic) {
-        tracing::warn!(%out, "rhai_warn");
-    }
-    pub(crate) fn log_error(out: Dynamic) {
-        tracing::error!(%out, "rhai_error");
-    }
-
     // Register a function for printing to stderr
     pub(crate) fn eprint(x: &str) {
         eprintln!("{x}");
@@ -1112,7 +1095,7 @@ impl Rhai {
         Ok(())
     }
 
-    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String) -> Engine {
+    pub(super) fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
         let mut engine = Engine::new();
         // If we pass in a path, use it to configure our engine
         // with a FileModuleResolver which allows import to work
@@ -1128,18 +1111,45 @@ impl Rhai {
 
         let base64_module = exported_module!(router_base64);
 
+        // Share main so we can move copies into each closure as required for logging
+        let shared_main = Arc::new(main.display().to_string());
+
+        let trace_main = shared_main.clone();
+        let debug_main = shared_main.clone();
+        let info_main = shared_main.clone();
+        let warn_main = shared_main.clone();
+        let error_main = shared_main.clone();
+
+        let print_main = shared_main;
+
         // Configure our engine for execution
         engine
             .set_max_expr_depths(0, 0)
-            .on_print(move |rhai_log| {
-                tracing::info!("{}", rhai_log);
+            .on_print(move |message| {
+                tracing::info!(%message, target = %print_main);
             })
             // Register our plugin module
             .register_global_module(module.into())
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
             // Register HeaderMap as an iterator so we can loop over contents
-            .register_iterator::<RhaiHeaderMap>();
+            .register_iterator::<RhaiHeaderMap>()
+            // Register a series of logging functions
+            .register_fn("log_trace", move |message: Dynamic| {
+                tracing::trace!(%message, target = %trace_main);
+            })
+            .register_fn("log_debug", move |message: Dynamic| {
+                tracing::debug!(%message, target = %debug_main);
+            })
+            .register_fn("log_info", move |message: Dynamic| {
+                tracing::info!(%message, target = %info_main);
+            })
+            .register_fn("log_warn", move |message: Dynamic| {
+                tracing::warn!(%message, target = %warn_main);
+            })
+            .register_fn("log_error", move |message: Dynamic| {
+                tracing::error!(%message, target = %error_main);
+            });
         // Add common getter/setters for different types
         register_rhai_interface!(engine, supergraph, execution, subgraph);
 
