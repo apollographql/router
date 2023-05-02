@@ -52,7 +52,7 @@ pub struct IntegrationTest {
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
-    collect_stdio: Option<tokio::sync::oneshot::Sender<Vec<String>>>,
+    collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
 }
 
@@ -93,7 +93,7 @@ impl IntegrationTest {
         config: &'static str,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
-        collect_stdio: Option<tokio::sync::oneshot::Sender<Vec<String>>>,
+        collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
     ) -> Self {
         Self::init_telemetry(telemetry);
 
@@ -133,6 +133,10 @@ impl IntegrationTest {
         fs::write(&test_config_location, config).expect("could not write config");
 
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
+        let collect_stdio = collect_stdio.map(|sender| {
+            let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
+            (sender, version_line_re)
+        });
         Self {
             router: None,
             router_location: Self::router_location(),
@@ -174,13 +178,26 @@ impl IntegrationTest {
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
-                if collect_stdio.is_some() {
-                    collected.push(line.clone())
+                if let Some((_sender, version_line_re)) = &collect_stdio {
+                    #[derive(serde::Deserialize)]
+                    struct Log {
+                        #[allow(unused)]
+                        timestamp: String,
+                        level: String,
+                        message: String,
+                    }
+                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    collected.push(format!(
+                        "{}: {}",
+                        log.level,
+                        // Redacted so we don't need to update snapshots every release
+                        version_line_re.replace(&log.message, "Apollo Router [version number] ")
+                    ))
                 }
                 let _ = stdio_tx.send(line).await;
             }
-            if let Some(sender) = collect_stdio {
-                let _ = sender.send(collected);
+            if let Some((sender, _version_line_re)) = collect_stdio {
+                let _ = sender.send(collected.join("\n"));
             }
         });
 

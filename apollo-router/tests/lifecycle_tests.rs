@@ -181,28 +181,6 @@ async fn test_cli_config_preview() {
     );
 }
 
-async fn collect_stdio(rx: tokio::sync::oneshot::Receiver<Vec<String>>) -> String {
-    #[derive(serde::Deserialize)]
-    struct Log {
-        #[allow(unused)]
-        timestamp: String,
-        level: String,
-        message: String,
-    }
-    let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
-    rx.await
-        .unwrap()
-        .into_iter()
-        .map(|line| {
-            let log = serde_json::from_str::<Log>(&line).unwrap();
-            // Redacted so we don't need to update snapshots every release
-            let message = version_line_re.replace(&log.message, "Apollo Router [version number] ");
-            format!("{}: {}", log.level, message)
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_experimental_notice() {
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -221,5 +199,5 @@ async fn test_experimental_notice() {
     router.assert_started().await;
     router.graceful_shutdown().await;
 
-    insta::assert_snapshot!(collect_stdio(rx).await);
+    insta::assert_snapshot!(rx.await.unwrap());
 }
