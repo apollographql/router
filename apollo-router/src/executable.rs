@@ -154,6 +154,11 @@ pub struct Opt {
     )]
     hot_reload: bool,
 
+    /// Disable panic handler that catches and redirects panics to the logs.
+    /// This might be useful if you want to define your own panic handler.
+    #[clap(long, hide(true), action(ArgAction::SetTrue))]
+    panic_handler_disabled: bool,
+
     /// Configuration location relative to the project directory.
     #[clap(
         short,
@@ -358,7 +363,10 @@ impl Executable {
 
         copy_args_to_env();
         init_telemetry(&opt.log_level)?;
-        setup_panic_handler();
+
+        if !opt.panic_handler_disabled {
+            setup_panic_handler();
+        }
 
         if opt.schema {
             eprintln!("`router --schema` is deprecated. Use `router config schema`");
