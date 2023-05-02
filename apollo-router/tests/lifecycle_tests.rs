@@ -3,6 +3,7 @@ use std::time::Duration;
 use apollo_router::graphql;
 use futures::FutureExt;
 use serde_json::json;
+use tokio::process::Command;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
@@ -138,4 +139,44 @@ async fn test_force_hot_reload() -> Result<(), BoxError> {
     router.assert_reloaded().await;
     router.graceful_shutdown().await;
     Ok(())
+}
+
+async fn command_output(command: &mut Command) -> String {
+    let output = command.output().await.unwrap();
+    let success = output.status.success();
+    let exit_code = output.status.code();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    format!(
+        "Success: {success:?}\n\
+        Exit code: {exit_code:?}\n\
+        stderr:\n\
+        {stderr}\n\
+        stdout:\n\
+        {stdout}"
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cli_config_experimental() {
+    insta::assert_snapshot!(
+        command_output(
+            Command::new(IntegrationTest::router_location())
+                .arg("config")
+                .arg("experimental")
+        )
+        .await
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_cli_config_preview() {
+    insta::assert_snapshot!(
+        command_output(
+            Command::new(IntegrationTest::router_location())
+                .arg("config")
+                .arg("preview")
+        )
+        .await
+    );
 }

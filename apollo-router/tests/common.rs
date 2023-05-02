@@ -130,17 +130,20 @@ impl IntegrationTest {
 
         fs::write(&test_config_location, config).expect("could not write config");
 
-        let router_location = PathBuf::from(env!("CARGO_BIN_EXE_router"));
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
         Self {
             router: None,
-            router_location,
+            router_location: Self::router_location(),
             test_config_location,
             _lock: lock,
             stdio_tx,
             stdio_rx,
             _subgraphs: subgraphs,
         }
+    }
+
+    pub fn router_location() -> PathBuf {
+        PathBuf::from(env!("CARGO_BIN_EXE_router"))
     }
 
     #[allow(dead_code)]
