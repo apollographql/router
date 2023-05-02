@@ -90,4 +90,7 @@ telemetry:
           # Send errors to Apollo Studio
           send: true # (default: true)
           redact: false # (default: true)
+        subgraphs:
+          account: # Override the default behavior only for the "account" subgraph
+            send: false
 ```
