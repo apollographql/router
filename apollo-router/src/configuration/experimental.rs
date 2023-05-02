@@ -82,12 +82,10 @@ impl Discussed {
             let list = list.join("\n");
             tracing::info!(
                 "You're using some \"{prefix}\" features of the Apollo Router \
-                (those which have their configuration prefixed by \"{prefix}_\"). \
-                {stage_description} \
-                Here is a list of links where you can give your opinion:
-
-                {list}
-
+                (those which have their configuration prefixed by \"{prefix}_\").\n\
+                {stage_description}\n\
+                Here is a list of links where you can give your opinion:\n\n\
+                {list}\n\n\
                 For more information about launch stages, please see the documentation here: \
                 https://www.apollographql.com/docs/resources/product-launch-stages/",
             );

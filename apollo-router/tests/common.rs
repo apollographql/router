@@ -52,6 +52,7 @@ pub struct IntegrationTest {
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    collect_stdio: Option<tokio::sync::oneshot::Sender<Vec<String>>>,
     _subgraphs: wiremock::MockServer,
 }
 
@@ -92,6 +93,7 @@ impl IntegrationTest {
         config: &'static str,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
+        collect_stdio: Option<tokio::sync::oneshot::Sender<Vec<String>>>,
     ) -> Self {
         Self::init_telemetry(telemetry);
 
@@ -138,6 +140,7 @@ impl IntegrationTest {
             _lock: lock,
             stdio_tx,
             stdio_rx,
+            collect_stdio,
             _subgraphs: subgraphs,
         }
     }
@@ -164,12 +167,20 @@ impl IntegrationTest {
             .expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
+        let collect_stdio = self.collect_stdio.take();
         // We need to read from stdout otherwise we will hang
         task::spawn(async move {
+            let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
+                if collect_stdio.is_some() {
+                    collected.push(line.clone())
+                }
                 let _ = stdio_tx.send(line).await;
+            }
+            if let Some(sender) = collect_stdio {
+                let _ = sender.send(collected);
             }
         });
 

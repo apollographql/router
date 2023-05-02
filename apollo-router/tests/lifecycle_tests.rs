@@ -180,3 +180,40 @@ async fn test_cli_config_preview() {
         .await
     );
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_experimental_notice() {
+    let (stdio_tx, stdio_rx) = tokio::sync::oneshot::channel();
+    let mut router = IntegrationTest::builder()
+        .config(
+            "
+            telemetry:
+                experimental_logging:
+                    format: json
+            ",
+        )
+        .collect_stdio(stdio_tx)
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router.graceful_shutdown().await;
+
+    #[derive(serde::Deserialize)]
+    struct Log {
+        #[allow(unused)]
+        timestamp: String,
+        level: String,
+        message: String,
+    }
+
+    let log_lines = stdio_rx.await.unwrap();
+    let logs: Vec<_> = log_lines
+        .iter()
+        .map(|line| {
+            let log = serde_json::from_str::<Log>(&line).unwrap();
+            format!("{}: {}", log.level, log.message)
+        })
+        .collect();
+    insta::assert_snapshot!(logs.join("\n"));
+}
