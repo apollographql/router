@@ -187,12 +187,16 @@ impl IntegrationTest {
                         message: String,
                     }
                     let log = serde_json::from_str::<Log>(&line).unwrap();
-                    collected.push(format!(
-                        "{}: {}",
-                        log.level,
-                        // Redacted so we don't need to update snapshots every release
-                        version_line_re.replace(&log.message, "Apollo Router [version number] ")
-                    ))
+                    // Omit this message from snapshots since it depends on external environment
+                    if !log.message.starts_with("RUST_BACKTRACE=full detected") {
+                        collected.push(format!(
+                            "{}: {}",
+                            log.level,
+                            // Redacted so we don't need to update snapshots every release
+                            version_line_re
+                                .replace(&log.message, "Apollo Router [version number] ")
+                        ))
+                    }
                 }
                 let _ = stdio_tx.send(line).await;
             }

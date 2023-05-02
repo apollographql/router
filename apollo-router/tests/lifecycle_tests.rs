@@ -164,6 +164,7 @@ async fn test_cli_config_experimental() {
             Command::new(IntegrationTest::router_location())
                 .arg("config")
                 .arg("experimental")
+                .env("RUST_BACKTRACE", "") // Avoid "RUST_BACKTRACE=full detected" log on CI
         )
         .await
     );
@@ -176,6 +177,7 @@ async fn test_cli_config_preview() {
             Command::new(IntegrationTest::router_location())
                 .arg("config")
                 .arg("preview")
+                .env("RUST_BACKTRACE", "") // Avoid "RUST_BACKTRACE=full detected" log on CI
         )
         .await
     );
