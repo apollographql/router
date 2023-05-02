@@ -375,7 +375,12 @@ impl IntegrationTest {
 
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
-        // On windows we have to do complicated things to gracefully shutdown. One day we may get around to this, but it's not a priority.
+        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
+    #[allow(dead_code)]
+    pub async fn kill(&mut self) {
         let _ = self
             .router
             .as_mut()

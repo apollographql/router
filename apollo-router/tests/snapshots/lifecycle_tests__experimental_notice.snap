@@ -1,6 +1,6 @@
 ---
 source: apollo-router/tests/lifecycle_tests.rs
-expression: collect_stdio(rx).await
+expression: rx.await.unwrap()
 ---
 INFO: Apollo Router [version number] // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
 INFO: Anonymous usage data collection is disabled.
@@ -13,6 +13,3 @@ Here is a list of links where you can give your opinion:
 For more information about launch stages, please see the documentation here: https://www.apollographql.com/docs/resources/product-launch-stages/
 INFO: Health check endpoint exposed at http://127.0.0.1:8088/health
 INFO: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
-INFO: shutting down
-INFO: all connections shut down
-INFO: stopped

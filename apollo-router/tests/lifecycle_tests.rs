@@ -199,7 +199,7 @@ async fn test_experimental_notice() {
         .await;
     router.start().await;
     router.assert_started().await;
-    router.graceful_shutdown().await;
+    router.kill().await;
 
     insta::assert_snapshot!(rx.await.unwrap());
 }
