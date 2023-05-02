@@ -24,14 +24,15 @@ impl Discussed {
     }
 
     pub(crate) fn print(&self, stage: &str, urls: &HashMap<String, String>) {
-        let list = urls
+        let mut list: Vec<_> = urls
             .iter()
             .map(|(config_key, discussion_link)| format!("\t- {config_key}: {discussion_link}"))
-            .collect::<Vec<_>>()
-            .join("\n");
+            .collect();
         if list.is_empty() {
             println!("This Router version has no {stage} configuration")
         } else {
+            list.sort();
+            let list = list.join("\n");
             println!(
                 "List of all {stage} configurations with related GitHub discussions:\n\n{list}"
             )
@@ -69,23 +70,23 @@ impl Discussed {
         stage_description: &str,
     ) {
         let used = get_configurations(conf, &format!("{prefix}_"));
-        let needed_discussions = used
+        let mut list: Vec<_> = used
             .into_iter()
             .filter_map(|config_key| {
                 urls.get(&config_key)
                     .map(|discussion_link| format!("\t- {config_key}: {discussion_link}"))
             })
-            .collect::<Vec<String>>()
-            .join("\n");
-
-        if !needed_discussions.is_empty() {
+            .collect();
+        if !list.is_empty() {
+            list.sort();
+            let list = list.join("\n");
             tracing::info!(
                 "You're using some \"{prefix}\" features of the Apollo Router \
                 (those which have their configuration prefixed by \"{prefix}_\"). \
                 {stage_description} \
                 Here is a list of links where you can give your opinion:
 
-                {needed_discussions}
+                {list}
 
                 For more information about launch stages, please see the documentation here: \
                 https://www.apollographql.com/docs/resources/product-launch-stages/",
