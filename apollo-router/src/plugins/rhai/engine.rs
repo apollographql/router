@@ -279,11 +279,97 @@ mod router_json {
     }
 }
 
+#[export_module]
+mod router_context {
+    pub(crate) type Context = crate::Context;
+
+    // Register a contains function for Context so that "in" works
+    #[rhai_fn(name = "contains")]
+    pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
+        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
+    }
+
+    // Register a Context indexer so we can get/set context
+    #[rhai_fn(index_get, return_raw)]
+    pub(crate) fn context_get(x: &mut Context, key: &str) -> Result<Dynamic, Box<EvalAltResult>> {
+        x.get(key)
+            .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
+            .map_err(|e: BoxError| e.to_string().into())
+    }
+
+    #[rhai_fn(index_set, return_raw)]
+    pub(crate) fn context_set(
+        x: &mut Context,
+        key: &str,
+        value: Dynamic,
+    ) -> Result<(), Box<EvalAltResult>> {
+        let _ = x
+            .insert(key, value)
+            .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
+            .map_err(|e: BoxError| e.to_string())?;
+        Ok(())
+    }
+
+    //Register Context.upsert()
+    #[rhai_fn(name = "upsert", return_raw)]
+    pub(crate) fn context_upsert(
+        context: NativeCallContext,
+        x: &mut Context,
+        key: &str,
+        callback: FnPtr,
+    ) -> Result<(), Box<EvalAltResult>> {
+        x.upsert(key, |v: Dynamic| -> Dynamic {
+            // Note: Context::upsert() does not allow the callback to fail, although it
+            // can. If call_within_context() fails, return the original provided
+            // value.
+            callback
+                .call_within_context(&context, (v.clone(),))
+                .unwrap_or(v)
+        })
+        .map_err(|e: BoxError| e.to_string().into())
+    }
+
+    #[rhai_fn(name = "to_string")]
+    pub(crate) fn context_to_string(x: &mut Context) -> String {
+        format!("{x:?}")
+    }
+
+    // Add context getter/setters for deferred responses
+    #[rhai_fn(get = "context", return_raw)]
+    pub(crate) fn supergraph_deferred_response_context_get(
+        obj: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn supergraph_deferred_response_context_set(
+        obj: &mut SharedMut<supergraph::DeferredResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+
+    #[rhai_fn(get = "context", return_raw)]
+    pub(crate) fn execution_deferred_response_context_get(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> Result<Context, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.context.clone()))
+    }
+    #[rhai_fn(set = "context", return_raw)]
+    pub(crate) fn execution_deferred_response_context_set(
+        obj: &mut SharedMut<execution::DeferredResponse>,
+        context: Context,
+    ) -> Result<(), Box<EvalAltResult>> {
+        obj.with_mut(|response| response.context = context);
+        Ok(())
+    }
+}
+
 // We have to keep the modules that we export using `export_module` inline because
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
 mod router_plugin {
-    pub(crate) type Context = crate::Context;
     pub(crate) type HeaderMap = RhaiHeaderMap;
     pub(crate) type Request = crate::graphql::Request;
     pub(crate) type Response = crate::graphql::Response;
@@ -562,12 +648,6 @@ mod router_plugin {
             .map_response(rhai_service.clone(), callback)
     }
 
-    // Register a contains function for Context so that "in" works
-    #[rhai_fn(name = "contains")]
-    pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
-        x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
-    }
-
     // Register urlencode/decode functions
     pub(crate) fn urlencode(x: &mut ImmutableString) -> String {
         urlencoding::encode(x).into_owned()
@@ -602,46 +682,6 @@ mod router_plugin {
         _: &mut SharedMut<execution::DeferredResponse>,
     ) -> bool {
         false
-    }
-
-    // Register a Context indexer so we can get/set context
-    #[rhai_fn(index_get, return_raw)]
-    pub(crate) fn context_get(x: &mut Context, key: &str) -> Result<Dynamic, Box<EvalAltResult>> {
-        x.get(key)
-            .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-            .map_err(|e: BoxError| e.to_string().into())
-    }
-
-    #[rhai_fn(index_set, return_raw)]
-    pub(crate) fn context_set(
-        x: &mut Context,
-        key: &str,
-        value: Dynamic,
-    ) -> Result<(), Box<EvalAltResult>> {
-        let _ = x
-            .insert(key, value)
-            .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
-            .map_err(|e: BoxError| e.to_string())?;
-        Ok(())
-    }
-
-    //Register Context.upsert()
-    #[rhai_fn(name = "upsert", return_raw)]
-    pub(crate) fn context_upsert(
-        context: NativeCallContext,
-        x: &mut Context,
-        key: &str,
-        callback: FnPtr,
-    ) -> Result<(), Box<EvalAltResult>> {
-        x.upsert(key, |v: Dynamic| -> Dynamic {
-            // Note: Context::upsert() does not allow the callback to fail, although it
-            // can. If call_within_context() fails, return the original provided
-            // value.
-            callback
-                .call_within_context(&context, (v.clone(),))
-                .unwrap_or(v)
-        })
-        .map_err(|e: BoxError| e.to_string().into())
     }
 
     // Request.query
@@ -828,10 +868,6 @@ mod router_plugin {
     // Default representation in rhai is the "type", so
     // we need to register a to_string function for all our registered
     // types so we can interact meaningfully with them.
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn context_to_string(x: &mut Context) -> String {
-        format!("{x:?}")
-    }
 
     #[rhai_fn(name = "to_string")]
     pub(crate) fn request_to_string(x: &mut Request) -> String {
@@ -877,37 +913,6 @@ mod router_plugin {
                 .clone()
                 .unwrap_or_default()
         })
-    }
-
-    // Add context getter/setters for deferred responses
-    #[rhai_fn(get = "context", return_raw)]
-    pub(crate) fn supergraph_deferred_response_context_get(
-        obj: &mut SharedMut<supergraph::DeferredResponse>,
-    ) -> Result<Context, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| response.context.clone()))
-    }
-    #[rhai_fn(set = "context", return_raw)]
-    pub(crate) fn supergraph_deferred_response_context_set(
-        obj: &mut SharedMut<supergraph::DeferredResponse>,
-        context: Context,
-    ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| response.context = context);
-        Ok(())
-    }
-
-    #[rhai_fn(get = "context", return_raw)]
-    pub(crate) fn execution_deferred_response_context_get(
-        obj: &mut SharedMut<execution::DeferredResponse>,
-    ) -> Result<Context, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| response.context.clone()))
-    }
-    #[rhai_fn(set = "context", return_raw)]
-    pub(crate) fn execution_deferred_response_context_set(
-        obj: &mut SharedMut<execution::DeferredResponse>,
-        context: Context,
-    ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| response.context = context);
-        Ok(())
     }
 }
 
@@ -1112,6 +1117,7 @@ impl Rhai {
         let mut module = exported_module!(router_plugin);
         combine_with_exported_module!(&mut module, "header", router_header_map);
         combine_with_exported_module!(&mut module, "json", router_json);
+        combine_with_exported_module!(&mut module, "context", router_context);
 
         let base64_module = exported_module!(router_base64);
 
