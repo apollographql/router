@@ -1,8 +1,8 @@
 ---
 source: apollo-router/tests/lifecycle_tests.rs
-expression: "logs.join(\"\\n\")"
+expression: collect_stdio(rx).await
 ---
-INFO: Apollo Router v1.14.0 // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
+INFO: Apollo Router [version number] // (c) Apollo Graph, Inc. // Licensed as ELv2 (https://go.apollo.dev/elv2)
 INFO: Anonymous usage data collection is disabled.
 INFO: You're using some "experimental" features of the Apollo Router (those which have their configuration prefixed by "experimental_").
 We may make breaking changes in future releases. To help us design the stable version we need your feedback.

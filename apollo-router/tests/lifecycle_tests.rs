@@ -181,9 +181,31 @@ async fn test_cli_config_preview() {
     );
 }
 
+async fn collect_stdio(rx: tokio::sync::oneshot::Receiver<Vec<String>>) -> String {
+    #[derive(serde::Deserialize)]
+    struct Log {
+        #[allow(unused)]
+        timestamp: String,
+        level: String,
+        message: String,
+    }
+    let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
+    rx.await
+        .unwrap()
+        .into_iter()
+        .map(|line| {
+            let log = serde_json::from_str::<Log>(&line).unwrap();
+            // Redacted so we don't need to update snapshots every release
+            let message = version_line_re.replace(&log.message, "Apollo Router [version number] ");
+            format!("{}: {}", log.level, message)
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_experimental_notice() {
-    let (stdio_tx, stdio_rx) = tokio::sync::oneshot::channel();
+    let (tx, rx) = tokio::sync::oneshot::channel();
     let mut router = IntegrationTest::builder()
         .config(
             "
@@ -192,28 +214,12 @@ async fn test_experimental_notice() {
                     format: json
             ",
         )
-        .collect_stdio(stdio_tx)
+        .collect_stdio(tx)
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
     router.graceful_shutdown().await;
 
-    #[derive(serde::Deserialize)]
-    struct Log {
-        #[allow(unused)]
-        timestamp: String,
-        level: String,
-        message: String,
-    }
-
-    let log_lines = stdio_rx.await.unwrap();
-    let logs: Vec<_> = log_lines
-        .iter()
-        .map(|line| {
-            let log = serde_json::from_str::<Log>(line).unwrap();
-            format!("{}: {}", log.level, log.message)
-        })
-        .collect();
-    insta::assert_snapshot!(logs.join("\n"));
+    insta::assert_snapshot!(collect_stdio(rx).await);
 }
