@@ -1,3 +1,0 @@
-telemetry:  
-  apollo:
-    field_level_instrumentation_sampler: always_off

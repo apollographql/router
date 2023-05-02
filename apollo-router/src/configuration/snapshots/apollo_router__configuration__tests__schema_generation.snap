@@ -1354,45 +1354,85 @@ expression: "&schema"
               "default": "https://usage-reporting.api.apollographql.com/api/ingress/traces",
               "type": "string"
             },
-            "field_level_instrumentation": {
-              "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",
+            "errors": {
+              "description": "Configure the way errors are handled to Apollo Studio",
               "type": "object",
               "properties": {
-                "redact_errors": {
-                  "description": "Redact errors coming from ftv1 traces",
-                  "default": false,
-                  "type": "boolean"
+                "subgraph": {
+                  "description": "Handling of errors coming from subgraph",
+                  "type": "object",
+                  "properties": {
+                    "all": {
+                      "description": "Handling of errors coming from all subgraphs",
+                      "type": "object",
+                      "properties": {
+                        "redact": {
+                          "description": "Redact subgraph errors to Apollo Studio",
+                          "default": true,
+                          "type": "boolean"
+                        },
+                        "send": {
+                          "description": "Send subgraph errors to Apollo Studio",
+                          "default": true,
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "subgraphs": {
+                      "description": "Handling of errors coming from specified subgraphs",
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "redact": {
+                            "description": "Redact subgraph errors to Apollo Studio",
+                            "default": true,
+                            "type": "boolean"
+                          },
+                          "send": {
+                            "description": "Send subgraph errors to Apollo Studio",
+                            "default": true,
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "nullable": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            "field_level_instrumentation_sampler": {
+              "description": "Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.",
+              "anyOf": [
+                {
+                  "description": "Sample a given fraction. Fractions >= 1 will always sample.",
+                  "type": "number",
+                  "format": "double"
                 },
-                "sampler": {
-                  "description": "0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation. Value MUST be less than global sampling rate",
-                  "anyOf": [
+                {
+                  "oneOf": [
                     {
-                      "description": "Sample a given fraction. Fractions >= 1 will always sample.",
-                      "type": "number",
-                      "format": "double"
+                      "description": "Always sample",
+                      "type": "string",
+                      "enum": [
+                        "always_on"
+                      ]
                     },
                     {
-                      "oneOf": [
-                        {
-                          "description": "Always sample",
-                          "type": "string",
-                          "enum": [
-                            "always_on"
-                          ]
-                        },
-                        {
-                          "description": "Never sample",
-                          "type": "string",
-                          "enum": [
-                            "always_off"
-                          ]
-                        }
+                      "description": "Never sample",
+                      "type": "string",
+                      "enum": [
+                        "always_off"
                       ]
                     }
                   ]
                 }
-              },
-              "additionalProperties": false
+              ]
             },
             "send_headers": {
               "description": "To configure which request header names and values are included in trace data that's sent to Apollo Studio.",

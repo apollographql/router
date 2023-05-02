@@ -1,19 +1,20 @@
 ### Adds a configuration to redact errors in traces sent to Apollo Studio
 
-If you want to redact errors coming from traces from your subgraphs and sent to Apollo Studio you can now set `tracing.apollo.field_level_instrumentation.redact_errors` to `true`.
-And the configuration to configure the sampling for these traces move from `tracing.apollo.field_level_instrumentation_sampler` to `tracing.apollo.field_level_instrumentation.sampler`.
+Redacts all the errors we send to Apollo Studio by default.
+If you don't want to redact errors coming from traces from your subgraphs and sent to Apollo Studio you can now set `tracing.apollo.errors.subgraph.all.redact` to `false` (default is `true`).
+Or if you don't want to send errors coming from traces from your subgraphs and sent to Apollo Studio you can now set `tracing.apollo.errors.subgraph.all.send` to `false` (default is `true`).
 
 Example:
 
-```yaml
+```yaml title="router.yaml"
 telemetry:
   apollo:
-    field_level_instrumentation:
-      # This example will trace half of requests. This number can't
-      # be higher than tracing.trace_config.sampler.
-      sampler: 0.5
-      # Redact errors sent to Studio
-      redact_errors: true # (default: false)
+    errors:
+      subgraph:
+        all:
+          # Send errors to Apollo Studio
+          send: true # (default: true)
+          redact: false # (default: true)
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3011

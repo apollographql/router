@@ -29,6 +29,8 @@ use url::Url;
 
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry;
+use crate::plugins::telemetry::apollo::ErrorConfiguration;
+use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::SingleReport;
 use crate::plugins::telemetry::apollo_exporter::proto;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::http::Values;
@@ -139,7 +141,7 @@ pub(crate) struct Exporter {
     #[derivative(Debug = "ignore")]
     report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
-    redact_errors: bool,
+    errors_configuration: ErrorsConfiguration,
 }
 
 enum TreeData {
@@ -174,7 +176,7 @@ impl Exporter {
         schema_id: String,
         buffer_size: NonZeroUsize,
         field_execution_sampler: SamplerOption,
-        redact_errors: Option<bool>,
+        errors_configuration: Option<ErrorsConfiguration>,
         batch_config: BatchProcessorConfig,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
@@ -187,12 +189,13 @@ impl Exporter {
                 &apollo_graph_ref,
                 &schema_id,
             )?),
-            redact_errors: redact_errors.unwrap_or_default(),
+
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
                 SamplerOption::TraceIdRatioBased(ratio) => 1.0 / ratio,
             },
+            errors_configuration: errors_configuration.unwrap_or_default(),
         })
     }
 
@@ -347,10 +350,19 @@ impl Exporter {
                 })]
             }
             SUBGRAPH_SPAN_NAME => {
+                let subgraph_name = span
+                    .attributes
+                    .get(&Key::from_static_str("apollo.subgraph.name"))
+                    .and_then(extract_string)
+                    .unwrap_or_default();
+                let error_configuration = self
+                    .errors_configuration
+                    .subgraph
+                    .get_error_config(&subgraph_name);
                 vec![TreeData::Trace(
                     span.attributes
                         .get(&APOLLO_PRIVATE_FTV1)
-                        .and_then(|t| extract_ftv1_trace(t, self.redact_errors)),
+                        .and_then(|t| extract_ftv1_trace(t, error_configuration)),
                 )]
             }
             SUPERGRAPH_SPAN_NAME => {
@@ -528,13 +540,13 @@ fn extract_i64(v: &Value) -> Option<i64> {
 
 fn extract_ftv1_trace(
     v: &Value,
-    redact_errors: bool,
+    error_config: &ErrorConfiguration,
 ) -> Option<Result<Box<proto::reports::Trace>, Error>> {
     if let Value::String(s) = v {
         if let Some(mut t) = decode_ftv1_trace(s.as_str()) {
-            if redact_errors {
+            if error_config.redact || !error_config.send {
                 if let Some(root) = &mut t.root {
-                    redact_node_errors(root);
+                    redact_node_errors(root, !error_config.send);
                 }
             }
             return Some(Ok(Box::new(t)));
@@ -544,13 +556,19 @@ fn extract_ftv1_trace(
     None
 }
 
-fn redact_node_errors(t: &mut proto::reports::trace::Node) {
-    t.error.iter_mut().for_each(|err| {
-        err.message = String::from("[REDACTED]");
-        err.location = Vec::new();
-        err.json = String::new();
-    });
-    t.child.iter_mut().for_each(redact_node_errors);
+fn redact_node_errors(t: &mut proto::reports::trace::Node, to_delete: bool) {
+    if to_delete {
+        t.error = Vec::new();
+    } else {
+        t.error.iter_mut().for_each(|err| {
+            err.message = String::from("<masked>");
+            err.location = Vec::new();
+            err.json = String::new();
+        });
+    }
+    t.child
+        .iter_mut()
+        .for_each(|n| redact_node_errors(n, to_delete));
 }
 
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
@@ -752,6 +770,7 @@ mod test {
     use opentelemetry::Value;
     use prost::Message;
     use serde_json::json;
+    use crate::plugins::telemetry::apollo::{ErrorConfiguration};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
@@ -910,9 +929,12 @@ mod test {
         let trace = Trace::default();
         let encoded = base64::encode(trace.encode_to_vec());
         assert_eq!(
-            *extract_ftv1_trace(&Value::String(encoded.into()), false)
-                .expect("there was a trace here")
-                .expect("the trace must be decoded"),
+            *extract_ftv1_trace(
+                &Value::String(encoded.into()),
+                &ErrorConfiguration::default()
+            )
+            .expect("there was a trace here")
+            .expect("the trace must be decoded"),
             trace
         );
     }
@@ -947,19 +969,54 @@ mod test {
         };
         node.child.push(sub_node);
 
-        redact_node_errors(&mut node);
+        redact_node_errors(&mut node, false);
         assert!(node.error[0].json.is_empty());
         assert!(node.error[0].location.is_empty());
-        assert_eq!(node.error[0].message.as_str(), "[REDACTED]");
+        assert_eq!(node.error[0].message.as_str(), "<masked>");
         assert_eq!(node.error[0].time_ns, 5u64);
         assert!(node.error[1].json.is_empty());
         assert!(node.error[1].location.is_empty());
-        assert_eq!(node.error[1].message.as_str(), "[REDACTED]");
+        assert_eq!(node.error[1].message.as_str(), "<masked>");
         assert_eq!(node.error[1].time_ns, 5u64);
 
         assert!(node.child[0].error[0].json.is_empty());
         assert!(node.child[0].error[0].location.is_empty());
-        assert_eq!(node.child[0].error[0].message.as_str(), "[REDACTED]");
+        assert_eq!(node.child[0].error[0].message.as_str(), "<masked>");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
+    }
+
+    #[test]
+    fn test_delete_node_errors() {
+        let sub_node = Node {
+            error: vec![Error {
+                message: "this is my error".to_string(),
+                location: Vec::new(),
+                time_ns: 5,
+                json: String::from(r#"{"foo": "bar"}"#),
+            }],
+            ..Default::default()
+        };
+        let mut node = Node {
+            error: vec![
+                Error {
+                    message: "this is my error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+                Error {
+                    message: "this is my other error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+            ],
+            ..Default::default()
+        };
+        node.child.push(sub_node);
+
+        redact_node_errors(&mut node, true);
+        assert!(node.error.is_empty());
+        assert!(node.child[0].error.is_empty());
     }
 }

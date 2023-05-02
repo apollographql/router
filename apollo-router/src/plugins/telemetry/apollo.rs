@@ -67,7 +67,7 @@ pub(crate) struct Config {
     pub(crate) buffer_size: NonZeroUsize,
 
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
-    pub(crate) field_level_instrumentation: FieldLevelInstrumentation,
+    pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -81,28 +81,64 @@ pub(crate) struct Config {
 
     /// Configuration for batch processing.
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Configure the way errors are handled to Apollo Studio
+    pub(crate) errors: ErrorsConfiguration,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ErrorsConfiguration {
+    /// Handling of errors coming from subgraph
+    pub(crate) subgraph: SubgraphErrorConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubgraphErrorConfig {
+    /// Handling of errors coming from all subgraphs
+    pub(crate) all: ErrorConfiguration,
+    /// Handling of errors coming from specified subgraphs
+    pub(crate) subgraphs: Option<HashMap<String, ErrorConfiguration>>,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct FieldLevelInstrumentation {
-    /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
-    /// Value MUST be less than global sampling rate
-    pub(crate) sampler: SamplerOption,
-    /// Redact errors coming from ftv1 traces
-    pub(crate) redact_errors: bool,
+pub(crate) struct ErrorConfiguration {
+    /// Send subgraph errors to Apollo Studio
+    pub(crate) send: bool,
+    /// Redact subgraph errors to Apollo Studio
+    pub(crate) redact: bool,
 }
 
-impl Default for FieldLevelInstrumentation {
+impl Default for ErrorConfiguration {
     fn default() -> Self {
         Self {
-            sampler: default_field_level_instrumentation_sampler(),
-            redact_errors: false,
+            send: default_send_errors(),
+            redact: default_redact_errors(),
         }
     }
 }
 
-fn default_field_level_instrumentation_sampler() -> SamplerOption {
+impl SubgraphErrorConfig {
+    pub(crate) fn get_error_config(&self, subgraph: &str) -> &ErrorConfiguration {
+        if let Some(subgraph_conf) = self.subgraphs.as_ref().and_then(|s| s.get(subgraph)) {
+            subgraph_conf
+        } else {
+            &self.all
+        }
+    }
+}
+
+pub(crate) const fn default_send_errors() -> bool {
+    true
+}
+
+pub(crate) const fn default_redact_errors() -> bool {
+    true
+}
+
+const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
@@ -140,10 +176,11 @@ impl Default for Config {
             client_version_header: client_version_header_default(),
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
-            field_level_instrumentation: FieldLevelInstrumentation::default(),
+            field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
+            errors: ErrorsConfiguration::default(),
         }
     }
 }

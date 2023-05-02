@@ -855,9 +855,7 @@ async fn query_rust(
         serde_json::json!({
             "telemetry":{
               "apollo": {
-                    "field_level_instrumentation": {
-                        "sampler": "always_off"
-                    }
+                    "field_level_instrumentation_sampler": "always_off"
                 }
             }
         }),

@@ -585,8 +585,7 @@ impl Conf {
                 self.apollo
                     .clone()
                     .unwrap_or_default()
-                    .field_level_instrumentation
-                    .sampler,
+                    .field_level_instrumentation_sampler,
             ) {
                 // Error conditions
                 (
