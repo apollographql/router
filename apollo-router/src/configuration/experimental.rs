@@ -16,29 +16,26 @@ impl Discussed {
     }
 
     pub(crate) fn print_experimental(&self) {
-        let available_exp_confs_str: Vec<String> = self
-            .experimental
-            .iter()
-            .map(|(used_exp_conf, discussion_link)| {
-                format!("\t- {used_exp_conf}: {discussion_link}")
-            })
-            .collect();
-        println!(
-            "List of all experimental configurations with related GitHub discussions:\n\n{}",
-            available_exp_confs_str.join("\n")
-        );
+        self.print("experimental", &self.experimental)
     }
 
     pub(crate) fn print_preview(&self) {
-        let available_confs_str: Vec<String> = self
-            .preview
+        self.print("preview", &self.preview)
+    }
+
+    pub(crate) fn print(&self, stage: &str, urls: &HashMap<String, String>) {
+        let list = urls
             .iter()
-            .map(|(used_conf, discussion_link)| format!("\t- {used_conf}: {discussion_link}"))
-            .collect();
-        println!(
-            "List of all preview configurations with related GitHub discussions:\n\n{}",
-            available_confs_str.join("\n")
-        );
+            .map(|(config_key, discussion_link)| format!("\t- {config_key}: {discussion_link}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if list.is_empty() {
+            println!("This Router version has no {stage} configuration")
+        } else {
+            println!(
+                "List of all {stage} configurations with related GitHub discussions:\n\n{list}"
+            )
+        }
     }
 
     pub(crate) fn log_experimental_used(&self, conf: &Value) {
