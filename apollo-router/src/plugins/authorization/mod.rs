@@ -25,48 +25,53 @@ struct Conf {
     require_authentication: bool,
 }
 
-struct AuthorizationPlugin;
+struct AuthorizationPlugin {
+    enabled: bool,
+}
 
 #[async_trait::async_trait]
 impl Plugin for AuthorizationPlugin {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        if !init.config.require_authentication {
-            return Err("require_authentication is disabled".into());
-        }
-        Ok(AuthorizationPlugin)
+        Ok(AuthorizationPlugin {
+            enabled: init.config.require_authentication,
+        })
     }
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
-            .checkpoint(move |request: supergraph::Request| {
-                if request
-                    .context
-                    .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
-                {
-                    Ok(ControlFlow::Continue(request))
-                } else {
-                    // This is a metric and will not appear in the logs
-                    tracing::info!(
-                        monotonic_counter.apollo_require_authentication_failure_count = 1u64,
-                    );
-                    tracing::error!("rejecting unauthenticated request");
-                    let response = supergraph::Response::error_builder()
-                        .error(
-                            graphql::Error::builder()
-                                .message("unauthenticated".to_string())
-                                .extension_code("AUTH_ERROR")
-                                .build(),
-                        )
-                        .status_code(StatusCode::UNAUTHORIZED)
-                        .context(request.context)
-                        .build()?;
-                    Ok(ControlFlow::Break(response))
-                }
-            })
-            .service(service)
-            .boxed()
+        if self.enabled {
+            ServiceBuilder::new()
+                .checkpoint(move |request: supergraph::Request| {
+                    if request
+                        .context
+                        .contains_key(APOLLO_AUTHENTICATION_JWT_CLAIMS)
+                    {
+                        Ok(ControlFlow::Continue(request))
+                    } else {
+                        // This is a metric and will not appear in the logs
+                        tracing::info!(
+                            monotonic_counter.apollo_require_authentication_failure_count = 1u64,
+                        );
+                        tracing::error!("rejecting unauthenticated request");
+                        let response = supergraph::Response::error_builder()
+                            .error(
+                                graphql::Error::builder()
+                                    .message("unauthenticated".to_string())
+                                    .extension_code("AUTH_ERROR")
+                                    .build(),
+                            )
+                            .status_code(StatusCode::UNAUTHORIZED)
+                            .context(request.context)
+                            .build()?;
+                        Ok(ControlFlow::Break(response))
+                    }
+                })
+                .service(service)
+                .boxed()
+        } else {
+            service
+        }
     }
 }
 
