@@ -16,7 +16,7 @@ New configuration (`tracing.apollo.errors.subgraph.all.redact`, which defaults t
 
 The error messages returned to the clients are **not** changed or redacted from their previous behavior.
 
-To enable sending subgraph's federated trace error messages to Studio **without redaction**, you can set the following configuration:
+To enable sending subgraphs' federated trace error messages to Studio **without redaction**, you can set the following configuration:
 
 ```yaml title="router.yaml"
 telemetry:
