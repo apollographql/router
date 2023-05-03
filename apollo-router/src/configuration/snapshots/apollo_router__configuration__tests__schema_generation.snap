@@ -591,6 +591,22 @@ expression: "&schema"
       },
       "additionalProperties": false
     },
+    "experimental_chaos": {
+      "description": "Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions. You probably don’t want this in production!",
+      "default": {
+        "force_hot_reload": null
+      },
+      "type": "object",
+      "properties": {
+        "force_hot_reload": {
+          "description": "Force a hot reload of the Router (as if the schema or configuration had changed) at a regular time interval.",
+          "default": null,
+          "type": "string",
+          "nullable": true
+        }
+      },
+      "additionalProperties": false
+    },
     "forbid_mutations": {
       "description": "Forbid mutations configuration",
       "type": "boolean"
