@@ -190,7 +190,6 @@ mod apq_tests {
 
     use super::*;
     use crate::configuration::Apq;
-    use crate::configuration::Supergraph;
     use crate::error::Error;
     use crate::graphql::Response;
     use crate::services::layers::content_negociation::ACCEPTS_JSON_CONTEXT_KEY;
@@ -434,11 +433,8 @@ mod apq_tests {
         };
 
         let mut config = Configuration::default();
-        config.supergraph = Supergraph {
-            apq: Apq {
-                enabled: false,
-                ..Default::default()
-            },
+        config.apq = Apq {
+            enabled: false,
             ..Default::default()
         };
 

@@ -104,7 +104,8 @@ impl FormatTest {
             FederationVersion::Fed2 => with_supergraph_boilerplate_fed2(schema),
         };
 
-        let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+        let schema =
+            Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
         let api_schema = schema.api_schema();
         let query =
@@ -987,6 +988,45 @@ fn solve_query_with_single_typename() {
 }
 
 #[test]
+fn solve_query_with_aliased_typename() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }",
+        )
+        .query("{ aliased: __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "aliased": "Query"
+        }})
+        .test();
+}
+
+#[test]
+fn solve_query_with_multiple_typenames() {
+    FormatTest::builder()
+        .schema(
+            "type Query {
+                get: Thing
+            }
+            type Thing {
+                array: [String]
+            }",
+        )
+        .query("{ aliased: __typename __typename }")
+        .response(json! {{}})
+        .expected(json! {{
+            "aliased": "Query",
+            "__typename": "Query"
+        }})
+        .test();
+}
+
+#[test]
 fn reformat_response_query_with_root_typename() {
     FormatTest::builder()
         .schema(
@@ -1130,7 +1170,8 @@ macro_rules! run_validation {
             Value::Object(object) => object,
             _ => unreachable!("variables must be an object"),
         };
-        let schema = Schema::parse(&$schema, &Default::default()).expect("could not parse schema");
+        let schema =
+            Schema::parse_test(&$schema, &Default::default()).expect("could not parse schema");
         let request = Request::builder()
             .variables(variables)
             .query($query.to_string())
@@ -3023,7 +3064,7 @@ fn it_parses_default_floats() {
         "#,
     );
 
-    let schema = Schema::parse(&schema, &Default::default()).unwrap();
+    let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
     let (_field_type, value) =
         &schema.input_types["WithAllKindsOfFloats"].fields["a_float_that_doesnt_fit_an_int"];
     assert_eq!(value.as_ref().unwrap().as_i64().unwrap(), 9876543210);
@@ -3049,7 +3090,7 @@ fn it_statically_includes() {
         body: String
     }",
     );
-    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
     let query = Query::parse(
         "query  {
@@ -3185,7 +3226,7 @@ fn it_statically_skips() {
         body: String
     }",
     );
-    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
     let query = Query::parse(
         "query  {
@@ -3313,7 +3354,7 @@ fn it_should_fail_with_empty_selection_set() {
         name: String
     }",
     );
-    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
 
     let _query_error = Query::parse(
         "query  {
@@ -4727,7 +4768,7 @@ fn fragment_on_interface_on_query() {
         }
     }";
 
-    let schema = Schema::parse(schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
     let query = Query::parse(query, &schema, &Default::default()).expect("could not parse query");
     let mut response = Response::builder()
@@ -4921,7 +4962,7 @@ fn parse_introspection_query() {
     }";
 
     let schema = with_supergraph_boilerplate(schema);
-    let schema = Schema::parse(&schema, &Default::default()).expect("could not parse schema");
+    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
     let api_schema = schema.api_schema();
 
     let query = "{
@@ -5233,7 +5274,7 @@ fn query_operation_nullification() {
 
 #[test]
 fn test_error_path_works_across_inline_fragments() {
-    let schema = Schema::parse(
+    let schema = Schema::parse_test(
         r#"
     schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -5350,7 +5391,7 @@ fn test_error_path_works_across_inline_fragments() {
 #[test]
 fn test_query_not_named_query() {
     let config = Default::default();
-    let schema = Schema::parse(
+    let schema = Schema::parse_test(
         r#"
         schema
             @core(feature: "https://specs.apollo.dev/core/v0.1")

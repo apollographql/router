@@ -1,8 +1,7 @@
 use anyhow::Result;
-use structopt::StructOpt;
 use xtask::*;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Dist {}
 
 impl Dist {

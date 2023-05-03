@@ -54,7 +54,7 @@ impl<T> GenericWith<T> for T where Self: Sized {}
 /// Telemetry configuration
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub struct Conf {
+pub(crate) struct Conf {
     /// Logging configuration
     #[serde(rename = "experimental_logging", default)]
     pub(crate) logging: Logging,

@@ -17,6 +17,8 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
 use directories::ProjectDirs;
+#[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
+use once_cell::sync::OnceCell;
 use url::ParseError;
 use url::Url;
 
@@ -194,6 +196,7 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// Your Apollo Router entitlement.
+    /// EXPERIMENTAL and not subject to semver.
     #[clap(skip = std::env::var("APOLLO_ROUTER_ENTITLEMENT").ok())]
     apollo_router_entitlement: Option<String>,
 
@@ -227,7 +230,7 @@ pub struct Opt {
     pub(crate) version: bool,
 }
 
-/// Wrapper so that structop can display the default config path in the help message.
+/// Wrapper so that clap can display the default config path in the help message.
 /// Uses ProjectDirs to get the default location.
 #[derive(Debug)]
 struct ProjectDir {

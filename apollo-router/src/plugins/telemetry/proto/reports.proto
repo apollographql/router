@@ -240,6 +240,13 @@ message Trace {
   string client_name = 7;
   string client_version = 8;
 
+  string operation_type = 35;
+  string operation_subtype = 36;
+
+  // optional: this is populated from the report header when storing trace data, and it is not
+  // expected to be specified in the report's version of a trace
+  string agent_version = 34;
+
   HTTP http = 10;
 
   CachePolicy cache_policy = 18;
@@ -280,7 +287,7 @@ message Trace {
 
   // removed: Node parse = 12; Node validate = 13;
   //          Id128 server_id = 1; Id128 client_id = 2;
-	//          String client_reference_id = 23; String client_address = 9;
+  //          String client_reference_id = 23; String client_address = 9;
   reserved 1, 2, 9, 12, 13, 23;
 }
 
@@ -321,16 +328,16 @@ message PathErrorStats {
 }
 
 message QueryLatencyStats {
-  repeated sint64 latency_count = 13 [(js_use_toArray)=true];
+  repeated sint64 latency_count = 13 [(js_use_toArray) = true];
   uint64 request_count = 2;
   uint64 cache_hits = 3;
   uint64 persisted_query_hits = 4;
   uint64 persisted_query_misses = 5;
-  repeated sint64 cache_latency_count = 14 [(js_use_toArray)=true];
+  repeated sint64 cache_latency_count = 14 [(js_use_toArray) = true];
   PathErrorStats root_error_stats = 7;
   uint64 requests_with_errors_count = 8;
-  repeated sint64 public_cache_ttl_count = 15 [(js_use_toArray)=true];
-  repeated sint64 private_cache_ttl_count = 16 [(js_use_toArray)=true];
+  repeated sint64 public_cache_ttl_count = 15 [(js_use_toArray) = true];
+  repeated sint64 private_cache_ttl_count = 16 [(js_use_toArray) = true];
   uint64 registered_operation_count = 11;
   uint64 forbidden_operation_count = 12;
   // The number of requests that were executed without field-level
@@ -346,6 +353,8 @@ message StatsContext {
   reserved 1;
   string client_name = 2;
   string client_version = 3;
+  string operation_type = 4;
+  string operation_subtype = 5;
 }
 
 message ContextualizedQueryLatencyStats {
@@ -388,7 +397,7 @@ message FieldStat {
   // the same way as estimated_execution_count so its "total count" might be
   // greater than `observed_execution_count` and may not exactly equal
   // `estimated_execution_count` due to rounding.
-  repeated sint64 latency_count = 9 [(js_use_toArray)=true];
+  repeated sint64 latency_count = 9 [(js_use_toArray) = true];
   reserved 1, 2, 7, 8;
 }
 
@@ -416,6 +425,12 @@ message ReferencedFieldsForType {
 // size has been reached (say, 4MB) or 5-10 seconds has passed is appropriate.
 // This message used to be know as FullTracesReport, but got renamed since it isn't just for traces anymore
 message Report {
+  message OperationCountByType {
+    string type = 1;
+    string subtype = 2;
+    uint64 operation_count = 3;
+  }
+
   ReportHeader header = 1;
 
   // key is statsReportKey (# operationName\nsignature) Note that the nested
@@ -436,6 +451,11 @@ message Report {
 
   // Total number of operations processed during this period.
   uint64 operation_count = 6;
+
+  // Total number of operations broken up by operation type and operation subtype.
+  // Only either this or operation_count should be populated, but if both are present, the total across all types and
+  // subtypes should match the overall operation_count.
+  repeated OperationCountByType operation_count_by_type = 8;
 
   // If this is set to true, the stats in TracesWithStats.stats_with_context
   // represent all of the operations described from this report, and the
@@ -460,8 +480,8 @@ message ContextualizedStats {
 // is true, then all operations are described as stats and some are also
 // described as traces.
 message TracesAndStats {
-  repeated Trace trace = 1 [(js_preEncoded)=true];
-  repeated ContextualizedStats stats_with_context = 2 [(js_use_toArray)=true];
+  repeated Trace trace = 1 [(js_preEncoded) = true];
+  repeated ContextualizedStats stats_with_context = 2 [(js_use_toArray) = true];
   // This describes the fields referenced in the operation. Note that this may
   // include fields that don't show up in FieldStats (due to being interface fields,
   // being nested under null fields or empty lists or non-matching fragments or
@@ -472,5 +492,5 @@ message TracesAndStats {
   // This field is used to validate that the algorithm used to construct `stats_with_context`
   // matches similar algorithms in Apollo's servers. It is otherwise ignored and should not
   // be included in reports.
-  repeated Trace internal_traces_contributing_to_stats = 3 [(js_preEncoded)=true];
+  repeated Trace internal_traces_contributing_to_stats = 3 [(js_preEncoded) = true];
 }

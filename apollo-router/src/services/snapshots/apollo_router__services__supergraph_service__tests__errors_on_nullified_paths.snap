@@ -1,0 +1,27 @@
+---
+source: apollo-router/src/services/supergraph_service.rs
+expression: stream.next_response().await.unwrap()
+---
+{
+  "data": {
+    "foo": {
+      "id": 1,
+      "bar": {
+        "id": 2,
+        "something": null
+      }
+    }
+  },
+  "errors": [
+    {
+      "message": "Could not fetch bar",
+      "path": [
+        "foo",
+        "bar"
+      ],
+      "extensions": {
+        "code": "NOT_FOUND"
+      }
+    }
+  ]
+}

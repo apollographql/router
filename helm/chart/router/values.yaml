@@ -77,6 +77,22 @@ containerPorts:
   # -- For exposing the health check endpoint
   health: 8088
 
+# -- An array of extra containers to include in the router pod
+# Example:
+# extraContainers:
+#   - name: coprocessor
+#     image: acme/coprocessor:1.0
+#     ports:
+#       - containerPort: 4001
+extraContainers: []
+
+# -- A map of extra labels to apply to the router deploment and containers
+# Example:
+# extraLabels:
+#   label_one_name: "label_one_value"
+#   label_two_name: "label_two_value"
+extraLabels: {}
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""

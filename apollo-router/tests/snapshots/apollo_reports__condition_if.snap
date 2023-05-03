@@ -31,6 +31,9 @@ traces_per_query:
           operation_name: ""
         client_name: ""
         client_version: ""
+        operation_type: query
+        operation_subtype: ""
+        agent_version: "[agent_version]"
         http:
           method: 4
           request_headers: {}
@@ -176,6 +179,9 @@ traces_per_query:
                               details: ~
                               client_name: ""
                               client_version: ""
+                              operation_type: ""
+                              operation_subtype: ""
+                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -429,6 +435,9 @@ traces_per_query:
                                               details: ~
                                               client_name: ""
                                               client_version: ""
+                                              operation_type: ""
+                                              operation_subtype: ""
+                                              agent_version: "[agent_version]"
                                               http: ~
                                               cache_policy: ~
                                               query_plan: ~
@@ -534,6 +543,9 @@ traces_per_query:
                                               details: ~
                                               client_name: ""
                                               client_version: ""
+                                              operation_type: ""
+                                              operation_subtype: ""
+                                              agent_version: "[agent_version]"
                                               http: ~
                                               cache_policy: ~
                                               query_plan: ~
@@ -562,5 +574,6 @@ traces_per_query:
     internal_traces_contributing_to_stats: []
 end_time: "[end_time]"
 operation_count: 0
+operation_count_by_type: []
 traces_pre_aggregated: true
 

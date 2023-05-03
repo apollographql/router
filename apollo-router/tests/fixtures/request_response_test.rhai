@@ -41,16 +41,16 @@ fn process_supergraph_request(request) {
     }
     let expected_query = `
 
-            query TopProducts($first: Int) { 
-                topProducts(first: $first) { 
-                    upc 
-                    name 
-                    reviews { 
-                        id 
-                        product { name } 
-                        author { id name } 
-                    } 
-                } 
+            query TopProducts($first: Int) {
+                topProducts(first: $first) {
+                    upc
+                    name
+                    reviews {
+                        id
+                        product { name }
+                        author { id name }
+                    }
+                }
             }
         `;
     if request.body.query != expected_query {
@@ -120,6 +120,31 @@ fn process_subgraph_response_om_forbidden(response) {
     };
 }
 
+fn process_subgraph_response_om_forbidden_graphql(response) {
+    throw #{
+        status: 403,
+        body: #{
+            errors: [#{
+                message: `I have raised a 403`,
+                extensions: #{
+                    code: "ACCESS_DENIED"
+                }
+            }]
+        }
+    };
+}
+
+
+fn process_subgraph_response_om_200_graphql(response) {
+    throw #{
+        status: 200,
+        body: #{
+            data: #{
+                name: "Ada Lovelace"
+            }
+        }
+    };
+}
 fn process_subgraph_response_string(response) {
     throw "I have raised an error";
 }
@@ -136,3 +161,40 @@ fn process_subgraph_response_om_missing_message(response) {
         status: 400,
     };
 }
+
+fn process_supergraph_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
+    }
+}
+
+fn process_execution_response_is_primary(response) {
+    if !response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should be primary"
+        };
+    }
+}
+
+fn process_supergraph_deferred_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+
+fn process_execution_deferred_response_is_not_primary(response) {
+    if response.is_primary() {
+        throw #{
+            status: 500,
+            message: "should not be primary"
+        };
+    }
+}
+

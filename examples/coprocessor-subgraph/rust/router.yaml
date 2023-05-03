@@ -1,0 +1,26 @@
+supergraph:
+  listen: 127.0.0.1:4000
+  introspection: true
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+include_subgraph_errors:
+  all: true # Propagate errors from all subraphs
+coprocessor:
+  url: http://127.0.0.1:8080 # mandatory URL which is the address of the co-processor
+  timeout: 2s # optional timeout (2 seconds in this example). If not set, defaults to 1 second
+  subgraph: # router or subgraph
+    all:
+      request: # What data should we transmit to the co-processor from the router request?
+        headers: true # All of these data content attributes are optional and false by default.
+        context: true
+        uri: true
+        service_name: true
+        body: true
+
+plugins:
+  # this plugin has one piece of configuration,
+  # the name of the entity you'd like to say hello to
+  example.echo_co_processor:
+    port: 8080

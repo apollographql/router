@@ -39,7 +39,6 @@ use reqwest::Client;
 use reqwest::Method;
 use reqwest::StatusCode;
 use serde_json::json;
-use serde_json_bytes::Value;
 use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
@@ -65,6 +64,7 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::json_ext::Path;
 use crate::plugin::test::MockSubgraph;
+use crate::query_planner::BridgeQueryPlanner;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -80,7 +80,6 @@ use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
-use crate::spec::Schema;
 use crate::test_harness::http_client;
 use crate::test_harness::http_client::MaybeMultipart;
 use crate::uplink::entitlement::EntitlementState;
@@ -572,21 +571,20 @@ async fn malformed_request() -> Result<(), ApolloRouterError> {
         &HeaderValue::from_static("application/json")
     );
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let invalid_gql_req: graphql::Error = response.json().await.unwrap();
+    let response_json: serde_json::Value = response.json().await.unwrap();
+
+    assert_eq!(response_json.get("data"), None);
+    let error = &response_json.get("errors").unwrap()[0];
+    let error_message = error.get("message").unwrap().as_str().unwrap();
+    let extensions = error.get("extensions").unwrap().as_object().unwrap();
+    let error_code = extensions.get("code").unwrap().as_str().unwrap();
+    let error_details = extensions.get("details").unwrap().as_str().unwrap();
+    assert_eq!(error_code, "INVALID_GRAPHQL_REQUEST");
     assert_eq!(
-        invalid_gql_req.extensions.get("code").unwrap(),
-        &Value::from(String::from("INVALID_GRAPHQL_REQUEST"))
+        error_details,
+        "failed to deserialize the request body into JSON: expected value at line 1 column 1"
     );
-    assert_eq!(
-        invalid_gql_req.extensions.get("details").unwrap(),
-        &Value::from(String::from(
-            "failed to deserialize the request body into JSON: expected value at line 1 column 1"
-        ))
-    );
-    assert_eq!(
-        invalid_gql_req.message,
-        "Invalid GraphQL request".to_string()
-    );
+    assert_eq!(error_message, "Invalid GraphQL request");
     server.shutdown().await
 }
 
@@ -972,6 +970,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
 async fn response_failure() -> Result<(), ApolloRouterError> {
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = crate::error::FetchError::SubrequestHttpError {
+            status_code: Some(200),
             service: "Mock service".to_string(),
             reason: "Mock error".to_string(),
         }
@@ -1007,6 +1006,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
     assert_eq!(
         response,
         crate::error::FetchError::SubrequestHttpError {
+            status_code: Some(200),
             service: "Mock service".to_string(),
             reason: "Mock error".to_string(),
         }
@@ -1090,7 +1090,7 @@ async fn test_previous_health_check_returns_four_oh_four() {
 }
 
 #[test(tokio::test)]
-async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
+async fn it_errors_on_bad_content_type_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
@@ -1121,14 +1121,14 @@ async fn it_send_bad_content_type() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"message":"'content-type' header can't be different from \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+        r#"{"errors":[{"message":"'content-type' header must be one of: \"application/json\" or \"application/graphql-response+json\"","extensions":{"code":"INVALID_CONTENT_TYPE_HEADER"}}]}"#
     );
 
     server.shutdown().await
 }
 
 #[test(tokio::test)]
-async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
+async fn it_errors_on_bad_accept_header() -> Result<(), ApolloRouterError> {
     let query = "query";
     let operation_name = "operationName";
 
@@ -1160,7 +1160,7 @@ async fn it_sends_bad_accept_header() -> Result<(), ApolloRouterError> {
     );
     assert_eq!(
         response.text().await.unwrap(),
-        r#"{"message":"'accept' header can't be different from \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}"#
+        r#"{"errors":[{"message":"'accept' header must be one of: \\\"*/*\\\", \"application/json\", \"application/graphql-response+json\" or \"multipart/mixed;boundary=\\\"graphql\\\";deferSpec=20220824\"","extensions":{"code":"INVALID_ACCEPT_HEADER"}}]}"#
     );
 
     server.shutdown().await
@@ -1197,7 +1197,10 @@ async fn it_displays_homepage() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(response.text().await.unwrap(), home_page_content());
+    assert_eq!(
+        response.text().await.unwrap(),
+        home_page_content(Homepage::fake_builder().enabled(false).build())
+    );
     server.shutdown().await.unwrap();
 }
 
@@ -2292,17 +2295,17 @@ async fn test_supergraph_timeout() {
 
     let conf: Arc<Configuration> = Arc::new(serde_json::from_value(config).unwrap());
 
-    let schema = Schema::parse(
-        include_str!("..//testdata/minimal_supergraph.graphql"),
-        &conf,
-    )
-    .unwrap();
+    let schema = include_str!("..//testdata/minimal_supergraph.graphql");
+    let planner = BridgeQueryPlanner::new(schema.to_string(), conf.clone())
+        .await
+        .unwrap();
+    let schema = planner.schema();
 
     // we do the entire supergraph rebuilding instead of using `from_supergraph_mock_callback_and_configuration`
     // because we need the plugins to apply on the supergraph
     let plugins = create_plugins(&conf, &schema, None).await.unwrap();
 
-    let mut builder = PluggableSupergraphServiceBuilder::new(Arc::new(schema))
+    let mut builder = PluggableSupergraphServiceBuilder::new(planner)
         .with_configuration(conf.clone())
         .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
 

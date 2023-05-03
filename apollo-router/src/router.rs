@@ -10,6 +10,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
@@ -32,6 +34,7 @@ use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 
+use self::Event::ForcedHotReload;
 use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreSchema;
 use self::Event::Shutdown;
@@ -50,12 +53,11 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router;
-use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
 use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::entitlement_stream::EntitlementQuery;
 use crate::uplink::entitlement_stream::EntitlementStreamExt;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
@@ -73,9 +75,13 @@ async fn make_router_service<RF>(
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     entitlement: EntitlementState,
 ) -> Result<router::BoxCloneService, BoxError> {
-    let schema = Arc::new(Schema::parse(schema, &configuration)?);
     let service_factory = YamlRouterFactory
-        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .create(
+            configuration.clone(),
+            schema.to_string(),
+            None,
+            Some(extra_plugins),
+        )
         .await?;
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
@@ -255,7 +261,7 @@ impl SchemaSource {
                 stream_from_uplink::<SupergraphSdlQuery, String>(
                     apollo_key,
                     apollo_graph_ref,
-                    urls.map(Endpoints::round_robin),
+                    urls.map(Endpoints::fallback),
                     poll_interval,
                     timeout,
                 )
@@ -414,18 +420,19 @@ type EntitlementStream = Pin<Box<dyn Stream<Item = Entitlement> + Send>>;
 #[derivative(Debug)]
 #[non_exhaustive]
 pub enum EntitlementSource {
-    /// A static entitlement.
+    /// A static entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Static")]
     Static { entitlement: Entitlement },
 
+    /// An entitlement supplied via APOLLO_ROUTER_ENTITLEMENT. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Env")]
     Env,
 
-    /// A stream of entitlement.
+    /// A stream of entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Stream")]
     Stream(#[derivative(Debug = "ignore")] EntitlementStream),
 
-    /// A raw file that may be watched for changes.
+    /// A raw file that may be watched for changes. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "File")]
     File {
         /// The path of the entitlement file.
@@ -530,10 +537,10 @@ impl EntitlementSource {
                 urls,
                 poll_interval,
                 timeout,
-            } => stream_from_uplink::<EntitlementRequest, Entitlement>(
+            } => stream_from_uplink::<EntitlementQuery, Entitlement>(
                 apollo_key,
                 apollo_graph_ref,
-                urls.map(Endpoints::round_robin),
+                urls.map(Endpoints::fallback),
                 poll_interval,
                 timeout,
             )
@@ -548,6 +555,7 @@ impl EntitlementSource {
             })
             .boxed(),
             EntitlementSource::Env => {
+                // EXPERIMENTAL and not subject to semver.
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
                     Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),
@@ -570,6 +578,67 @@ enum ReadConfigError {
     Io(std::io::Error),
     /// {0}
     Validation(crate::configuration::ConfigurationError),
+}
+
+pub(crate) struct ForcedHotReloadSource {
+    config: Arc<ForcedHotReloadConfig>,
+    timer: Option<tokio::time::Interval>,
+}
+
+#[derive(Default)]
+pub(crate) struct ForcedHotReloadConfig {
+    interval_seconds: AtomicU64, // zero: disabled
+}
+
+impl ForcedHotReloadConfig {
+    pub(crate) fn period(&self) -> Option<Duration> {
+        match self.interval_seconds.load(Ordering::Acquire) {
+            0 => None,
+            secs => Some(Duration::from_secs(secs)),
+        }
+    }
+
+    pub(crate) fn set_period(&self, new_period: Option<Duration>) {
+        let new_seconds = if let Some(duration) = new_period {
+            duration.as_secs().max(1) // round to at least 1 second
+        } else {
+            0
+        };
+        self.interval_seconds.store(new_seconds, Ordering::Release)
+    }
+}
+
+impl ForcedHotReloadSource {
+    pub(crate) fn new(config: Arc<ForcedHotReloadConfig>) -> Self {
+        let mut new = Self {
+            config,
+            timer: None,
+        };
+        new.check_config();
+        new
+    }
+
+    fn check_config(&mut self) {
+        let configured = self.config.period();
+        if configured != self.timer.as_ref().map(|t| t.period()) {
+            self.timer = configured.map(|period| {
+                let mut interval = tokio::time::interval(period);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                interval
+            })
+        }
+    }
+
+    fn into_stream(mut self) -> impl Stream<Item = Event> {
+        futures::stream::poll_fn(move |ctx: &mut Context<'_>| {
+            self.check_config();
+            if let Some(timer) = &mut self.timer {
+                timer.poll_tick(ctx).map(|_| Some(Event::ForcedHotReload))
+            } else {
+                Poll::Pending
+            }
+        })
+    }
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -720,7 +789,7 @@ impl RouterHttpServer {
         shutdown: Option<ShutdownSource>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let event_stream = generate_event_stream(
+        let (event_stream, forced_hot_reload_config) = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
             schema,
@@ -729,7 +798,8 @@ impl RouterHttpServer {
         );
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
-        let state_machine = StateMachine::new(server_factory, router_factory);
+        let state_machine =
+            StateMachine::new(server_factory, router_factory, forced_hot_reload_config);
         let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
@@ -809,6 +879,9 @@ pub(crate) enum Event {
     /// There were no more updates to entitlement.
     NoMoreEntitlement,
 
+    /// Artificial hot reload for chaos testing
+    ForcedHotReload,
+
     /// The server should gracefully shutdown.
     Shutdown,
 }
@@ -833,6 +906,9 @@ impl Debug for Event {
             }
             NoMoreEntitlement => {
                 write!(f, "NoMoreEntitlement")
+            }
+            ForcedHotReload => {
+                write!(f, "ForcedHotReload")
             }
             Shutdown => {
                 write!(f, "Shutdown")
@@ -866,18 +942,23 @@ fn generate_event_stream(
     schema: SchemaSource,
     entitlement: EntitlementSource,
     shutdown_receiver: oneshot::Receiver<()>,
-) -> impl Stream<Item = Event> {
+) -> (impl Stream<Item = Event>, Arc<ForcedHotReloadConfig>) {
+    let forced_hot_reload_config = Arc::new(ForcedHotReloadConfig::default());
     // Chain is required so that the final shutdown message is sent.
-    stream::select_all(vec![
+    let stream = stream::select_all(vec![
         shutdown.into_stream().boxed(),
         configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
         entitlement.into_stream().boxed(),
+        ForcedHotReloadSource::new(forced_hot_reload_config.clone())
+            .into_stream()
+            .boxed(),
         shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
     .chain(stream::iter(vec![Shutdown]))
-    .boxed()
+    .boxed();
+    (stream, forced_hot_reload_config)
 }
 
 #[cfg(test)]

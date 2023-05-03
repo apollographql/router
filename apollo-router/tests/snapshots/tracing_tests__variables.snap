@@ -174,10 +174,6 @@ expression: get_spans()
                   "record": {
                     "entries": [
                       [
-                        "graphql.operation.name",
-                        ""
-                      ],
-                      [
                         "otel.kind",
                         "INTERNAL"
                       ],
@@ -229,8 +225,6 @@ expression: get_spans()
                       "module_path": "apollo_router::services::supergraph_service",
                       "fields": {
                         "names": [
-                          "graphql.document",
-                          "graphql.operation.name",
                           "otel.kind"
                         ]
                       }

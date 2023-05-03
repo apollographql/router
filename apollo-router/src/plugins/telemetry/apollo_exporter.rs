@@ -164,7 +164,7 @@ impl ApolloExporter {
 
     pub(crate) async fn submit_report(&self, report: Report) -> Result<(), ApolloExportError> {
         // We may be sending traces but with no operation count
-        if report.operation_count == 0 && report.traces_per_query.is_empty() {
+        if report.operation_count_by_type.is_empty() && report.traces_per_query.is_empty() {
             return Ok(());
         }
         tracing::debug!("submitting report: {:?}", report);
@@ -257,7 +257,6 @@ impl ApolloExporter {
                     }
                 }
                 Err(e) => {
-                    println!("Got {e}");
                     // TODO: Ultimately need more sophisticated handling here. For example
                     // a redirect should not be treated the same way as a connect or a
                     // type builder error...

@@ -1,17 +1,16 @@
 use anyhow::Result;
-use structopt::StructOpt;
 
 use super::Compliance;
 use super::Lint;
 use super::Test;
 
-#[derive(Debug, StructOpt)]
+#[derive(Debug, clap::Parser)]
 pub struct Dev {
-    #[structopt(flatten)]
+    #[clap(flatten)]
     compliance: Compliance,
-    #[structopt(flatten)]
+    #[clap(flatten)]
     lint: Lint,
-    #[structopt(flatten)]
+    #[clap(flatten)]
     test: Test,
 }
 

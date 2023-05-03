@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Implements the router phase of the request lifecycle.
 
 use std::sync::Arc;
@@ -22,11 +24,13 @@ use http_body::Body as _;
 use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
+use router_bridge::planner::Planner;
 use tower::BoxError;
 use tower::Layer;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
@@ -45,6 +49,7 @@ use crate::cache::DeduplicatingCache;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
+use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::RouterRequest;
@@ -191,10 +196,11 @@ where
                         })
                     })
                     .unwrap_or_else(|| {
-                        Err(("missing query string", "missing query string".to_string()))
+                        Err(("There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()))
                     })
             } else {
                 hyper::body::to_bytes(body)
+                    .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
                         (
@@ -356,28 +362,22 @@ where
                                 Ok(RouterResponse { response, context })
                             } else {
                                 // this should be unreachable due to a previous check, but just to be sure...
-                                Ok(router::Response {
-                                response: http::Response::builder()
-                                    .status(StatusCode::NOT_ACCEPTABLE)
-                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                                    .body(
-                                    Body::from(
-                                        serde_json::to_string(
-                                            &graphql::Error::builder()
-                                                .message(format!(
-                                                    r#"'accept' header can't be different from \"*/*\", {:?}, {:?} or {:?}"#,
-                                                    APPLICATION_JSON.essence_str(),
-                                                    GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
-                                                    MULTIPART_DEFER_CONTENT_TYPE
-                                                ))
-                                                .extension_code("INVALID_ACCEPT_HEADER")
-                                                .build(),
-                                        )
-                                        .unwrap_or_else(|_| String::from("Invalid request"))
+                                router::Response::error_builder()
+                                    .error(
+                                        graphql::Error::builder()
+                                            .message(format!(
+                                                r#"'accept' header must be one of: \"*/*\", {:?}, {:?} or {:?}"#,
+                                                APPLICATION_JSON.essence_str(),
+                                                GRAPHQL_JSON_RESPONSE_HEADER_VALUE,
+                                                MULTIPART_DEFER_CONTENT_TYPE
+                                            ))
+                                            .extension_code("INVALID_ACCEPT_HEADER")
+                                            .build(),
                                     )
-                                ).expect("cannot fail"),
-                                context,
-                            })
+                                    .status_code(StatusCode::NOT_ACCEPTABLE)
+                                    .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                                    .context(context)
+                                    .build()
                             }
                         }
                     }
@@ -390,23 +390,19 @@ where
                         error = %error,
                         %error
                     );
-                    Ok(router::Response {
-                        response: http::Response::builder()
-                            .status(StatusCode::BAD_REQUEST)
-                            .header(CONTENT_TYPE, APPLICATION_JSON.to_string())
-                            .body(Body::from(
-                                serde_json::to_string(
-                                    &graphql::Error::builder()
-                                        .message(String::from("Invalid GraphQL request"))
-                                        .extension_code("INVALID_GRAPHQL_REQUEST")
-                                        .extension("details", extension_details)
-                                        .build(),
-                                )
-                                .unwrap_or_else(|_| String::from("Invalid GraphQL request")),
-                            ))
-                            .expect("cannot fail"),
-                        context,
-                    })
+
+                    router::Response::error_builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message(String::from("Invalid GraphQL request"))
+                                .extension_code("INVALID_GRAPHQL_REQUEST")
+                                .extension("details", extension_details)
+                                .build(),
+                        )
+                        .status_code(StatusCode::BAD_REQUEST)
+                        .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                        .context(context)
+                        .build()
                 }
             }
         };
@@ -481,13 +477,10 @@ where
 {
     pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
         let static_page = StaticPageLayer::new(configuration);
-        let apq_layer = if configuration.supergraph.apq.enabled {
+        let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
-                DeduplicatingCache::from_configuration(
-                    &configuration.supergraph.apq.experimental_cache,
-                    "APQ",
-                )
-                .await,
+                DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
+                    .await,
             )
         } else {
             APQLayer::disabled()
@@ -528,6 +521,10 @@ where
 impl RouterCreator<crate::services::supergraph_service::SupergraphCreator> {
     pub(crate) async fn cache_keys(&self, count: usize) -> Vec<(String, Option<String>)> {
         self.supergraph_creator.cache_keys(count).await
+    }
+
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.supergraph_creator.planner()
     }
 }
 

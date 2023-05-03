@@ -1,7 +1,9 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::time::SystemTime;
 use std::time::SystemTimeError;
 
 use async_trait::async_trait;
@@ -14,6 +16,7 @@ use lru::LruCache;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
+use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceError;
 use opentelemetry::Key;
@@ -49,6 +52,7 @@ use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
@@ -84,6 +88,7 @@ const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 pub(crate) const DOCUMENT: Key = Key::from_static_str("graphql.document");
+const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 
 #[derive(Error, Debug)]
 pub(crate) enum Error {
@@ -103,6 +108,27 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct LightSpanData {
+    span_id: SpanId,
+    name: Cow<'static, str>,
+    start_time: SystemTime,
+    end_time: SystemTime,
+    attributes: EvictedHashMap,
+}
+
+impl From<SpanData> for LightSpanData {
+    fn from(value: SpanData) -> Self {
+        Self {
+            span_id: value.span_context.span_id(),
+            name: value.name,
+            start_time: value.start_time,
+            end_time: value.end_time,
+            attributes: value.attributes,
+        }
+    }
+}
+
 /// A [`SpanExporter`] that writes to [`Reporter`].
 ///
 /// [`SpanExporter`]: super::SpanExporter
@@ -110,7 +136,7 @@ pub(crate) enum Error {
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub(crate) struct Exporter {
-    spans_by_parent_id: LruCache<SpanId, Vec<SpanData>>,
+    spans_by_parent_id: LruCache<SpanId, LruCache<usize, LightSpanData>>,
     #[derivative(Debug = "ignore")]
     report_exporter: Arc<ApolloExporter>,
     field_execution_weight: f64,
@@ -134,6 +160,7 @@ enum TreeData {
     DeferDeferred(DeferredNode),
     ConditionIf(Option<QueryPlanNode>),
     ConditionElse(Option<QueryPlanNode>),
+    Execution(String),
     Trace(Option<Result<Box<proto::reports::Trace>, Error>>),
 }
 
@@ -169,7 +196,7 @@ impl Exporter {
 
     fn extract_root_trace(
         &mut self,
-        span: &SpanData,
+        span: &LightSpanData,
         child_nodes: Vec<TreeData>,
     ) -> Result<Box<proto::reports::Trace>, Error> {
         let http = extract_http_data(span);
@@ -216,6 +243,9 @@ impl Exporter {
                         operation_name,
                     });
                 }
+                TreeData::Execution(operation_type) => {
+                    root_trace.operation_type = operation_type;
+                }
                 _ => panic!("should never have had other node types"),
             }
         }
@@ -223,7 +253,7 @@ impl Exporter {
         Ok(Box::new(root_trace))
     }
 
-    fn extract_trace(&mut self, span: SpanData) -> Result<Box<proto::reports::Trace>, Error> {
+    fn extract_trace(&mut self, span: LightSpanData) -> Result<Box<proto::reports::Trace>, Error> {
         self.extract_data_from_spans(&span)?
             .pop()
             .and_then(|node| {
@@ -236,21 +266,20 @@ impl Exporter {
             .expect("root trace must exist because it is constructed on the request span, qed")
     }
 
-    fn extract_data_from_spans(&mut self, span: &SpanData) -> Result<Vec<TreeData>, Error> {
-        let (mut child_nodes, errors) = self
-            .spans_by_parent_id
-            .pop_entry(&span.span_context.span_id())
-            .map(|(_, spans)| spans)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|span| self.extract_data_from_spans(&span))
-            .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
-                match next {
-                    Ok(mut children) => oks.append(&mut children),
-                    Err(err) => errors.push(err),
-                }
-                (oks, errors)
-            });
+    fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
+        let (mut child_nodes, errors) = match self.spans_by_parent_id.pop_entry(&span.span_id) {
+            Some((_, spans)) => spans
+                .into_iter()
+                .map(|(_, span)| self.extract_data_from_spans(&span))
+                .fold((Vec::new(), Vec::new()), |(mut oks, mut errors), next| {
+                    match next {
+                        Ok(mut children) => oks.append(&mut children),
+                        Err(err) => errors.push(err),
+                    }
+                    (oks, errors)
+                }),
+            None => (Vec::new(), Vec::new()),
+        };
         if !errors.is_empty() {
             return Err(Error::MultipleErrors(errors));
         }
@@ -429,6 +458,15 @@ impl Exporter {
                     child_nodes.remove_first_query_plan_node(),
                 )]
             }
+            EXECUTION_SPAN_NAME => {
+                child_nodes.push(TreeData::Execution(
+                    span.attributes
+                        .get(&OPERATION_TYPE)
+                        .and_then(extract_string)
+                        .unwrap_or_default(),
+                ));
+                child_nodes
+            }
             _ => child_nodes,
         })
     }
@@ -501,7 +539,7 @@ pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
     proto::reports::Trace::decode(Cursor::new(bytes)).ok()
 }
 
-fn extract_http_data(span: &SpanData) -> Http {
+fn extract_http_data(span: &LightSpanData) -> Http {
     let method = match span
         .attributes
         .get(&HTTP_METHOD)
@@ -555,7 +593,7 @@ impl SpanExporter for Exporter {
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         for span in batch {
             if span.name == REQUEST_SPAN_NAME {
-                match self.extract_trace(span) {
+                match self.extract_trace(span.into()) {
                     Ok(mut trace) => {
                         let mut operation_signature = Default::default();
                         std::mem::swap(&mut trace.signature, &mut operation_signature);
@@ -573,17 +611,21 @@ impl SpanExporter for Exporter {
                         tracing::error!("failed to construct trace: {}, skipping", error);
                     }
                 }
-            } else {
+            } else if span.parent_span_id != SpanId::INVALID {
                 // Not a root span, we may need it later so stash it.
 
                 // This is sad, but with LRU there is no `get_insert_mut` so a double lookup is required
                 // It is safe to expect the entry to exist as we just inserted it, however capacity of the LRU must not be 0.
-                self.spans_by_parent_id
-                    .get_or_insert(span.parent_span_id, Vec::new);
+                let len = self
+                    .spans_by_parent_id
+                    .get_or_insert(span.parent_span_id, || {
+                        LruCache::new(NonZeroUsize::new(50).unwrap())
+                    })
+                    .len();
                 self.spans_by_parent_id
                     .get_mut(&span.parent_span_id)
                     .expect("capacity of cache was zero")
-                    .push(span);
+                    .push(len, span.into());
             }
         }
         let mut report = telemetry::apollo::Report::default();
@@ -709,6 +751,7 @@ mod test {
                 TreeData::ConditionIf(_) => elements.push("condition_if"),
                 TreeData::ConditionElse(_) => elements.push("condition_else"),
                 TreeData::Trace(_) => elements.push("trace"),
+                TreeData::Execution(_) => elements.push("execution"),
                 TreeData::Router { .. } => elements.push("router"),
             }
         }
