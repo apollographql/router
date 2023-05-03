@@ -66,9 +66,9 @@ By [@SimonSapin](https://github.com/SimonSapin) in https://github.com/apollograp
 
 ### Provide helpful console output when using "preview" features, just like "experimental" features
 
-This expands on the existing mechanism that was originally introduced in https://github.com/apollographql/router/pull/2242, which supports the notion of an "experimental" feature, and make it compatible with the notion of "preview" features.
+This expands on the existing mechanism that was originally introduced in https://github.com/apollographql/router/pull/2242, which supports the notion of an "experimental" feature, and makes it compatible with the notion of "preview" features.
 
-When preview or experimental features are used, an `INFO`-level log is emitted during startup to notify of which features are used and shows URLs to their GitHub discussions, for feedback. Additionally, `router config experimental` and `router config preview` CLI sub-commands list all such features in the current Router version, regardless of which are used in a given configuration file.
+When preview or experimental features are used, an `INFO`-level log is emitted during startup to notify which features are used and shows URLs to their GitHub discussions, for feedback. Additionally, `router config experimental` and `router config preview` CLI sub-commands list all such features in the current Router version, regardless of which are used in a given configuration file.
 
 For more information about launch stages, please see the documentation here: https://www.apollographql.com/docs/resources/product-launch-stages/
 
@@ -84,7 +84,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ### Update to Federation v2.4.2
 
-This update to Federation v2.4.2 fixes a [potential bug](https://github.com/apollographql/federation/pull/2524) when an `@interfaceObject` type has a `@requires`.  This might be encountered when an `@interfaceObject` type has a field with a `@requires` and the query requests that field only for some specific implementations of the corresponding interface.  In this case, the generated query plan was sometimes invalid and could result in an invalid query to a subgraph.  In the case that the subgraph was an Apollo Server implementation, this lead the subgraph producing an `"The _entities resolver tried to load an entity for type X, but no object or interface type of that name was found in the schema"` error.
+This update to Federation v2.4.2 fixes a [potential bug](https://github.com/apollographql/federation/pull/2524) when an `@interfaceObject` type has a `@requires`.  This might be encountered when an `@interfaceObject` type has a field with a `@requires` and the query requests that field only for some specific implementations of the corresponding interface.  In this case, the generated query plan was sometimes invalid and could result in an invalid query to a subgraph.  In the case that the subgraph was an Apollo Server implementation, this lead to the subgraph producing an `"The _entities resolver tried to load an entity for type X, but no object or interface type of that name was found in the schema"` error.
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/2910
 
