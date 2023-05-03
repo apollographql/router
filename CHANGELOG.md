@@ -195,8 +195,6 @@ We've added a new LRU cache in place of a `Vec` for sub-span data to avoid keepi
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3006
 
-## 🛠 Maintenance
-
 # [1.15.1] - 2023-04-18
 
 ## 🐛 Fixes
