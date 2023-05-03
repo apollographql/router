@@ -129,13 +129,13 @@ async fn test_force_hot_reload() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             "experimental_chaos:
-                force_hot_reload: 10s",
+                force_reload: 1s",
         )
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    tokio::time::sleep(Duration::from_secs(11)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     router.assert_reloaded().await;
     router.graceful_shutdown().await;
     Ok(())
