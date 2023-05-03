@@ -143,6 +143,10 @@ expression: get_spans()
               "record": {
                 "entries": [
                   [
+                    "graphql.document",
+                    "{ topProducts { name name2:name } }"
+                  ],
+                  [
                     "graphql.operation.name",
                     ""
                   ],
@@ -157,10 +161,6 @@ expression: get_spans()
                   [
                     "apollo_private.graphql.variables",
                     "{}"
-                  ],
-                  [
-                    "graphql.document",
-                    "# -\n{topProducts{name name}}"
                   ],
                   [
                     "apollo_private.operation_signature",
@@ -192,10 +192,6 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
-                      ],
-                      [
-                        "graphql.document",
-                        "# -\n{topProducts{name name}}"
                       ],
                       [
                         "histogram.apollo_router_cache_miss_time",
