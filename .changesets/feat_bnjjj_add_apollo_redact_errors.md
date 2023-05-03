@@ -2,7 +2,7 @@
 
 When using subgraphs which are enabled with [Apollo Federated Tracing](https://www.apollographql.com/docs/router/configuration/apollo-telemetry/#enabling-field-level-instrumentation), the error messages within those traces will be **redacted by default**.
 
-New configuration (`tracing.apollo.errors.subgraph.all.redact`, which defaults to `true`) enables and disables the redaction mechanism.  Similar configuration (`tracing.apollo.errors.subgraph.all.send`, which also defaults to `true`) enables and the entire transmission of the error to Studio.
+New configuration (`tracing.apollo.errors.subgraph.all.redact`, which defaults to `true`) enables or disables the redaction mechanism.  Similar configuration (`tracing.apollo.errors.subgraph.all.send`, which also defaults to `true`) enables or disables the entire transmission of the error to Studio.
 
 The error messages returned to the clients are **not** changed or redacted from their previous behavior.
 
