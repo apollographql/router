@@ -114,6 +114,13 @@ pub(crate) struct Tracing {
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
     /// Datadog exporter configuration
     pub(crate) datadog: Option<tracing::datadog::Config>,
+    /// Adds the GraphQL document and operation name to the supergraph span
+    #[serde(default = "default_record_graphql_document")]
+    pub(crate) record_graphql_document: bool,
+}
+
+fn default_record_graphql_document() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]

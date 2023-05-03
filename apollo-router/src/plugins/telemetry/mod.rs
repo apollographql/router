@@ -318,6 +318,7 @@ impl Plugin for Telemetry {
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
+                config.tracing.as_ref().map(|t| t.record_graphql_document).unwrap_or(false)
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
@@ -672,31 +673,48 @@ impl Telemetry {
     fn supergraph_service_span(
         field_level_instrumentation_ratio: f64,
         config: apollo::Config,
+        record_graphql_document: bool,
     ) -> impl Fn(&SupergraphRequest) -> Span + Clone {
         move |request: &SupergraphRequest| {
             let http_request = &request.supergraph_request;
-            let operation_name = http_request
-                .body()
-                .operation_name
-                .as_deref()
-                .unwrap_or_default();
 
-            let span = info_span!(
-                SUPERGRAPH_SPAN_NAME,
-                graphql.document = field::Empty,
-                // TODO add graphql.operation.type
-                graphql.operation.name = operation_name,
-                otel.kind = "INTERNAL",
-                apollo_private.field_level_instrumentation_ratio =
-                    field_level_instrumentation_ratio,
-                apollo_private.operation_signature = field::Empty,
-                apollo_private.graphql.variables = Self::filter_variables_values(
-                    &request.supergraph_request.body().variables,
-                    &config.send_variable_values,
-                ),
-            );
+            if record_graphql_document {
+                let query = http_request.body().query.clone().unwrap_or_default();
+                let operation_name = http_request
+                    .body()
+                    .operation_name
+                    .as_deref()
+                    .unwrap_or_default();
 
-            span
+                info_span!(
+                    SUPERGRAPH_SPAN_NAME,
+                    graphql.document = query.as_str(),
+                    // TODO add graphql.operation.type
+                    graphql.operation.name = operation_name,
+                    otel.kind = "INTERNAL",
+                    apollo_private.field_level_instrumentation_ratio =
+                        field_level_instrumentation_ratio,
+                    apollo_private.operation_signature = field::Empty,
+                    apollo_private.graphql.variables = Self::filter_variables_values(
+                        &request.supergraph_request.body().variables,
+                        &config.send_variable_values,
+                    )
+                )
+            } else {
+                info_span!(
+                    SUPERGRAPH_SPAN_NAME,
+                    graphql.document = field::Empty,
+                    graphql.operation.name = field::Empty,
+                    otel.kind = "INTERNAL",
+                    apollo_private.field_level_instrumentation_ratio =
+                        field_level_instrumentation_ratio,
+                    apollo_private.operation_signature = field::Empty,
+                    apollo_private.graphql.variables = Self::filter_variables_values(
+                        &request.supergraph_request.body().variables,
+                        &config.send_variable_values,
+                    )
+                )
+            }
         }
     }
 
