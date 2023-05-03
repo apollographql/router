@@ -82,7 +82,7 @@ pub(crate) struct Config {
     /// Configuration for batch processing.
     pub(crate) batch_processor: BatchProcessorConfig,
 
-    /// Configure the way errors are handled to Apollo Studio
+    /// Configure the way errors are transmitted to Apollo Studio
     pub(crate) errors: ErrorsConfiguration,
 }
 

@@ -561,7 +561,7 @@ fn redact_node_errors(t: &mut proto::reports::trace::Node, to_delete: bool) {
         t.error = Vec::new();
     } else {
         t.error.iter_mut().for_each(|err| {
-            err.message = String::from("<masked>");
+            err.message = String::from("<redacted>");
             err.location = Vec::new();
             err.json = String::new();
         });
