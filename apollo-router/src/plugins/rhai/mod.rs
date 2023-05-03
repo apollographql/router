@@ -85,6 +85,9 @@ type SharedMut<T> = rhai::Shared<Mutex<Option<T>>>;
 
 pub(crate) const RHAI_SPAN_NAME: &str = "rhai_plugin";
 
+const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
+    "cannot access headers on a deferred response";
+
 impl<T> OptionDance<T> for SharedMut<T> {
     fn with_mut<R>(&self, f: impl FnOnce(&mut T) -> R) -> R {
         let mut guard = self.lock().expect("poisoned mutex");
@@ -214,11 +217,25 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn supergraph_response_is_primary(
+        _obj: &mut SharedMut<supergraph::Response>,
+    ) -> bool {
+        true
+    }
+
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_router_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn supergraph_deferred_response_is_primary(
+        _obj: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> bool {
+        false
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -228,11 +245,23 @@ mod router_plugin {
         Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn execution_response_is_primary(_obj: &mut SharedMut<execution::Response>) -> bool {
+        true
+    }
+
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(name = "is_primary", pure)]
+    pub(crate) fn execution_deferred_response_is_primary(
+        _obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> bool {
+        false
     }
 
     #[rhai_fn(get = "headers", pure, return_raw)]
@@ -291,7 +320,7 @@ mod router_plugin {
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -308,7 +337,7 @@ mod router_plugin {
         _obj: &mut SharedMut<execution::DeferredResponse>,
         _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        Err("cannot access headers on a deferred response".into())
+        Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
@@ -390,7 +419,11 @@ impl EngineBlock {
         main: PathBuf,
         sdl: Arc<String>,
     ) -> Result<Self, BoxError> {
-        let engine = Arc::new(Rhai::new_rhai_engine(scripts, sdl.to_string()));
+        let engine = Arc::new(Rhai::new_rhai_engine(
+            scripts,
+            sdl.to_string(),
+            main.clone(),
+        ));
         let ast = engine.compile_file(main)?;
         let mut scope = Scope::new();
         // Keep these two lower cases ones as mistakes until 2.0
@@ -907,7 +940,16 @@ macro_rules! gen_map_deferred_response {
                             );
                             if let Err(error) = result {
                                 tracing::error!("map_response callback failed: {error}");
-                                return None;
+                                let error_details = process_error(error);
+                                let mut guard = shared_response.lock().unwrap();
+                                let response_opt = guard.take();
+                                let $rhai_deferred_response { mut response, .. } = response_opt.unwrap();
+                                let error = Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                };
+                                response.errors = vec![error];
+                                return Some(response);
                             }
 
                             let mut guard = shared_response.lock().unwrap();
@@ -1263,7 +1305,7 @@ impl Rhai {
         Ok(())
     }
 
-    fn new_rhai_engine(path: Option<PathBuf>, sdl: String) -> Engine {
+    fn new_rhai_engine(path: Option<PathBuf>, sdl: String, main: PathBuf) -> Engine {
         let mut engine = Engine::new();
         // If we pass in a path, use it to configure our engine
         // with a FileModuleResolver which allows import to work
@@ -1278,11 +1320,22 @@ impl Rhai {
 
         let base64_module = exported_module!(router_base64);
 
+        // Share main so we can move copies into each closure as required for logging
+        let shared_main = Shared::new(main.display().to_string());
+
+        let trace_main = shared_main.clone();
+        let debug_main = shared_main.clone();
+        let info_main = shared_main.clone();
+        let warn_main = shared_main.clone();
+        let error_main = shared_main.clone();
+
+        let print_main = shared_main;
+
         // Configure our engine for execution
         engine
             .set_max_expr_depths(0, 0)
-            .on_print(move |rhai_log| {
-                tracing::info!("{}", rhai_log);
+            .on_print(move |message| {
+                tracing::info!(%message, target = %print_main);
             })
             // Register our plugin module
             .register_global_module(module.into())
@@ -1546,20 +1599,20 @@ impl Rhai {
             })
             .register_fn("to_string", |id: &mut TraceId| -> String { id.to_string() })
             // Register a series of logging functions
-            .register_fn("log_trace", |out: Dynamic| {
-                tracing::trace!(%out, "rhai_trace");
+            .register_fn("log_trace", move |message: Dynamic| {
+                tracing::trace!(%message, target = %trace_main);
             })
-            .register_fn("log_debug", |out: Dynamic| {
-                tracing::debug!(%out, "rhai_debug");
+            .register_fn("log_debug", move |message: Dynamic| {
+                tracing::debug!(%message, target = %debug_main);
             })
-            .register_fn("log_info", |out: Dynamic| {
-                tracing::info!(%out, "rhai_info");
+            .register_fn("log_info", move |message: Dynamic| {
+                tracing::info!(%message, target = %info_main);
             })
-            .register_fn("log_warn", |out: Dynamic| {
-                tracing::warn!(%out, "rhai_warn");
+            .register_fn("log_warn", move |message: Dynamic| {
+                tracing::warn!(%message, target = %warn_main);
             })
-            .register_fn("log_error", |out: Dynamic| {
-                tracing::error!(%out, "rhai_error");
+            .register_fn("log_error", move |message: Dynamic| {
+                tracing::error!(%message, target = %error_main);
             })
             // Register a function for printing to stderr
             .register_fn("eprint", |x: &str| {
