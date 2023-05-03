@@ -66,7 +66,6 @@ use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
-use self::tracing::apollo_telemetry::DOCUMENT;
 use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -325,12 +324,6 @@ impl Plugin for Telemetry {
                 if let Ok(Some(usage_reporting)) =
                     resp.context.get::<_, UsageReporting>(USAGE_REPORTING)
                 {
-                    // Record the operation signature as GraphQL document on the supergraph span
-                    Span::current().record(
-                        DOCUMENT.as_str(),
-                        usage_reporting.stats_report_key.as_str(),
-                    );
-
                     // Record the operation signature on the supergraph span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
