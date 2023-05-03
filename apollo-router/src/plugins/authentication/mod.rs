@@ -17,6 +17,7 @@ use jsonwebtoken::jwk::KeyOperations;
 use jsonwebtoken::jwk::PublicKeyUse;
 use jsonwebtoken::Algorithm;
 use jsonwebtoken::DecodingKey;
+use jsonwebtoken::TokenData;
 use jsonwebtoken::Validation;
 use once_cell::sync::Lazy;
 use reqwest::Client;
@@ -168,9 +169,10 @@ struct JWTCriteria {
 fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Result<Option<(Option<String>, Jwk)>, BoxError> {
+) -> Result<Option<Vec<(Option<String>, Jwk)>>, BoxError> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
+    let mut found_highest_score = false;
     for JwkSetInfo {
         jwks,
         issuer,
@@ -270,9 +272,10 @@ fn search_jwks(
             // point for having an explicitly matching algorithm and 1 point for an explicitly
             // matching kid. We will sort our candidates and pick the key with the highest score.
 
-            // If we find a key with a HIGHEST_SCORE, let's stop looking.
+            // If we find a key with a HIGHEST_SCORE, we will filter the list to only keep those
+            // with that score
             if key_score == HIGHEST_SCORE {
-                return Ok(Some((issuer, key)));
+                found_highest_score = true;
             }
 
             candidates.push((key_score, (issuer.clone(), key)));
@@ -298,7 +301,28 @@ fn search_jwks(
         if candidates.len() > 1 {
             candidates.sort_by(|a, b| a.0.cmp(&b.0));
         }
-        Ok(Some(candidates.pop().expect("list isn't empty").1))
+
+        if found_highest_score {
+            Ok(Some(
+                candidates
+                    .into_iter()
+                    .filter_map(|(score, candidate)| {
+                        if score == HIGHEST_SCORE {
+                            Some(candidate)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            ))
+        } else {
+            Ok(Some(
+                candidates
+                    .into_iter()
+                    .map(|(_score, candidate)| candidate)
+                    .collect(),
+            ))
+        }
     }
 }
 
@@ -484,40 +508,11 @@ fn authenticate(
         }
     };
 
-    if let Some((issuer, jwk)) = jwk_opt {
-        let decoding_key = match DecodingKey::from_jwk(&jwk) {
-            Ok(k) => k,
-            Err(e) => {
-                return failure_message(
-                    request.context,
-                    AuthenticationError::CannotCreateDecodingKey(e),
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
-
-        let algorithm = match jwk.common.algorithm {
-            Some(a) => a,
-            None => {
-                return failure_message(
-                    request.context,
-                    AuthenticationError::JWKHasNoAlgorithm,
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                );
-            }
-        };
-
-        let mut validation = Validation::new(algorithm);
-        validation.validate_nbf = true;
-
-        let token_data = match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
-            Ok(v) => v,
-            Err(e) => {
-                return failure_message(
-                    request.context,
-                    AuthenticationError::CannotDecodeJWT(e),
-                    StatusCode::UNAUTHORIZED,
-                );
+    if let Some(keys) = jwk_opt {
+        let (issuer, token_data) = match decode_jwt(jwt, keys, criteria) {
+            Ok(data) => data,
+            Err((auth_error, status_code)) => {
+                return failure_message(request.context, auth_error, status_code);
             }
         };
 
@@ -572,6 +567,68 @@ fn authenticate(
             AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
             StatusCode::UNAUTHORIZED,
         )
+    }
+}
+
+fn decode_jwt(
+    jwt: &str,
+    keys: Vec<(Option<String>, Jwk)>,
+    criteria: JWTCriteria,
+) -> Result<(Option<String>, TokenData<serde_json::Value>), (AuthenticationError, StatusCode)> {
+    let mut error = None;
+    for (issuer, jwk) in keys.into_iter() {
+        let decoding_key = match DecodingKey::from_jwk(&jwk) {
+            Ok(k) => k,
+            Err(e) => {
+                error = Some((
+                    AuthenticationError::CannotCreateDecodingKey(e),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+                continue;
+            }
+        };
+
+        let algorithm = match jwk.common.algorithm {
+            Some(a) => a,
+            None => {
+                error = Some((
+                    AuthenticationError::JWKHasNoAlgorithm,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                ));
+                continue;
+            }
+        };
+
+        let mut validation = Validation::new(algorithm);
+        validation.validate_nbf = true;
+
+        match decode::<serde_json::Value>(jwt, &decoding_key, &validation) {
+            Ok(v) => return Ok((issuer, v)),
+            Err(e) => {
+                error = Some((
+                    AuthenticationError::CannotDecodeJWT(e),
+                    StatusCode::UNAUTHORIZED,
+                ));
+            }
+        };
+    }
+
+    match error {
+        Some(e) => Err(e),
+        None => {
+            // We can't find a key to process this JWT.
+            if criteria.kid.is_some() {
+                Err((
+                    AuthenticationError::CannotFindKID(criteria.kid),
+                    StatusCode::UNAUTHORIZED,
+                ))
+            } else {
+                Err((
+                    AuthenticationError::CannotFindSuitableKey(criteria.alg, criteria.kid),
+                    StatusCode::UNAUTHORIZED,
+                ))
+            }
+        }
     }
 }
 
