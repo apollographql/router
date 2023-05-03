@@ -210,6 +210,8 @@ uname = "0.1.1"
 
 [target.'cfg(unix)'.dependencies]
 uname = "0.1.1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemallocator = "0.5"
 
 [dev-dependencies]
