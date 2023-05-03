@@ -1355,7 +1355,7 @@ expression: "&schema"
               "type": "string"
             },
             "errors": {
-              "description": "Configure the way errors are handled to Apollo Studio",
+              "description": "Configure the way errors are transmitted to Apollo Studio",
               "type": "object",
               "properties": {
                 "subgraph": {
