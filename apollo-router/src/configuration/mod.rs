@@ -46,7 +46,7 @@ use thiserror::Error;
 
 use self::cors::Cors;
 use self::expansion::Expansion;
-pub(crate) use self::experimental::print_all_experimental_conf;
+pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
