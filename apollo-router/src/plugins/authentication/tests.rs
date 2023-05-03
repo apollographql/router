@@ -570,7 +570,6 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -588,7 +587,6 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -605,9 +603,7 @@ async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
         alg: Algorithm::RS512,
     };
 
-    assert!(search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .is_none());
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }
 
 #[tokio::test]
@@ -620,7 +616,6 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -641,7 +636,6 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
         .expect("found a key")
         .pop()
         .expect("list isn't empty");
@@ -880,7 +874,5 @@ async fn it_rejects_key_with_restricted_algorithm() {
         alg: Algorithm::HS256,
     };
 
-    assert!(search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .is_none());
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }

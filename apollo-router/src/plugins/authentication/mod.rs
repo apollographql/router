@@ -62,9 +62,6 @@ enum AuthenticationError<'a> {
     /// '{0}' is not a valid JWT header: {1}
     InvalidHeader(&'a str, JWTError),
 
-    /// Cannot retrieve JWKS: {0}
-    CannotRetrieveJWKS(BoxError),
-
     /// Cannot create decoding key: {0}
     CannotCreateDecodingKey(JWTError),
 
@@ -169,7 +166,7 @@ struct JWTCriteria {
 fn search_jwks(
     jwks_manager: &JwksManager,
     criteria: &JWTCriteria,
-) -> Result<Option<Vec<(Option<String>, Jwk)>>, BoxError> {
+) -> Option<Vec<(Option<String>, Jwk)>> {
     const HIGHEST_SCORE: usize = 2;
     let mut candidates = vec![];
     let mut found_highest_score = false;
@@ -295,7 +292,7 @@ fn search_jwks(
     );
 
     if candidates.is_empty() {
-        Ok(None)
+        None
     } else {
         // Only sort if we need to
         if candidates.len() > 1 {
@@ -303,7 +300,7 @@ fn search_jwks(
         }
 
         if found_highest_score {
-            Ok(Some(
+            Some(
                 candidates
                     .into_iter()
                     .filter_map(|(score, candidate)| {
@@ -314,14 +311,14 @@ fn search_jwks(
                         }
                     })
                     .collect(),
-            ))
+            )
         } else {
-            Ok(Some(
+            Some(
                 candidates
                     .into_iter()
                     .map(|(_score, candidate)| candidate)
                     .collect(),
-            ))
+            )
         }
     }
 }
@@ -496,19 +493,7 @@ fn authenticate(
     // Search our list of JWKS to find the kid and process it
     // Note: This will search through JWKS in the order in which they are defined
     // in configuration.
-
-    let jwk_opt = match search_jwks(jwks_manager, &criteria) {
-        Ok(j) => j,
-        Err(e) => {
-            return failure_message(
-                request.context,
-                AuthenticationError::CannotRetrieveJWKS(e),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-
-    if let Some(keys) = jwk_opt {
+    if let Some(keys) = search_jwks(jwks_manager, &criteria) {
         let (issuer, token_data) = match decode_jwt(jwt, keys, criteria) {
             Ok(data) => data,
             Err((auth_error, status_code)) => {
