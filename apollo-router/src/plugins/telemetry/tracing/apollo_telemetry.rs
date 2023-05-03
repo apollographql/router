@@ -972,16 +972,16 @@ mod test {
         redact_node_errors(&mut node, false);
         assert!(node.error[0].json.is_empty());
         assert!(node.error[0].location.is_empty());
-        assert_eq!(node.error[0].message.as_str(), "<masked>");
+        assert_eq!(node.error[0].message.as_str(), "<redacted>");
         assert_eq!(node.error[0].time_ns, 5u64);
         assert!(node.error[1].json.is_empty());
         assert!(node.error[1].location.is_empty());
-        assert_eq!(node.error[1].message.as_str(), "<masked>");
+        assert_eq!(node.error[1].message.as_str(), "<redacted>");
         assert_eq!(node.error[1].time_ns, 5u64);
 
         assert!(node.child[0].error[0].json.is_empty());
         assert!(node.child[0].error[0].location.is_empty());
-        assert_eq!(node.child[0].error[0].message.as_str(), "<masked>");
+        assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
     }
 
