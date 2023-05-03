@@ -20,6 +20,9 @@ async fn make_request(request: supergraph::Request) {
         .configuration_json(json!({"telemetry": {
             "apollo": {
                 "field_level_instrumentation_sampler": "always_off"
+            },
+            "tracing": {
+                "record_graphql_document": true
             }
         }
         }))
