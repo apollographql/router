@@ -185,7 +185,6 @@ async fn test_cli_config_preview() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_experimental_notice() {
-    let (tx, rx) = tokio::sync::oneshot::channel();
     let mut router = IntegrationTest::builder()
         .config(
             "
@@ -194,12 +193,12 @@ async fn test_experimental_notice() {
                     format: json
             ",
         )
-        .collect_stdio(tx)
         .build()
         .await;
     router.start().await;
+    router
+        .assert_log_contains("You're using some \\\"experimental\\\" features of the Apollo Router")
+        .await;
     router.assert_started().await;
-    router.kill().await;
-
-    insta::assert_snapshot!(rx.await.unwrap());
+    router.graceful_shutdown().await;
 }
