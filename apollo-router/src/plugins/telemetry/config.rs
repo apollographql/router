@@ -114,13 +114,6 @@ pub(crate) struct Tracing {
     pub(crate) zipkin: Option<tracing::zipkin::Config>,
     /// Datadog exporter configuration
     pub(crate) datadog: Option<tracing::datadog::Config>,
-    /// Adds the GraphQL document and operation name to the supergraph span
-    #[serde(default = "default_record_graphql_document")]
-    pub(crate) record_graphql_document: bool,
-}
-
-fn default_record_graphql_document() -> bool {
-    true
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema, Default)]
@@ -334,6 +327,8 @@ pub(crate) struct Trace {
     pub(crate) max_attributes_per_link: u32,
     /// Default attributes
     pub(crate) attributes: BTreeMap<String, AttributeValue>,
+    /// Adds the GraphQL document and operation name to the supergraph span
+    pub(crate) record_graphql_document: bool,
 }
 
 fn default_parent_based_sampler() -> bool {
@@ -357,6 +352,7 @@ impl Default for Trace {
             max_attributes_per_event: default_max_attributes_per_event(),
             max_attributes_per_link: default_max_attributes_per_link(),
             attributes: Default::default(),
+            record_graphql_document: true,
         }
     }
 }

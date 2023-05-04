@@ -4313,11 +4313,6 @@ expression: "&schema"
               "additionalProperties": false,
               "nullable": true
             },
-            "record_graphql_document": {
-              "description": "Adds the GraphQL document and operation name to the supergraph span",
-              "default": true,
-              "type": "boolean"
-            },
             "trace_config": {
               "description": "Common configuration",
               "type": "object",
@@ -4421,6 +4416,11 @@ expression: "&schema"
                 },
                 "parent_based_sampler": {
                   "description": "Whether to use parent based sampling",
+                  "default": true,
+                  "type": "boolean"
+                },
+                "record_graphql_document": {
+                  "description": "Adds the GraphQL document and operation name to the supergraph span",
                   "default": true,
                   "type": "boolean"
                 },

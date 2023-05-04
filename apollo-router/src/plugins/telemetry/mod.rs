@@ -317,7 +317,18 @@ impl Plugin for Telemetry {
             .instrument(Self::supergraph_service_span(
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
-                config.tracing.as_ref().map(|t| t.record_graphql_document).unwrap_or(false)
+                config.tracing
+                    .as_ref()
+                    .map(|t|
+                        t.trace_config
+                            .as_ref()
+                            .map(|tc| tc.record_graphql_document)
+                            // if tracing is configured but trace_config is not, write the GraphQL
+                            // document by default
+                            .unwrap_or(true)
+                    )
+                    // if tracing is not configured, do not write the GraphQL document to spans
+                    .unwrap_or(false)
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
