@@ -132,6 +132,12 @@ pub struct Configuration {
     #[serde(default)]
     pub(crate) apq: Apq,
 
+    // NOTE: when renaming this to move out of preview, also update paths
+    // in `configuration/expansion.rs` and `uplink/entitlement.rs`.
+    /// Operation limits
+    #[serde(default)]
+    pub(crate) preview_operation_limits: OperationLimits,
+
     /// Configuration for chaos testing, trying to reproduce bugs that require uncommon conditions.
     /// You probably don’t want this in production!
     #[serde(default)]
@@ -167,6 +173,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             apollo_plugins: ApolloPlugins,
             tls: Tls,
             apq: Apq,
+            preview_operation_limits: OperationLimits,
             experimental_chaos: Chaos,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
@@ -181,6 +188,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             .apollo_plugins(ad_hoc.apollo_plugins.plugins)
             .tls(ad_hoc.tls)
             .apq(ad_hoc.apq)
+            .operation_limits(ad_hoc.preview_operation_limits)
             .chaos(ad_hoc.experimental_chaos)
             .build()
             .map_err(|e| serde::de::Error::custom(e.to_string()))
@@ -212,6 +220,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
         apq: Option<Apq>,
+        operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
     ) -> Result<Self, ConfigurationError> {
         let conf = Self {
@@ -222,6 +231,7 @@ impl Configuration {
             homepage: homepage.unwrap_or_default(),
             cors: cors.unwrap_or_default(),
             apq: apq.unwrap_or_default(),
+            preview_operation_limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -280,6 +290,7 @@ impl Configuration {
         apollo_plugins: Map<String, Value>,
         tls: Option<Tls>,
         apq: Option<Apq>,
+        operation_limits: Option<OperationLimits>,
         chaos: Option<Chaos>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
@@ -289,6 +300,7 @@ impl Configuration {
             sandbox: sandbox.unwrap_or_else(|| Sandbox::fake_builder().build()),
             homepage: homepage.unwrap_or_else(|| Homepage::fake_builder().build()),
             cors: cors.unwrap_or_default(),
+            preview_operation_limits: operation_limits.unwrap_or_default(),
             experimental_chaos: chaos.unwrap_or_default(),
             plugins: UserPlugins {
                 plugins: Some(plugins),
@@ -464,11 +476,6 @@ pub(crate) struct Supergraph {
 
     /// Query planning options
     pub(crate) query_planning: QueryPlanning,
-
-    // NOTE: when renaming this to move out of preview, also update paths
-    // in `configuration/expansion.rs` and `uplink/entitlement.rs`.
-    /// Operation limits
-    pub(crate) preview_limits: Limits,
 }
 
 fn default_defer_support() -> bool {
@@ -484,7 +491,6 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        limits: Option<Limits>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(default_graphql_listen),
@@ -492,7 +498,6 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            preview_limits: limits.unwrap_or_default(),
         }
     }
 }
@@ -507,7 +512,6 @@ impl Supergraph {
         introspection: Option<bool>,
         defer_support: Option<bool>,
         query_planning: Option<QueryPlanning>,
-        limits: Option<Limits>,
     ) -> Self {
         Self {
             listen: listen.unwrap_or_else(test_listen),
@@ -515,7 +519,6 @@ impl Supergraph {
             introspection: introspection.unwrap_or_else(default_graphql_introspection),
             defer_support: defer_support.unwrap_or_else(default_defer_support),
             query_planning: query_planning.unwrap_or_default(),
-            preview_limits: limits.unwrap_or_default(),
         }
     }
 }
@@ -547,7 +550,7 @@ impl Supergraph {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 #[serde(default)]
-pub(crate) struct Limits {
+pub(crate) struct OperationLimits {
     /// If set, requests with operations deeper than this maximum
     /// are rejected with a HTTP 400 Bad Request response and GraphQL error with
     /// `"extensions": {"code": "MAX_DEPTH_LIMIT"}`
@@ -620,8 +623,7 @@ pub(crate) struct Limits {
     pub(crate) parser_max_tokens: usize,
 }
 
-#[allow(clippy::derivable_impls)] //  explicit is better here
-impl Default for Limits {
+impl Default for OperationLimits {
     fn default() -> Self {
         Self {
             // These limits are opt-in
