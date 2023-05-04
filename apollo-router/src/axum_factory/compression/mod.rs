@@ -188,3 +188,38 @@ impl Encode for Compressor {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use async_compression::tokio::write::GzipDecoder;
+    use hyper::Body;
+    use rand::Rng;
+    use tokio::io::AsyncWriteExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn finish() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let mut rng = rand::thread_rng();
+        let body: Body = std::iter::repeat(())
+            .map(|_| rng.gen_range(0u8..3))
+            .take(5000)
+            .collect::<Vec<_>>()
+            .into();
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        while let Some(buf) = stream.next().await {
+            decoder.write_all(&buf.unwrap()).await.unwrap();
+        }
+
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        assert_eq!(response.len(), 5000);
+
+        assert!(stream.next().await.is_none());
+    }
+}
