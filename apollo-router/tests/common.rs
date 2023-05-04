@@ -466,6 +466,14 @@ impl IntegrationTest {
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
     }
 
+    #[allow(dead_code)]
+    #[cfg(target_family = "unix")]
+    pub async fn send_sighup(&mut self) {
+        unsafe {
+            libc::kill(self.pid(), libc::SIGHUP);
+        }
+    }
+
     #[cfg(target_os = "linux")]
     pub fn dump_stack_traces(&mut self) {
         if let Ok(trace) = rstack::TraceOptions::new()
