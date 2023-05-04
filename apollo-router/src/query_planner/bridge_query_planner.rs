@@ -128,19 +128,21 @@ impl BridgeQueryPlanner {
         self.schema.clone()
     }
 
-    async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
+    async fn parse_selections(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
+        let (query, operation_name) = key;
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
-        let query_parsing_future =
-            tokio::task::spawn_blocking(move || Query::parse(query, &schema, &configuration))
-                .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"));
-        match query_parsing_future.await {
-            Ok(res) => res.map_err(QueryPlannerError::from),
-            Err(err) => {
-                failfast_debug!("parsing query task failed: {}", err);
-                Err(QueryPlannerError::from(err))
-            }
+        let task_result = tokio::task::spawn_blocking(move || {
+            let mut query = Query::parse(query, &schema, &configuration)?;
+            crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
+            Ok::<_, QueryPlannerError>(query)
+        })
+        .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"))
+        .await;
+        if let Err(err) = &task_result {
+            failfast_debug!("parsing query task failed: {}", err);
         }
+        task_result?
     }
 
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -279,7 +281,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 impl BridgeQueryPlanner {
     async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = self.parse_selections(key.0.clone()).await?;
+        let selections = self.parse_selections(key.clone()).await?;
 
         if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`

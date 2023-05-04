@@ -20,6 +20,12 @@ supergraph:
       in_memory:
         limit: 1000
 
+preview_operation_limits:
+  max_depth: 20
+  max_height: 100
+  max_aliases: 100
+  max_root_fields: 10
+
 apq:
   router:
     cache:
