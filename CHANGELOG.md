@@ -8,7 +8,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### GraphOS Enterprise: operation limits
+### GraphOS Enterprise: Operation Limits
 
 You can define [operation limits](https://www.apollographql.com/docs/router/configuration/operation-limits) in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected.
 
@@ -22,30 +22,29 @@ preview_operation_limits:
   max_root_fields: 20
 ```
 
-See details in [operation limits documentation](https://www.apollographql.com/docs/router/configuration/operation-limits).
+See details in [operation limits documentation](https://www.apollographql.com/docs/router/configuration/operation-limits) for information on setting up this GraphOS Enterprise feature.
 
 By [@SimonSapin](https://github.com/SimonSapin), [@lrlna](https://github.com/lrlna), and [@StephenBarlow](https://github.com/StephenBarlow)
 
 ## 🐛 Fixes
 
-### make sure the compression state is flushed ([Issue #3035](https://github.com/apollographql/router/issues/3035))
+### Ensure the compression state is flushed ([Issue #3035](https://github.com/apollographql/router/issues/3035))
 
-In some cases, the "finish" call to flush the compression state at the end does not flush the entire state, so it has to be called multiple times.
+In some cases, the "finish" call to flush the compression state at the end of a request did was not flushing the entire state and it has to be called multiple times.
 
-This fixes a regression introduced in 1.16.0 by [#2986](https://github.com/apollographql/router/pull/2986) where large responses would be cut short when compressed.
+This fixes a regression introduced in v1.16.0 by [#2986](https://github.com/apollographql/router/pull/2986) which resulted in larger responses being truncated after compression.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3037
 
 ## 🛠 Maintenance
 
-### Make test_experimental_notice assertion more targeted ([Pull #3036](https://github.com/apollographql/router/pull/3036))
+### Make `test_experimental_notice` assertion more targeted ([Pull #3036](https://github.com/apollographql/router/pull/3036))
 
-Previously this test relied on a full snapshot of the log. This is likely to result in failures either due to environmental reasons or other unrelated changes.
-The test now relies on a more targeted assertion that is less likely to fail.
+Previously this test relied on a full snapshot of the log message. This was likely to result in failures, either due to environmental reasons or other unrelated changes.
+
+The test now relies on a more targeted assertion that is less likely to fail under various conditions.
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/3036
-
-
 
 # [1.16.0] - 2023-05-03
 
