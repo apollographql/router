@@ -30,7 +30,6 @@ use crate::http_ext;
 use crate::plugin::test::MockExecutionService;
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
-use crate::plugins::rhai::engine::RhaiHeaderMap;
 use crate::services::ExecutionRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
@@ -255,9 +254,9 @@ async fn it_can_access_sdl_constant() {
 #[test]
 fn it_provides_helpful_headermap_errors() {
     let mut engine = new_rhai_test_engine();
-    engine.register_fn("new_hm", || RhaiHeaderMap(HeaderMap::new()));
+    engine.register_fn("new_hm", HeaderMap::new);
 
-    let result = engine.eval::<RhaiHeaderMap>(
+    let result = engine.eval::<HeaderMap>(
         r#"
 let map = new_hm();
 map["ümlaut"] = "will fail";
