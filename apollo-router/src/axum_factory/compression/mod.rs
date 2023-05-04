@@ -79,7 +79,8 @@ where {
                         }
                     }
                     Ok(data) => {
-                        let mut buf = BytesMut::zeroed(1024);
+                        // most compression algorithms have a compression ratio of more than 90% for JSON
+                        let mut buf = BytesMut::zeroed(data.len() / 10);
                         let mut written = 0usize;
 
                         let mut partial_input = PartialBuffer::new(&*data);
@@ -99,7 +100,10 @@ where {
                                 // so we resize and add more data
                                 if partial_output.unwritten().is_empty() {
                                     let _ = partial_output.into_inner();
-                                    buf.reserve(written);
+                                    buf.resize(
+                                        buf.len() + partial_input.unwritten().len() / 10,
+                                        0u8,
+                                    );
                                 }
                             } else {
                                 match self.flush(&mut partial_output) {
@@ -123,19 +127,27 @@ where {
                 }
             }
 
-            let buf = BytesMut::zeroed(64);
-            let mut partial_output = PartialBuffer::new(buf);
+            loop {
+                let buf = BytesMut::zeroed(1024);
+                let mut partial_output = PartialBuffer::new(buf);
 
-            match self.finish(&mut partial_output) {
-                Err(e) => {
-                    let _ = tx.send(Err(e.into())).await;
-                }
-                Ok(_) => {
-                    let len = partial_output.written().len();
+                match self.finish(&mut partial_output) {
+                    Err(e) => {
+                        let _ = tx.send(Err(e.into())).await;
+                        break;
+                    }
+                    Ok(is_flushed) => {
+                        let len = partial_output.written().len();
 
-                    let mut buf = partial_output.into_inner();
-                    buf.resize(len, 0);
-                    let _ = tx.send(Ok(buf.freeze())).await;
+                        let mut buf = partial_output.into_inner();
+                        buf.resize(len, 0);
+                        if (tx.send(Ok(buf.freeze())).await).is_err() {
+                            return;
+                        }
+                        if is_flushed {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -179,5 +191,40 @@ impl Encode for Compressor {
             Compressor::Brotli(e) => e.finish(output),
             Compressor::Zstd(e) => e.finish(output),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_compression::tokio::write::GzipDecoder;
+    use hyper::Body;
+    use rand::Rng;
+    use tokio::io::AsyncWriteExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn finish() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let mut rng = rand::thread_rng();
+        let body: Body = std::iter::repeat(())
+            .map(|_| rng.gen_range(0u8..3))
+            .take(5000)
+            .collect::<Vec<_>>()
+            .into();
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        while let Some(buf) = stream.next().await {
+            decoder.write_all(&buf.unwrap()).await.unwrap();
+        }
+
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        assert_eq!(response.len(), 5000);
+
+        assert!(stream.next().await.is_none());
     }
 }
