@@ -79,7 +79,8 @@ where {
                         }
                     }
                     Ok(data) => {
-                        let mut buf = BytesMut::zeroed(1024);
+                        // most compression algorithms have a compression ratio of more than 90% for JSON
+                        let mut buf = BytesMut::zeroed(data.len() / 10);
                         let mut written = 0usize;
 
                         let mut partial_input = PartialBuffer::new(&*data);
