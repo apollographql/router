@@ -411,7 +411,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             if let Ok(line) = self.stdio_rx.try_recv() {
