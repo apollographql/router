@@ -473,11 +473,10 @@ The Apollo Router supports enforcing two types of request limits for enhanced se
 You can set parser-based request limits in your YAML config file like so:
 
 ```yaml title="router.yaml"
-supergraph:
-  preview_limits:
-    # Default values are shown
-    parser_max_tokens: 15000
-    parser_max_recursion: 4096
+preview_operation_limits:
+  # Default values are shown
+  parser_max_tokens: 15000
+  parser_max_recursion: 4096
 ```
 
 The router rejects any request that violates at least one of these limits. See below for descriptions of individual limits.
@@ -555,10 +554,9 @@ example:
 You can specify GraphQL parser-specific limits in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
-supergraph:
-  preview_limits:
-    parser_max_recursion: 6000
-    parser_max_tokens: 20000
+preview_operation_limits:
+  parser_max_recursion: 6000
+  parser_max_tokens: 20000
 ```
 
 For other operation limits see [Enforcing operation limits in the Apollo Router](./configuration/operation-limits/).

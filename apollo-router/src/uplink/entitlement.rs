@@ -156,19 +156,19 @@ impl EntitlementReport {
             // Per-operation limits are restricted but parser limits like `parser_max_recursion`
             // where the Router only configures apollo-rs are not.
             ConfigurationRestriction::builder()
-                .path("$.supergraph.preview_limits.max_depth")
+                .path("$.preview_operation_limits.max_depth")
                 .name("Operation depth limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.preview_limits.max_height")
+                .path("$.preview_operation_limits.max_height")
                 .name("Operation height limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.preview_limits.max_root_fields")
+                .path("$.preview_operation_limits.max_root_fields")
                 .name("Operation root fields limiting")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.supergraph.preview_limits.max_aliases")
+                .path("$.preview_operation_limits.max_aliases")
                 .name("Operation aliases limiting")
                 .build(),
         ]

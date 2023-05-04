@@ -5,12 +5,11 @@ You can define [operation limits](https://www.apollographql.com/docs/router/conf
 You define operation limits in your router's [YAML config file](https://www.apollographql.com/docs/router/configuration/overview#yaml-config-file), like so:
 
 ```yaml
-supergraph:
-  limits:
-    max_depth: 100
-    max_height: 200
-    max_aliases: 30
-    max_root_fields: 20
+preview_operation_limits:
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
 ```
 
 See details in [operation limits documentation](https://www.apollographql.com/docs/router/configuration/operation-limits).

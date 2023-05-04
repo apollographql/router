@@ -64,7 +64,7 @@ pub(crate) fn check(
     query: &mut Query,
     operation_name: Option<String>,
 ) -> Result<(), OperationLimits<bool>> {
-    let config_limits = &configuration.supergraph.preview_limits;
+    let config_limits = &configuration.preview_operation_limits;
     let max = OperationLimits {
         depth: config_limits.max_depth,
         height: config_limits.max_height,

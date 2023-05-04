@@ -2,6 +2,6 @@ description: server.experimental_parser_recursion_limit moved to supergraph.limi
 actions:
   - type: move
     from: server.experimental_parser_recursion_limit
-    to: supergraph.preview_limits.parser_max_recursion
+    to: preview_operation_limits.parser_max_recursion
   - type: delete
     path: server
