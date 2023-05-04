@@ -550,6 +550,25 @@ example:
   password: "${env.MY_PASSWORD}" #highlight-line
 ```
 
+### Reusing configuration
+
+You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
+
+```yaml title="router.yaml"
+headers:
+  subgraphs:
+    products:
+      request:
+        - insert: &insert_custom_header
+            name: "custom-header"
+            value: "something"
+    reviews:
+      request:
+        - insert: *insert_custom_header
+```
+
+Here, the `name` and `value` entries under `&insert_custom_header` are reused under `*insert_custom_header`.
+
 ## Configuration awareness in your text editor
 
 The Apollo Router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
