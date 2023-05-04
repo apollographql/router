@@ -100,7 +100,10 @@ where {
                                 // so we resize and add more data
                                 if partial_output.unwritten().is_empty() {
                                     let _ = partial_output.into_inner();
-                                    buf.reserve(written);
+                                    buf.resize(
+                                        buf.len() + partial_input.unwritten().len() / 10,
+                                        0u8,
+                                    );
                                 }
                             } else {
                                 match self.flush(&mut partial_output) {
