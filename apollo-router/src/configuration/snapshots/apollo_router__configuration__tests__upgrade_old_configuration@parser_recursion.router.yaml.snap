@@ -3,7 +3,6 @@ source: apollo-router/src/configuration/tests.rs
 expression: new_config
 ---
 ---
-supergraph:
-  preview_limits:
-    parser_max_recursion: 100
+preview_operation_limits:
+  parser_max_recursion: 100
 

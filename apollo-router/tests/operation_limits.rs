@@ -231,7 +231,7 @@ async fn build_test_harness(
     let get_execution_count = move || execution_count_2.load(Ordering::Acquire);
     let service = TestHarness::builder()
         .configuration_json(json!({
-            "supergraph": { "preview_limits": limits_config },
+            "preview_operation_limits": limits_config,
             "include_subgraph_errors": { "all": true },
         }))
         .unwrap()

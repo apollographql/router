@@ -16,15 +16,14 @@ To use operation limits, you must run v1.17 or later of the Apollo Router. [Down
 You define operation limits in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
-supergraph:
-  preview_limits:
-    max_depth: 100
-    max_height: 200
-    max_aliases: 30
-    max_root_fields: 20
+preview_operation_limits:
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
 
-    # Uncomment to enable warn_only mode
-    # warn_only: true
+  # Uncomment to enable warn_only mode
+  # warn_only: true
 ```
 
 Each limit takes an integer value. You can define any combination of [supported limits](#supported-limits).
@@ -117,7 +116,6 @@ Running in `warn_only` mode can be useful while you're testing to determine the 
 You can enable or disable `warn_only` mode in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
 
 ```yaml title="router.yaml"
-supergraph:
-  preview_limits:
-    warn_only: true # warn_only mode always enabled
+preview_operation_limits:
+  warn_only: true # warn_only mode always enabled
 ```
