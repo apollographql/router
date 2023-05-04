@@ -105,6 +105,7 @@ fn redact_dynamic() -> Redaction {
                             "trace_id",
                             "histogram.apollo_router_cache_miss_time",
                             "histogram.apollo_router_cache_hit_time",
+                            "histogram.apollo_router_query_planning_time",
                         ]
                         .contains(&s)
                     })
