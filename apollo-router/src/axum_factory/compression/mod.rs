@@ -123,19 +123,25 @@ where {
                 }
             }
 
-            let buf = BytesMut::zeroed(64);
-            let mut partial_output = PartialBuffer::new(buf);
+            loop {
+                let buf = BytesMut::zeroed(1024);
+                let mut partial_output = PartialBuffer::new(buf);
 
-            match self.finish(&mut partial_output) {
-                Err(e) => {
-                    let _ = tx.send(Err(e.into())).await;
-                }
-                Ok(_) => {
-                    let len = partial_output.written().len();
+                match self.finish(&mut partial_output) {
+                    Err(e) => {
+                        let _ = tx.send(Err(e.into())).await;
+                        break;
+                    }
+                    Ok(is_flushed) => {
+                        let len = partial_output.written().len();
 
-                    let mut buf = partial_output.into_inner();
-                    buf.resize(len, 0);
-                    let _ = tx.send(Ok(buf.freeze())).await;
+                        let mut buf = partial_output.into_inner();
+                        buf.resize(len, 0);
+                        let _ = tx.send(Ok(buf.freeze())).await;
+                        if is_flushed {
+                            break;
+                        }
+                    }
                 }
             }
         });
