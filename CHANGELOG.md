@@ -30,7 +30,7 @@ By [@SimonSapin](https://github.com/SimonSapin), [@lrlna](https://github.com/lrl
 
 ### Ensure the compression state is flushed ([Issue #3035](https://github.com/apollographql/router/issues/3035))
 
-In some cases, the "finish" call to flush the compression state at the end of a request did was not flushing the entire state and it has to be called multiple times.
+In some cases, the "finish" call to flush the compression state at the end of a request was not flushing the entire state. This fix calls "finish" multiple times until all data is used.
 
 This fixes a regression introduced in v1.16.0 by [#2986](https://github.com/apollographql/router/pull/2986) which resulted in larger responses being truncated after compression.
 
