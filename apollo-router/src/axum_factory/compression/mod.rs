@@ -138,7 +138,9 @@ where {
 
                         let mut buf = partial_output.into_inner();
                         buf.resize(len, 0);
-                        let _ = tx.send(Ok(buf.freeze())).await;
+                        if (tx.send(Ok(buf.freeze())).await).is_err() {
+                            return;
+                        }
                         if is_flushed {
                             break;
                         }
