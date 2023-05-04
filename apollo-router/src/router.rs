@@ -616,6 +616,7 @@ impl ReloadSource {
                     Poll::Ready(Some(Event::Reload))
                 }
                 // We must return pending even if the queue is empty, otherwise the stream will never be polled again
+                // The waker will still be used, so this won't end up in a hot loop.
                 Poll::Ready(None) => Poll::Pending,
                 Poll::Pending => Poll::Pending,
             }
