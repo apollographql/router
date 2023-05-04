@@ -112,16 +112,29 @@ pub(crate) enum FetchError {
 impl FetchError {
     /// Convert the fetch error to a GraphQL error.
     pub(crate) fn to_graphql_error(&self, path: Option<Path>) -> Error {
-        let mut value: Value = serde_json::to_value(self).unwrap_or_default().into();
+        let mut value: Value = serde_json_bytes::to_value(self).unwrap_or_default();
         if let Some(extensions) = value.as_object_mut() {
             extensions
                 .entry("code")
                 .or_insert_with(|| self.extension_code().into());
             // Following these specs https://www.apollographql.com/docs/apollo-server/data/errors/#including-custom-error-details
             match self {
+                FetchError::SubrequestHttpError {
+                    service,
+                    status_code,
+                    ..
+                } => {
+                    extensions
+                        .entry("service")
+                        .or_insert_with(|| service.clone().into());
+                    extensions.remove("status_code");
+                    if let Some(status_code) = status_code {
+                        extensions
+                            .insert("http", serde_json_bytes::json!({ "status": status_code }));
+                    }
+                }
                 FetchError::SubrequestMalformedResponse { service, .. }
                 | FetchError::SubrequestUnexpectedPatchResponse { service }
-                | FetchError::SubrequestHttpError { service, .. }
                 | FetchError::CompressionError { service, .. } => {
                     extensions
                         .entry("service")
@@ -520,5 +533,32 @@ impl ParseErrors {
                 println!("{r:#?}");
             });
         };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphql;
+
+    #[test]
+    fn test_into_graphql_error() {
+        let error = FetchError::SubrequestHttpError {
+            status_code: Some(400),
+            service: String::from("my_service"),
+            reason: String::from("invalid request"),
+        };
+        let expected_gql_error = graphql::Error::builder()
+            .message("HTTP fetch failed from 'my_service': invalid request")
+            .extension_code("SUBREQUEST_HTTP_ERROR")
+            .extension("reason", Value::String("invalid request".into()))
+            .extension("service", Value::String("my_service".into()))
+            .extension(
+                "http",
+                serde_json_bytes::json!({"status": Value::Number(400.into())}),
+            )
+            .build();
+
+        assert_eq!(expected_gql_error, error.to_graphql_error(None));
     }
 }
