@@ -310,7 +310,7 @@ supergraph:
 
 ```yaml title="router.yaml"
 supergraph:
-  # The socket address and port to listen on. 
+  # The socket address and port to listen on.
   # Note that this must be quoted to avoid interpretation as an array in YAML.
   listen: '[::1]:4000'
 ```
@@ -459,6 +459,63 @@ tls:
         certificate_authorities: "${file./path/to/product_ca.crt}"
 ```
 
+### Request limits
+
+> Request limits are currently in [preview](/resources/product-launch-stages#preview).
+
+The Apollo Router supports enforcing two types of request limits for enhanced security:
+
+- Lexical, parser-based limits (documented here)
+- [Semantic, operation-based limits](./operation-limits/) (this is an [Enterprise feature](../enterprise-features/))
+
+> To set request limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
+
+You can set parser-based request limits in your YAML config file like so:
+
+```yaml title="router.yaml"
+preview_operation_limits:
+  # Default values are shown
+  parser_max_tokens: 15000
+  parser_max_recursion: 4096
+```
+
+The router rejects any request that violates at least one of these limits. See below for descriptions of individual limits.
+
+#### `parser_max_tokens`
+
+Limits the number of tokens a query document can include. This counts _all_ tokens, including both [lexical and ignored tokens](https://spec.graphql.org/October2021/#sec-Language.Source-Text.Lexical-Tokens).
+
+The default value is `15000`.
+
+#### `parser_max_recursion`
+
+Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
+
+The default value is `4096`.
+
+In the example below, the `GetProducts` operation has a recursion of three, and the `ProductVariation` fragment has a recursion of two. Therefore, the _max_ recursion of the query document is three.
+
+```graphql
+query GetProducts {
+  allProducts { #1
+    ...productVariation
+    delivery { #2
+      fastestDelivery #3
+    }
+  }
+}
+
+fragment ProductVariation on Product {
+  variation { #1
+    name #2
+  }
+}
+```
+
+Note that the router calculates the recursion depth for each operation and fragment _separately_.  Even if a fragment is included in an operation, that fragment's recursion depth does not contribute to the _operation's_ recursion depth.
+
+> In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+
 ### Plugins
 
 You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
@@ -474,7 +531,7 @@ plugins:
 
 You can reference variables directly in your YAML config file. This is useful for referencing secrets without including them in the file.
 
-Currently, the Apollo Router supports expansion of environment variables and file paths. Corresponding variables must be prefixed with `env.` or `file.`
+Currently, the Apollo Router supports expansion of environment variables and file paths. Corresponding variables are prefixed with `env.` and `file.`, respectively.
 
 The router uses Unix-style expansion. Here are some examples:
 
@@ -492,6 +549,48 @@ supergraph:
 example:
   password: "${env.MY_PASSWORD}" #highlight-line
 ```
+
+### Parser limits
+You can specify GraphQL parser-specific limits in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
+
+```yaml title="router.yaml"
+preview_operation_limits:
+  parser_max_recursion: 6000
+  parser_max_tokens: 20000
+```
+
+For other operation limits see [Enforcing operation limits in the Apollo Router](./configuration/operation-limits/).
+
+#### `parser_max_recursion`
+Limits recursion in the parser to prevent stack overflows. Recursion is counted based on how nested a given GraphQL Definition is, specifically focusing Operation Definitions and Fragment Definitions. Each definition is counted separately, as the parser parses them separately.
+
+This limit has existed in the router as `experimental_parser_recursion_limit`. It has been renamed to `parser_max_recursion`.
+
+The router sets a default of **4_096** recursions.
+
+In the following example, `getProducts` Operation Definition has a recursion of three, whereas `productVariation` Fragment Definition has a recursion of two:
+
+```graphql
+query getProducts {
+  allProducts { #1
+    ...productVariation
+    delivery { #2
+        fastestDelivery #3
+    }
+  }
+}
+
+fragment productVariation on Product {
+  variation { #1
+    name #2
+  }
+}
+```
+
+#### `parser_max_tokens`
+Limits the number of tokens an operation can have. This counts _all_ tokens, including [ignored tokens](https://spec.graphql.org/October2021/#sec-Appendix-Grammar-Summary.Ignored-Tokens).
+
+The router sets a default of **15_000** tokens.
 
 ### Reusing configuration
 

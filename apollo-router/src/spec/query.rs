@@ -43,10 +43,10 @@ pub(crate) const TYPENAME: &str = "__typename";
 #[derive(Derivative, Default, Serialize, Deserialize)]
 #[derivative(PartialEq, Hash, Eq, Debug)]
 pub(crate) struct Query {
-    string: String,
+    pub(crate) string: String,
     #[derivative(PartialEq = "ignore", Hash = "ignore", Debug = "ignore")]
     #[serde(skip)]
-    compiler: OnceCell<Mutex<ApolloCompiler>>,
+    pub(crate) compiler: OnceCell<Mutex<ApolloCompiler>>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     fragments: Fragments,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
@@ -268,7 +268,8 @@ impl Query {
     ) -> Result<Self, SpecError> {
         let query = query.into();
         let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.server.experimental_parser_recursion_limit);
+            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
+            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
         let id = compiler.add_executable(&query, "query");
         let ast = compiler.db.ast(id);
 

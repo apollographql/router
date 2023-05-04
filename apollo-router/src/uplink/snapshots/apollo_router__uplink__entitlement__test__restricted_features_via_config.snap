@@ -23,3 +23,15 @@ Configuration yaml:
 
 * Subgraph entity caching
   .traffic_shaping..experimental_entity_caching
+
+* Operation depth limiting
+  .preview_operation_limits.max_depth
+
+* Operation height limiting
+  .preview_operation_limits.max_height
+
+* Operation root fields limiting
+  .preview_operation_limits.max_root_fields
+
+* Operation aliases limiting
+  .preview_operation_limits.max_aliases

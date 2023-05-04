@@ -23,6 +23,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
 
 /// Error types for execution.
@@ -281,6 +282,9 @@ pub(crate) enum QueryPlannerError {
 
     /// introspection error: {0}
     Introspection(IntrospectionError),
+
+    /// complexity limit exceeded
+    LimitExceeded(OperationLimits<bool>),
 }
 
 impl IntoGraphQLErrors for QueryPlannerError {
@@ -309,25 +313,47 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 .iter()
                 .map(|p_err| Error::from(p_err.clone()))
                 .collect()),
+            QueryPlannerError::LimitExceeded(OperationLimits {
+                depth,
+                height,
+                root_fields,
+                aliases,
+            }) => {
+                let mut errors = Vec::new();
+                let mut build = |exceeded, code, message| {
+                    if exceeded {
+                        errors.push(
+                            Error::builder()
+                                .message(message)
+                                .extension_code(code)
+                                .build(),
+                        )
+                    }
+                };
+                build(
+                    depth,
+                    "MAX_DEPTH_LIMIT",
+                    "Maximum depth limit exceeded in this operation",
+                );
+                build(
+                    height,
+                    "MAX_HEIGHT_LIMIT",
+                    "Maximum height (field count) limit exceeded in this operation",
+                );
+                build(
+                    root_fields,
+                    "MAX_ROOT_FIELDS_LIMIT",
+                    "Maximum root fields limit exceeded in this operation",
+                );
+                build(
+                    aliases,
+                    "MAX_ALIASES_LIMIT",
+                    "Maximum aliases limit exceeded in this operation",
+                );
+                Ok(errors)
+            }
             err => Err(err),
         }
-    }
-}
-
-impl ErrorExtension for QueryPlannerError {
-    fn extension_code(&self) -> String {
-        match self {
-            QueryPlannerError::SchemaValidationErrors(_) => "SCHEMA_VALIDATION_ERRORS",
-            QueryPlannerError::PlanningErrors(_) => "PLANNING_ERRORS",
-            QueryPlannerError::JoinError(_) => "JOIN_ERROR",
-            QueryPlannerError::CacheResolverError(_) => "CACHE_RESOLVER_ERROR",
-            QueryPlannerError::EmptyPlan(_) => "EMPTY_PLAN",
-            QueryPlannerError::UnhandledPlannerResult => "UNHANDLED_PLANNER_RESULT",
-            QueryPlannerError::RouterBridgeError(_) => "ROUTER_BRIDGE_ERROR",
-            QueryPlannerError::SpecError(_) => "SPEC_ERROR",
-            QueryPlannerError::Introspection(_) => "INTROSPECTION",
-        }
-        .to_string()
     }
 }
 
@@ -395,6 +421,11 @@ impl From<SpecError> for QueryPlannerError {
 impl From<router_bridge::error::Error> for QueryPlannerError {
     fn from(error: router_bridge::error::Error) -> Self {
         QueryPlannerError::RouterBridgeError(error)
+    }
+}
+impl From<OperationLimits<bool>> for QueryPlannerError {
+    fn from(error: OperationLimits<bool>) -> Self {
+        QueryPlannerError::LimitExceeded(error)
     }
 }
 
