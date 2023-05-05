@@ -5,8 +5,10 @@ pub(crate) mod text;
 use std::cell::RefCell;
 use std::fmt;
 use std::io;
+use std::io::Write;
 use std::marker::PhantomData;
 
+use opentelemetry::trace::TraceContextExt;
 use tracing::Event;
 use tracing::Subscriber;
 use tracing_subscriber::fmt::format;
@@ -86,19 +88,23 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
 
 pub(crate) struct FormattingLayer<
     S,
-    N = format::DefaultFields,
+    /*N = format::DefaultFields,
     E = format::Format<format::Full>,
-    W = fn() -> io::Stdout,
+    W = fn() -> io::Stdout,*/
 > {
-    make_writer: W,
+    /*make_writer: W,
     fmt_fields: N,
-    fmt_event: E,
+    fmt_event: E,*/
     //fmt_span: format::FmtSpanConfig,
     is_ansi: bool,
-    log_internal_errors: bool,
+    is_json: bool,
+    display_target: bool,
+    display_filename: bool,
+    display_line: bool,
     _inner: PhantomData<fn(S)>,
 }
 
+/*
 impl<S, N, E, W> FormattingLayer<S, N, E, W>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
@@ -114,18 +120,18 @@ where
             event,
         }
     }
-}
+}*/
 
-impl<S, N, E, W> Layer<S> for FormattingLayer<S, N, E, W>
+impl<S /*, N, E, W*/> Layer<S> for FormattingLayer<S /*, N, E, W*/>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
-    N: for<'writer> FormatFields<'writer> + 'static,
+    /*N: for<'writer> FormatFields<'writer> + 'static,
     E: FormatEvent<S, N> + 'static,
-    W: for<'writer> MakeWriter<'writer> + 'static,
+    W: for<'writer> MakeWriter<'writer> + 'static,*/
 {
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         thread_local! {
-            static BUF: RefCell<String> = RefCell::new(String::new());
+            static BUF: RefCell<Vec<u8>> = RefCell::new(Vec::new());
         }
 
         BUF.with(|buf| {
@@ -138,34 +144,37 @@ where
                     &mut *a
                 }
                 _ => {
-                    b = String::new();
+                    b = Vec::new();
                     &mut b
                 }
             };
 
-let formatted_fields = FormattedFields::new(String::new());
-let writer = formatted_fields.as_writer();
-            let ctx = self.make_ctx(ctx, event);
-            if self
-                .fmt_event
-                .format_event(
-                    &ctx,
-                    //format::Writer::new(&mut buf).with_ansi(self.is_ansi),
-                    writer,
-                    event,
-                )
-                .is_ok()
-            {
-                let mut writer = self.make_writer.make_writer_for(event.metadata());
-                let res = io::Write::write_all(&mut writer, buf.as_bytes());
-                if self.log_internal_errors {
-                    if let Err(e) = res {
-                        eprintln!("[tracing-subscriber] Unable to write an event to the Writer for this Subscriber! Error: {}\n", e);
-                    }
-                }
+            let trace_id = event
+                .parent()
+                .and_then(|id| ctx.span(id))
+                .or_else(|| ctx.lookup_current())
+                .and_then(|span| {
+                    let ext = span.extensions();
+                    ext.get::<tracing_opentelemetry::OtelData>()
+                        .as_ref()
+                        .map(|otel_data| {
+                            otel_data.builder.trace_id.unwrap_or_else(|| {
+                                otel_data.parent_cx.span().span_context().trace_id()
+                            })
+                        })
+                });
+
+            let res = if self.is_json {
+                todo!()
+            } else {
+                self.format_text_event(&mut buf, event, trace_id)
+            };
+
+            if res.is_ok() {
+                io::stdout().write_all(&buf);
             }
 
-            buf.clear();
+            buf.resize(0, 0u8);
         });
     }
 }

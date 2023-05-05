@@ -379,6 +379,7 @@ dependencies = [
  "test-span",
  "thiserror",
  "tikv-jemallocator",
+ "time",
  "tokio",
  "tokio-rustls",
  "tokio-stream",

@@ -1,8 +1,11 @@
 use std::fmt;
+use std::io;
 
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry::trace::TraceId;
+use time::format_description::well_known::Rfc3339;
 use tracing_core::Event;
 use tracing_core::Level;
 use tracing_core::Subscriber;
@@ -16,6 +19,8 @@ use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::fmt::time::SystemTime;
 use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::registry::LookupSpan;
+
+use super::FormattingLayer;
 
 #[derive(Debug, Clone)]
 pub(crate) struct TextFormatter {
@@ -267,5 +272,153 @@ where
 
     fn record_bool(&mut self, field: &tracing_core::Field, value: bool) {
         self.0.record_bool(field, value)
+    }
+}
+
+impl<S> FormattingLayer<S> {
+    pub(super) fn format_text_event<W>(
+        &self,
+        mut writer: W,
+        event: &Event<'_>,
+        trace_id: Option<TraceId>,
+    ) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        let meta = event.metadata();
+        self.format_timestamp(&mut writer)?;
+        self.format_location(event, &mut writer)?;
+
+        self.format_level(meta.level(), &mut writer)?;
+        self.format_request_id(&mut writer, event, trace_id)?;
+        if self.display_target {
+            self.format_target(meta.target(), &mut writer)?;
+        }
+
+        //let mut visitor = CustomVisitor::new(DefaultVisitor::new(writer.by_ref(), true));
+        //event.record(&mut visitor);
+
+        writeln!(writer)
+    }
+
+    #[inline]
+    fn format_level<W>(&self, level: &Level, writer: &mut W) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        if self.is_ansi {
+            match *level {
+                Level::TRACE => write!(writer, "{}", Color::Purple.paint(TextFormatter::TRACE_STR)),
+                Level::DEBUG => write!(writer, "{}", Color::Blue.paint(TextFormatter::DEBUG_STR)),
+                Level::INFO => write!(writer, "{}", Color::Green.paint(TextFormatter::INFO_STR)),
+                Level::WARN => write!(writer, "{}", Color::Yellow.paint(TextFormatter::WARN_STR)),
+                Level::ERROR => write!(writer, "{}", Color::Red.paint(TextFormatter::ERROR_STR)),
+            }?;
+        } else {
+            match *level {
+                Level::TRACE => write!(writer, "{}", TextFormatter::TRACE_STR),
+                Level::DEBUG => write!(writer, "{}", TextFormatter::DEBUG_STR),
+                Level::INFO => write!(writer, "{}", TextFormatter::INFO_STR),
+                Level::WARN => write!(writer, "{}", TextFormatter::WARN_STR),
+                Level::ERROR => write!(writer, "{}", TextFormatter::ERROR_STR),
+            }?;
+        }
+        write!(writer, " ")
+    }
+
+    #[inline]
+    fn format_timestamp<W>(&self, writer: &mut W) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        let timer = time::OffsetDateTime::now_utc();
+
+        if self.is_ansi {
+            let style = Style::new().dimmed();
+            write!(writer, "{}", style.prefix())?;
+
+            if timer.format_into(writer, &Rfc3339).is_err() {
+                write!(writer, "<unknown time>")?;
+            }
+
+            write!(writer, "{}", style.suffix())?;
+        } else {
+            if timer.format_into(writer, &Rfc3339).is_err() {
+                write!(writer, "<unknown time>")?;
+            }
+        }
+        write!(writer, " ")
+    }
+
+    #[inline]
+    fn format_location<W>(&self, event: &Event<'_>, writer: &mut W) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        if let (Some(filename), Some(line)) = (event.metadata().file(), event.metadata().line()) {
+            if self.is_ansi {
+                let style = Style::new().dimmed();
+                write!(writer, "{}", style.prefix())?;
+                if self.display_filename {
+                    write!(writer, "{filename}")?;
+                }
+                if self.display_filename && self.display_line {
+                    write!(writer, ":")?;
+                }
+                if self.display_line {
+                    write!(writer, "{line}")?;
+                }
+                write!(writer, "{}", style.suffix())?;
+            } else {
+                write!(writer, "{filename}:{line}")?;
+            }
+            write!(writer, " ")?;
+        }
+
+        Ok(())
+    }
+
+    #[inline]
+    fn format_target<W>(&self, target: &str, writer: &mut W) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        if self.is_ansi {
+            let style = Style::new().dimmed();
+            write!(writer, "{}", style.prefix())?;
+            write!(writer, "{target}:")?;
+            write!(writer, "{}", style.suffix())?;
+        } else {
+            write!(writer, "{target}:")?;
+        }
+        write!(writer, " ")
+    }
+
+    #[inline]
+    fn format_request_id<W>(
+        &self,
+        writer: &mut W,
+        event: &Event<'_>,
+        trace_id: Option<TraceId>,
+    ) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        match trace_id {
+            Some(trace_id) => {
+                if self.is_ansi {
+                    let style = Style::new().dimmed();
+                    write!(writer, "{}", style.prefix())?;
+                    write!(writer, "[trace_id={trace_id}]")?;
+                    write!(writer, "{}", style.suffix())?;
+                } else {
+                    write!(writer, "[trace_id={trace_id}]")?;
+                }
+                write!(writer, " ")?;
+            }
+            None => eprintln!("Unable to find OtelData in extensions; this is a bug"),
+        }
+
+        Ok(())
     }
 }
