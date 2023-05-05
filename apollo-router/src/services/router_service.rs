@@ -194,7 +194,7 @@ where
                         })
                     })
                     .unwrap_or_else(|| {
-                        Err(("missing query string", "missing query string".to_string()))
+                        Err(("There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.", "There was no GraphQL operation to execute. Use the `query` parameter to send an operation, using either GET or POST.".to_string()))
                     })
             } else {
                 hyper::body::to_bytes(body)

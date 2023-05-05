@@ -10,6 +10,8 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Context;
 use std::task::Poll;
@@ -32,6 +34,7 @@ use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 
+use self::Event::ForcedHotReload;
 use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreSchema;
 use self::Event::Shutdown;
@@ -577,6 +580,67 @@ enum ReadConfigError {
     Validation(crate::configuration::ConfigurationError),
 }
 
+pub(crate) struct ForcedHotReloadSource {
+    config: Arc<ForcedHotReloadConfig>,
+    timer: Option<tokio::time::Interval>,
+}
+
+#[derive(Default)]
+pub(crate) struct ForcedHotReloadConfig {
+    interval_seconds: AtomicU64, // zero: disabled
+}
+
+impl ForcedHotReloadConfig {
+    pub(crate) fn period(&self) -> Option<Duration> {
+        match self.interval_seconds.load(Ordering::Acquire) {
+            0 => None,
+            secs => Some(Duration::from_secs(secs)),
+        }
+    }
+
+    pub(crate) fn set_period(&self, new_period: Option<Duration>) {
+        let new_seconds = if let Some(duration) = new_period {
+            duration.as_secs().max(1) // round to at least 1 second
+        } else {
+            0
+        };
+        self.interval_seconds.store(new_seconds, Ordering::Release)
+    }
+}
+
+impl ForcedHotReloadSource {
+    pub(crate) fn new(config: Arc<ForcedHotReloadConfig>) -> Self {
+        let mut new = Self {
+            config,
+            timer: None,
+        };
+        new.check_config();
+        new
+    }
+
+    fn check_config(&mut self) {
+        let configured = self.config.period();
+        if configured != self.timer.as_ref().map(|t| t.period()) {
+            self.timer = configured.map(|period| {
+                let mut interval = tokio::time::interval(period);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                interval
+            })
+        }
+    }
+
+    fn into_stream(mut self) -> impl Stream<Item = Event> {
+        futures::stream::poll_fn(move |ctx: &mut Context<'_>| {
+            self.check_config();
+            if let Some(timer) = &mut self.timer {
+                timer.poll_tick(ctx).map(|_| Some(Event::ForcedHotReload))
+            } else {
+                Poll::Pending
+            }
+        })
+    }
+}
+
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
 /// Specifies when the Router’s HTTP server should gracefully shutdown
@@ -725,7 +789,7 @@ impl RouterHttpServer {
         shutdown: Option<ShutdownSource>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let event_stream = generate_event_stream(
+        let (event_stream, forced_hot_reload_config) = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
             schema,
@@ -734,7 +798,8 @@ impl RouterHttpServer {
         );
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
-        let state_machine = StateMachine::new(server_factory, router_factory);
+        let state_machine =
+            StateMachine::new(server_factory, router_factory, forced_hot_reload_config);
         let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
@@ -814,6 +879,9 @@ pub(crate) enum Event {
     /// There were no more updates to entitlement.
     NoMoreEntitlement,
 
+    /// Artificial hot reload for chaos testing
+    ForcedHotReload,
+
     /// The server should gracefully shutdown.
     Shutdown,
 }
@@ -838,6 +906,9 @@ impl Debug for Event {
             }
             NoMoreEntitlement => {
                 write!(f, "NoMoreEntitlement")
+            }
+            ForcedHotReload => {
+                write!(f, "ForcedHotReload")
             }
             Shutdown => {
                 write!(f, "Shutdown")
@@ -871,18 +942,23 @@ fn generate_event_stream(
     schema: SchemaSource,
     entitlement: EntitlementSource,
     shutdown_receiver: oneshot::Receiver<()>,
-) -> impl Stream<Item = Event> {
+) -> (impl Stream<Item = Event>, Arc<ForcedHotReloadConfig>) {
+    let forced_hot_reload_config = Arc::new(ForcedHotReloadConfig::default());
     // Chain is required so that the final shutdown message is sent.
-    stream::select_all(vec![
+    let stream = stream::select_all(vec![
         shutdown.into_stream().boxed(),
         configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
         entitlement.into_stream().boxed(),
+        ForcedHotReloadSource::new(forced_hot_reload_config.clone())
+            .into_stream()
+            .boxed(),
         shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
     .chain(stream::iter(vec![Shutdown]))
-    .boxed()
+    .boxed();
+    (stream, forced_hot_reload_config)
 }
 
 #[cfg(test)]

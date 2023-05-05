@@ -52,6 +52,7 @@ pub struct IntegrationTest {
     _lock: tokio::sync::OwnedMutexGuard<bool>,
     stdio_tx: tokio::sync::mpsc::Sender<String>,
     stdio_rx: tokio::sync::mpsc::Receiver<String>,
+    collect_stdio: Option<(tokio::sync::oneshot::Sender<String>, regex::Regex)>,
     _subgraphs: wiremock::MockServer,
 }
 
@@ -92,6 +93,7 @@ impl IntegrationTest {
         config: &'static str,
         telemetry: Option<Telemetry>,
         responder: Option<ResponseTemplate>,
+        collect_stdio: Option<tokio::sync::oneshot::Sender<String>>,
     ) -> Self {
         Self::init_telemetry(telemetry);
 
@@ -130,17 +132,25 @@ impl IntegrationTest {
 
         fs::write(&test_config_location, config).expect("could not write config");
 
-        let router_location = PathBuf::from(env!("CARGO_BIN_EXE_router"));
         let (stdio_tx, stdio_rx) = tokio::sync::mpsc::channel(2000);
+        let collect_stdio = collect_stdio.map(|sender| {
+            let version_line_re = regex::Regex::new("Apollo Router v[^ ]+ ").unwrap();
+            (sender, version_line_re)
+        });
         Self {
             router: None,
-            router_location,
+            router_location: Self::router_location(),
             test_config_location,
             _lock: lock,
             stdio_tx,
             stdio_rx,
+            collect_stdio,
             _subgraphs: subgraphs,
         }
+    }
+
+    pub fn router_location() -> PathBuf {
+        PathBuf::from(env!("CARGO_BIN_EXE_router"))
     }
 
     #[allow(dead_code)]
@@ -161,12 +171,37 @@ impl IntegrationTest {
             .expect("router should start");
         let reader = BufReader::new(router.stdout.take().expect("out"));
         let stdio_tx = self.stdio_tx.clone();
+        let collect_stdio = self.collect_stdio.take();
         // We need to read from stdout otherwise we will hang
         task::spawn(async move {
+            let mut collected = Vec::new();
             let mut lines = reader.lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 println!("{line}");
+                if let Some((_sender, version_line_re)) = &collect_stdio {
+                    #[derive(serde::Deserialize)]
+                    struct Log {
+                        #[allow(unused)]
+                        timestamp: String,
+                        level: String,
+                        message: String,
+                    }
+                    let log = serde_json::from_str::<Log>(&line).unwrap();
+                    // Omit this message from snapshots since it depends on external environment
+                    if !log.message.starts_with("RUST_BACKTRACE=full detected") {
+                        collected.push(format!(
+                            "{}: {}",
+                            log.level,
+                            // Redacted so we don't need to update snapshots every release
+                            version_line_re
+                                .replace(&log.message, "Apollo Router [version number] ")
+                        ))
+                    }
+                }
                 let _ = stdio_tx.send(line).await;
+            }
+            if let Some((sender, _version_line_re)) = collect_stdio {
+                let _ = sender.send(collected.join("\n"));
             }
         });
 
@@ -340,7 +375,12 @@ impl IntegrationTest {
 
     #[cfg(target_os = "windows")]
     pub async fn graceful_shutdown(&mut self) {
-        // On windows we have to do complicated things to gracefully shutdown. One day we may get around to this, but it's not a priority.
+        // We don’t have SIGTERM on Windows, so do a non-graceful kill instead
+        self.kill().await
+    }
+
+    #[allow(dead_code)]
+    pub async fn kill(&mut self) {
         let _ = self
             .router
             .as_mut()
@@ -371,7 +411,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             if let Ok(line) = self.stdio_rx.try_recv() {
