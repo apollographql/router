@@ -1507,7 +1507,7 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
                         Value::Null => Vec::new(),
                         _ => panic!("unexpected JSON value kind"),
                     };
-                    vec.push(json!([subgraph_name.clone(), ftv1]));
+                    vec.push(json!([subgraph_name, ftv1]));
                     Value::Array(vec)
                 })
         }
