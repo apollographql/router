@@ -218,6 +218,10 @@ expression: get_spans()
                         "memory"
                       ],
                       [
+                        "histogram.apollo_router_query_planning_time",
+                        "[REDACTED]"
+                      ],
+                      [
                         "value.apollo_router_cache_size",
                         1
                       ],

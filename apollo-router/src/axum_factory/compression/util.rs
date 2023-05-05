@@ -1,4 +1,7 @@
 #![allow(dead_code)]
+
+use bytes::BytesMut;
+
 // All code from this module is extracted from https://github.com/Nemo157/async-compression and is under MIT or Apache-2 licence
 // it will be removed when we find a long lasting solution to https://github.com/Nemo157/async-compression/issues/154
 pub(crate) fn _assert_send<T: Send>() {}
@@ -33,6 +36,13 @@ impl<B: AsRef<[u8]>> PartialBuffer<B> {
 
     pub(crate) fn into_inner(self) -> B {
         self.buffer
+    }
+}
+
+impl PartialBuffer<&mut BytesMut> {
+    /// Extend the interior mutable buffer by the given amount, filling with 0
+    pub(crate) fn extend(&mut self, amount: usize) {
+        self.buffer.resize(self.buffer.len() + amount, 0u8);
     }
 }
 

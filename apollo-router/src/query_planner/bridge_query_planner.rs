@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -227,10 +228,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            match this
+            let start = Instant::now();
+            let res = this
                 .get((req.query.clone(), req.operation_name.to_owned()))
-                .await
-            {
+                .await;
+            let duration = start.elapsed().as_secs_f64();
+            tracing::info!(histogram.apollo_router_query_planning_time = duration,);
+
+            match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                     .content(query_planner_content)
                     .context(req.context)
