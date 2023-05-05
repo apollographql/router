@@ -133,7 +133,7 @@ impl Context {
     ///    value updated).
     ///  - If the operation succeeds, the pair have either updated an existing value
     ///    or been inserted.
-    pub fn upsert<K, V>(&self, key: K, upsert: impl Fn(V) -> V) -> Result<(), BoxError>
+    pub fn upsert<K, V>(&self, key: K, upsert: impl FnOnce(V) -> V) -> Result<(), BoxError>
     where
         K: Into<String>,
         V: for<'de> serde::Deserialize<'de> + Serialize + Default,
@@ -166,13 +166,20 @@ impl Context {
     /// The resolving function must yield a value to be used in the context. It
     /// is provided with the current value to use in evaluating which value to
     /// yield.
-    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl Fn(Value) -> Value)
+    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl FnOnce(Value) -> Value)
     where
         K: Into<String>,
     {
         let key = key.into();
         self.entries.entry(key.clone()).or_insert(Value::Null);
         self.entries.alter(&key, |_, v| upsert(v));
+    }
+
+    /// Convert the context into an iterator.
+    pub fn try_into_iter(self) -> Result<impl IntoIterator<Item = (String, Value)>, BoxError> {
+        Ok(Arc::try_unwrap(self.entries)
+            .map_err(|_e| anyhow::anyhow!("cannot take ownership of dashmap"))?
+            .into_iter())
     }
 
     /// Iterate over the entries.

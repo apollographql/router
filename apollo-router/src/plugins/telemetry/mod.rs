@@ -1500,14 +1500,14 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
             // Record the ftv1 trace for processing later
             Span::current().record("apollo_private.ftv1", ftv1.as_str());
             resp.context
-                .upsert_json_value(SUBGRAPH_FTV1, |value: Value| {
+                .upsert_json_value(SUBGRAPH_FTV1, move |value: Value| {
                     let mut vec = match value {
                         Value::Array(array) => array,
                         // upsert_json_value populate the entry with null if it was vacant
                         Value::Null => Vec::new(),
                         _ => panic!("unexpected JSON value kind"),
                     };
-                    vec.push(json!([subgraph_name.clone(), ftv1.clone()]));
+                    vec.push(json!([subgraph_name.clone(), ftv1]));
                     Value::Array(vec)
                 })
         }
