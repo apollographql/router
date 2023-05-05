@@ -2,13 +2,23 @@
 pub(crate) mod json;
 pub(crate) mod text;
 
+use std::cell::RefCell;
 use std::fmt;
+use std::io;
+use std::marker::PhantomData;
 
+use tracing::Event;
 use tracing::Subscriber;
+use tracing_subscriber::fmt::format;
 use tracing_subscriber::fmt::format::Writer;
+use tracing_subscriber::fmt::FmtContext;
 use tracing_subscriber::fmt::FormatEvent;
 use tracing_subscriber::fmt::FormatFields;
+use tracing_subscriber::fmt::FormattedFields;
+use tracing_subscriber::fmt::MakeWriter;
+use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::Layer;
 
 use super::metrics::METRIC_PREFIX_COUNTER;
 use super::metrics::METRIC_PREFIX_HISTOGRAM;
@@ -72,4 +82,90 @@ pub(crate) fn filter_metric_events(event: &tracing::Event<'_>) -> bool {
             || f.name().starts_with(METRIC_PREFIX_MONOTONIC_COUNTER)
             || f.name().starts_with(METRIC_PREFIX_VALUE)
     })
+}
+
+pub(crate) struct FormattingLayer<
+    S,
+    N = format::DefaultFields,
+    E = format::Format<format::Full>,
+    W = fn() -> io::Stdout,
+> {
+    make_writer: W,
+    fmt_fields: N,
+    fmt_event: E,
+    //fmt_span: format::FmtSpanConfig,
+    is_ansi: bool,
+    log_internal_errors: bool,
+    _inner: PhantomData<fn(S)>,
+}
+
+impl<S, N, E, W> FormattingLayer<S, N, E, W>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+    E: FormatEvent<S, N> + 'static,
+    W: for<'writer> MakeWriter<'writer> + 'static,
+{
+    #[inline]
+    fn make_ctx<'a>(&'a self, ctx: Context<'a, S>, event: &'a Event<'a>) -> FmtContext<'a, S, N> {
+        FmtContext {
+            ctx,
+            fmt_fields: &self.fmt_fields,
+            event,
+        }
+    }
+}
+
+impl<S, N, E, W> Layer<S> for FormattingLayer<S, N, E, W>
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+    N: for<'writer> FormatFields<'writer> + 'static,
+    E: FormatEvent<S, N> + 'static,
+    W: for<'writer> MakeWriter<'writer> + 'static,
+{
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+        thread_local! {
+            static BUF: RefCell<String> = RefCell::new(String::new());
+        }
+
+        BUF.with(|buf| {
+            let borrow = buf.try_borrow_mut();
+            let mut a;
+            let mut b;
+            let mut buf = match borrow {
+                Ok(buf) => {
+                    a = buf;
+                    &mut *a
+                }
+                _ => {
+                    b = String::new();
+                    &mut b
+                }
+            };
+
+let formatted_fields = FormattedFields::new(String::new());
+let writer = formatted_fields.as_writer();
+            let ctx = self.make_ctx(ctx, event);
+            if self
+                .fmt_event
+                .format_event(
+                    &ctx,
+                    //format::Writer::new(&mut buf).with_ansi(self.is_ansi),
+                    writer,
+                    event,
+                )
+                .is_ok()
+            {
+                let mut writer = self.make_writer.make_writer_for(event.metadata());
+                let res = io::Write::write_all(&mut writer, buf.as_bytes());
+                if self.log_internal_errors {
+                    if let Err(e) = res {
+                        eprintln!("[tracing-subscriber] Unable to write an event to the Writer for this Subscriber! Error: {}\n", e);
+                    }
+                }
+            }
+
+            buf.clear();
+        });
+    }
 }
