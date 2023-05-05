@@ -8,25 +8,25 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### add a metric tracking query planning time 
+### Introduced new metric which tracks query planning time
 
-we need a way to track query planning time without going through the traces
+We've introduced a `apollo_router_query_planning_time` histogram which captures time spent in the query planning phase.  This is documented along with our other metrics [in the documentation](https://www.apollographql.com/docs/router/configuration/metrics/#available-metrics).
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2974
 
 ## 🐛 Fixes
 
-### Fix panic when compressing small responses with gzip 
+### Small gzip'd responses no longer cause a panic
 
-1.17.0 has a regression where compressing small responses would trigger invalid buffer management, and the router would panic.
+A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
 
 By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3047
 
-### Fixes a bug preventing status code from making it out to the graphQL error extensions
+### HTTP status codes are now returned in `SubrequestHttpError` as intended
 
-> When contextually available, includes the HTTP status code with `SubrequestHttpError`. This provides plugins the ability to access the status code directly. Currently string parsing of the `reason` is the only way to determine the status.
+When contextually available, the HTTP status code is included within `SubrequestHttpError`. This provides plugins the ability to access the status code directly. Previously, only string parsing of the `reason` could be used to determine the status code.
 
-Previous merge request added the status_code to the Error enum, but it was not serialized into the graphql error extensions which are available to plugins.
+This corrects a previous contribution which added the status code, but neglected to serialize it properly into the `extensions` in the response which are made available to plugins.  Thank you to the same contributor for the correction!
 
 By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/3005
 
@@ -34,11 +34,9 @@ By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.co
 
 ### Indicate that `apollo_router_cache_size` is a count of cache entries
 
-This follows-up [PR #2607](https://github.com/apollographql/router/pull/2607) which added `apollo_router_cache_size`.  It adds `apollo_router_cache_size` to the documntation and indicates that this is the number of cache entries (that is, a count).
+This follows-up [PR #2607](https://github.com/apollographql/router/pull/2607) which added `apollo_router_cache_size`.  It adds `apollo_router_cache_size` to [the documentation](https://www.apollographql.com/docs/router/configuration/metrics/#available-metrics) and indicates that this is the number of cache entries (that is, a count).
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3044
-
-
 
 # [1.17.0] - 2023-05-04
 
