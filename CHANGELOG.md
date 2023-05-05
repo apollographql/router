@@ -4,6 +4,42 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.18.0] - 2023-05-05
+
+## 🚀 Features
+
+### add a metric tracking query planning time 
+
+we need a way to track query planning time without going through the traces
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2974
+
+## 🐛 Fixes
+
+### Fix panic when compressing small responses with gzip 
+
+1.17.0 has a regression where compressing small responses would trigger invalid buffer management, and the router would panic.
+
+By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3047
+
+### Fixes a bug preventing status code from making it out to the graphQL error extensions
+
+> When contextually available, includes the HTTP status code with `SubrequestHttpError`. This provides plugins the ability to access the status code directly. Currently string parsing of the `reason` is the only way to determine the status.
+
+Previous merge request added the status_code to the Error enum, but it was not serialized into the graphql error extensions which are available to plugins.
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/3005
+
+## 📚 Documentation
+
+### Indicate that `apollo_router_cache_size` is a count of cache entries
+
+This follows-up [PR #2607](https://github.com/apollographql/router/pull/2607) which added `apollo_router_cache_size`.  It adds `apollo_router_cache_size` to the documntation and indicates that this is the number of cache entries (that is, a count).
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3044
+
+
+
 # [1.17.0] - 2023-05-04
 
 ## 🚀 Features
