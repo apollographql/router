@@ -67,6 +67,8 @@ query GetUser {
 }
 ```
 
+Each unique field increments an operation's height by one, regardless of that field's return type (scalar, object, or list). 
+
 ### `max_aliases`
 
 Limits the total number of aliased fields in an operation, including fields of fragments.
@@ -78,10 +80,12 @@ query GetUser {
   user {
     nickname: name # 1
     username: name # 2
-    username: name # 3
+    handle: name   # 3
   }
 }
 ```
+
+Each aliased field increments the alias count by one, regardless of that field's return type (scalar, object, or list).
 
 ### `max_root_fields`
 
