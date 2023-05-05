@@ -81,29 +81,20 @@ where {
                     Ok(data) => {
                         // most compression algorithms have a compression ratio of more than 90% for JSON
                         let mut buf = BytesMut::zeroed(data.len() / 10);
-                        let mut written = 0usize;
 
                         let mut partial_input = PartialBuffer::new(&*data);
+                        let mut partial_output = PartialBuffer::new(&mut buf);
                         loop {
-                            let mut partial_output = PartialBuffer::new(&mut buf);
-                            partial_output.advance(written);
-
                             if let Err(e) = self.encode(&mut partial_input, &mut partial_output) {
                                 let _ = tx.send(Err(e.into())).await;
                                 return;
                             }
 
-                            written += partial_output.written().len();
-
                             if !partial_input.unwritten().is_empty() {
                                 // there was not enough space in the output buffer to compress everything,
                                 // so we resize and add more data
                                 if partial_output.unwritten().is_empty() {
-                                    let _ = partial_output.into_inner();
-                                    buf.resize(
-                                        buf.len() + partial_input.unwritten().len() / 10,
-                                        0u8,
-                                    );
+                                    partial_output.extend(partial_input.unwritten().len() / 10);
                                 }
                             } else {
                                 match self.flush(&mut partial_output) {
@@ -226,5 +217,14 @@ mod tests {
         assert_eq!(response.len(), 5000);
 
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn gzip_header_writing() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+        let body: Body = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
+
+        let mut stream = compressor.process(body);
+        let _ = stream.next().await.unwrap().unwrap();
     }
 }
