@@ -218,4 +218,13 @@ mod tests {
 
         assert!(stream.next().await.is_none());
     }
+
+    #[tokio::test]
+    async fn gzip_header_writing() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+        let body: Body = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
+
+        let mut stream = compressor.process(body);
+        let _ = stream.next().await.unwrap().unwrap();
+    }
 }
