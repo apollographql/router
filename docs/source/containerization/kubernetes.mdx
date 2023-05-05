@@ -13,7 +13,7 @@ import { Link } from 'gatsby';
 
 [Helm](https://helm.sh) is the package manager for kubernetes.
 
-There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.17.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
+There is a complete [helm chart definition](https://github.com/apollographql/router/tree/v1.18.0/helm/chart/router) in the repo which illustrates how to use helm to deploy the router in kubernetes.
 
 In both the following examples, we are using helm to install the router:
  - into namespace "router-deploy" (create namespace if it doesn't exist)
@@ -64,10 +64,10 @@ kind: ServiceAccount
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.17.0
+    helm.sh/chart: router-1.18.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/version: "v1.18.0"
     app.kubernetes.io/managed-by: Helm
 ---
 # Source: router/templates/secret.yaml
@@ -76,10 +76,10 @@ kind: Secret
 metadata:
   name: "release-name-router"
   labels:
-    helm.sh/chart: router-1.17.0
+    helm.sh/chart: router-1.18.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/version: "v1.18.0"
     app.kubernetes.io/managed-by: Helm
 data:
   managedFederationApiKey: "UkVEQUNURUQ="
@@ -90,10 +90,10 @@ kind: ConfigMap
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.17.0
+    helm.sh/chart: router-1.18.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/version: "v1.18.0"
     app.kubernetes.io/managed-by: Helm
 data:
   configuration.yaml: |
@@ -117,10 +117,10 @@ kind: Service
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.17.0
+    helm.sh/chart: router-1.18.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/version: "v1.18.0"
     app.kubernetes.io/managed-by: Helm
 spec:
   type: ClusterIP
@@ -143,10 +143,10 @@ kind: Deployment
 metadata:
   name: release-name-router
   labels:
-    helm.sh/chart: router-1.17.0
+    helm.sh/chart: router-1.18.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/version: "v1.18.0"
     app.kubernetes.io/managed-by: Helm
   
   annotations:
@@ -172,7 +172,7 @@ spec:
         - name: router
           securityContext:
             {}
-          image: "ghcr.io/apollographql/router:v1.17.0"
+          image: "ghcr.io/apollographql/router:v1.18.0"
           imagePullPolicy: IfNotPresent
           args:
             - --hot-reload
@@ -223,10 +223,10 @@ kind: Pod
 metadata:
   name: "release-name-router-test-connection"
   labels:
-    helm.sh/chart: router-1.17.0
+    helm.sh/chart: router-1.18.0
     app.kubernetes.io/name: router
     app.kubernetes.io/instance: release-name
-    app.kubernetes.io/version: "v1.17.0"
+    app.kubernetes.io/version: "v1.18.0"
     app.kubernetes.io/managed-by: Helm
   annotations:
     "helm.sh/hook": test
