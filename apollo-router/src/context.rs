@@ -176,7 +176,9 @@ impl Context {
     }
 
     /// Convert the context into an iterator.
-    pub fn try_into_iter(self) -> Result<impl IntoIterator<Item = (String, Value)>, BoxError> {
+    pub(crate) fn try_into_iter(
+        self,
+    ) -> Result<impl IntoIterator<Item = (String, Value)>, BoxError> {
         Ok(Arc::try_unwrap(self.entries)
             .map_err(|_e| anyhow::anyhow!("cannot take ownership of dashmap"))?
             .into_iter())
