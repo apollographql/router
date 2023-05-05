@@ -8,6 +8,7 @@ use http::header::InvalidHeaderName;
 use http::uri::Authority;
 use http::uri::Parts;
 use http::uri::PathAndQuery;
+use http::HeaderMap;
 use http::Uri;
 use rhai::module_resolvers::FileModuleResolver;
 use rhai::plugin::*;
@@ -72,36 +73,6 @@ impl<T> OptionDance<T> for SharedMut<T> {
     }
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct RhaiHeaderMap(pub(crate) http::HeaderMap);
-
-#[derive(Clone)]
-pub(crate) struct HeaderPair {
-    name: Option<http::header::HeaderName>,
-    value: http::header::HeaderValue,
-}
-pub(crate) struct RhaiHeaderMapIterator(http::header::IntoIter<http::header::HeaderValue>);
-
-impl IntoIterator for RhaiHeaderMap {
-    type Item = HeaderPair;
-
-    type IntoIter = RhaiHeaderMapIterator;
-
-    fn into_iter(self) -> Self::IntoIter {
-        RhaiHeaderMapIterator(self.0.into_iter())
-    }
-}
-
-impl Iterator for RhaiHeaderMapIterator {
-    type Item = HeaderPair;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.0
-            .next()
-            .map(|(name, value)| HeaderPair { name, value })
-    }
-}
-
 // We have to keep the modules that we export using `export_module` inline because
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
@@ -120,40 +91,40 @@ mod router_base64 {
 
 #[export_module]
 mod router_header_map {
+    pub(crate) type HeaderMap = http::HeaderMap;
     pub(crate) type OptionalHeaderName = Option<http::header::HeaderName>;
     pub(crate) type HeaderName = http::header::HeaderName;
     pub(crate) type HeaderValue = http::header::HeaderValue;
-    pub(crate) type HeaderPair = super::HeaderPair;
+    pub(crate) type HeaderPair = (OptionalHeaderName, http::header::HeaderValue);
 
     // Register get for Header Name/Value from a tuple pair
-    #[rhai_fn(get = "name")]
-    pub(crate) fn header_pair_name_get(x: &mut HeaderPair) -> OptionalHeaderName {
-        x.name.clone()
+    #[rhai_fn(get = "name", pure)]
+    pub(crate) fn header_name_get(x: &mut HeaderPair) -> OptionalHeaderName {
+        x.0.clone()
     }
-    #[rhai_fn(get = "value")]
-    pub(crate) fn header_pair_value_get(x: &mut HeaderPair) -> HeaderValue {
-        x.value.clone()
+    #[rhai_fn(get = "value", pure)]
+    pub(crate) fn header_value_get(x: &mut HeaderPair) -> HeaderValue {
+        x.1.clone()
     }
 
     // Register a contains function for HeaderMap so that "in" works
-    #[rhai_fn(name = "contains")]
-    pub(crate) fn header_map_contains(x: &mut RhaiHeaderMap, key: &str) -> bool {
+    #[rhai_fn(name = "contains", pure)]
+    pub(crate) fn header_map_contains(x: &mut HeaderMap, key: &str) -> bool {
         match HeaderName::from_str(key) {
-            Ok(hn) => x.0.contains_key(hn),
+            Ok(hn) => x.contains_key(hn),
             Err(_e) => false,
         }
     }
 
     // Register a HeaderMap indexer so we can get/set headers
-    #[rhai_fn(index_get, return_raw)]
+    #[rhai_fn(index_get, pure, return_raw)]
     pub(crate) fn header_map_get(
-        x: &mut RhaiHeaderMap,
+        x: &mut HeaderMap,
         key: &str,
     ) -> Result<String, Box<EvalAltResult>> {
         let search_name =
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
-        Ok(x.0
-            .get(search_name)
+        Ok(x.get(search_name)
             .ok_or("")?
             .to_str()
             .map_err(|e| e.to_string())?
@@ -162,11 +133,11 @@ mod router_header_map {
 
     #[rhai_fn(index_set, return_raw)]
     pub(crate) fn header_map_set_string(
-        x: &mut RhaiHeaderMap,
+        x: &mut HeaderMap,
         key: &str,
         value: &str,
     ) -> Result<(), Box<EvalAltResult>> {
-        x.0.insert(
+        x.insert(
             HeaderName::from_str(key).map_err(|e| e.to_string())?,
             HeaderValue::from_str(value).map_err(|e| e.to_string())?,
         );
@@ -177,13 +148,13 @@ mod router_header_map {
     // key.
     #[rhai_fn(index_set, return_raw)]
     pub(crate) fn header_map_set_array(
-        x: &mut RhaiHeaderMap,
+        x: &mut HeaderMap,
         key: &str,
         value: Array,
     ) -> Result<(), Box<EvalAltResult>> {
         let h_key = HeaderName::from_str(key).map_err(|e| e.to_string())?;
         for v in value {
-            x.0.append(
+            x.append(
                 h_key.clone(),
                 HeaderValue::from_str(&v.into_string()?).map_err(|e| e.to_string())?,
             );
@@ -197,15 +168,15 @@ mod router_header_map {
     // existing one, which would break code. When router 2.0 is released, we should replace
     // the existing indexer_get for HeaderMap with this function and mark it as an
     // incompatible change.
-    #[rhai_fn(name = "values", return_raw)]
+    #[rhai_fn(name = "values", pure, return_raw)]
     pub(crate) fn header_map_values(
-        x: &mut RhaiHeaderMap,
+        x: &mut HeaderMap,
         key: &str,
     ) -> Result<Array, Box<EvalAltResult>> {
         let search_name =
             HeaderName::from_str(key).map_err(|e: InvalidHeaderName| e.to_string())?;
         let mut response = Array::new();
-        for value in x.0.get_all(search_name).iter() {
+        for value in x.get_all(search_name).iter() {
             response.push(
                 value
                     .to_str()
@@ -217,7 +188,7 @@ mod router_header_map {
         Ok(response)
     }
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn optional_header_name_to_string(x: &mut OptionalHeaderName) -> String {
         match x {
             Some(v) => v.to_string(),
@@ -225,20 +196,20 @@ mod router_header_map {
         }
     }
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn header_name_to_string(x: &mut HeaderName) -> String {
         x.to_string()
     }
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn header_value_to_string(x: &mut HeaderValue) -> String {
         x.to_str().map_or("".to_string(), |v| v.to_string())
     }
 
-    #[rhai_fn(name = "to_string")]
-    pub(crate) fn header_map_to_string(x: &mut RhaiHeaderMap) -> String {
+    #[rhai_fn(name = "to_string", pure)]
+    pub(crate) fn header_map_to_string(x: &mut HeaderMap) -> String {
         let mut msg = String::new();
-        for pair in x.0.iter() {
+        for pair in x.iter() {
             let line = format!(
                 "{}: {}",
                 pair.0,
@@ -250,15 +221,15 @@ mod router_header_map {
         msg
     }
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn header_pair_to_string(x: &mut HeaderPair) -> String {
         format!(
             "{}: {}",
-            match &x.name {
+            match &x.0 {
                 Some(v) => v.to_string(),
                 None => "None".to_string(),
             },
-            x.value.to_str().map_or("".to_string(), |v| v.to_string())
+            x.1.to_str().map_or("".to_string(), |v| v.to_string())
         )
     }
 }
@@ -268,12 +239,12 @@ mod router_json {
     pub(crate) type Object = crate::json_ext::Object;
     pub(crate) type Value = crate::json_ext::Value;
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn object_to_string(x: &mut Object) -> String {
         format!("{x:?}")
     }
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn value_to_string(x: &mut Value) -> String {
         format!("{x:?}")
     }
@@ -284,13 +255,13 @@ mod router_context {
     pub(crate) type Context = crate::Context;
 
     // Register a contains function for Context so that "in" works
-    #[rhai_fn(name = "contains")]
+    #[rhai_fn(name = "contains", pure)]
     pub(crate) fn context_contains(x: &mut Context, key: &str) -> bool {
         x.get(key).map_or(false, |v: Option<Dynamic>| v.is_some())
     }
 
     // Register a Context indexer so we can get/set context
-    #[rhai_fn(index_get, return_raw)]
+    #[rhai_fn(index_get, pure, return_raw)]
     pub(crate) fn context_get(x: &mut Context, key: &str) -> Result<Dynamic, Box<EvalAltResult>> {
         x.get(key)
             .map(|v: Option<Dynamic>| v.unwrap_or(Dynamic::UNIT))
@@ -329,13 +300,13 @@ mod router_context {
         .map_err(|e: BoxError| e.to_string().into())
     }
 
-    #[rhai_fn(name = "to_string")]
+    #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn context_to_string(x: &mut Context) -> String {
         format!("{x:?}")
     }
 
     // Add context getter/setters for deferred responses
-    #[rhai_fn(get = "context", return_raw)]
+    #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn supergraph_deferred_response_context_get(
         obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<Context, Box<EvalAltResult>> {
@@ -350,7 +321,7 @@ mod router_context {
         Ok(())
     }
 
-    #[rhai_fn(get = "context", return_raw)]
+    #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn execution_deferred_response_context_get(
         obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<Context, Box<EvalAltResult>> {
@@ -370,7 +341,7 @@ mod router_context {
 // error[E0658]: non-inline modules in proc macro input are unstable
 #[export_module]
 mod router_plugin {
-    pub(crate) type HeaderMap = RhaiHeaderMap;
+    pub(crate) type HeaderMap = http::HeaderMap;
     pub(crate) type Request = crate::graphql::Request;
     pub(crate) type Response = crate::graphql::Response;
     pub(crate) type Error = crate::error::Error;
@@ -406,16 +377,16 @@ mod router_plugin {
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_subgraph_headers(
         obj: &mut http_ext::Request<Request>,
-    ) -> Result<RhaiHeaderMap, Box<EvalAltResult>> {
-        Ok(RhaiHeaderMap(obj.headers().clone()))
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.headers().clone())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_subgraph_headers(
         obj: &mut http_ext::Request<Request>,
-        headers: RhaiHeaderMap,
+        headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        *obj.headers_mut() = headers.0;
+        *obj.headers_mut() = headers;
         Ok(())
     }
 
@@ -455,8 +426,8 @@ mod router_plugin {
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_supergraph_response(
         obj: &mut SharedMut<supergraph::Response>,
-    ) -> Result<RhaiHeaderMap, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| RhaiHeaderMap(response.response.headers().clone())))
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -483,8 +454,8 @@ mod router_plugin {
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_response(
         obj: &mut SharedMut<execution::Response>,
-    ) -> Result<RhaiHeaderMap, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| RhaiHeaderMap(response.response.headers().clone())))
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -495,7 +466,7 @@ mod router_plugin {
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
-    ) -> Result<RhaiHeaderMap, Box<EvalAltResult>> {
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
@@ -509,8 +480,8 @@ mod router_plugin {
     #[rhai_fn(get = "headers", pure, return_raw)]
     pub(crate) fn get_originating_headers_subgraph_response(
         obj: &mut SharedMut<subgraph::Response>,
-    ) -> Result<RhaiHeaderMap, Box<EvalAltResult>> {
-        Ok(obj.with_mut(|response| RhaiHeaderMap(response.response.headers().clone())))
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Ok(obj.with_mut(|response| response.response.headers().clone()))
     }
 
     #[rhai_fn(get = "body", pure, return_raw)]
@@ -551,16 +522,16 @@ mod router_plugin {
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_supergraph_response(
         obj: &mut SharedMut<supergraph::Response>,
-        headers: RhaiHeaderMap,
+        headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| *response.response.headers_mut() = headers.0);
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
         Ok(())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_router_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
-        _headers: RhaiHeaderMap,
+        _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
@@ -568,16 +539,16 @@ mod router_plugin {
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_execution_response(
         obj: &mut SharedMut<execution::Response>,
-        headers: RhaiHeaderMap,
+        headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| *response.response.headers_mut() = headers.0);
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
         Ok(())
     }
 
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
-        _headers: RhaiHeaderMap,
+        _headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
@@ -585,9 +556,9 @@ mod router_plugin {
     #[rhai_fn(set = "headers", return_raw)]
     pub(crate) fn set_originating_headers_subgraph_response(
         obj: &mut SharedMut<subgraph::Response>,
-        headers: RhaiHeaderMap,
+        headers: HeaderMap,
     ) -> Result<(), Box<EvalAltResult>> {
-        obj.with_mut(|response| *response.response.headers_mut() = headers.0);
+        obj.with_mut(|response| *response.response.headers_mut() = headers);
         Ok(())
     }
 
@@ -649,35 +620,36 @@ mod router_plugin {
     }
 
     // Register urlencode/decode functions
+    #[rhai_fn(pure)]
     pub(crate) fn urlencode(x: &mut ImmutableString) -> String {
         urlencoding::encode(x).into_owned()
     }
 
-    #[rhai_fn(return_raw)]
+    #[rhai_fn(pure, return_raw)]
     pub(crate) fn urldecode(x: &mut ImmutableString) -> Result<String, Box<EvalAltResult>> {
         Ok(urlencoding::decode(x)
             .map_err(|e| e.to_string())?
             .into_owned())
     }
 
-    #[rhai_fn(name = "headers_are_available")]
+    #[rhai_fn(name = "headers_are_available", pure)]
     pub(crate) fn supergraph_response(_: &mut SharedMut<supergraph::Response>) -> bool {
         true
     }
 
-    #[rhai_fn(name = "headers_are_available")]
+    #[rhai_fn(name = "headers_are_available", pure)]
     pub(crate) fn supergraph_deferred_response(
         _: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> bool {
         false
     }
 
-    #[rhai_fn(name = "headers_are_available")]
+    #[rhai_fn(name = "headers_are_available", pure)]
     pub(crate) fn execution_response(_: &mut SharedMut<execution::Response>) -> bool {
         true
     }
 
-    #[rhai_fn(name = "headers_are_available")]
+    #[rhai_fn(name = "headers_are_available", pure)]
     pub(crate) fn execution_deferred_response(
         _: &mut SharedMut<execution::DeferredResponse>,
     ) -> bool {
@@ -685,7 +657,7 @@ mod router_plugin {
     }
 
     // Request.query
-    #[rhai_fn(get = "query")]
+    #[rhai_fn(get = "query", pure)]
     pub(crate) fn request_query_get(x: &mut Request) -> Dynamic {
         x.query.clone().map_or(Dynamic::UNIT, Dynamic::from)
     }
@@ -696,7 +668,7 @@ mod router_plugin {
     }
 
     // Request.operation_name
-    #[rhai_fn(get = "operation_name")]
+    #[rhai_fn(get = "operation_name", pure)]
     pub(crate) fn request_operation_name_get(x: &mut Request) -> Dynamic {
         x.operation_name
             .clone()
@@ -709,7 +681,7 @@ mod router_plugin {
     }
 
     // Request.variables
-    #[rhai_fn(get = "variables", return_raw)]
+    #[rhai_fn(get = "variables", pure, return_raw)]
     pub(crate) fn request_variables_get(x: &mut Request) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.variables.clone())
     }
@@ -724,7 +696,7 @@ mod router_plugin {
     }
 
     // Request.extensions
-    #[rhai_fn(get = "extensions", return_raw)]
+    #[rhai_fn(get = "extensions", pure, return_raw)]
     pub(crate) fn request_extensions_get(x: &mut Request) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.extensions.clone())
     }
@@ -739,7 +711,7 @@ mod router_plugin {
     }
 
     // Uri.path
-    #[rhai_fn(get = "path", return_raw)]
+    #[rhai_fn(get = "path", pure, return_raw)]
     pub(crate) fn uri_path_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.path())
     }
@@ -767,7 +739,7 @@ mod router_plugin {
     }
 
     // Uri.host
-    #[rhai_fn(get = "host", return_raw)]
+    #[rhai_fn(get = "host", pure, return_raw)]
     pub(crate) fn uri_host_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.host())
     }
@@ -796,7 +768,7 @@ mod router_plugin {
     }
 
     // Response.label
-    #[rhai_fn(get = "label")]
+    #[rhai_fn(get = "label", pure)]
     pub(crate) fn response_label_get(x: &mut Response) -> Dynamic {
         x.label.clone().map_or(Dynamic::UNIT, Dynamic::from)
     }
@@ -807,7 +779,7 @@ mod router_plugin {
     }
 
     // Response.data
-    #[rhai_fn(get = "data", return_raw)]
+    #[rhai_fn(get = "data", pure, return_raw)]
     pub(crate) fn response_data_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.data.clone())
     }
@@ -820,7 +792,7 @@ mod router_plugin {
 
     // Response.path (Not Implemented)
     // Response.errors
-    #[rhai_fn(get = "errors", return_raw)]
+    #[rhai_fn(get = "errors", pure, return_raw)]
     pub(crate) fn response_errors_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.errors.clone())
     }
@@ -835,7 +807,7 @@ mod router_plugin {
     }
 
     // Response.extensions
-    #[rhai_fn(get = "extensions", return_raw)]
+    #[rhai_fn(get = "extensions", pure, return_raw)]
     pub(crate) fn response_extensions_get(x: &mut Response) -> Result<Dynamic, Box<EvalAltResult>> {
         to_dynamic(x.extensions.clone())
     }
@@ -984,20 +956,20 @@ macro_rules! register_rhai_interface {
             // Originating Request
             $engine.register_get(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>| -> Result<RhaiHeaderMap, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|request| RhaiHeaderMap(request.supergraph_request.headers().clone())))
+                |obj: &mut SharedMut<$base::Request>| -> Result<HeaderMap, Box<EvalAltResult>> {
+                    Ok(obj.with_mut(|request| request.supergraph_request.headers().clone()))
                 }
             );
 
             $engine.register_set(
                 "headers",
-                |obj: &mut SharedMut<$base::Request>, headers:RhaiHeaderMap| {
+                |obj: &mut SharedMut<$base::Request>, headers: HeaderMap| {
                     if_subgraph! {
                         $base => {
                             let _unused = (obj, headers);
                             Err("cannot mutate originating request on a subgraph".into())
                         } else {
-                            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers.0);
+                            obj.with_mut(|request| *request.supergraph_request.headers_mut() = headers);
                             Ok(())
                         }
                     }
@@ -1143,7 +1115,7 @@ impl Rhai {
             // Register our base64 module (not global)
             .register_static_module("base64", base64_module.into())
             // Register HeaderMap as an iterator so we can loop over contents
-            .register_iterator::<RhaiHeaderMap>()
+            .register_iterator::<HeaderMap>()
             // Register a series of logging functions
             .register_fn("log_trace", move |message: Dynamic| {
                 tracing::trace!(%message, target = %trace_main);
