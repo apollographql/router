@@ -5425,3 +5425,41 @@ fn test_query_not_named_query() {
         "unexpected selection {selection:?}"
     );
 }
+
+#[tokio::test]
+async fn test_compiler_type_system() {
+    let schema = with_supergraph_boilerplate(
+        "type Query {
+        product: Product
+    }
+
+    type Product {
+        id: String!
+        name: String
+    }",
+    );
+    let schema = Schema::parse_test(&schema, &Default::default()).expect("could not parse schema");
+
+    let query = Query::parse(
+        "{
+            product {
+                id
+            }
+        }",
+        &schema,
+        &Default::default(),
+    )
+    .unwrap();
+
+    let compiler = query.compiler.get().unwrap().lock().await;
+    assert_eq!(
+        compiler
+            .db
+            .type_system()
+            .definitions
+            .schema
+            .root_operations()
+            .count(),
+        1
+    );
+}
