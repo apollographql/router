@@ -160,30 +160,46 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 router_service_factory,
                 all_connections_stopped_signal: _,
             } => {
-                tracing::info!("reloading");
+                tracing::info!("processing 'Running' state");
 
                 if new_entitlement == Some(EntitlementState::Unentitled)
                     && *entitlement != EntitlementState::Unentitled
                 {
                     // When we get an unentitled event, if we were entitled before then just carry on.
                     // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                    tracing::debug!("loss of entitlement detected, ignoring");
+                    tracing::info!("loss of entitlement detected, ignoring 'Running' state change");
                     return self;
                 }
 
-                // We update the running config. This is OK even in the case that the router could not reload as we always want to retain the latest information for when we try to reload next.
-                // In the case of a failed reload the server handle is retained, which has the old config/schema/entitlements in.
+                // There may be multiple triggers for a new Running state
+                let mut configuration_changed = false;
+                let mut entitlement_changed = false;
+                let mut schema_changed = false;
+
+                // We update the running config. This is OK even in the case that the router could not process the config as we always want to retain the latest information.
+                // In the case of failure the server handle is retained, which has the old config/schema/entitlements in.
                 if let Some(new_configuration) = new_configuration {
+                    configuration_changed = true;
                     *configuration = new_configuration;
                 }
                 if let Some(new_schema) = new_schema {
+                    schema_changed = true;
                     *schema = new_schema;
                 }
                 if let Some(new_entitlement) = new_entitlement {
+                    entitlement_changed = true;
                     *entitlement = new_entitlement;
                 }
 
+                tracing::info!(
+                    configuration_changed,
+                    schema_changed,
+                    entitlement_changed,
+                    "reloading causes"
+                );
+
                 let mut guard = state_machine.listen_addresses.clone().write_owned().await;
+
                 new_state = match Self::try_start(
                     state_machine,
                     server_handle,
@@ -196,18 +212,18 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 .await
                 {
                     Ok(new_state) => {
-                        tracing::info!("reload complete");
+                        tracing::info!("'Running' state change processed successfully");
                         Some(new_state)
                     }
                     Err(e) => {
                         // If we encountered an error it may be fatal depending on if we consumed the server handle or not.
                         match server_handle {
                             None => {
-                                tracing::error!("fatal error while trying to reload; {}", e);
+                                tracing::error!("fatal error while trying to process 'Running' state change; {}", e);
                                 Some(Errored(e))
                             }
                             Some(_) => {
-                                tracing::info!("error while reloading, continuing with previous configuration; {}", e);
+                                tracing::info!("error while processing 'Running' state change, continuing with previous configuration; {}", e);
                                 None
                             }
                         }
