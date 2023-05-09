@@ -468,6 +468,7 @@ async fn handle_graphql(
         Ok(response) => {
             tracing::info!(counter.apollo_router_session_count_active = -1,);
             let (mut parts, body) = response.response.into_parts();
+            //println!("response parts before compression: {parts:?}");
 
             let opt_compressor = accept_encoding
                 .as_ref()
@@ -483,6 +484,7 @@ async fn handle_graphql(
                     Body::wrap_stream(compressor.process(body))
                 }
             };
+            //println!("response parts after compression: {parts:?}");
 
             http::Response::from_parts(parts, body).into_response()
         }

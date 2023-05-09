@@ -79,8 +79,7 @@ where {
                         }
                     }
                     Ok(data) => {
-                        // most compression algorithms have a compression ratio of more than 90% for JSON
-                        let mut buf = BytesMut::zeroed(data.len() / 10);
+                        let mut buf = BytesMut::zeroed(data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
                         let mut partial_output = PartialBuffer::new(&mut buf);
@@ -94,24 +93,41 @@ where {
                                 // there was not enough space in the output buffer to compress everything,
                                 // so we resize and add more data
                                 if partial_output.unwritten().is_empty() {
+                                    println!(
+                                        "extending partial output by {} bytes",
+                                        partial_input.unwritten().len() / 10
+                                    );
                                     partial_output.extend(partial_input.unwritten().len() / 10);
                                 }
                             } else {
-                                match self.flush(&mut partial_output) {
-                                    Err(e) => {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    Ok(_) => {
-                                        let len = partial_output.written().len();
-                                        let _ = partial_output.into_inner();
-                                        buf.resize(len, 0);
-                                        if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                loop {
+                                    match self.flush(&mut partial_output) {
+                                        Err(e) => {
+                                            let _ = tx.send(Err(e.into())).await;
                                             return;
                                         }
-                                        break;
+                                        Ok(flushed) => {
+                                            if !flushed {
+                                                if partial_output.unwritten().is_empty() {
+                                                    partial_output
+                                                        .extend(partial_output.written().len());
+                                                }
+                                                continue;
+                                            } else {
+                                                break;
+                                            }
+                                        }
                                     }
                                 }
+
+                                let len = partial_output.written().len();
+                                let _ = partial_output.into_inner();
+                                buf.resize(len, 0);
+
+                                if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                    return;
+                                }
+                                break;
                             }
                         }
                     }
