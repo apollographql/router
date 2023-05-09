@@ -204,6 +204,7 @@ impl Encode for Compressor {
 #[cfg(test)]
 mod tests {
     use async_compression::tokio::write::GzipDecoder;
+    use futures::stream;
     use hyper::Body;
     use rand::Rng;
     use tokio::io::AsyncWriteExt;
@@ -242,5 +243,54 @@ mod tests {
 
         let mut stream = compressor.process(body);
         let _ = stream.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn flush() {
+        let primary_response = r#"
+--graphql
+content-type: application/json
+
+{"data":{"allProducts":[{"sku":"federation","id":"apollo-federation"},{"sku":"studio","id":"apollo-studio"},{"sku":"client","id":"apollo-client"}]},"hasNext":true}
+--graphql
+"#;
+        let deferred_response = r#"content-type: application/json
+
+{"hasNext":false,"incremental":[{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"platform"}},"path":["allProducts",0]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"platform","name":"platform-name"}},"path":["allProducts",1]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"client"}},"path":["allProducts",2]}]}
+--graphql--
+"#;
+
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let body: Body = Body::wrap_stream(stream::iter(vec![
+            Ok::<_, BoxError>(Bytes::from(primary_response)),
+            Ok(Bytes::from(deferred_response)),
+        ]));
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        let first = stream.next().await.unwrap().unwrap();
+        decoder.write_all(&first).await.unwrap();
+
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(decoder.get_ref()).unwrap(),
+            primary_response
+        );
+
+        let second = stream.next().await.unwrap().unwrap();
+        decoder.write_all(&second).await.unwrap();
+
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+
+        let mut full_response = String::from(primary_response);
+        full_response += deferred_response;
+        assert_eq!(
+            std::str::from_utf8(decoder.get_ref()).unwrap(),
+            full_response
+        );
     }
 }
