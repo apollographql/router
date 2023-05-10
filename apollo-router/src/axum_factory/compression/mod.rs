@@ -107,14 +107,12 @@ where {
                                             return;
                                         }
                                         Ok(flushed) => {
-                                            if !flushed {
-                                                if partial_output.unwritten().is_empty() {
-                                                    partial_output
-                                                        .extend(partial_output.written().len());
-                                                }
-                                                continue;
-                                            } else {
+                                            if flushed {
                                                 break;
+                                            }
+                                            if partial_output.unwritten().is_empty() {
+                                                partial_output
+                                                    .extend(partial_output.written().len());
                                             }
                                         }
                                     }
