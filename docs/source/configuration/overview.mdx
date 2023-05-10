@@ -550,48 +550,6 @@ example:
   password: "${env.MY_PASSWORD}" #highlight-line
 ```
 
-### Parser limits
-You can specify GraphQL parser-specific limits in your router's [YAML config file](./configuration/overview/#yaml-config-file), like so:
-
-```yaml title="router.yaml"
-preview_operation_limits:
-  parser_max_recursion: 6000
-  parser_max_tokens: 20000
-```
-
-For other operation limits see [Enforcing operation limits in the Apollo Router](./configuration/operation-limits/).
-
-#### `parser_max_recursion`
-Limits recursion in the parser to prevent stack overflows. Recursion is counted based on how nested a given GraphQL Definition is, specifically focusing Operation Definitions and Fragment Definitions. Each definition is counted separately, as the parser parses them separately.
-
-This limit has existed in the router as `experimental_parser_recursion_limit`. It has been renamed to `parser_max_recursion`.
-
-The router sets a default of **4_096** recursions.
-
-In the following example, `getProducts` Operation Definition has a recursion of three, whereas `productVariation` Fragment Definition has a recursion of two:
-
-```graphql
-query getProducts {
-  allProducts { #1
-    ...productVariation
-    delivery { #2
-        fastestDelivery #3
-    }
-  }
-}
-
-fragment productVariation on Product {
-  variation { #1
-    name #2
-  }
-}
-```
-
-#### `parser_max_tokens`
-Limits the number of tokens an operation can have. This counts _all_ tokens, including [ignored tokens](https://spec.graphql.org/October2021/#sec-Appendix-Grammar-Summary.Ignored-Tokens).
-
-The router sets a default of **15_000** tokens.
-
 ### Reusing configuration
 
 You can reuse parts of your configuration file in multiple places using standard YAML aliasing syntax:
