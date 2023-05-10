@@ -93,10 +93,6 @@ where {
                                 // there was not enough space in the output buffer to compress everything,
                                 // so we resize and add more data
                                 if partial_output.unwritten().is_empty() {
-                                    println!(
-                                        "extending partial output by {} bytes",
-                                        partial_input.unwritten().len() / 10
-                                    );
                                     partial_output.extend(partial_input.unwritten().len() / 10);
                                 }
                             } else {
