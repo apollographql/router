@@ -1,5 +1,5 @@
 {
-  "title": "Router",
+  "title": "Router (self-hosted)",
   "algoliaFilters": [
     "docset:router"
   ],
@@ -40,6 +40,13 @@
           "/configuration/authn-jwt",
           [
             "enterprise"
+          ]
+        ],
+        "Operation limits": [
+          "/configuration/operation-limits",
+          [
+            "enterprise",
+            "preview"
           ]
         ],
         "Privacy and data collection": "/privacy"

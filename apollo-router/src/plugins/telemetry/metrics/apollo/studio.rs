@@ -76,7 +76,7 @@ pub(crate) struct SingleFieldStat {
     pub(crate) latency: DurationHistogram<f64>,
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct ContextualizedStats {
     context: StatsContext,
     query_latency_stats: QueryLatencyStats,
@@ -93,7 +93,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct QueryLatencyStats {
     request_latencies: DurationHistogram,
     persisted_query_hits: u64,
@@ -130,7 +130,7 @@ impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct PathErrorStats {
     children: HashMap<String, PathErrorStats>,
     errors_count: u64,
@@ -147,7 +147,7 @@ impl AddAssign<SinglePathErrorStats> for PathErrorStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TypeStat {
     per_field_stat: HashMap<String, FieldStat>,
 }
@@ -160,7 +160,7 @@ impl AddAssign<SingleTypeStat> for TypeStat {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,

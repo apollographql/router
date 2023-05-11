@@ -8,7 +8,7 @@ use serde::Serialize;
 /// It can be either `u64` for exact counts (where the `value` parameter
 /// of `increment_duration` is typically `1`), or `f64` for estimations
 /// that compensate for a sampling rate.
-#[derive(Serialize, Debug)]
+#[derive(Clone, Serialize, Debug)]
 pub(crate) struct DurationHistogram<T = u64> {
     /// `Vec` indices represents a duration bucket.
     /// `Vec` items are the sums of values in each bucket.

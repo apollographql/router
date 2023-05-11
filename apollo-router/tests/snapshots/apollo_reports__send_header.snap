@@ -32,7 +32,6 @@ traces_per_query:
         client_version: ""
         operation_type: query
         operation_subtype: ""
-        agent_version: "[agent_version]"
         http:
           method: 4
           request_headers:
@@ -178,7 +177,6 @@ traces_per_query:
                         client_version: ""
                         operation_type: ""
                         operation_subtype: ""
-                        agent_version: "[agent_version]"
                         http: ~
                         cache_policy: ~
                         query_plan: ~
@@ -422,7 +420,6 @@ traces_per_query:
                               client_version: ""
                               operation_type: ""
                               operation_subtype: ""
-                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~
@@ -530,7 +527,6 @@ traces_per_query:
                               client_version: ""
                               operation_type: ""
                               operation_subtype: ""
-                              agent_version: "[agent_version]"
                               http: ~
                               cache_policy: ~
                               query_plan: ~

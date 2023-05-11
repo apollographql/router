@@ -19,6 +19,9 @@ use futures::channel::oneshot;
 use futures::future::join;
 use futures::future::join_all;
 use futures::prelude::*;
+use http::header::ACCEPT_ENCODING;
+use http::header::CONTENT_ENCODING;
+use http::HeaderValue;
 use http::Request;
 use http_body::combinators::UnsyncBoxBody;
 use hyper::Body;
@@ -32,10 +35,6 @@ use tokio_rustls::TlsAcceptor;
 use tower::service_fn;
 use tower::BoxError;
 use tower::ServiceExt;
-use tower_http::compression::predicate::NotForContentType;
-use tower_http::compression::CompressionLayer;
-use tower_http::compression::DefaultPredicate;
-use tower_http::compression::Predicate;
 use tower_http::trace::TraceLayer;
 
 use super::listeners::ensure_endpoints_consistency;
@@ -45,6 +44,7 @@ use super::listeners::ListenersAndRouters;
 use super::utils::decompress_request_body;
 use super::utils::PropagatingMakeSpan;
 use super::ListenAddrAndRouter;
+use crate::axum_factory::compression::Compressor;
 use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
@@ -329,12 +329,7 @@ where
         ))
         .layer(TraceLayer::new_for_http().make_span_with(PropagatingMakeSpan { entitlement }))
         .layer(Extension(service_factory))
-        .layer(cors)
-        // Compress the response body, except for multipart responses such as with `@defer`.
-        // This is a work-around for https://github.com/apollographql/router/issues/1572
-        .layer(CompressionLayer::new().compress_when(
-            DefaultPredicate::new().and(NotForContentType::const_new("multipart/")),
-        ));
+        .layer(cors);
 
     let route = endpoints_on_main_listener
         .into_iter()
@@ -434,6 +429,11 @@ async fn handle_graphql(
 
     let request: router::Request = http_request.into();
     let context = request.context.clone();
+    let accept_encoding = request
+        .router_request
+        .headers()
+        .get(ACCEPT_ENCODING)
+        .cloned();
 
     let res = service.oneshot(request).await;
     let dur = context.busy_time();
@@ -467,7 +467,24 @@ async fn handle_graphql(
         }
         Ok(response) => {
             tracing::info!(counter.apollo_router_session_count_active = -1,);
-            response.response.into_response()
+            let (mut parts, body) = response.response.into_parts();
+
+            let opt_compressor = accept_encoding
+                .as_ref()
+                .and_then(|value| value.to_str().ok())
+                .and_then(|v| Compressor::new(v.split(',').map(|s| s.trim())));
+            let body = match opt_compressor {
+                None => body,
+                Some(compressor) => {
+                    parts.headers.insert(
+                        CONTENT_ENCODING,
+                        HeaderValue::from_static(compressor.content_encoding()),
+                    );
+                    Body::wrap_stream(compressor.process(body))
+                }
+            };
+
+            http::Response::from_parts(parts, body).into_response()
         }
     }
 }
