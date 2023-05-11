@@ -79,8 +79,7 @@ where {
                         }
                     }
                     Ok(data) => {
-                        // most compression algorithms have a compression ratio of more than 90% for JSON
-                        let mut buf = BytesMut::zeroed(data.len() / 10);
+                        let mut buf = BytesMut::zeroed(data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
                         let mut partial_output = PartialBuffer::new(&mut buf);
@@ -97,21 +96,32 @@ where {
                                     partial_output.extend(partial_input.unwritten().len() / 10);
                                 }
                             } else {
-                                match self.flush(&mut partial_output) {
-                                    Err(e) => {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    Ok(_) => {
-                                        let len = partial_output.written().len();
-                                        let _ = partial_output.into_inner();
-                                        buf.resize(len, 0);
-                                        if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                loop {
+                                    match self.flush(&mut partial_output) {
+                                        Err(e) => {
+                                            let _ = tx.send(Err(e.into())).await;
                                             return;
                                         }
-                                        break;
+                                        Ok(flushed) => {
+                                            if flushed {
+                                                break;
+                                            }
+                                            if partial_output.unwritten().is_empty() {
+                                                partial_output
+                                                    .extend(partial_output.written().len());
+                                            }
+                                        }
                                     }
                                 }
+
+                                let len = partial_output.written().len();
+                                let _ = partial_output.into_inner();
+                                buf.resize(len, 0);
+
+                                if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                    return;
+                                }
+                                break;
                             }
                         }
                     }
@@ -188,6 +198,7 @@ impl Encode for Compressor {
 #[cfg(test)]
 mod tests {
     use async_compression::tokio::write::GzipDecoder;
+    use futures::stream;
     use hyper::Body;
     use rand::Rng;
     use tokio::io::AsyncWriteExt;
@@ -226,5 +237,54 @@ mod tests {
 
         let mut stream = compressor.process(body);
         let _ = stream.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn flush() {
+        let primary_response = r#"
+--graphql
+content-type: application/json
+
+{"data":{"allProducts":[{"sku":"federation","id":"apollo-federation"},{"sku":"studio","id":"apollo-studio"},{"sku":"client","id":"apollo-client"}]},"hasNext":true}
+--graphql
+"#;
+        let deferred_response = r#"content-type: application/json
+
+{"hasNext":false,"incremental":[{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"platform"}},"path":["allProducts",0]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"platform","name":"platform-name"}},"path":["allProducts",1]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"client"}},"path":["allProducts",2]}]}
+--graphql--
+"#;
+
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let body: Body = Body::wrap_stream(stream::iter(vec![
+            Ok::<_, BoxError>(Bytes::from(primary_response)),
+            Ok(Bytes::from(deferred_response)),
+        ]));
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        let first = stream.next().await.unwrap().unwrap();
+        decoder.write_all(&first).await.unwrap();
+
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(decoder.get_ref()).unwrap(),
+            primary_response
+        );
+
+        let second = stream.next().await.unwrap().unwrap();
+        decoder.write_all(&second).await.unwrap();
+
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+
+        let mut full_response = String::from(primary_response);
+        full_response += deferred_response;
+        assert_eq!(
+            std::str::from_utf8(decoder.get_ref()).unwrap(),
+            full_response
+        );
     }
 }
