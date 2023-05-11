@@ -5421,9 +5421,10 @@ fn test_query_not_named_query() {
         matches!(
             selection,
             Selection::Field {
-                field_type: FieldType::Boolean,
+                field_type: FieldType(hir::Type::Named { name, .. }),
                 ..
             }
+            if name == "Boolean"
         ),
         "unexpected selection {selection:?}"
     );

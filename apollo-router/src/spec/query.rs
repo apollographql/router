@@ -331,11 +331,11 @@ impl Query {
     fn format_value<'a: 'b, 'b>(
         &'a self,
         parameters: &mut FormatParameters,
-        field_type: &FieldType,
+        field_type: &hir::Type,
         input: &mut Value,
         output: &mut Value,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &FieldType,
+        parent_type: &hir::Type,
         selection_set: &'a [Selection],
     ) -> Result<(), InvalidValue> {
         // for every type, if we have an invalid value, we will replace it with null
@@ -344,7 +344,7 @@ impl Query {
             // for non null types, we validate with the inner type, then if we get an InvalidValue
             // we set it to null and immediately return an error instead of Ok(()), because we
             // want the error to go up until the next nullable parent
-            FieldType::NonNull(inner_type) => {
+            hir::Type::NonNull { ty: inner_type, .. } => {
                 match self.format_value(
                     parameters,
                     inner_type,
@@ -384,7 +384,7 @@ impl Query {
             // and should replace the entire list with null
             // if the types are nullable, the inner call to filter_errors will take care
             // of setting the current entry to null
-            FieldType::List(inner_type) => match input {
+            hir::Type::List { ty: inner_type, .. } => match input {
                 Value::Array(input_array) => {
                     if output.is_null() {
                         *output = Value::Array(
@@ -421,8 +421,59 @@ impl Query {
                 }
                 _ => Ok(()),
             },
+            hir::Type::Named { name, .. } if name == "Int" => {
+                let opt = if input.is_i64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else if input.is_u64() {
+                    input.as_i64().and_then(|i| i32::try_from(i).ok())
+                } else {
+                    None
+                };
 
-            FieldType::Named(type_name) | FieldType::Introspection(type_name) => {
+                // if the value is invalid, we do not insert it in the output object
+                // which is equivalent to inserting null
+                if opt.is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "Float" => {
+                if input.as_f64().is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "Boolean" => {
+                if input.as_bool().is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "String" => {
+                if input.as_str().is_some() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named { name, .. } if name == "Id" => {
+                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
+                    *output = input.clone();
+                } else {
+                    *output = Value::Null;
+                }
+                Ok(())
+            }
+            hir::Type::Named {
+                name: type_name, ..
+            } => {
                 let definitions = &parameters.schema.type_system.definitions;
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
@@ -478,7 +529,7 @@ impl Query {
                                 input_object,
                                 output_object,
                                 path,
-                                &FieldType::Named(type_name.to_string()),
+                                field_type,
                             )
                             .is_err()
                         {
@@ -495,58 +546,6 @@ impl Query {
                     }
                 }
             }
-
-            // the rest of the possible types just need to validate the expected value
-            FieldType::Int => {
-                let opt = if input.is_i64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
-                } else if input.is_u64() {
-                    input.as_i64().and_then(|i| i32::try_from(i).ok())
-                } else {
-                    None
-                };
-
-                // if the value is invalid, we do not insert it in the output object
-                // which is equivalent to inserting null
-                if opt.is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::Float => {
-                if input.as_f64().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::Boolean => {
-                if input.as_bool().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::String => {
-                if input.as_str().is_some() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
-            FieldType::Id => {
-                if input.is_string() || input.is_i64() || input.is_u64() || input.is_f64() {
-                    *output = input.clone();
-                } else {
-                    *output = Value::Null;
-                }
-                Ok(())
-            }
         }
     }
 
@@ -557,7 +556,7 @@ impl Query {
         input: &mut Object,
         output: &mut Object,
         path: &mut Vec<ResponsePathElement<'b>>,
-        parent_type: &FieldType,
+        parent_type: &hir::Type,
     ) -> Result<(), InvalidValue> {
         // For skip and include, using .unwrap_or is legit here because
         // validate_variables should have already checked that
@@ -608,7 +607,7 @@ impl Query {
                             path.push(ResponsePathElement::Key(field_name.as_str()));
                             let res = self.format_value(
                                 parameters,
-                                field_type,
+                                &field_type.0,
                                 input_value,
                                 output_value,
                                 path,
@@ -770,11 +769,11 @@ impl Query {
                         path.push(ResponsePathElement::Key(field_name_str));
                         let res = self.format_value(
                             parameters,
-                            field_type,
+                            &field_type.0,
                             input_value,
                             output_value,
                             path,
-                            field_type,
+                            &field_type.0,
                             selection_set,
                         );
                         path.pop();
@@ -823,7 +822,7 @@ impl Query {
                         input,
                         output,
                         path,
-                        &FieldType::Named(type_condition.clone()),
+                        &FieldType::new_named(type_condition).0,
                     )?;
                 }
                 Selection::FragmentSpread {
@@ -861,7 +860,7 @@ impl Query {
                             input,
                             output,
                             path,
-                            &FieldType::Named(operation_type_name.into()),
+                            &FieldType::new_named(operation_type_name).0,
                         )?;
                     } else {
                         // the fragment should have been already checked with the schema
@@ -1045,7 +1044,7 @@ impl Operation {
         if kind == OperationKind::Subscription {
             return Err(SpecError::SubscriptionNotSupported);
         }
-        let current_field_type = FieldType::Named(schema.root_operation_name(kind).to_owned());
+        let current_field_type = FieldType::new_named(schema.root_operation_name(kind));
         let selection_set = operation
             .selection_set()
             .selection()

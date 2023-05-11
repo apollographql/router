@@ -58,9 +58,9 @@ impl Selection {
                     return Ok(None);
                 }
                 let field_type = match field.name() {
-                    TYPENAME => FieldType::String,
-                    "__schema" => FieldType::Introspection("__Schema".to_string()),
-                    "__type" => FieldType::Introspection("__Type".to_string()),
+                    TYPENAME => FieldType::new_named("String"),
+                    "__schema" => FieldType::new_named("__Schema"),
+                    "__type" => FieldType::new_named("__Type"),
                     field_name => {
                         let name = current_type
                             .inner_type_name()
@@ -131,7 +131,7 @@ impl Selection {
                     .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
                     .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
 
-                let fragment_type = FieldType::Named(type_condition.clone());
+                let fragment_type = FieldType::new_named(type_condition.clone());
 
                 let selection_set = inline_fragment
                     .selection_set()
