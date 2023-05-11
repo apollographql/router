@@ -184,6 +184,18 @@ impl Expansion {
                 default.default.clone()
             };
 
+            let config_value_from_path =
+                jsonpath_lib::select(config, &format!("$.{}", default.config_path))
+                    .unwrap_or_default();
+
+            if default.env_name.is_some()
+                && !config_value_from_path.is_empty()
+                && value == default.default
+                && value != *config_value_from_path[0]
+            {
+                continue;
+            }
+
             transformer_builder = transformer_builder.add_action(
                 Parser::parse(&format!("const({value})"), &default.config_path)
                     .expect("migration must be valid"),

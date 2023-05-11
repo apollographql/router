@@ -5,5 +5,5 @@ expression: value
 defaulted: defaulted
 expanded: expanded
 no_env: defaulted
-overridden: defaulted
+overridden: overridden
 
