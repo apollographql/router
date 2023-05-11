@@ -423,15 +423,16 @@ impl Query {
             },
 
             FieldType::Named(type_name) | FieldType::Introspection(type_name) => {
+                let definitions = &parameters.schema.type_system.definitions;
                 // we cannot know about the expected format of custom scalars
                 // so we must pass them directly to the client
-                if parameters.schema.custom_scalars.contains(type_name) {
+                if definitions.scalars.contains_key(type_name) {
                     *output = input.clone();
                     return Ok(());
-                } else if let Some(enum_type) = parameters.schema.enums.get(type_name) {
+                } else if let Some(enum_type) = definitions.enums.get(type_name) {
                     return match input.as_str() {
                         Some(s) => {
-                            if enum_type.contains(s) {
+                            if enum_type.value(s).is_some() {
                                 *output = input.clone();
                                 Ok(())
                             } else {
@@ -451,12 +452,13 @@ impl Query {
                         if let Some(input_type) =
                             input_object.get(TYPENAME).and_then(|val| val.as_str())
                         {
+                            let definitions = &parameters.schema.type_system.definitions;
                             // If there is a __typename, make sure the pointed type is a valid type of the schema. Otherwise, something is wrong, and in case we might
                             // be inadvertently leaking some data for an @inacessible type or something, nullify the whole object. However, do note that due to `@interfaceObject`,
                             // some subgraph can have returned a __typename that is the name of an interface in the supergraph, and this is fine (that is, we should not
                             // return such a __typename to the user, but as long as it's not returned, having it in the internal data is ok and sometimes expected).
-                            if !parameters.schema.object_types.contains_key(input_type)
-                                && !parameters.schema.interfaces.contains_key(input_type)
+                            if !definitions.objects.contains_key(input_type)
+                                && !definitions.interfaces.contains_key(input_type)
                             {
                                 parameters.nullified.push(Path::from_response_slice(path));
                                 *output = Value::Null;
@@ -590,7 +592,13 @@ impl Query {
                             output.entry((*field_name).clone()).or_insert(Value::Null);
                         if name.as_str() == TYPENAME {
                             if let Some(input_str) = input_value.as_str() {
-                                if parameters.schema.object_types.contains_key(input_str) {
+                                if parameters
+                                    .schema
+                                    .type_system
+                                    .definitions
+                                    .objects
+                                    .contains_key(input_str)
+                                {
                                     *output_value = input_value.clone();
                                 } else {
                                     return Err(InvalidValue);

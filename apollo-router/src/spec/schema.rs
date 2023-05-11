@@ -1,7 +1,6 @@
 //! GraphQL schema.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -31,8 +30,6 @@ pub(crate) struct Schema {
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
     pub(crate) input_types: HashMap<String, InputObjectType>,
-    pub(crate) custom_scalars: HashSet<String>,
-    pub(crate) enums: HashMap<String, HashSet<String>>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
     root_operations: HashMap<OperationKind, String>,
@@ -144,19 +141,6 @@ impl Schema {
             .map(|(name, def)| (name.clone(), (&**def).into()))
             .collect();
 
-        let enums = compiler
-            .db
-            .enums_with_built_ins()
-            .iter()
-            .map(|(name, def)| {
-                let values = def
-                    .values()
-                    .map(|value| value.enum_value().to_owned())
-                    .collect();
-                (name.clone(), values)
-            })
-            .collect();
-
         let root_operations = compiler
             .db
             .schema()
@@ -177,14 +161,6 @@ impl Schema {
             })
             .collect();
 
-        let custom_scalars = compiler
-            .db
-            .scalars()
-            .iter()
-            .filter(|(_name, def)| !def.is_built_in())
-            .map(|(name, _def)| name.clone())
-            .collect();
-
         let mut hasher = Sha256::new();
         hasher.update(schema.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
@@ -196,8 +172,6 @@ impl Schema {
             object_types,
             interfaces,
             input_types,
-            custom_scalars,
-            enums,
             api_schema: None,
             schema_id,
             root_operations,
@@ -499,14 +473,13 @@ mod tests {
     fn api_schema() {
         let schema = include_str!("../testdata/contract_schema.graphql");
         let schema = Schema::parse_test(schema, &Default::default()).unwrap();
-        assert!(schema.object_types["Product"]
-            .fields
-            .get("inStock")
-            .is_some());
-        assert!(schema.api_schema.unwrap().object_types["Product"]
-            .fields
-            .get("inStock")
-            .is_none());
+        let has_in_stock_field = |schema: &Schema| {
+            schema.type_system.definitions.objects["Product"]
+                .fields()
+                .any(|f| f.name() == "inStock")
+        };
+        assert!(has_in_stock_field(&schema));
+        assert!(!has_in_stock_field(schema.api_schema.as_ref().unwrap()));
     }
 
     #[test]

@@ -103,7 +103,8 @@ impl FieldType {
                 }
             }
             (FieldType::Named(name), _)
-                if schema.custom_scalars.contains(name) || schema.enums.contains_key(name) =>
+                if schema.type_system.definitions.scalars.contains_key(name)
+                    || schema.type_system.definitions.enums.contains_key(name) =>
             {
                 Ok(())
             }
