@@ -14,11 +14,7 @@ use sha2::Sha256;
 
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::json_ext::Object;
-use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
-use crate::spec::query::parse_hir_value;
-use crate::spec::FieldType;
 use crate::Configuration;
 
 /// A GraphQL schema.
@@ -27,12 +23,8 @@ pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) object_types: HashMap<String, ObjectType>,
-    pub(crate) interfaces: HashMap<String, Interface>,
-    pub(crate) input_types: HashMap<String, InputObjectType>,
     api_schema: Option<Box<Schema>>,
     pub(crate) schema_id: Option<String>,
-    root_operations: HashMap<OperationKind, String>,
 }
 
 #[cfg(test)]
@@ -120,47 +112,6 @@ impl Schema {
             }
         }
 
-        let object_types: HashMap<_, _> = compiler
-            .db
-            .object_types_with_built_ins()
-            .iter()
-            .map(|(name, def)| (name.clone(), (&**def).into()))
-            .collect();
-
-        let interfaces: HashMap<_, _> = compiler
-            .db
-            .interfaces()
-            .iter()
-            .map(|(name, def)| (name.clone(), (&**def).into()))
-            .collect();
-
-        let input_types: HashMap<_, _> = compiler
-            .db
-            .input_objects()
-            .iter()
-            .map(|(name, def)| (name.clone(), (&**def).into()))
-            .collect();
-
-        let root_operations = compiler
-            .db
-            .schema()
-            .root_operations()
-            .filter(|def| def.loc().is_some()) // exclude implict operations
-            .map(|def| {
-                (
-                    def.operation_ty().into(),
-                    if let hir::Type::Named { name, .. } = def.named_type() {
-                        name.clone()
-                    } else {
-                        // FIXME: hir::RootOperationTypeDefinition should contain
-                        // the name directly, not a `Type` enum value which happens to always
-                        // be the `Named` variant.
-                        unreachable!()
-                    },
-                )
-            })
-            .collect();
-
         let mut hasher = Sha256::new();
         hasher.update(schema.as_bytes());
         let schema_id = Some(format!("{:x}", hasher.finalize()));
@@ -169,12 +120,8 @@ impl Schema {
             raw_sdl: Arc::new(schema.into()),
             type_system: compiler.db.type_system(),
             subgraphs,
-            object_types,
-            interfaces,
-            input_types,
             api_schema: None,
             schema_id,
-            root_operations,
         })
     }
 }
@@ -206,96 +153,18 @@ impl Schema {
     }
 
     pub(crate) fn root_operation_name(&self, kind: OperationKind) -> &str {
-        self.root_operations
-            .get(&kind)
-            .map(|s| s.as_str())
-            .unwrap_or_else(|| kind.as_str())
+        let schema_def = &self.type_system.definitions.schema;
+        match kind {
+            OperationKind::Query => schema_def.query(),
+            OperationKind::Mutation => schema_def.mutation(),
+            OperationKind::Subscription => schema_def.subscription(),
+        }
+        .unwrap_or_else(|| kind.as_str())
     }
 }
 
 #[derive(Debug)]
 pub(crate) struct InvalidObject;
-
-#[derive(Debug, Clone)]
-pub(crate) struct ObjectType {
-    pub(crate) fields: HashMap<String, FieldType>,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct Interface {
-    pub(crate) fields: HashMap<String, FieldType>,
-}
-
-macro_rules! implement_object_type_or_interface {
-    ($name:ident => $hir_ty:ty $(,)?) => {
-        impl From<&'_ $hir_ty> for $name {
-            fn from(def: &'_ $hir_ty) -> Self {
-                Self {
-                    fields: def
-                        .fields()
-                        .map(|field| (field.name().to_owned(), field.ty().into()))
-                        .collect(),
-                }
-            }
-        }
-    };
-}
-
-// Spec: https://spec.graphql.org/draft/#sec-Objects
-// Spec: https://spec.graphql.org/draft/#sec-Object-Extensions
-implement_object_type_or_interface!(
-    ObjectType =>
-    hir::ObjectTypeDefinition,
-);
-// Spec: https://spec.graphql.org/draft/#sec-Interfaces
-// Spec: https://spec.graphql.org/draft/#sec-Interface-Extensions
-implement_object_type_or_interface!(
-    Interface =>
-    hir::InterfaceTypeDefinition,
-);
-
-#[derive(Debug, Clone)]
-pub(crate) struct InputObjectType {
-    pub(crate) fields: HashMap<String, (FieldType, Option<Value>)>,
-}
-
-impl InputObjectType {
-    pub(crate) fn validate_object(
-        &self,
-        object: &Object,
-        schema: &Schema,
-    ) -> Result<(), InvalidObject> {
-        self.fields
-            .iter()
-            .try_for_each(|(name, (ty, default_value))| {
-                let value = match object.get(name.as_str()) {
-                    Some(&Value::Null) | None => default_value.as_ref().unwrap_or(&Value::Null),
-                    Some(value) => value,
-                };
-                ty.validate_input_value(value, schema)
-            })
-            .map_err(|_| InvalidObject)
-    }
-}
-
-impl From<&'_ hir::InputObjectTypeDefinition> for InputObjectType {
-    fn from(def: &'_ hir::InputObjectTypeDefinition) -> Self {
-        InputObjectType {
-            fields: def
-                .fields()
-                .map(|field| {
-                    (
-                        field.name().to_owned(),
-                        (
-                            field.ty().into(),
-                            field.default_value().and_then(parse_hir_value),
-                        ),
-                    )
-                })
-                .collect(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

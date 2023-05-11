@@ -65,17 +65,18 @@ impl Selection {
                         let name = current_type
                             .inner_type_name()
                             .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
+                        let definitions = &schema.type_system.definitions;
                         //looking into object types
-                        schema
-                            .object_types
+                        definitions
+                            .objects
                             .get(name)
-                            .and_then(|ty| ty.fields.get(field_name))
+                            .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
                             // otherwise, it might be an interface
                             .or_else(|| {
-                                schema
+                                definitions
                                     .interfaces
                                     .get(name)
-                                    .and_then(|ty| ty.fields.get(field_name))
+                                    .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
                             })
                             .ok_or_else(|| {
                                 SpecError::InvalidField(
@@ -83,7 +84,8 @@ impl Selection {
                                     current_type.to_string(),
                                 )
                             })?
-                            .clone()
+                            .ty()
+                            .into()
                     }
                 };
 

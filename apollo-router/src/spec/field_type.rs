@@ -2,6 +2,7 @@ use apollo_compiler::hir;
 use serde::Deserialize;
 use serde::Serialize;
 
+use super::query::parse_hir_value;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
@@ -142,10 +143,21 @@ fn validate_input_value(
         (_, Value::Null) => Ok(()),
         (hir::Type::Named { name, .. }, value) => {
             if let Some(value) = value.as_object() {
-                if let Some(object_ty) = schema.input_types.get(name) {
-                    object_ty
-                        .validate_object(value, schema)
-                        .map_err(|_| InvalidValue)
+                if let Some(object_ty) = schema.type_system.definitions.input_objects.get(name) {
+                    object_ty.fields().try_for_each(|field| {
+                        let default: Value;
+                        let value = match value.get(field.name()) {
+                            Some(&Value::Null) | None => {
+                                default = field
+                                    .default_value()
+                                    .and_then(parse_hir_value)
+                                    .unwrap_or(Value::Null);
+                                &default
+                            }
+                            Some(value) => value,
+                        };
+                        validate_input_value(field.ty(), value, schema)
+                    })
                 } else {
                     Err(InvalidValue)
                 }
