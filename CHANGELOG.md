@@ -4,6 +4,40 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.18.0] - 2023-05-05
+
+## 🚀 Features
+
+### Introduced new metric which tracks query planning time
+
+We've introduced a `apollo_router_query_planning_time` histogram which captures time spent in the query planning phase.  This is documented along with our other metrics [in the documentation](https://www.apollographql.com/docs/router/configuration/metrics/#available-metrics).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2974
+
+## 🐛 Fixes
+
+### Small gzip'd responses no longer cause a panic
+
+A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
+
+By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3047
+
+### HTTP status codes are now returned in `SubrequestHttpError` as intended
+
+When contextually available, the HTTP status code is included within `SubrequestHttpError`. This provides plugins the ability to access the status code directly. Previously, only string parsing of the `reason` could be used to determine the status code.
+
+This corrects a previous contribution which added the status code, but neglected to serialize it properly into the `extensions` in the response which are made available to plugins.  Thank you to the same contributor for the correction!
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/3005
+
+## 📚 Documentation
+
+### Indicate that `apollo_router_cache_size` is a count of cache entries
+
+This follows-up [PR #2607](https://github.com/apollographql/router/pull/2607) which added `apollo_router_cache_size`.  It adds `apollo_router_cache_size` to [the documentation](https://www.apollographql.com/docs/router/configuration/metrics/#available-metrics) and indicates that this is the number of cache entries (that is, a count).
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3044
+
 # [1.17.0] - 2023-05-04
 
 ## 🚀 Features

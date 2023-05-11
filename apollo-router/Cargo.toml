@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router"
-version = "1.17.0"
+version = "1.18.0"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 repository = "https://github.com/apollographql/router/"
 documentation = "https://docs.rs/apollo-router"
