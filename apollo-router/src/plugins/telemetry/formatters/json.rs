@@ -3,10 +3,12 @@ use std::fmt;
 use std::fmt::Write;
 use std::io;
 
+use opentelemetry::trace::TraceId;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
 use tracing::span::Record;
+use tracing_core::Event;
 use tracing_core::Field;
 use tracing_subscriber::field;
 use tracing_subscriber::field::VisitOutput;
@@ -14,6 +16,9 @@ use tracing_subscriber::fmt::format::Writer;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::fmt::FormattedFields;
 
+use crate::json_ext::Object;
+
+use super::FormattingLayer;
 use super::TRACE_ID_FIELD_NAME;
 
 /// The JSON [`FormatFields`] implementation.
@@ -61,6 +66,38 @@ impl<'a> FormatFields<'a> for JsonFields {
         current.fields = new;
 
         Ok(())
+    }
+}
+
+impl<S> FormattingLayer<S> {
+    pub(super) fn format_json_event<W>(
+        &self,
+        mut writer: W,
+        event: &Event<'_>,
+        trace_id: Option<TraceId>,
+    ) -> io::Result<()>
+    where
+        W: std::io::Write,
+    {
+        /*let mut o = Object::new();
+        for field in event.fields() {
+
+        }
+        let mut event_value = serde_json::to_value(&event).unwrap();*/
+        /*let meta = event.metadata();
+                self.format_timestamp(&mut writer)?;
+                self.format_location(event, &mut writer)?;
+
+                self.format_level(meta.level(), &mut writer)?;
+                self.format_request_id(&mut writer, trace_id)?;
+                if self.display_target {
+                    self.format_target(meta.target(), &mut writer)?;
+                }
+
+                //let mut visitor = CustomVisitor::new(DefaultVisitor::new(writer.by_ref(), true));
+                //event.record(&mut visitor);
+        */
+        writeln!(writer)
     }
 }
 

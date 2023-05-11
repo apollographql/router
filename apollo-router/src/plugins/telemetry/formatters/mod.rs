@@ -177,4 +177,12 @@ where
             buf.resize(0, 0u8);
         });
     }
+
+    fn on_record(
+        &self,
+        _span: &tracing_core::span::Id,
+        _values: &tracing_core::span::Record<'_>,
+        _ctx: Context<'_, S>,
+    ) {
+    }
 }

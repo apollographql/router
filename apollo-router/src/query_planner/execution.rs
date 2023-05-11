@@ -5,7 +5,9 @@ use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast::Sender;
 use tokio_stream::wrappers::BroadcastStream;
+use tracing::event;
 use tracing::Instrument;
+use tracing::Level;
 
 use super::log;
 use super::DeferredNode;
@@ -96,7 +98,11 @@ impl PlanNode {
         sender: futures::channel::mpsc::Sender<Response>,
     ) -> future::BoxFuture<(Value, Option<String>, Vec<Error>)> {
         Box::pin(async move {
-            tracing::trace!("executing plan:\n{:#?}", self);
+            //tracing::info!("executing plan:\n{:#?}", self);
+            tracing::info!("executing plan {:?}", parent_value);
+            let error = 12345;
+            event!(Level::ERROR, %error, "Received error");
+
             let mut value;
             let mut errors;
             let mut subselection = None;

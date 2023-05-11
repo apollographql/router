@@ -220,8 +220,17 @@ where
         }
         let mut visitor = CustomVisitor::new(DefaultVisitor::new(writer.by_ref(), true));
         event.record(&mut visitor);
+        event.record(&mut TestVisit);
 
         writeln!(writer)
+    }
+}
+
+struct TestVisit;
+
+impl field::Visit for TestVisit {
+    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn fmt::Debug) {
+        println!("event recording field {field:?} = {value:?}");
     }
 }
 
@@ -290,7 +299,7 @@ impl<S> FormattingLayer<S> {
         self.format_location(event, &mut writer)?;
 
         self.format_level(meta.level(), &mut writer)?;
-        self.format_request_id(&mut writer, event, trace_id)?;
+        self.format_request_id(&mut writer, trace_id)?;
         if self.display_target {
             self.format_target(meta.target(), &mut writer)?;
         }
@@ -395,12 +404,7 @@ impl<S> FormattingLayer<S> {
     }
 
     #[inline]
-    fn format_request_id<W>(
-        &self,
-        writer: &mut W,
-        event: &Event<'_>,
-        trace_id: Option<TraceId>,
-    ) -> io::Result<()>
+    fn format_request_id<W>(&self, writer: &mut W, trace_id: Option<TraceId>) -> io::Result<()>
     where
         W: std::io::Write,
     {
@@ -421,4 +425,45 @@ impl<S> FormattingLayer<S> {
 
         Ok(())
     }
+}
+
+struct TextFieldVisitor<'a, W> {
+    writer: &'a mut W,
+}
+
+impl<'a, W: std::io::Write> Visit for TextFieldVisitor<'a, W> {
+    fn record_str(&mut self, field: &tracing_core::Field, value: &str) {
+        if field.name() == "message" {
+            self.record_debug(field, &format_args!("{}", value))
+        } else {
+            self.record_debug(field, &value)
+        }
+    }
+
+    fn record_debug(&mut self, field: &tracing_core::Field, value: &dyn fmt::Debug) {
+        match field.name() {
+            "message" => write!(self.writer, "{:?}", value),
+            // Skip fields that are actually log metadata that have already been handled
+            #[cfg(feature = "tracing-log")]
+            name if name.starts_with("log.") => Ok(()),
+            name if name.starts_with("r#") => write!(self.writer, "{}={:?}", &name[2..], value),
+            name => write!(self.writer, "{}={:?}", name, value),
+        };
+    }
+
+    fn record_error(
+        &mut self,
+        field: &tracing_core::Field,
+        value: &(dyn std::error::Error + 'static),
+    ) {
+        self.record_debug(field, &format_args!("{}", value))
+    }
+
+    fn record_f64(&mut self, field: &tracing_core::Field, value: f64) {}
+
+    fn record_i64(&mut self, field: &tracing_core::Field, value: i64) {}
+
+    fn record_u64(&mut self, field: &tracing_core::Field, value: u64) {}
+
+    fn record_bool(&mut self, field: &tracing_core::Field, value: bool) {}
 }

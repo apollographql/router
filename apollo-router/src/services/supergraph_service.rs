@@ -17,6 +17,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 use tower_service::Service;
+use tracing_core::Level;
 use tracing_futures::Instrument;
 
 use super::layers::content_negociation;
@@ -158,6 +159,14 @@ where
         },
     };
 
+    //tracing::error!("query plan", plan = content);
+    tracing::event!(
+        target: "query plan",
+        Level::ERROR,
+        ?content,
+        "errors: {:?}",
+        errors
+    );
     if !errors.is_empty() {
         return Ok(SupergraphResponse::builder()
             .context(context)
