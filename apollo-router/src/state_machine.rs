@@ -160,14 +160,19 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 router_service_factory,
                 all_connections_stopped_signal: _,
             } => {
-                tracing::info!("reloading");
+                tracing::info!(
+                    new_schema = new_schema.is_some(),
+                    new_entitlement = new_entitlement.is_some(),
+                    new_configuration = new_configuration.is_some(),
+                    "reloading"
+                );
 
                 if new_entitlement == Some(EntitlementState::Unentitled)
                     && *entitlement != EntitlementState::Unentitled
                 {
                     // When we get an unentitled event, if we were entitled before then just carry on.
                     // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                    tracing::debug!("loss of entitlement detected, ignoring");
+                    tracing::info!("loss of entitlement detected, ignoring reload");
                     return self;
                 }
 
