@@ -8,6 +8,14 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
+### Fix multipart response compression by using a large enough buffer
+
+When writing a deferred response, if the output buffer was too small to write the entire compressed response, the compressor would write a small chunk that did not decompress to the entire primary response, and would then wait for the next response to send the rest.
+
+Unfortunately, we cannot really know the output size we need in advance, and if we asked the decoder, it will tell us that it flushed all the data, even if it could have sent more.  To compensate for this, we raise the output buffer size, and do a second buffer growing step after flushing, if necessary.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3067
+
 ### Emit more log details to the state machine's `Running` phase ([Issue #3065](https://github.com/apollographql/router/issues/3065))
 
 This change adds details about the triggers of potential state changes to the logs and also makes it easier to see when an un-entitled event causes a state change to be ignored.
@@ -16,13 +24,6 @@ Prior to this change, it was difficult to know from the logs why a router state 
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3066
 
-### Fix multipart response compression by using a large enough buffer
-
-When writing a deferred response, if the output buffer was too small to write the entire compressed response, the compressor would write a small chunk that did not decompress to the entire primary response, and would then wait for the next response to send the rest.
-
-Unfortunately, we cannot really know the output size we need in advance, and if we asked the decoder, it will tell us that it flushed all the data, even if it could have sent more.  To compensate for this, we raise the output buffer size, and do a second buffer growing step after flushing, if necessary.
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3067
 
 ### Respect GraphOS/Studio metric "backoff" guidance ([Issue #2888](https://github.com/apollographql/router/issues/2888))
 
