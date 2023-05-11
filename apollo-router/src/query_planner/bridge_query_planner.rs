@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
@@ -127,19 +128,21 @@ impl BridgeQueryPlanner {
         self.schema.clone()
     }
 
-    async fn parse_selections(&self, query: String) -> Result<Query, QueryPlannerError> {
+    async fn parse_selections(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
+        let (query, operation_name) = key;
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
-        let query_parsing_future =
-            tokio::task::spawn_blocking(move || Query::parse(query, &schema, &configuration))
-                .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"));
-        match query_parsing_future.await {
-            Ok(res) => res.map_err(QueryPlannerError::from),
-            Err(err) => {
-                failfast_debug!("parsing query task failed: {}", err);
-                Err(QueryPlannerError::from(err))
-            }
+        let task_result = tokio::task::spawn_blocking(move || {
+            let mut query = Query::parse(query, &schema, &configuration)?;
+            crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
+            Ok::<_, QueryPlannerError>(query)
+        })
+        .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"))
+        .await;
+        if let Err(err) = &task_result {
+            failfast_debug!("parsing query task failed: {}", err);
         }
+        task_result?
     }
 
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -225,10 +228,14 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
         let this = self.clone();
         let fut = async move {
-            match this
+            let start = Instant::now();
+            let res = this
                 .get((req.query.clone(), req.operation_name.to_owned()))
-                .await
-            {
+                .await;
+            let duration = start.elapsed().as_secs_f64();
+            tracing::info!(histogram.apollo_router_query_planning_time = duration,);
+
+            match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                     .content(query_planner_content)
                     .context(req.context)
@@ -274,7 +281,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
 impl BridgeQueryPlanner {
     async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = self.parse_selections(key.0.clone()).await?;
+        let selections = self.parse_selections(key.clone()).await?;
 
         if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`

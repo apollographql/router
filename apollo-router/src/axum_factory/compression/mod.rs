@@ -79,63 +79,76 @@ where {
                         }
                     }
                     Ok(data) => {
-                        let mut buf = BytesMut::zeroed(1024);
-                        let mut written = 0usize;
+                        let mut buf = BytesMut::zeroed(data.len());
 
                         let mut partial_input = PartialBuffer::new(&*data);
+                        let mut partial_output = PartialBuffer::new(&mut buf);
                         loop {
-                            let mut partial_output = PartialBuffer::new(&mut buf);
-                            partial_output.advance(written);
-
                             if let Err(e) = self.encode(&mut partial_input, &mut partial_output) {
                                 let _ = tx.send(Err(e.into())).await;
                                 return;
                             }
 
-                            written += partial_output.written().len();
-
                             if !partial_input.unwritten().is_empty() {
                                 // there was not enough space in the output buffer to compress everything,
                                 // so we resize and add more data
                                 if partial_output.unwritten().is_empty() {
-                                    let _ = partial_output.into_inner();
-                                    buf.reserve(written);
+                                    partial_output.extend(partial_input.unwritten().len() / 10);
                                 }
                             } else {
-                                match self.flush(&mut partial_output) {
-                                    Err(e) => {
-                                        let _ = tx.send(Err(e.into())).await;
-                                        return;
-                                    }
-                                    Ok(_) => {
-                                        let len = partial_output.written().len();
-                                        let _ = partial_output.into_inner();
-                                        buf.resize(len, 0);
-                                        if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                loop {
+                                    match self.flush(&mut partial_output) {
+                                        Err(e) => {
+                                            let _ = tx.send(Err(e.into())).await;
                                             return;
                                         }
-                                        break;
+                                        Ok(flushed) => {
+                                            if flushed {
+                                                break;
+                                            }
+                                            if partial_output.unwritten().is_empty() {
+                                                partial_output
+                                                    .extend(partial_output.written().len());
+                                            }
+                                        }
                                     }
                                 }
+
+                                let len = partial_output.written().len();
+                                let _ = partial_output.into_inner();
+                                buf.resize(len, 0);
+
+                                if (tx.send(Ok(buf.freeze())).await).is_err() {
+                                    return;
+                                }
+                                break;
                             }
                         }
                     }
                 }
             }
 
-            let buf = BytesMut::zeroed(64);
-            let mut partial_output = PartialBuffer::new(buf);
+            loop {
+                let buf = BytesMut::zeroed(1024);
+                let mut partial_output = PartialBuffer::new(buf);
 
-            match self.finish(&mut partial_output) {
-                Err(e) => {
-                    let _ = tx.send(Err(e.into())).await;
-                }
-                Ok(_) => {
-                    let len = partial_output.written().len();
+                match self.finish(&mut partial_output) {
+                    Err(e) => {
+                        let _ = tx.send(Err(e.into())).await;
+                        break;
+                    }
+                    Ok(is_flushed) => {
+                        let len = partial_output.written().len();
 
-                    let mut buf = partial_output.into_inner();
-                    buf.resize(len, 0);
-                    let _ = tx.send(Ok(buf.freeze())).await;
+                        let mut buf = partial_output.into_inner();
+                        buf.resize(len, 0);
+                        if (tx.send(Ok(buf.freeze())).await).is_err() {
+                            return;
+                        }
+                        if is_flushed {
+                            break;
+                        }
+                    }
                 }
             }
         });
@@ -179,5 +192,99 @@ impl Encode for Compressor {
             Compressor::Brotli(e) => e.finish(output),
             Compressor::Zstd(e) => e.finish(output),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use async_compression::tokio::write::GzipDecoder;
+    use futures::stream;
+    use hyper::Body;
+    use rand::Rng;
+    use tokio::io::AsyncWriteExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn finish() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let mut rng = rand::thread_rng();
+        let body: Body = std::iter::repeat(())
+            .map(|_| rng.gen_range(0u8..3))
+            .take(5000)
+            .collect::<Vec<_>>()
+            .into();
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        while let Some(buf) = stream.next().await {
+            decoder.write_all(&buf.unwrap()).await.unwrap();
+        }
+
+        decoder.shutdown().await.unwrap();
+        let response = decoder.into_inner();
+        assert_eq!(response.len(), 5000);
+
+        assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn gzip_header_writing() {
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+        let body: Body = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
+
+        let mut stream = compressor.process(body);
+        let _ = stream.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn flush() {
+        let primary_response = r#"
+--graphql
+content-type: application/json
+
+{"data":{"allProducts":[{"sku":"federation","id":"apollo-federation"},{"sku":"studio","id":"apollo-studio"},{"sku":"client","id":"apollo-client"}]},"hasNext":true}
+--graphql
+"#;
+        let deferred_response = r#"content-type: application/json
+
+{"hasNext":false,"incremental":[{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"platform"}},"path":["allProducts",0]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"platform","name":"platform-name"}},"path":["allProducts",1]},{"data":{"dimensions":{"size":"1"},"variation":{"id":"OSS","name":"client"}},"path":["allProducts",2]}]}
+--graphql--
+"#;
+
+        let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
+
+        let body: Body = Body::wrap_stream(stream::iter(vec![
+            Ok::<_, BoxError>(Bytes::from(primary_response)),
+            Ok(Bytes::from(deferred_response)),
+        ]));
+
+        let mut stream = compressor.process(body);
+        let mut decoder = GzipDecoder::new(Vec::new());
+
+        let first = stream.next().await.unwrap().unwrap();
+        decoder.write_all(&first).await.unwrap();
+
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+        assert_eq!(
+            std::str::from_utf8(decoder.get_ref()).unwrap(),
+            primary_response
+        );
+
+        let second = stream.next().await.unwrap().unwrap();
+        decoder.write_all(&second).await.unwrap();
+
+        decoder.flush().await.unwrap();
+        decoder.get_mut().flush().await.unwrap();
+
+        let mut full_response = String::from(primary_response);
+        full_response += deferred_response;
+        assert_eq!(
+            std::str::from_utf8(decoder.get_ref()).unwrap(),
+            full_response
+        );
     }
 }

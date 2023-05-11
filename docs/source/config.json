@@ -42,6 +42,13 @@
             "enterprise"
           ]
         ],
+        "Operation limits": [
+          "/configuration/operation-limits",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],
         "Privacy and data collection": "/privacy"
       }
     },
