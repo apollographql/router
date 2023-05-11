@@ -24,6 +24,14 @@ Unfortunately, we cannot really know the output size we need in advance, and if 
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3067
 
+### Respect GraphOS/Studio metric "backoff" guidance ([Issue #2888](https://github.com/apollographql/router/issues/2888))
+
+For stability reasons, GraphOS metric ingress will return an HTTP `429` status code with `Retry-After` guidance if it's unable to immediately accept a metric submission from a router.  A router instance should not try to submit further metrics until that amount of time (in seconds) has elapsed.  This fix provides support for this interaction.
+
+While observing a backoff request from GraphOS, the router will continue to collect metrics and no metrics are lost unless the router terminates before the timeout expires.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2977
+
 ## 🛠 Maintenance
 
 ### Refactor the way we're redacting errors for Apollo telemetry
