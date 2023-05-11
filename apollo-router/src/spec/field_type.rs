@@ -13,6 +13,10 @@ pub(crate) struct InvalidValue;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct FieldType(pub(crate) hir::Type);
 
+// hir::Type does not implement Serialize or Deserialize,
+// and <https://serde.rs/remote-derive.html> seems not to work for recursive types.
+// Instead have explicit `impl`s that are based on derived impl of purpose-built types.
+
 impl Serialize for FieldType {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -229,4 +233,23 @@ impl From<&'_ hir::Type> for FieldType {
     fn from(ty: &'_ hir::Type) -> Self {
         Self(ty.clone())
     }
+}
+
+/// Make sure custom Serialize and Deserialize impls are compatible with each other
+#[test]
+fn test_field_type_serialization() {
+    let ty = FieldType(hir::Type::NonNull {
+        ty: Box::new(hir::Type::List {
+            ty: Box::new(hir::Type::Named {
+                name: "ID".into(),
+                loc: None,
+            }),
+            loc: None,
+        }),
+        loc: None,
+    });
+    assert_eq!(
+        serde_json::from_str::<FieldType>(&serde_json::to_string(&ty).unwrap()).unwrap(),
+        ty
+    )
 }
