@@ -271,7 +271,7 @@ pub(crate) struct Report {
         HashMap<(OperationKind, Option<OperationSubType>), OperationCountByType>,
 }
 
-#[derive(Default, Debug, Serialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]
 pub(crate) struct OperationCountByType {
     pub(crate) r#type: OperationKind,
     pub(crate) subtype: Option<OperationSubType>,
@@ -341,8 +341,8 @@ impl Report {
         aggregated_report
     }
 
-    pub(crate) fn into_report(
-        self,
+    pub(crate) fn build_proto_report(
+        &self,
         header: ReportHeader,
     ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
@@ -350,15 +350,18 @@ impl Report {
             end_time: Some(SystemTime::now().into()),
             operation_count_by_type: self
                 .operation_count_by_type
-                .into_values()
+                .values()
+                .cloned()
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
             ..Default::default()
         };
 
-        for (key, traces_and_stats) in self.traces_per_query {
-            report.traces_per_query.insert(key, traces_and_stats.into());
+        for (key, traces_and_stats) in &self.traces_per_query {
+            report
+                .traces_per_query
+                .insert(key.clone(), traces_and_stats.clone().into());
         }
         report
     }
@@ -407,7 +410,7 @@ impl AddAssign<SingleStatsReport> for Report {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TracesAndStats {
     pub(crate) traces: Vec<Trace>,
     #[serde(with = "vectorize")]

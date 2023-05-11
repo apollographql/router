@@ -4,9 +4,11 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
 use std::time::Duration;
+use std::time::Instant;
 
 use bytes::BytesMut;
 use flate2::write::GzEncoder;
@@ -16,7 +18,9 @@ use futures::stream::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_ENCODING;
 use http::header::CONTENT_TYPE;
+use http::header::RETRY_AFTER;
 use http::header::USER_AGENT;
+use http::StatusCode;
 use opentelemetry::ExportError;
 pub(crate) use prost::*;
 use reqwest::Client;
@@ -44,6 +48,9 @@ pub(crate) enum ApolloExportError {
 
     #[error("Apollo exporter unavailable error: {0}")]
     Unavailable(String),
+
+    #[error("Apollo Studio not accepting reports for {1} seconds")]
+    StudioBackoff(Report, u64),
 }
 
 impl ExportError for ApolloExportError {
@@ -83,14 +90,14 @@ impl Default for Sender {
 /// The Apollo exporter is responsible for attaching report header information for individual requests
 /// Retrying when sending fails.
 /// Sending periodically (in the case of metrics).
-#[derive(Clone)]
 pub(crate) struct ApolloExporter {
     batch_config: BatchProcessorConfig,
     endpoint: Url,
     apollo_key: String,
     header: proto::reports::ReportHeader,
     client: Client,
-    strip_traces: Arc<Mutex<bool>>,
+    strip_traces: AtomicBool,
+    studio_backoff: Mutex<Instant>,
 }
 
 impl ApolloExporter {
@@ -126,6 +133,7 @@ impl ApolloExporter {
                 .map_err(BoxError::from)?,
             header,
             strip_traces: Default::default(),
+            studio_backoff: Mutex::new(Instant::now()),
         })
     }
 
@@ -134,6 +142,7 @@ impl ApolloExporter {
         tokio::spawn(async move {
             let timeout = tokio::time::interval(self.batch_config.scheduled_delay);
             let mut report = Report::default();
+            let mut backoff_warn = true;
 
             tokio::pin!(timeout);
 
@@ -148,8 +157,20 @@ impl ApolloExporter {
                         }
                        },
                     _ = timeout.tick() => {
-                        if let Err(e) = self.submit_report(std::mem::take(&mut report)).await {
-                            tracing::error!("failed to submit Apollo report: {}", e)
+                        match self.submit_report(std::mem::take(&mut report)).await {
+                            Ok(_) => backoff_warn = true,
+                            Err(err) => {
+                                match err {
+                                    ApolloExportError::StudioBackoff(unsubmitted, remaining) => {
+                                        if backoff_warn {
+                                            tracing::warn!("Apollo Studio not accepting reports for {remaining} seconds");
+                                            backoff_warn = false;
+                                        }
+                                        report = unsubmitted;
+                                    },
+                                    _ => tracing::error!("failed to submit Apollo report: {}", err)
+                                }
+                            }
                         }
                     }
                 };
@@ -167,11 +188,23 @@ impl ApolloExporter {
         if report.operation_count_by_type.is_empty() && report.traces_per_query.is_empty() {
             return Ok(());
         }
+
+        // If studio has previously told us not to submit reports, return for further processing
+        let expires_at = *self.studio_backoff.lock().unwrap();
+        let now = Instant::now();
+        if expires_at > now {
+            let remaining = expires_at - now;
+            return Err(ApolloExportError::StudioBackoff(
+                report,
+                remaining.as_secs(),
+            ));
+        }
+
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let mut report = report.into_report(self.header.clone());
-        prost::Message::encode(&report, &mut content)
+        let mut proto_report = report.build_proto_report(self.header.clone());
+        prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -206,14 +239,14 @@ impl ApolloExporter {
         let mut msg = "default error message".to_string();
         let mut has_traces = false;
 
-        for (_, traces_and_stats) in report.traces_per_query.iter_mut() {
+        for (_, traces_and_stats) in proto_report.traces_per_query.iter_mut() {
             if !traces_and_stats.trace.is_empty()
                 || !traces_and_stats
                     .internal_traces_contributing_to_stats
                     .is_empty()
             {
                 has_traces = true;
-                if *self.strip_traces.lock().expect("lock poisoned") {
+                if self.strip_traces.load(Ordering::SeqCst) {
                     traces_and_stats.trace.clear();
                     traces_and_stats
                         .internal_traces_contributing_to_stats
@@ -228,6 +261,7 @@ impl ApolloExporter {
             match self.client.execute(task_req).await {
                 Ok(v) => {
                     let status = v.status();
+                    let opt_header_retry = v.headers().get(RETRY_AFTER).cloned();
                     let data = v
                         .text()
                         .await
@@ -242,14 +276,32 @@ impl ApolloExporter {
                     } else if status.is_server_error() {
                         tracing::warn!("attempt: {}, could not transfer: {}", i + 1, data);
                         msg = data;
+                        if status == StatusCode::TOO_MANY_REQUESTS {
+                            // We should have a Retry-After header to go with the status code
+                            // If we don't have the header, or it isn't a valid string or we can't
+                            // convert it to u64, just ignore it. Otherwise, interpret it as a
+                            // number of seconds for which we should not attempt to send any more
+                            // reports.
+                            let mut retry_after = 0;
+                            if let Some(returned_retry_after) =
+                                opt_header_retry.and_then(|v| v.to_str().ok()?.parse::<u64>().ok())
+                            {
+                                retry_after = returned_retry_after;
+                                *self.studio_backoff.lock().unwrap() =
+                                    Instant::now() + Duration::from_secs(retry_after);
+                            }
+                            // Even if we can't update the studio_backoff, we should not continue to
+                            // retry here. We'd better just return the error.
+                            return Err(ApolloExportError::StudioBackoff(report, retry_after));
+                        }
                     } else {
                         tracing::debug!("ingress response text: {:?}", data);
-                        if has_traces && !*self.strip_traces.lock().expect("lock poisoned") {
+                        if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
                             if let Ok(response) = serde_json::Value::from_str(&data) {
                                 if let Some(Value::Bool(true)) = response.get("tracesIgnored") {
                                     tracing::warn!("traces will not be sent to Apollo as this account is on a free plan");
-                                    *self.strip_traces.lock().expect("lock poisoned") = true;
+                                    self.strip_traces.store(true, Ordering::SeqCst);
                                 }
                             }
                         }
