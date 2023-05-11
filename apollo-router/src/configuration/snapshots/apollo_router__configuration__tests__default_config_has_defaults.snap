@@ -6,4 +6,6 @@ plugins: ~
 telemetry:
   apollo:
     endpoint: "https://usage-reporting.api.apollographql.com/api/ingress/traces"
+supergraph:
+  listen: "127.0.0.1:4000"
 

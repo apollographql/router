@@ -13,6 +13,8 @@ configuration.headers.subgraphs.<redacted>.request.insert.value.<redacted>: 1
 configuration.headers.subgraphs.<redacted>.request.remove.len: 1
 configuration.headers.subgraphs.<redacted>.request.remove.named.<redacted>: 1
 configuration.override_subgraph_url.len: 1
+configuration.supergraph.listen.<redacted>: 3
+configuration.supergraph.listen.len: 2
 configuration.telemetry.apollo.endpoint.<redacted>: 1
 configuration.telemetry.apollo.send_headers.len: 1
 configuration.telemetry.tracing.otlp.endpoint.<redacted>: 1
