@@ -184,15 +184,6 @@ impl Expansion {
                 default.default.clone()
             };
 
-            if default.env_name.is_some()
-                && !jsonpath_lib::select(config, &format!("$.{}", default.config_path))
-                    .unwrap_or_default()
-                    .is_empty()
-            {
-                // Env variables do NOT override config. If the user want to enable this then they must use config expansion.
-                continue;
-            }
-
             transformer_builder = transformer_builder.add_action(
                 Parser::parse(&format!("const({value})"), &default.config_path)
                     .expect("migration must be valid"),
@@ -233,7 +224,6 @@ impl Expansion {
         }
         // The expansion may have resulted in a primitive, reparse and replace
         if let Some(expanded) = expanded {
-            tracing::info!("Expanded {} to {}", value, expanded);
             *value = coerce(&expanded)
         }
         Ok(())
