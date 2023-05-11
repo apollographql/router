@@ -8,18 +8,19 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🐛 Fixes
 
-### add more details to the state machine `Running` processing ([Issue #3065](https://github.com/apollographql/router/issues/3065))
+### Emit more log details to the state machine's `Running` phase ([Issue #3065](https://github.com/apollographql/router/issues/3065))
 
-It's difficult to know from the logs why a router state reload has been triggered and the current logs don't make it clear that it's possible for a state change trigger to be ignored.
+This change adds details about the triggers of potential state changes to the logs and also makes it easier to see when an un-entitled event causes a state change to be ignored.
 
-This change adds details about the triggers of potential state changes to the logs and also make it easier to see when an unentitled event causes a state change to be ignored.
+Prior to this change, it was difficult to know from the logs why a router state reload had been triggered and the logs didn't make it clear that it was possible that the state change was going to be ignored.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3066
 
-### use a large enough buffer to flush in 
+### Fix multipart response compression by using a large enough buffer
 
-When writing a deferred response, if the output buffer was too small to write the entire compressed response, the compressor would write a small chunk, that did not decompress to the entire primary response, and would then wait for the next response to send the rest. Unfortunately, we cannot really know the output size we need in advance, and if we asked the decoder, it will tell us that it flushed all the data, even if it could have sent more.
-So in here we raise the output buffer size, and do a second buffer growing step after flushing if necessary.
+When writing a deferred response, if the output buffer was too small to write the entire compressed response, the compressor would write a small chunk that did not decompress to the entire primary response, and would then wait for the next response to send the rest.
+
+Unfortunately, we cannot really know the output size we need in advance, and if we asked the decoder, it will tell us that it flushed all the data, even if it could have sent more.  To compensate for this, we raise the output buffer size, and do a second buffer growing step after flushing, if necessary.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3067
 
@@ -27,10 +28,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Refactor the way we're redacting errors for Apollo telemetry
 
-Preprocess errors in a more readable way.
+This follows-up on the federated subgraph trace error redaction mechanism changes which first appeared in [v1.16.0](https://github.com/apollographql/router/releases/tag/v1.16.0) via [PR #3011](https://github.com/apollographql/router/pull/3011) with some internal refactoring that improves the readability of the logic.  There should be no functional changes to the feature's behavior.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3030
-
 
 
 # [1.18.0] - 2023-05-05
