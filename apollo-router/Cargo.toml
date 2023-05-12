@@ -97,7 +97,6 @@ linkme = "0.3.9"
 lru = "0.8.1"
 mediatype = "0.19.13"
 mockall = "0.11.3"
-miette = { version = "5.5.0", features = ["fancy"] }
 mime = "0.3.17"
 multer = "2.0.4"
 multimap = "0.8.3"

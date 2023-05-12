@@ -5,6 +5,8 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_compiler::diagnostics::ApolloDiagnostic;
+use apollo_compiler::diagnostics::DiagnosticData;
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
@@ -13,8 +15,8 @@ use http::Uri;
 use sha2::Digest;
 use sha2::Sha256;
 
-use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::error::ValidationErrors;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
 use crate::query_planner::OperationKind;
@@ -27,6 +29,8 @@ use crate::Configuration;
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     pub(crate) type_system: Arc<apollo_compiler::hir::TypeSystem>,
+    /// Stored for comparison with the validation errors from query planning.
+    diagnostics: Vec<ApolloDiagnostic>,
     subgraphs: HashMap<String, Uri>,
     pub(crate) object_types: HashMap<String, ObjectType>,
     pub(crate) interfaces: HashMap<String, Interface>,
@@ -79,12 +83,18 @@ impl Schema {
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        // TODO: run full compiler-based validation instead?
-        let errors = ast.errors().cloned().collect::<Vec<_>>();
-        if !errors.is_empty() {
-            let errors = ParseErrors {
+        let diagnostics = compiler
+            .validate()
+            .into_iter()
+            .filter(|err| err.data.is_error())
+            .collect::<Vec<_>>();
+        if diagnostics
+            .iter()
+            .any(|err| matches!(*err.data, DiagnosticData::SyntaxError { .. }))
+        {
+            let errors = ValidationErrors {
                 raw_schema: schema.to_string(),
-                errors,
+                errors: diagnostics,
             };
             errors.print();
             return Err(SchemaError::Parse(errors));
@@ -192,6 +202,7 @@ impl Schema {
         Ok(Schema {
             raw_sdl: Arc::new(schema.into()),
             type_system: compiler.db.type_system(),
+            diagnostics,
             subgraphs,
             object_types,
             interfaces,
