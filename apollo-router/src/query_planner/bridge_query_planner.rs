@@ -50,17 +50,34 @@ impl BridgeQueryPlanner {
     ) -> Result<Self, ServiceBuildError> {
         let schema = Schema::parse(&sdl, &configuration)?;
 
-        let planner = Arc::new(
-            Planner::new(
-                sdl,
-                QueryPlannerConfig {
-                    incremental_delivery: Some(IncrementalDeliverySupport {
-                        enable_defer: Some(configuration.supergraph.defer_support),
-                    }),
-                },
-            )
-            .await?,
+        let planner = Planner::new(
+            sdl,
+            QueryPlannerConfig {
+                incremental_delivery: Some(IncrementalDeliverySupport {
+                    enable_defer: Some(configuration.supergraph.defer_support),
+                }),
+            },
+        )
+        .await;
+
+        let planner = match planner {
+            Ok(planner) => planner,
+            Err(err) => {
+                assert!(
+                    schema.has_errors(),
+                    "query planner reported a validation error, but apollo-rs did not"
+                );
+
+                return Err(err.into());
+            }
+        };
+
+        assert!(
+            !schema.has_errors(),
+            "query planner did not report validation error, but apollo-rs did"
         );
+
+        let planner = Arc::new(planner);
 
         let api_schema = planner.api_schema().await?;
         let api_schema = Schema::parse(&api_schema.schema, &configuration)?;

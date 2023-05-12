@@ -246,6 +246,10 @@ impl Schema {
             .map(|s| s.as_str())
             .unwrap_or_else(|| kind.as_str())
     }
+
+    pub(crate) fn has_errors(&self) -> bool {
+        !self.diagnostics.is_empty()
+    }
 }
 
 #[derive(Debug)]
