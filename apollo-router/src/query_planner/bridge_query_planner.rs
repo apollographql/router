@@ -45,12 +45,14 @@ pub(crate) struct BridgeQueryPlanner {
 
 impl BridgeQueryPlanner {
     pub(crate) async fn new(
-        schema: String,
+        sdl: String,
         configuration: Arc<Configuration>,
     ) -> Result<Self, ServiceBuildError> {
+        let schema = Schema::parse(&sdl, &configuration)?;
+
         let planner = Arc::new(
             Planner::new(
-                schema.clone(),
+                sdl,
                 QueryPlannerConfig {
                     incremental_delivery: Some(IncrementalDeliverySupport {
                         enable_defer: Some(configuration.supergraph.defer_support),
@@ -61,12 +63,8 @@ impl BridgeQueryPlanner {
         );
 
         let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration, None)?;
-        let schema = Arc::new(Schema::parse(
-            &schema,
-            &configuration,
-            Some(Box::new(api_schema)),
-        )?);
+        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let schema = Arc::new(schema.with_api_schema(api_schema));
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))
         } else {
@@ -99,12 +97,8 @@ impl BridgeQueryPlanner {
         );
 
         let api_schema = planner.api_schema().await?;
-        let api_schema = Schema::parse(&api_schema.schema, &configuration, None)?;
-        let schema = Arc::new(Schema::parse(
-            &schema,
-            &configuration,
-            Some(Box::new(api_schema)),
-        )?);
+        let api_schema = Schema::parse(&api_schema.schema, &configuration)?;
+        let schema = Arc::new(Schema::parse(&schema, &configuration)?.with_api_schema(api_schema));
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(Introspection::new(planner.clone()).await))

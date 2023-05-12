@@ -53,27 +53,17 @@ fn make_api_schema(schema: &str) -> Result<String, SchemaError> {
 }
 
 impl Schema {
-    pub(crate) fn parse(
-        s: &str,
-        configuration: &Configuration,
-        api_schema: Option<Box<Schema>>,
-    ) -> Result<Self, SchemaError> {
-        let mut schema = Self::parse_inner(s, configuration)?;
-        schema.api_schema = api_schema;
-        Ok(schema)
-    }
-
     #[cfg(test)]
     pub(crate) fn parse_test(s: &str, configuration: &Configuration) -> Result<Self, SchemaError> {
-        let mut schema = Self::parse_inner(s, configuration)?;
-        schema.api_schema = Some(Box::new(Self::parse_inner(
-            &make_api_schema(s)?,
-            configuration,
-        )?));
+        let api_schema = Self::parse(&make_api_schema(s)?, configuration)?;
+        let schema = Self::parse(s, configuration)?.with_api_schema(api_schema);
         Ok(schema)
     }
 
-    fn parse_inner(schema: &str, _configuration: &Configuration) -> Result<Schema, SchemaError> {
+    pub(crate) fn parse(
+        schema: &str,
+        _configuration: &Configuration,
+    ) -> Result<Schema, SchemaError> {
         let mut compiler = ApolloCompiler::new();
         let id = compiler.add_type_system(schema, "schema.graphql");
 
@@ -88,6 +78,9 @@ impl Schema {
             .into_iter()
             .filter(|err| err.data.is_error())
             .collect::<Vec<_>>();
+
+        // Only bail out on parser errors for now: validation errors will be checked with the query
+        // planner result
         if diagnostics
             .iter()
             .any(|err| matches!(*err.data, DiagnosticData::SyntaxError { .. }))
@@ -213,6 +206,11 @@ impl Schema {
             schema_id,
             root_operations,
         })
+    }
+
+    pub(crate) fn with_api_schema(mut self, api_schema: Schema) -> Self {
+        self.api_schema = Some(Box::new(api_schema));
+        self
     }
 }
 

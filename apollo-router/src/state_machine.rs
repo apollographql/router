@@ -261,7 +261,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         FA: RouterSuperServiceFactory,
     {
         let parsed_schema = Arc::new(
-            Schema::parse(&schema, &configuration, None)
+            Schema::parse(&schema, &configuration)
                 .map_err(|e| ServiceCreationError(e.to_string().into()))?,
         );
 
