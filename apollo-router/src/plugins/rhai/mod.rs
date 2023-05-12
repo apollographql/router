@@ -469,7 +469,6 @@ macro_rules! gen_map_response {
                         } else {
                             $base::Response::error_builder()
                                 .errors(vec![Error {
-                                    // TODO
                                     message: error_details.message.unwrap_or_default(),
                                     ..Default::default()
                                 }])
@@ -539,15 +538,13 @@ macro_rules! gen_map_deferred_response {
                         } else {
                             $response::error_builder()
                                 .errors(vec![Error {
-                                    // TODO
                                     message: error_details.message.unwrap_or_default(),
                                     ..Default::default()
                                 }])
                                 .status_code(error_details.status)
                                 .context(context)
                                 .build()
-                        }
-                                .expect("can't fail to build our error message")
+                        }.expect("can't fail to build our error message")
                     }
 
                     // we split the response stream into headers+first response, then a stream of deferred responses
