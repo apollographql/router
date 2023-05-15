@@ -166,7 +166,7 @@ where
 {
     fn enabled(
         &self,
-        meta: &tracing::Metadata<'_>,
+        _meta: &tracing::Metadata<'_>,
         cx: &tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
         let current_span = cx.current_span();
