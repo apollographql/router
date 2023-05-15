@@ -21,11 +21,30 @@ const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 
 /// A persisted query.
 #[derive(Deserialize, Clone, Debug)]
-struct PersistedQuery {
+pub(crate) struct PersistedQuery {
     #[allow(unused)]
-    version: u8,
+    pub(crate) version: u8,
     #[serde(rename = "sha256Hash")]
-    sha256hash: String,
+    pub(crate) sha256hash: String,
+}
+
+impl PersistedQuery {
+    /// Attempt to extract a `PersistedQuery` from a `&SupergraphRequest`
+    pub(crate) fn maybe_from_request(request: &SupergraphRequest) -> Option<Self> {
+        request
+            .supergraph_request
+            .body()
+            .extensions
+            .get("persistedQuery")
+            .and_then(|value| serde_json_bytes::from_value(value.clone()).ok())
+    }
+
+    /// Attempt to decode the sha256 hash in a `PersistedQuery`
+    pub(crate) fn decode_hash(self) -> Option<(String, Vec<u8>)> {
+        hex::decode(self.sha256hash.as_bytes())
+            .ok()
+            .map(|decoded| (self.sha256hash, decoded))
+    }
 }
 
 /// [`Layer`] for APQ implementation.
@@ -59,17 +78,8 @@ async fn apq_request(
     cache: &DeduplicatingCache<String, String>,
     mut request: SupergraphRequest,
 ) -> Result<SupergraphRequest, SupergraphResponse> {
-    let maybe_query_hash: Option<(String, Vec<u8>)> = request
-        .supergraph_request
-        .body()
-        .extensions
-        .get("persistedQuery")
-        .and_then(|value| serde_json_bytes::from_value::<PersistedQuery>(value.clone()).ok())
-        .and_then(|persisted_query| {
-            hex::decode(persisted_query.sha256hash.as_bytes())
-                .ok()
-                .map(|decoded| (persisted_query.sha256hash, decoded))
-        });
+    let maybe_query_hash =
+        PersistedQuery::maybe_from_request(&request).and_then(PersistedQuery::decode_hash);
 
     let body_query = request.supergraph_request.body().query.clone();
 
