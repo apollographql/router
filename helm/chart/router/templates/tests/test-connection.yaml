@@ -11,5 +11,5 @@ spec:
     - name: netcat
       image: busybox
       command: ['nc']
-      args: ['-vz','-w','1','{{ include "router.fullname" . }}:{{.Values.router.service.port }}']
+      args: ['-vz','-w','1','{{ include "router.fullname" . }}:{{.Values.service.port }}']
   restartPolicy: Never
