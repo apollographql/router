@@ -9,10 +9,10 @@ use tokio::sync::mpsc;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
-use Event::ForcedHotReload;
 use Event::NoMoreConfiguration;
 use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
+use Event::Reload;
 use Event::Shutdown;
 
 use super::http_server_factory::HttpServerFactory;
@@ -28,9 +28,9 @@ use super::state_machine::State::Running;
 use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
+use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::router::Event::UpdateEntitlement;
-use crate::router::ForcedHotReloadConfig;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
@@ -160,14 +160,19 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 router_service_factory,
                 all_connections_stopped_signal: _,
             } => {
-                tracing::info!("reloading");
+                tracing::info!(
+                    new_schema = new_schema.is_some(),
+                    new_entitlement = new_entitlement.is_some(),
+                    new_configuration = new_configuration.is_some(),
+                    "reloading"
+                );
 
                 if new_entitlement == Some(EntitlementState::Unentitled)
                     && *entitlement != EntitlementState::Unentitled
                 {
                     // When we get an unentitled event, if we were entitled before then just carry on.
                     // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                    tracing::debug!("loss of entitlement detected, ignoring");
+                    tracing::info!("loss of entitlement detected, ignoring reload");
                     return self;
                 }
 
@@ -296,10 +301,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             entitlement
         };
 
-        state_machine
-            .forced_hot_reload_config
-            .set_period(configuration.experimental_chaos.force_hot_reload);
-
         let router_service_factory = state_machine
             .router_configurator
             .create(
@@ -349,6 +350,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         listen_addresses_guard.graphql_listen_address =
             server_handle.graphql_listen_address().clone();
 
+        // Log that we are using experimental features. It is best to do this here rather than config
+        // validation as it will actually log issues rather than return structured validation errors.
+        // Logging here also means that this is actually configuration that took effect
+        if let Some(yaml) = &configuration.validated_yaml {
+            let discussed = Discussed::new();
+            discussed.log_experimental_used(yaml);
+            discussed.log_preview_used(yaml);
+        }
+
         Ok(Running {
             configuration,
             schema,
@@ -375,7 +385,6 @@ where
     router_configurator: FA,
     pub(crate) listen_addresses: Arc<RwLock<ListenAddresses>>,
     listen_addresses_guard: Option<OwnedRwLockWriteGuard<ListenAddresses>>,
-    forced_hot_reload_config: Arc<ForcedHotReloadConfig>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -384,11 +393,7 @@ where
     FA: RouterSuperServiceFactory + Send,
     FA::RouterFactory: RouterFactory,
 {
-    pub(crate) fn new(
-        http_server_factory: S,
-        router_factory: FA,
-        forced_hot_reload_config: Arc<ForcedHotReloadConfig>,
-    ) -> Self {
+    pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
         // Listen address is created locked so that if a consumer tries to examine the listen address before the state machine has reached running state they are blocked.
         let listen_addresses: Arc<RwLock<ListenAddresses>> = Default::default();
         let listen_addresses_guard = Some(
@@ -402,7 +407,6 @@ where
             router_configurator: router_factory,
             listen_addresses,
             listen_addresses_guard,
-            forced_hot_reload_config,
         }
     }
 
@@ -444,7 +448,7 @@ where
                         .update_inputs(&mut self, None, None, Some(entitlement))
                         .await
                 }
-                ForcedHotReload => state.update_inputs(&mut self, None, None, None).await,
+                Reload => state.update_inputs(&mut self, None, None, None).await,
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
@@ -690,7 +694,7 @@ mod tests {
     async fn listen_addresses_are_locked() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        let state_machine = StateMachine::new(server_factory, router_factory, Default::default());
+        let state_machine = StateMachine::new(server_factory, router_factory);
         assert!(state_machine.listen_addresses.try_read().is_err());
     }
 
@@ -1049,7 +1053,7 @@ mod tests {
         router_factory: MockMyRouterConfigurator,
         events: Vec<Event>,
     ) -> Result<(), ApolloRouterError> {
-        let state_machine = StateMachine::new(server_factory, router_factory, Default::default());
+        let state_machine = StateMachine::new(server_factory, router_factory);
         state_machine
             .process_events(stream::iter(events).boxed())
             .await

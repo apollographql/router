@@ -4,6 +4,120 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.18.1] - 2023-05-11
+
+## 🐛 Fixes
+
+### Fix multipart response compression by using a large enough buffer
+
+When writing a deferred response, if the output buffer was too small to write the entire compressed response, the compressor would write a small chunk that did not decompress to the entire primary response, and would then wait for the next response to send the rest.
+
+Unfortunately, we cannot really know the output size we need in advance, and if we asked the decoder, it would tell us that it flushed all the data, even if it could have sent more.  To compensate for this, we raise the output buffer size, and grow the buffer a second time after flushing, if necessary.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3067
+
+### Emit more log details to the state machine's `Running` phase ([Issue #3065](https://github.com/apollographql/router/issues/3065))
+
+This change adds details about the triggers of potential state changes to the logs and also makes it easier to see when an un-entitled event causes a state change to be ignored.
+
+Prior to this change, it was difficult to know from the logs why a router state reload had been triggered and the logs didn't make it clear that it was possible that the state change was going to be ignored.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3066
+
+
+### Respect GraphOS/Studio metric "backoff" guidance ([Issue #2888](https://github.com/apollographql/router/issues/2888))
+
+For stability reasons, GraphOS metric ingress will return an HTTP `429` status code with `Retry-After` guidance if it's unable to immediately accept a metric submission from a router.  A router instance should not try to submit further metrics until that amount of time (in seconds) has elapsed.  This fix provides support for this interaction.
+
+While observing a backoff request from GraphOS, the router will continue to collect metrics and no metrics are lost unless the router terminates before the timeout expires.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2977
+
+## 🛠 Maintenance
+
+### Refactor the way we're redacting errors for Apollo telemetry
+
+This follows-up on the federated subgraph trace error redaction mechanism changes which first appeared in [v1.16.0](https://github.com/apollographql/router/releases/tag/v1.16.0) via [PR #3011](https://github.com/apollographql/router/pull/3011) with some internal refactoring that improves the readability of the logic.  There should be no functional changes to the feature's behavior.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3030
+
+
+# [1.18.0] - 2023-05-05
+
+## 🚀 Features
+
+### Introduced new metric which tracks query planning time
+
+We've introduced a `apollo_router_query_planning_time` histogram which captures time spent in the query planning phase.  This is documented along with our other metrics [in the documentation](https://www.apollographql.com/docs/router/configuration/metrics/#available-metrics).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2974
+
+## 🐛 Fixes
+
+### Small gzip'd responses no longer cause a panic
+
+A regression introduced in v1.17.0 — again related to compression — has been resolved.  This occurred when small responses used invalid buffer management, causing a panic.
+
+By [@dbanty](https://github.com/dbanty) in https://github.com/apollographql/router/pull/3047
+
+### HTTP status codes are now returned in `SubrequestHttpError` as intended
+
+When contextually available, the HTTP status code is included within `SubrequestHttpError`. This provides plugins the ability to access the status code directly. Previously, only string parsing of the `reason` could be used to determine the status code.
+
+This corrects a previous contribution which added the status code, but neglected to serialize it properly into the `extensions` in the response which are made available to plugins.  Thank you to the same contributor for the correction!
+
+By [@scottdouglas1989](https://github.com/scottdouglas1989) in https://github.com/apollographql/router/pull/3005
+
+## 📚 Documentation
+
+### Indicate that `apollo_router_cache_size` is a count of cache entries
+
+This follows-up [PR #2607](https://github.com/apollographql/router/pull/2607) which added `apollo_router_cache_size`.  It adds `apollo_router_cache_size` to [the documentation](https://www.apollographql.com/docs/router/configuration/metrics/#available-metrics) and indicates that this is the number of cache entries (that is, a count).
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3044
+
+# [1.17.0] - 2023-05-04
+
+## 🚀 Features
+
+### GraphOS Enterprise: Operation Limits
+
+You can define [operation limits](https://www.apollographql.com/docs/router/configuration/operation-limits) in your router's configuration to reject potentially malicious requests. An operation that exceeds _any_ specified limit is rejected.
+
+You define operation limits in your router's [YAML config file](https://www.apollographql.com/docs/router/configuration/overview#yaml-config-file), like so:
+
+```yaml
+preview_operation_limits:
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
+```
+
+See details in [operation limits documentation](https://www.apollographql.com/docs/router/configuration/operation-limits) for information on setting up this GraphOS Enterprise feature.
+
+By [@SimonSapin](https://github.com/SimonSapin), [@lrlna](https://github.com/lrlna), and [@StephenBarlow](https://github.com/StephenBarlow)
+
+## 🐛 Fixes
+
+### Ensure the compression state is flushed ([Issue #3035](https://github.com/apollographql/router/issues/3035))
+
+In some cases, the "finish" call to flush the compression state at the end of a request was not flushing the entire state. This fix calls "finish" multiple times until all data is used.
+
+This fixes a regression introduced in v1.16.0 by [#2986](https://github.com/apollographql/router/pull/2986) which resulted in larger responses being truncated after compression.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3037
+
+## 🛠 Maintenance
+
+### Make `test_experimental_notice` assertion more targeted ([Pull #3036](https://github.com/apollographql/router/pull/3036))
+
+Previously this test relied on a full snapshot of the log message. This was likely to result in failures, either due to environmental reasons or other unrelated changes.
+
+The test now relies on a more targeted assertion that is less likely to fail under various conditions.
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/3036
+
 # [1.16.0] - 2023-05-03
 
 ## 🚀 Features

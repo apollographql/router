@@ -458,7 +458,7 @@ mod test {
                 }
                 Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
                 Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
-                Event::ForcedHotReload => SimpleEvent::ForcedHotReload,
+                Event::Reload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }

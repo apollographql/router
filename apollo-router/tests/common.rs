@@ -411,7 +411,7 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
-    async fn assert_log_contains(&mut self, msg: &str) {
+    pub async fn assert_log_contains(&mut self, msg: &str) {
         let now = Instant::now();
         while now.elapsed() < Duration::from_secs(5) {
             if let Ok(line) = self.stdio_rx.try_recv() {
@@ -464,6 +464,14 @@ impl IntegrationTest {
 
         self.dump_stack_traces();
         panic!("unable to shutdown router, this probably means a hang and should be investigated");
+    }
+
+    #[allow(dead_code)]
+    #[cfg(target_family = "unix")]
+    pub async fn send_sighup(&mut self) {
+        unsafe {
+            libc::kill(self.pid(), libc::SIGHUP);
+        }
     }
 
     #[cfg(target_os = "linux")]
