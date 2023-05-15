@@ -439,6 +439,7 @@ mod test {
         HaltEntitlement,
         WarnEntitlement,
         NoMoreEntitlement,
+        ForcedHotReload,
         Shutdown,
     }
 
@@ -457,6 +458,7 @@ mod test {
                 }
                 Event::UpdateEntitlement(_) => SimpleEvent::UpdateEntitlement,
                 Event::NoMoreEntitlement => SimpleEvent::NoMoreEntitlement,
+                Event::Reload => SimpleEvent::ForcedHotReload,
                 Event::Shutdown => SimpleEvent::Shutdown,
             }
         }

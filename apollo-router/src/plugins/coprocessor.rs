@@ -563,7 +563,9 @@ where
         }
 
         if let Some(context) = co_processor_output.context {
-            res.context = context;
+            for (key, value) in context.try_into_iter()? {
+                res.context.upsert_json_value(key, move |_current| value);
+            }
         }
 
         return Ok(ControlFlow::Break(res));
@@ -581,7 +583,11 @@ where
     request.router_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        request.context = context;
+        for (key, value) in context.try_into_iter()? {
+            request
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -666,7 +672,11 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        response.context = context;
+        for (key, value) in context.try_into_iter()? {
+            response
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -765,13 +775,17 @@ where
                 *http_response.headers_mut() = internalize_header_map(headers)?;
             }
 
-            let mut subgraph_response = subgraph::Response {
+            let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
             };
 
             if let Some(context) = co_processor_output.context {
-                subgraph_response.context = context;
+                for (key, value) in context.try_into_iter()? {
+                    subgraph_response
+                        .context
+                        .upsert_json_value(key, move |_current| value);
+                }
             }
 
             subgraph_response
@@ -791,7 +805,11 @@ where
     request.subgraph_request = http::Request::from_parts(parts, new_body);
 
     if let Some(context) = co_processor_output.context {
-        request.context = context;
+        for (key, value) in context.try_into_iter()? {
+            request
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {
@@ -883,7 +901,11 @@ where
     }
 
     if let Some(context) = co_processor_output.context {
-        response.context = context;
+        for (key, value) in context.try_into_iter()? {
+            response
+                .context
+                .upsert_json_value(key, move |_current| value);
+        }
     }
 
     if let Some(headers) = co_processor_output.headers {

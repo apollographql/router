@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.15.1"
+version = "1.18.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -286,6 +286,7 @@ dependencies = [
  "axum",
  "backtrace",
  "base64 0.20.0",
+ "brotli",
  "buildstructor 0.5.2",
  "bytes",
  "ci_info",
@@ -403,11 +404,13 @@ dependencies = [
  "wiremock",
  "wsl",
  "yaml-rust",
+ "zstd",
+ "zstd-safe",
 ]
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.15.1"
+version = "1.18.1"
 dependencies = [
  "apollo-parser 0.4.1",
  "apollo-router",
@@ -423,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.15.1"
+version = "1.18.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -4839,9 +4842,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.2.1+v2.4.1"
+version = "0.2.2+v2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4acbfd187f72fd4ac00ae1e050b011b87641135f7ef222fe462ee78964c037d4"
+checksum = "a3b7f46d4ce5a83664e398eebe73d5501f38523f2b96fa0ef2e0cecb8474856e"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -7094,4 +7097,34 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.13",
+]
+
+[[package]]
+name = "zstd"
+version = "0.12.3+zstd.1.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76eea132fb024e0e13fd9c2f5d5d595d8a967aa72382ac2f9d39fcc95afd0806"
+dependencies = [
+ "zstd-safe",
+]
+
+[[package]]
+name = "zstd-safe"
+version = "6.0.5+zstd.1.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56d9e60b4b1758206c238a10165fbcae3ca37b01744e394c463463f6529d23b"
+dependencies = [
+ "libc",
+ "zstd-sys",
+]
+
+[[package]]
+name = "zstd-sys"
+version = "2.0.8+zstd.1.5.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5556e6ee25d32df2586c098bbfa278803692a20d0ab9565e049480d52707ec8c"
+dependencies = [
+ "cc",
+ "libc",
+ "pkg-config",
 ]

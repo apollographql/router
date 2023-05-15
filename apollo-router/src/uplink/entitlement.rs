@@ -153,6 +153,24 @@ impl EntitlementReport {
                 .path("$.traffic_shaping..experimental_entity_caching")
                 .name("Subgraph entity caching")
                 .build(),
+            // Per-operation limits are restricted but parser limits like `parser_max_recursion`
+            // where the Router only configures apollo-rs are not.
+            ConfigurationRestriction::builder()
+                .path("$.preview_operation_limits.max_depth")
+                .name("Operation depth limiting")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.preview_operation_limits.max_height")
+                .name("Operation height limiting")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.preview_operation_limits.max_root_fields")
+                .name("Operation root fields limiting")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.preview_operation_limits.max_aliases")
+                .name("Operation aliases limiting")
+                .build(),
         ]
     }
 }

@@ -66,9 +66,7 @@ pub(crate) struct Config {
     /// The buffer size for sending traces to Apollo. Increase this if you are experiencing lost traces.
     pub(crate) buffer_size: NonZeroUsize,
 
-    /// Enable field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
-    /// 0.0 will result in no field level instrumentation. 1.0 will result in always instrumentation.
-    /// Value MUST be less than global sampling rate
+    /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
@@ -83,9 +81,64 @@ pub(crate) struct Config {
 
     /// Configuration for batch processing.
     pub(crate) batch_processor: BatchProcessorConfig,
+
+    /// Configure the way errors are transmitted to Apollo Studio
+    pub(crate) errors: ErrorsConfiguration,
 }
 
-fn default_field_level_instrumentation_sampler() -> SamplerOption {
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ErrorsConfiguration {
+    /// Handling of errors coming from subgraph
+    pub(crate) subgraph: SubgraphErrorConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct SubgraphErrorConfig {
+    /// Handling of errors coming from all subgraphs
+    pub(crate) all: ErrorConfiguration,
+    /// Handling of errors coming from specified subgraphs
+    pub(crate) subgraphs: Option<HashMap<String, ErrorConfiguration>>,
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub(crate) struct ErrorConfiguration {
+    /// Send subgraph errors to Apollo Studio
+    pub(crate) send: bool,
+    /// Redact subgraph errors to Apollo Studio
+    pub(crate) redact: bool,
+}
+
+impl Default for ErrorConfiguration {
+    fn default() -> Self {
+        Self {
+            send: default_send_errors(),
+            redact: default_redact_errors(),
+        }
+    }
+}
+
+impl SubgraphErrorConfig {
+    pub(crate) fn get_error_config(&self, subgraph: &str) -> &ErrorConfiguration {
+        if let Some(subgraph_conf) = self.subgraphs.as_ref().and_then(|s| s.get(subgraph)) {
+            subgraph_conf
+        } else {
+            &self.all
+        }
+    }
+}
+
+pub(crate) const fn default_send_errors() -> bool {
+    true
+}
+
+pub(crate) const fn default_redact_errors() -> bool {
+    true
+}
+
+const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
@@ -127,6 +180,7 @@ impl Default for Config {
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
+            errors: ErrorsConfiguration::default(),
         }
     }
 }
@@ -217,7 +271,7 @@ pub(crate) struct Report {
         HashMap<(OperationKind, Option<OperationSubType>), OperationCountByType>,
 }
 
-#[derive(Default, Debug, Serialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Default, Debug, Serialize, PartialEq, Eq, Hash)]
 pub(crate) struct OperationCountByType {
     pub(crate) r#type: OperationKind,
     pub(crate) subtype: Option<OperationSubType>,
@@ -287,8 +341,8 @@ impl Report {
         aggregated_report
     }
 
-    pub(crate) fn into_report(
-        self,
+    pub(crate) fn build_proto_report(
+        &self,
         header: ReportHeader,
     ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
@@ -296,15 +350,18 @@ impl Report {
             end_time: Some(SystemTime::now().into()),
             operation_count_by_type: self
                 .operation_count_by_type
-                .into_values()
+                .values()
+                .cloned()
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
             ..Default::default()
         };
 
-        for (key, traces_and_stats) in self.traces_per_query {
-            report.traces_per_query.insert(key, traces_and_stats.into());
+        for (key, traces_and_stats) in &self.traces_per_query {
+            report
+                .traces_per_query
+                .insert(key.clone(), traces_and_stats.clone().into());
         }
         report
     }
@@ -353,7 +410,7 @@ impl AddAssign<SingleStatsReport> for Report {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TracesAndStats {
     pub(crate) traces: Vec<Trace>,
     #[serde(with = "vectorize")]

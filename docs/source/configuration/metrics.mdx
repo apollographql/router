@@ -57,37 +57,47 @@ apollo_router_http_request_duration_seconds_bucket{le="0.9"} 1
 > Note that if you haven't run a query against the router yet, you'll see a blank page because no metrics have been generated!
 
 ### Available metrics
+
 The following metrics are available when using Prometheus. Attributes are listed where applicable.
 
 #### HTTP
+
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
   - `subgraph`: (Optional) The subgraph being queried
-- `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status 
+- `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
 - `apollo_router_timeout` - Number of triggered timeouts
 - `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
   - `subgraph`: The subgraph being queried
   - `status` : If the retry was aborted (`aborted`)
 
 #### Session
-- `apollo_router_session_count_total` - Number of currently connected clients 
-- `apollo_router_session_count_active` - Number of in-flight GraphQL requests 
+
+- `apollo_router_session_count_total` - Number of currently connected clients
+- `apollo_router_session_count_active` - Number of in-flight GraphQL requests
 
 #### Cache
-- `apollo_router_cache_hit_count` - Number of cache hits 
-- `apollo_router_cache_miss_count` - Number of cache misses 
-- `apollo_router_cache_hit_time` - Time to hit the cache in seconds 
-- `apollo_router_cache_miss_time` - Time to miss the cache in seconds 
+
+- `apollo_router_cache_size` — Number of entries in the cache
+- `apollo_router_cache_hit_count` - Number of cache hits
+- `apollo_router_cache_miss_count` - Number of cache misses
+- `apollo_router_cache_hit_time` - Time to hit the cache in seconds
+- `apollo_router_cache_miss_time` - Time to miss the cache in seconds
 
 All cache metrics listed above have the following attributes:
+
 - `kind`: the cache being queried (`apq`, `query planner`, `introspection`)
 - `storage`: The backend storage of the cache (`memory`, `redis`)
 
 #### Performance
+
 - `apollo_router_processing_time` - Time spent processing a request (outside of waiting for external or subgraph requests) in seconds.
+- `apollo_router_query_planning_time` - Time spent planning queries in seconds.
 
 #### Uplink
+
 - `apollo_router_uplink_fetch_duration_seconds_bucket` - Uplink request duration, attributes:
+
   - `url`: The Uplink URL that was polled
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
   - `kind`: (`new`, `unchanged`, `http_error`, `uplink_error`)
@@ -95,7 +105,7 @@ All cache metrics listed above have the following attributes:
   - `error`: The error message (if an error occurred)
 
 - `apollo_router_uplink_fetch_count_total`
-  - `status`: (`success`, `failure`) 
+  - `status`: (`success`, `failure`)
   - `query`: The query that the router sent to Uplink (`SupergraphSdl` or `Entitlement`)
 
 Note that the initial call to uplink during router startup will not be reflected in metrics.
@@ -164,8 +174,11 @@ telemetry:
           response:
             body:
               # Apply the value of the provided path of the router's response body as an attribute
-              - path: .errors[0].extensions.status
+              - path: .errors[0].extensions.http.status
                 name: error_from_body
+              # Use the unique extension code to identify the kind of error
+              - path: .errors[0].extensions.code
+                name: error_code
           context:
             # Apply the indicated element from the plugin chain's context as an attribute
             - named: my_key

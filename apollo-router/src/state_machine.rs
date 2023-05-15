@@ -12,6 +12,7 @@ use ApolloRouterError::ServiceCreationError;
 use Event::NoMoreConfiguration;
 use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
+use Event::Reload;
 use Event::Shutdown;
 
 use super::http_server_factory::HttpServerFactory;
@@ -27,6 +28,7 @@ use super::state_machine::State::Running;
 use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
+use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::router::Event::UpdateEntitlement;
 use crate::router_factory::RouterFactory;
@@ -158,14 +160,19 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 router_service_factory,
                 all_connections_stopped_signal: _,
             } => {
-                tracing::info!("reloading");
+                tracing::info!(
+                    new_schema = new_schema.is_some(),
+                    new_entitlement = new_entitlement.is_some(),
+                    new_configuration = new_configuration.is_some(),
+                    "reloading"
+                );
 
                 if new_entitlement == Some(EntitlementState::Unentitled)
                     && *entitlement != EntitlementState::Unentitled
                 {
                     // When we get an unentitled event, if we were entitled before then just carry on.
                     // This means that users can delete and then undelete their graphs in studio while having their routers continue to run.
-                    tracing::debug!("loss of entitlement detected, ignoring");
+                    tracing::info!("loss of entitlement detected, ignoring reload");
                     return self;
                 }
 
@@ -343,6 +350,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         listen_addresses_guard.graphql_listen_address =
             server_handle.graphql_listen_address().clone();
 
+        // Log that we are using experimental features. It is best to do this here rather than config
+        // validation as it will actually log issues rather than return structured validation errors.
+        // Logging here also means that this is actually configuration that took effect
+        if let Some(yaml) = &configuration.validated_yaml {
+            let discussed = Discussed::new();
+            discussed.log_experimental_used(yaml);
+            discussed.log_preview_used(yaml);
+        }
+
         Ok(Running {
             configuration,
             schema,
@@ -432,6 +448,7 @@ where
                         .update_inputs(&mut self, None, None, Some(entitlement))
                         .await
                 }
+                Reload => state.update_inputs(&mut self, None, None, None).await,
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
