@@ -925,9 +925,9 @@ async fn query_rust_with_config(
     )
 }
 
-async fn setup_router_and_registry(
+async fn fallible_setup_router_and_registry(
     config: serde_json::Value,
-) -> (router::BoxCloneService, CountingServiceRegistry) {
+) -> Result<(router::BoxCloneService, CountingServiceRegistry), BoxError> {
     let counting_registry = CountingServiceRegistry::new();
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
@@ -936,9 +936,14 @@ async fn setup_router_and_registry(
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
         .build_router()
-        .await
-        .unwrap();
-    (router, counting_registry)
+        .await?;
+    Ok((router, counting_registry))
+}
+
+async fn setup_router_and_registry(
+    config: serde_json::Value,
+) -> (router::BoxCloneService, CountingServiceRegistry) {
+    fallible_setup_router_and_registry(config).await.unwrap()
 }
 
 async fn query_with_router(
@@ -1062,6 +1067,39 @@ impl ValueExt for Value {
                 }
             }
             (a, b) => a == b,
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn all_stock_router_example_yamls_are_valid() {
+    for entry in walkdir::WalkDir::new("../examples").into_iter().flatten() {
+        let entry_path = entry.path();
+        let display_path = entry_path.display().to_string();
+        let entry_parent = entry_path
+            .parent()
+            .unwrap_or_else(|| panic!("could not find parent of {display_path}"));
+
+        // skip projects with a `.skipconfigvalidation` file or a `Cargo.toml`
+        // we only want to test stock router binary examples, nothing custom
+        if !entry_parent.join(".skipconfigvalidation").exists()
+            && !entry_parent.join("Cargo.toml").exists()
+        {
+            if let Some(name) = entry.file_name().to_str() {
+                if name.ends_with("yaml") || name.ends_with("yml") {
+                    let raw_yaml = std::fs::read_to_string(entry_path)
+                        .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
+                    {
+                        let yaml = serde_yaml::from_str::<serde_json::Value>(&raw_yaml)
+                            .unwrap_or_else(|e| panic!("unable to parse YAML {display_path}: {e}"));
+                        fallible_setup_router_and_registry(yaml)
+                            .await
+                            .unwrap_or_else(|e| {
+                                panic!("unable to start up router for {display_path}: {e}");
+                            });
+                    }
+                }
+            }
         }
     }
 }
