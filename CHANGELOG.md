@@ -4,6 +4,44 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.18.1] - 2023-05-11
+
+## 🐛 Fixes
+
+### Fix multipart response compression by using a large enough buffer
+
+When writing a deferred response, if the output buffer was too small to write the entire compressed response, the compressor would write a small chunk that did not decompress to the entire primary response, and would then wait for the next response to send the rest.
+
+Unfortunately, we cannot really know the output size we need in advance, and if we asked the decoder, it would tell us that it flushed all the data, even if it could have sent more.  To compensate for this, we raise the output buffer size, and grow the buffer a second time after flushing, if necessary.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3067
+
+### Emit more log details to the state machine's `Running` phase ([Issue #3065](https://github.com/apollographql/router/issues/3065))
+
+This change adds details about the triggers of potential state changes to the logs and also makes it easier to see when an un-entitled event causes a state change to be ignored.
+
+Prior to this change, it was difficult to know from the logs why a router state reload had been triggered and the logs didn't make it clear that it was possible that the state change was going to be ignored.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3066
+
+
+### Respect GraphOS/Studio metric "backoff" guidance ([Issue #2888](https://github.com/apollographql/router/issues/2888))
+
+For stability reasons, GraphOS metric ingress will return an HTTP `429` status code with `Retry-After` guidance if it's unable to immediately accept a metric submission from a router.  A router instance should not try to submit further metrics until that amount of time (in seconds) has elapsed.  This fix provides support for this interaction.
+
+While observing a backoff request from GraphOS, the router will continue to collect metrics and no metrics are lost unless the router terminates before the timeout expires.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2977
+
+## 🛠 Maintenance
+
+### Refactor the way we're redacting errors for Apollo telemetry
+
+This follows-up on the federated subgraph trace error redaction mechanism changes which first appeared in [v1.16.0](https://github.com/apollographql/router/releases/tag/v1.16.0) via [PR #3011](https://github.com/apollographql/router/pull/3011) with some internal refactoring that improves the readability of the logic.  There should be no functional changes to the feature's behavior.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3030
+
+
 # [1.18.0] - 2023-05-05
 
 ## 🚀 Features
