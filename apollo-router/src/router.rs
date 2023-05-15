@@ -4,15 +4,13 @@
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -29,14 +27,15 @@ use hyper::Body;
 use thiserror::Error;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
+use tokio_util::time::DelayQueue;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
 use url::Url;
 
-use self::Event::ForcedHotReload;
 use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreSchema;
+use self::Event::Reload;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateSchema;
@@ -234,9 +233,17 @@ impl SchemaSource {
                             if watch {
                                 crate::files::watch(&path)
                                     .filter_map(move |_| {
-                                        future::ready(std::fs::read_to_string(&path).ok())
+                                        let path = path.clone();
+                                        async move {
+                                            match tokio::fs::read_to_string(&path).await {
+                                                Ok(schema) => Some(UpdateSchema(schema)),
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
+                                            }
+                                        }
                                     })
-                                    .map(UpdateSchema)
                                     .boxed()
                             } else {
                                 stream::once(future::ready(UpdateSchema(schema))).boxed()
@@ -344,59 +351,35 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
-                } else if watch {
-                    crate::files::watch(&path)
-                        .map(move |_| match ConfigurationSource::read_config(&path) {
-                            Ok(config) => UpdateConfiguration(config),
-                            Err(err) => {
-                                tracing::error!("{}", err);
-                                NoMoreConfiguration
-                            }
-                        })
-                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
                         Ok(configuration) => {
-                            #[cfg(any(test, not(unix)))]
-                            {
+                            if watch {
+                                crate::files::watch(&path)
+                                    .filter_map(move |_| {
+                                        let path = path.clone();
+                                        async move {
+                                            match ConfigurationSource::read_config_async(&path)
+                                                .await
+                                            {
+                                                Ok(configuration) => {
+                                                    Some(UpdateConfiguration(configuration))
+                                                }
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
+                                            }
+                                        }
+                                    })
+                                    .boxed()
+                            } else {
                                 stream::once(future::ready(UpdateConfiguration(configuration)))
                                     .boxed()
                             }
-
-                            #[cfg(all(not(test), unix))]
-                            {
-                                let mut sighup_stream = tokio::signal::unix::signal(
-                                    tokio::signal::unix::SignalKind::hangup(),
-                                )
-                                .expect("Failed to install SIGHUP signal handler");
-
-                                let (mut tx, rx) = futures::channel::mpsc::channel(1);
-                                tokio::task::spawn(async move {
-                                    while let Some(()) = sighup_stream.recv().await {
-                                        tx.send(()).await.unwrap();
-                                    }
-                                });
-                                futures::stream::select(
-                                    stream::once(future::ready(UpdateConfiguration(configuration)))
-                                        .boxed(),
-                                    rx.filter_map(
-                                        move |()| match ConfigurationSource::read_config(&path) {
-                                            Ok(configuration) => future::ready(Some(
-                                                UpdateConfiguration(configuration),
-                                            )),
-                                            Err(err) => {
-                                                tracing::error!("{}", err);
-                                                future::ready(None)
-                                            }
-                                        },
-                                    )
-                                    .boxed(),
-                                )
-                                .boxed()
-                            }
                         }
                         Err(err) => {
-                            tracing::error!("{}", err);
+                            tracing::error!("Failed to read configuration: {}", err);
                             stream::empty().boxed()
                         }
                     }
@@ -408,7 +391,11 @@ impl ConfigurationSource {
     }
 
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
-        let config = fs::read_to_string(path)?;
+        let config = std::fs::read_to_string(path)?;
+        config.parse().map_err(ReadConfigError::Validation)
+    }
+    async fn read_config_async(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = tokio::fs::read_to_string(path).await?;
         config.parse().map_err(ReadConfigError::Validation)
     }
 }
@@ -580,64 +567,62 @@ enum ReadConfigError {
     Validation(crate::configuration::ConfigurationError),
 }
 
-pub(crate) struct ForcedHotReloadSource {
-    config: Arc<ForcedHotReloadConfig>,
-    timer: Option<tokio::time::Interval>,
-}
-
 #[derive(Default)]
-pub(crate) struct ForcedHotReloadConfig {
-    interval_seconds: AtomicU64, // zero: disabled
+struct ReloadSourceInner {
+    queue: DelayQueue<()>,
+    period: Option<Duration>,
 }
 
-impl ForcedHotReloadConfig {
-    pub(crate) fn period(&self) -> Option<Duration> {
-        match self.interval_seconds.load(Ordering::Acquire) {
-            0 => None,
-            secs => Some(Duration::from_secs(secs)),
+/// Reload source is an internal event emitter for the state machine that will send reload events on SIGUP and/or on a timer.
+#[derive(Clone, Default)]
+pub(crate) struct ReloadSource {
+    inner: Arc<Mutex<ReloadSourceInner>>,
+}
+
+impl ReloadSource {
+    fn set_period(&self, period: &Option<Duration>) {
+        let mut inner = self.inner.lock().unwrap();
+        // Clear the queue before setting the period
+        inner.queue.clear();
+        inner.period = *period;
+        if let Some(period) = period {
+            inner.queue.insert((), *period);
         }
     }
 
-    pub(crate) fn set_period(&self, new_period: Option<Duration>) {
-        let new_seconds = if let Some(duration) = new_period {
-            duration.as_secs().max(1) // round to at least 1 second
-        } else {
-            0
-        };
-        self.interval_seconds.store(new_seconds, Ordering::Release)
-    }
-}
+    fn into_stream(self) -> impl Stream<Item = Event> {
+        #[cfg(unix)]
+        let signal_stream = {
+            let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+                .expect("Failed to install SIGHUP signal handler");
 
-impl ForcedHotReloadSource {
-    pub(crate) fn new(config: Arc<ForcedHotReloadConfig>) -> Self {
-        let mut new = Self {
-            config,
-            timer: None,
-        };
-        new.check_config();
-        new
-    }
-
-    fn check_config(&mut self) {
-        let configured = self.config.period();
-        if configured != self.timer.as_ref().map(|t| t.period()) {
-            self.timer = configured.map(|period| {
-                let mut interval = tokio::time::interval(period);
-                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-                interval
+            futures::stream::poll_fn(move |cx| match signal.poll_recv(cx) {
+                Poll::Ready(Some(_)) => Poll::Ready(Some(Event::Reload)),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
             })
-        }
-    }
+            .boxed()
+        };
+        #[cfg(not(unix))]
+        let signal_stream = futures::stream::empty().boxed();
 
-    fn into_stream(mut self) -> impl Stream<Item = Event> {
-        futures::stream::poll_fn(move |ctx: &mut Context<'_>| {
-            self.check_config();
-            if let Some(timer) = &mut self.timer {
-                timer.poll_tick(ctx).map(|_| Some(Event::ForcedHotReload))
-            } else {
-                Poll::Pending
+        let periodic_reload = futures::stream::poll_fn(move |cx| {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.queue.poll_expired(cx) {
+                Poll::Ready(Some(_expired)) => {
+                    if let Some(period) = inner.period {
+                        inner.queue.insert((), period);
+                    }
+                    Poll::Ready(Some(Event::Reload))
+                }
+                // We must return pending even if the queue is empty, otherwise the stream will never be polled again
+                // The waker will still be used, so this won't end up in a hot loop.
+                Poll::Ready(None) => Poll::Pending,
+                Poll::Pending => Poll::Pending,
             }
-        })
+        });
+
+        futures::stream::select(signal_stream, periodic_reload)
     }
 }
 
@@ -789,7 +774,7 @@ impl RouterHttpServer {
         shutdown: Option<ShutdownSource>,
     ) -> RouterHttpServer {
         let (shutdown_sender, shutdown_receiver) = oneshot::channel::<()>();
-        let (event_stream, forced_hot_reload_config) = generate_event_stream(
+        let event_stream = generate_event_stream(
             shutdown.unwrap_or(ShutdownSource::CtrlC),
             configuration.unwrap_or_default(),
             schema,
@@ -798,8 +783,7 @@ impl RouterHttpServer {
         );
         let server_factory = AxumHttpServerFactory::new();
         let router_factory = OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
-        let state_machine =
-            StateMachine::new(server_factory, router_factory, forced_hot_reload_config);
+        let state_machine = StateMachine::new(server_factory, router_factory);
         let listen_addresses = state_machine.listen_addresses.clone();
         let result = spawn(
             async move { state_machine.process_events(event_stream).await }
@@ -880,7 +864,7 @@ pub(crate) enum Event {
     NoMoreEntitlement,
 
     /// Artificial hot reload for chaos testing
-    ForcedHotReload,
+    Reload,
 
     /// The server should gracefully shutdown.
     Shutdown,
@@ -907,7 +891,7 @@ impl Debug for Event {
             NoMoreEntitlement => {
                 write!(f, "NoMoreEntitlement")
             }
-            ForcedHotReload => {
+            Reload => {
                 write!(f, "ForcedHotReload")
             }
             Shutdown => {
@@ -942,23 +926,30 @@ fn generate_event_stream(
     schema: SchemaSource,
     entitlement: EntitlementSource,
     shutdown_receiver: oneshot::Receiver<()>,
-) -> (impl Stream<Item = Event>, Arc<ForcedHotReloadConfig>) {
-    let forced_hot_reload_config = Arc::new(ForcedHotReloadConfig::default());
-    // Chain is required so that the final shutdown message is sent.
+) -> impl Stream<Item = Event> {
+    let reload_source = ReloadSource::default();
+
     let stream = stream::select_all(vec![
         shutdown.into_stream().boxed(),
-        configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
         entitlement.into_stream().boxed(),
-        ForcedHotReloadSource::new(forced_hot_reload_config.clone())
+        reload_source.clone().into_stream().boxed(),
+        configuration
             .into_stream()
+            .map(move |config_event| {
+                if let Event::UpdateConfiguration(config) = &config_event {
+                    reload_source.set_period(&config.experimental_chaos.force_reload)
+                }
+                config_event
+            })
             .boxed(),
         shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
+    // Chain is required so that the final shutdown message is sent.
     .chain(stream::iter(vec![Shutdown]))
     .boxed();
-    (stream, forced_hot_reload_config)
+    stream
 }
 
 #[cfg(test)]
