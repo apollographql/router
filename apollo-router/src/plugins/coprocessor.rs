@@ -3,7 +3,6 @@
 
 use std::collections::HashMap;
 use std::ops::ControlFlow;
-use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,8 +10,8 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
-use futures::Stream;
 use futures::StreamExt;
+use futures::TryStreamExt;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -48,7 +47,6 @@ use crate::tracer::TraceId;
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
-pub type BodyStream = Pin<Box<dyn Stream<Item = Body> + Send>>;
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
@@ -113,7 +111,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + Sync + 'static,
 {
     http_client: C,
     configuration: Conf,
@@ -127,7 +125,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + Sync + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + Sync + 'static,
 {
     fn new(http_client: C, configuration: Conf, sdl: Arc<String>) -> Result<Self, BoxError> {
         Ok(Self {
@@ -268,7 +266,7 @@ impl RouterStage {
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -384,7 +382,7 @@ impl SubgraphStage {
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -480,7 +478,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -496,7 +494,7 @@ where
     // HTTP GET requests don't have a body
     let body_to_send = request_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| String::from_utf8(bytes.to_vec()))
         .transpose()
         .unwrap_or_default();
 
@@ -539,18 +537,19 @@ where
         // Ensure the code is a valid http status code
         let code = control.get_http_status()?;
 
-        let graphql_response: crate::graphql::Response =
-            serde_json::from_value(co_processor_output.body.unwrap_or(serde_json::Value::Null))
-                .unwrap_or_else(|error| {
-                    crate::graphql::Response::builder()
-                        .errors(vec![Error::builder()
-                            .message(format!(
-                                "couldn't deserialize coprocessor output body: {error}"
-                            ))
-                            .extension_code("EXERNAL_DESERIALIZATION_ERROR")
-                            .build()])
-                        .build()
-                });
+        let graphql_response: crate::graphql::Response = serde_json::from_value(
+            serde_json::to_value(co_processor_output.body).unwrap_or(serde_json::Value::Null),
+        )
+        .unwrap_or_else(|error| {
+            crate::graphql::Response::builder()
+                .errors(vec![Error::builder()
+                    .message(format!(
+                        "couldn't deserialize coprocessor output body: {error}"
+                    ))
+                    .extension_code("EXERNAL_DESERIALIZATION_ERROR")
+                    .build()])
+                .build()
+        });
 
         let res = router::Response::builder()
             .errors(graphql_response.errors)
@@ -616,26 +615,34 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
-    // we split the response stream into headers+first response, then a stream of deferred responses
+    // split the response into parts + body
+    let (parts, body) = response.response.into_parts();
+
+    // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    let (parts, stream) = response.response.into_parts();
-    let (first, rest) = stream.into_future().await;
+    let (first, rest): (Option<Result<Bytes, hyper::Error>>, Body) = body.into_future().await;
 
-    if first.is_none() {
-        response.response =
-            http::Response::from_parts(parts, first.expect("huh").expect("already checked").into());
-        return Ok(response);
-    }
+    // If first is None, or contains an error we return an error
+    let opt_first: Option<Bytes> = first.and_then(|f| f.ok());
+    let bytes = match opt_first {
+        Some(b) => b.to_vec(),
+        None => {
+            tracing::error!(
+                "Coprocessor cannot convert body into future due to problem with first part"
+            );
+            return Err(BoxError::from(
+                "Coprocessor cannot convert body into future due to problem with first part",
+            ));
+        }
+    };
 
-    println!("first: {first:?}");
-    println!("rest: {rest:?}");
+    // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
         .then(|| externalize_header_map(&parts.headers))
         .transpose()?;
-    let bytes = first.expect("huh").expect("already checked").to_vec();
     let body_to_send = response_config
         .body
         .then(|| String::from_utf8(bytes.clone()))
@@ -649,22 +656,21 @@ where
         stage: PipelineStep::RouterResponse.to_string(),
         control: None,
         id: TraceId::maybe_new().map(|id| id.to_string()),
-        headers: headers_to_send,
+        headers: headers_to_send.clone(),
         body: body_to_send,
         context: context_to_send,
         status_code: status_to_send,
-        sdl,
+        sdl: sdl.clone(),
         uri: None,
         path: None,
         method: None,
         service_name: None,
     };
 
-    println!("payload: {payload:?}");
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     response.context.enter_active_request();
-    let co_processor_result = payload.call(http_client, &coprocessor_url).await;
+    let co_processor_result = payload.call(http_client.clone(), &coprocessor_url).await;
     response.context.leave_active_request();
     tracing::debug!(?co_processor_result, "co-processor returned");
     let co_processor_output = co_processor_result?;
@@ -699,203 +705,75 @@ where
         *response.response.headers_mut() = internalize_header_map(headers)?;
     }
 
+    // Now break our co-processor modified response back into parts
     let (parts, body) = response.response.into_parts();
 
+    // Clone all the bits we need
     let context = response.context.clone();
+    let my_context = response.context.clone();
 
-    let mapped_stream = rest.filter_map(move |deferred_response| {
-        println!("deferred_response: {deferred_response:?}");
-        // CALL CO-PROCESSOR AND MANIPULATE DATA HERE
-        // async move { Some(Ok::<Body, BoxError>(Body::from(deferred_response.ok()?))) }
-        async move { deferred_response.ok() }
-    });
+    // Map the rest of our body
+    let mapped_stream = rest
+        .map_err(BoxError::from)
+        .and_then(move |deferred_response| {
+            let my_client = http_client.clone();
+            let my_coprocessor_url = coprocessor_url.clone();
+            let my_my_context = my_context.clone();
+            let my_sdl = sdl.clone();
 
-    let bytes = body.to_vec();
+            async move {
+                let bytes = deferred_response.to_vec();
+                let body_to_send = response_config
+                    .body
+                    .then(|| String::from_utf8(bytes.clone()))
+                    .transpose()?;
+                let context_to_send = response_config.context.then(|| my_my_context.clone());
+
+                // Note: We deliberately DO NOT send headers or status_code even if the user has
+                // requested them. That's because they are meaningless on a deferred response and
+                // providing them will be a source of confusion.
+                let payload = Externalizable {
+                    version: EXTERNALIZABLE_VERSION,
+                    stage: PipelineStep::RouterResponse.to_string(),
+                    control: None,
+                    id: TraceId::maybe_new().map(|id| id.to_string()),
+                    headers: None,
+                    body: body_to_send,
+                    context: context_to_send,
+                    status_code: None,
+                    sdl: my_sdl,
+                    uri: None,
+                    path: None,
+                    method: None,
+                    service_name: None,
+                };
+
+                // Second, call our co-processor and get a reply.
+                tracing::debug!(?payload, "externalized output");
+                my_my_context.enter_active_request();
+                let co_processor_result = payload.call(my_client, &my_coprocessor_url).await;
+                my_my_context.leave_active_request();
+                tracing::debug!(?co_processor_result, "co-processor returned");
+                let co_processor_output = co_processor_result?;
+
+                validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
+
+                let final_bytes: Bytes = match co_processor_output.body {
+                    Some(bytes) => bytes.into(),
+                    None => bytes.into(),
+                };
+                Ok(final_bytes)
+            }
+        });
+
+    let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
     let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
-    let bob: http::Response<Body> = http::Response::from_parts(parts, final_stream).into();
-    // Ok(bob)
-    Ok(response)
-    /*
-    let dunno = router::Response {
+    let bob: http::Response<Body> =
+        http::Response::from_parts(parts, Body::wrap_stream(final_stream));
+    Ok(router::Response {
         context,
         response: bob,
-    };
-    */
-    /*
-                    let response = http::Response::from_parts(
-                        parts,
-                        once(ready(body)).chain(mapped_stream).boxed(),
-                    )
-                    .into();
-    */
-    /*
-    // response.response = bob;
-     */
-    // response.response = bob;
-    /*
-    response =
-        http::Response::from_parts(parts, once(ready(body)).chain(mapped_stream).boxed()).into();
-    Ok(response)
-    */
-    /*
-    response.response =
-        // http::Response::from_parts(parts, once(ready(body)).chain(mapped_stream).boxed()).into();
-        http::Response::from_parts(parts, body);
-    Ok(response)
-    */
-    /*
-    let response = $rhai_response {
-        context,
-        response: http::Response::from_parts(
-            parts,
-            first.expect("already checked"),
-        )
-        .into(),
-    };
-    let shared_response = Shared::new(Mutex::new(Some(response)));
-
-    let result =
-        execute(&$rhai_service, &$callback, (shared_response.clone(),));
-    if let Err(error) = result {
-        tracing::error!("map_response callback failed: {error}");
-        let error_details = process_error(error);
-        let mut guard = shared_response.lock().unwrap();
-        let response_opt = guard.take();
-        return Ok(failure_message(
-            response_opt.unwrap().context,
-            error_details
-        ));
-    }
-
-    let mut guard = shared_response.lock().unwrap();
-    let response_opt = guard.take();
-    let $rhai_response { context, response } =
-        response_opt.unwrap();
-    let (parts, body) = http::Response::from(response).into_parts();
-
-    let ctx = context.clone();
-
-    let mapped_stream = rest.filter_map(move |deferred_response| {
-        let rhai_service = $rhai_service.clone();
-        let context = context.clone();
-        let callback = $callback.clone();
-        async move {
-            let response = $rhai_deferred_response {
-                context,
-                response: deferred_response,
-            };
-            let shared_response = Shared::new(Mutex::new(Some(response)));
-
-            let result = execute(
-                &rhai_service,
-                &callback,
-                (shared_response.clone(),),
-            );
-            if let Err(error) = result {
-                tracing::error!("map_response callback failed: {error}");
-                let error_details = process_error(error);
-                let mut guard = shared_response.lock().unwrap();
-                let response_opt = guard.take();
-                let $rhai_deferred_response { mut response, .. } = response_opt.unwrap();
-                let error = Error {
-                    message: error_details.message.unwrap_or_default(),
-                    ..Default::default()
-                };
-                response.errors = vec![error];
-                return Some(response);
-            }
-
-            let mut guard = shared_response.lock().unwrap();
-            let response_opt = guard.take();
-            let $rhai_deferred_response { response, .. } =
-                response_opt.unwrap();
-            Some(response)
-        }
-    });
-
-    let response = http::Response::from_parts(
-        parts,
-        once(ready(body)).chain(mapped_stream).boxed(),
-    )
-    .into();
-    Ok($response {
-        context: ctx,
-        response,
     })
-    */
-    /*
-        // Call into our out of process processor with a body of our body
-        // First, extract the data we need from our response and prepare our
-        // external call. Use our configuration to figure out which data to send.
-        let (parts, mut body) = response.response.into_parts();
-        //     let bytes = hyper::body::to_bytes(body).await?;
-        let bytes = Bytes::new();
-
-        if let Some(chunk) = body.data().await {
-            let headers_to_send = response_config
-                .headers
-                .then(|| externalize_header_map(&parts.headers))
-                .transpose()?;
-            let body_to_send = response_config
-                .body
-                .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
-                .transpose()?;
-            let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
-            let context_to_send = response_config.context.then(|| response.context.clone());
-            let sdl = response_config.sdl.then(|| sdl.clone().to_string());
-
-            let payload = Externalizable {
-                version: EXTERNALIZABLE_VERSION,
-                stage: PipelineStep::RouterResponse.to_string(),
-                control: None,
-                id: TraceId::maybe_new().map(|id| id.to_string()),
-                headers: headers_to_send,
-                body: body_to_send,
-                context: context_to_send,
-                status_code: status_to_send,
-                sdl,
-                uri: None,
-                path: None,
-                method: None,
-                service_name: None,
-            };
-
-            // Second, call our co-processor and get a reply.
-            tracing::debug!(?payload, "externalized output");
-            response.context.enter_active_request().await;
-            let co_processor_result = payload.call(http_client, &coprocessor_url).await;
-            response.context.leave_active_request().await;
-            tracing::debug!(?co_processor_result, "co-processor returned");
-            let co_processor_output = co_processor_result?;
-
-            validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
-
-            // Third, process our reply and act on the contents. Our processing logic is
-            // that we replace "bits" of our incoming response with the updated bits if they
-            // are present in our co_processor_output. If they aren't present, just use the
-            // bits that we sent to the co_processor.
-
-            let new_body = match co_processor_output.body {
-                Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
-                None => Body::from(bytes),
-            };
-
-            response.response = http::Response::from_parts(parts, new_body);
-            if let Some(control) = co_processor_output.control {
-                *response.response.status_mut() = control.get_http_status()?
-            }
-
-            if let Some(context) = co_processor_output.context {
-                response.context = context;
-            }
-
-            if let Some(headers) = co_processor_output.headers {
-                *response.response.headers_mut() = internalize_header_map(headers)?;
-            }
-
-            Ok(response)
-        }
-    */
 }
 // -----------------------------------------------------------------------------------------------------
 
@@ -912,7 +790,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -1048,7 +926,7 @@ where
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<hyper::Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our response and prepare our
