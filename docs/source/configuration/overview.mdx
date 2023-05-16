@@ -15,7 +15,7 @@ Arguments for this command are described below.
 
 ## Environment variables
 
-If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in its startup command:
+If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
 
 ```bash
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
@@ -38,7 +38,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
 </td>
 <td>
 
-The graph ref of the GraphOS graph and variant that the router fetches its supergraph schema from.
+The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
 
 **Required** if using managed federation.
 
@@ -52,7 +52,7 @@ The graph ref of the GraphOS graph and variant that the router fetches its super
 </td>
 <td>
 
-The [graph API key](/graphos/api-keys/#graph-api-keys) that the Apollo Router should use to authenticate with GraphOS when fetching its supergraph schema.
+The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
 
 **Required** if using managed federation.
 
@@ -64,16 +64,14 @@ The [graph API key](/graphos/api-keys/#graph-api-keys) that the Apollo Router sh
 </tbody>
 </table>
 
-## Command arguments
+## Command-line options
 
-The `router` command supports the arguments listed in the table below.
-
-Where indicated, some of these arguments can also be set via an environment variable. If you specify a configuration value using _both_ mechanisms, the command-line argument's value takes precedence.
+Where indicated, some of these options can also be provided via an environment variable. If an option is provided _both_ ways, the command-line value takes precedence.
 
 <table class="field-table api-ref">
   <thead>
     <tr>
-      <th>Argument / Environment Variable</th>
+      <th>Option / Environment Variable</th>
       <th>Description</th>
     </tr>
   </thead>
@@ -117,6 +115,38 @@ The absolute or relative path to the router's optional [YAML configuration file]
 <tr>
 <td style="min-width: 150px;">
 
+##### `--dev`
+
+</td>
+<td>
+
+⚠️ **Do not set this option in production!**
+
+If set, the Apollo Router runs in dev mode to help with local development.
+
+[Learn more about dev mode.](#dev-mode-defaults)
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--hr` / `--hot-reload`
+
+`APOLLO_ROUTER_HOT_RELOAD`
+
+</td>
+<td>
+
+If set, the router watches for changes to its schema and configuration files and reloads them automatically without downtime.
+
+</td>
+</tr>
+
+<tr>
+<td style="min-width: 150px;">
+
 ##### `--log`
 
 `APOLLO_ROUTER_LOG`
@@ -134,21 +164,6 @@ The default value is `info`.
 <tr>
 <td style="min-width: 150px;">
 
-##### `--hr` / `--hot-reload`
-
-`APOLLO_ROUTER_HOT_RELOAD`
-
-</td>
-<td>
-
-If provided, the router watches for changes to its schema and configuration files and reloads them automatically without downtime.
-
-</td>
-</tr>
-
-<tr>
-<td style="min-width: 150px;">
-
 ##### `--apollo-uplink-endpoints`
 
 `APOLLO_UPLINK_ENDPOINTS`
@@ -156,9 +171,9 @@ If provided, the router watches for changes to its schema and configuration file
 </td>
 <td>
 
-The Apollo Uplink URL(s) that the Apollo Router should poll to fetch its latest supergraph schema.
+If using [managed federation](/federation/managed-federation/overview/), the Apollo Uplink URL(s) that the router should poll to fetch its latest configuration. Almost all managed router instances should _omit_ this option to use the default set of Uplink URLs.
 
-This argument supports providing a comma-separated list of URLs.
+If you specify multiple URLs, separate them with commas (no whitespace).
 
 For default behavior and possible values, see [Apollo Uplink](/federation/managed-federation/uplink/).
 
@@ -208,20 +223,7 @@ The default value is `30s` (thirty seconds).
 </td>
 <td>
 
-Disable sending anonymous usage information to Apollo.
-
-</td>
-</tr>
-
-<tr>
-<td style="min-width: 150px;">
-
-##### `--schema`
-
-</td>
-<td>
-
-Prints out a JSON schema of the router's configuration file, including [plugin configuration](#plugins).
+If set, disables sending anonymous usage information to Apollo.
 
 </td>
 </tr>
@@ -234,19 +236,61 @@ Prints out a JSON schema of the router's configuration file, including [plugin c
 </td>
 <td>
 
-Prints out the Apollo Router's version.
+If set, the router prints its version number, then exits.
 
 </td>
 </tr>
+
+<tr>
+<td style="min-width: 150px;">
+
+##### `--schema`
+
+</td>
+<td>
+
+**Deprecated**—use [`./router config schema`](#configuration-awareness-in-your-text-editor) instead.
+
+If set, the router prints a JSON schema representation of its full supported configuration format, then exits.
+
+</td>
+</tr>
+
 </tbody>
 </table>
 
-## Config subcommand
+### Dev mode defaults
+
+> **⚠️ Do not set the `--dev` option in production!** If you want to replicate any specific dev mode functionality in production, instead make the corresponding modifications to your [YAML config file](#yaml-config-file).
+
+Setting the [`--dev`](#--dev) flag is equivalent to running `./router --hot-reload` with the following configuration options:
+
+```yaml
+sandbox:
+  enabled: true
+homepage:
+  enabled: false
+supergraph:
+  introspection: true
+include_subgraph_errors:
+  all: true
+plugins:
+  experimental.expose_query_plan: true
+```
+
+## `config` subcommands
+
+The Apollo Router provides a set of subcommands for interacting with its configuration. You run these subcommands with the following syntax:
+
+```
+./router config schema
+./router config upgrade <path-to-config-file.yaml>
+```
 
 <table class="field-table api-ref">
   <thead>
     <tr>
-      <th>Argument / Environment Variable</th>
+      <th>Subcommand</th>
       <th>Description</th>
     </tr>
   </thead>
@@ -261,7 +305,9 @@ Prints out the Apollo Router's version.
 </td>
 <td>
 
-Prints out a JSON schema of the Router's configuration file, including [plugin configuration](#plugins).
+Prints a JSON schema representation of the router's full supported configuration format.
+
+Use this schema to enable [configuration awareness in your text editor](#configuration-awareness-in-your-text-editor).
 
 </td>
 </tr>
@@ -274,7 +320,9 @@ Prints out a JSON schema of the Router's configuration file, including [plugin c
 </td>
 <td>
 
-Print configuration that has been upgraded to the current Router version.
+Takes a config file created for a _previous_ version of the Apollo Router and outputs the corresponding configuration for the _current_ version.
+
+For details, see [Upgrading your router configuration](#upgrading-your-router-configuration).
 
 </td>
 </tr>
@@ -290,7 +338,7 @@ The Apollo Router takes an optional YAML configuration file as input via the [`-
 ./router --config router.yaml
 ```
 
-This file enables you to customize various aspects of your router's behavior, covered in the subsections below.
+This file enables you to customize numerous aspects of your router's behavior, covered in the subsections below.
 
 > If you pass the [`--hot-reload`](#--hr----hot-reload) flag to the `router` command, your router automatically restarts whenever changes are made to its configuration file.
 
@@ -421,7 +469,7 @@ By default, the Apollo Router stores the following data in its in-memory cache t
 
 You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-memory caching in the Apollo Router](./in-memory-caching/).
 
-**If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/)
+**If you have a GraphOS Enterprise plan,** you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
 
 ### HTTP header rules
 
@@ -601,11 +649,11 @@ New releases of the Apollo Router might introduce breaking changes to the [YAML 
 If you encounter this warning, you can use the `router config upgrade` command to see the new expected format for your existing configuration file:
 
 ```bash
-./router config upgrade <path_to_router.yaml>
+./router config upgrade <path_to_config.yaml>
 ```
 
 You can also view a diff of exactly which changes are necessary to upgrade your existing configuration file:
 
 ```bash
-./router config upgrade --diff <path_to_router.yaml>
+./router config upgrade --diff <path_to_config.yaml>
 ```
