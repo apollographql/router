@@ -18,4 +18,4 @@ telemetry:
         - 20.00
 ```
 
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/PULL_NUMBER
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3098
