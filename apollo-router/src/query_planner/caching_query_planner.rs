@@ -8,6 +8,8 @@ use std::task;
 use futures::future::BoxFuture;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
+use sha2::Digest;
+use sha2::Sha256;
 use tower::ServiceExt;
 use tracing::Instrument;
 
@@ -251,12 +253,20 @@ pub(crate) struct CachingQueryKey {
 
 impl std::fmt::Display for CachingQueryKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut hasher = Sha256::new();
+        hasher.update(&self.query);
+        let query = hex::encode(hasher.finalize());
+
+        let mut hasher = Sha256::new();
+        hasher.update(self.operation.as_deref().unwrap_or("-"));
+        let operation = hex::encode(hasher.finalize());
+
         write!(
             f,
             "plan\0{}\0{}\0{}",
             self.schema_id.as_deref().unwrap_or("-"),
-            self.query,
-            self.operation.as_deref().unwrap_or("-")
+            query,
+            operation
         )
     }
 }
