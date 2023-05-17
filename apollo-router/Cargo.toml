@@ -265,3 +265,6 @@ tonic-build = "0.8.4"
 name = "integration_tests"
 path = "tests/integration_tests.rs"
 
+[[bench]]
+name = "huge_requests"
+harness = false
