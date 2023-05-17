@@ -28,7 +28,8 @@ use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
-use walkdir::{DirEntry, WalkDir};
+use walkdir::DirEntry;
+use walkdir::WalkDir;
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
