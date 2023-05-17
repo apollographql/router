@@ -95,7 +95,7 @@ async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError
 }
 
 #[tokio::test(flavor = "multi_thread")]
-// #[cfg(target_family = "unix")]
+#[cfg(target_family = "unix")]
 async fn test_graceful_shutdown() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(HAPPY_CONFIG)
