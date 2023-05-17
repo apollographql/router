@@ -30,8 +30,6 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 
-pub(crate) static USAGE_REPORTING: &str = "apollo_telemetry::usage_reporting";
-
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -243,29 +241,16 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
-                            if let Err(inner_e) = req
-                                .context
-                                .insert(USAGE_REPORTING, pe.usage_reporting.clone())
-                            {
-                                tracing::error!(
-                                    "usage reporting was not serializable to context, {}",
-                                    inner_e
-                                );
-                            }
+                            req.context
+                                .private_entries
+                                .lock()
+                                .insert(pe.usage_reporting.clone());
                         }
                         QueryPlannerError::SpecError(e) => {
-                            if let Err(inner_e) = req.context.insert(
-                                USAGE_REPORTING,
-                                UsageReporting {
-                                    stats_report_key: e.get_error_key().to_string(),
-                                    referenced_fields_by_type: HashMap::new(),
-                                },
-                            ) {
-                                tracing::error!(
-                                    "usage reporting was not serializable to context, {}",
-                                    inner_e
-                                );
-                            }
+                            req.context.private_entries.lock().insert(UsageReporting {
+                                stats_report_key: e.get_error_key().to_string(),
+                                referenced_fields_by_type: HashMap::new(),
+                            });
                         }
                         _ => (),
                     }

@@ -95,6 +95,10 @@ expression: get_spans()
                 0
               ],
               [
+                "apollo_private.http.response_headers",
+                "{}"
+              ],
+              [
                 "otel.status_code",
                 "Error"
               ]
