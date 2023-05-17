@@ -1,0 +1,10 @@
+# For reasons I can't explan, when this is run on Iryna's m1 system, you
+# have to specify the full path to the dockerfile. If you find a similar
+# problem, please replace '.' with the full path to federation-next.
+[target.aarch64-unknown-linux-gnu]
+dockerfile = "./apollo-harness/scripts/Dockerfile.builder"
+
+# For reasons I can't explan, when I run on my x86 machine, I have to base
+# the path from the `apollo-harness` directory, not the virtual workspace.
+[target.x86_64-unknown-linux-gnu]
+dockerfile = "./scripts/Dockerfile.builder"

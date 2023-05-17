@@ -1,0 +1,3 @@
+# Format -> free text title:program name:schema file:query file
+load and plan 1:rb_loader:schema.graphql:query.graphql
+load 1:rb_loader:schema.graphql:
