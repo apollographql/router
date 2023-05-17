@@ -28,6 +28,7 @@ use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt;
+use walkdir::{DirEntry, WalkDir};
 
 macro_rules! assert_federated_response {
     ($query:expr, $service_requests:expr $(,)?) => {
@@ -932,7 +933,7 @@ async fn fallible_setup_router_and_registry(
     let router = apollo_router::TestHarness::builder()
         .with_subgraph_network_requests()
         .configuration_json(config)
-        .unwrap()
+        .map_err(|e| Box::new(e) as BoxError)?
         .schema(include_str!("fixtures/supergraph.graphql"))
         .extra_plugin(counting_registry.clone())
         .build_router()
@@ -1073,14 +1074,19 @@ impl ValueExt for Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_stock_router_example_yamls_are_valid() {
-    let root_dir = option_env!("CARGO_MANIFEST_DIR").expect("could not find $CARGO_MANIFEST_DIR");
-    let examples_dir = std::path::PathBuf::try_from(&root_dir)
-        .unwrap_or_else(|e| {
-            panic!("could not create PathBuf from $CARGO_MANIFEST_DIR ({root_dir}): {e}")
+    let example_dir = "../examples";
+    let example_directory_entries: Vec<DirEntry> = WalkDir::new(example_dir)
+        .into_iter()
+        .map(|entry| {
+            entry.unwrap_or_else(|e| panic!("invalid directory entry in {example_dir}: {e}"))
         })
-        .join("examples");
-    for entry in walkdir::WalkDir::new(examples_dir).into_iter().flatten() {
-        let entry_path = entry.path();
+        .collect();
+    assert!(
+        !example_directory_entries.is_empty(),
+        "asserting that example_directory_entries is not empty"
+    );
+    for example_directory_entry in example_directory_entries {
+        let entry_path = example_directory_entry.path();
         let display_path = entry_path.display().to_string();
         let entry_parent = entry_path
             .parent()
@@ -1091,7 +1097,12 @@ async fn all_stock_router_example_yamls_are_valid() {
         if !entry_parent.join(".skipconfigvalidation").exists()
             && !entry_parent.join("Cargo.toml").exists()
         {
-            if let Some(name) = entry.file_name().to_str() {
+            // if we aren't on a unix machine and a `.unixonly` sibling file exists
+            // don't validate the YAML
+            if !cfg!(target_family = "unix") && entry_parent.join(".unixonly").exists() {
+                break;
+            }
+            if let Some(name) = example_directory_entry.file_name().to_str() {
                 if name.ends_with("yaml") || name.ends_with("yml") {
                     let raw_yaml = std::fs::read_to_string(entry_path)
                         .unwrap_or_else(|e| panic!("unable to read {display_path}: {e}"));
