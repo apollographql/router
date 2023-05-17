@@ -1073,7 +1073,13 @@ impl ValueExt for Value {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn all_stock_router_example_yamls_are_valid() {
-    for entry in walkdir::WalkDir::new("../examples").into_iter().flatten() {
+    let root_dir = option_env!("CARGO_MANIFEST_DIR").expect("could not find $CARGO_MANIFEST_DIR");
+    let examples_dir = std::path::PathBuf::try_from(&root_dir)
+        .unwrap_or_else(|e| {
+            panic!("could not create PathBuf from $CARGO_MANIFEST_DIR ({root_dir}): {e}")
+        })
+        .join("examples");
+    for entry in walkdir::WalkDir::new(examples_dir).into_iter().flatten() {
         let entry_path = entry.path();
         let display_path = entry_path.display().to_string();
         let entry_parent = entry_path
