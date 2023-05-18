@@ -85,7 +85,7 @@ coprocessor:
       sdl: false
       path: false
       method: false
-    response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send a client response.
+    response: # By including this key, the `RouterService` sends coprocessor requests whenever it's about to send a response chunk to a client.
       headers: true
       body: false
       context: false
@@ -178,9 +178,9 @@ Properties of the JSON body are divided into two high-level categories:
       "46"
     ]
   },
-  "body": {
-    "query": "query GetActiveUser {\n  me {\n  name\n}\n}"
-  },
+  "body": "{
+    \"query\": \"query GetActiveUser {\n  me {\n  name\n}\n}\"
+  }",
   "context": {
     "entries": {
       "accepts-json": false,
@@ -217,13 +217,13 @@ Properties of the JSON body are divided into two high-level categories:
       "application/json"
     ]
   },
-  "body": {
-    "data": {
-      "me": {
-        "name": "Ada Lovelace"
+  "body": "{
+    \"data\": {
+      \"me\": {
+        \"name\": \"Ada Lovelace\"
       }
     }
-  },
+  }",
   "context": {
     "entries": {
       "apollo_telemetry::subgraph_metrics_attributes": {},
@@ -666,10 +666,16 @@ The HTTP status code received by a response.
 </td>
 <td>
 
-The JSON body of the corresponding request or response, depending on this coprocessor request's [`stage`](#stage).
+The body data type will vary according to the [`stage`](#stage) at which the coprocessor is executing:
+
+ - If it is a RouterRequest or RouterResponse, the body is a JSON String.
+ - If it is a SubgraphRequest or SubgraphResponse, the body is a JSON Object.
+
+The reason for this difference is to accommodate variations in behaviour required by the router's support for [deferred responses](#deferred-responses).
 
 - If a request, this usually contains a `query` property containing the GraphQL query string.
 - If a response, this usually contains `data` and/or `errors` properties for the GraphQL operation result.
+- If a deferred response, this contains a chunk of `data` for the GraphQL operation result.
 
 > The `RouterResponse` stage will return _redacted_ errors within the `errors` by default. If you wish to process subgraph errors manually in your coprocessor you can enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
 
@@ -735,6 +741,70 @@ The router ignores modifications to this value.
 </tbody>
 </table>
 
+
+## Deferred Responses
+
+The router supports the [`@defer`](../executing-operations/defer-support/) schema directive which means that router extensions, including coprocessors, must deal with the fact that multiple chunks of response data will be provided for queries containing [`@defer`](../executing-operations/defer-support/) components.
+
+When processing deferred responses, the router will call a coprocessor once for each chunk of data as the data is received by the router. The different chunks are then passed for processing with the following details worthy of note:
+
+ - Certain properties only makes sense to include on the first call to a coprocessor, namely: `status_code` and `headers`. The reason for this is that these values are returned to the client with the first chunk of data, so providing them to subsequent coprocessor invocations would be misleading, since there is no way that changes can be communicated back to the client at this point.
+ - Because the data is presented as a JSON String, the coprocessor must return the body result as a JSON String. Many responses will not contain deferred streams and for these the body string can usually be fairly reliably transformed into a JSON Object for easy manipulation within the coprocessor. Coprocessors should be carefully coded to allow for the presence of a body which is not a valid JSON Object.
+ - Because the data is a JSON String, at both `RouterRequest` and `RouterResponse`, it's entirely possible for a coprocessor to rewrite the body from invalid JSON content into valid JSON content. Indeed this is one of the primary use cases for `RouterRequest` body processing.
+ - If performing `RouterRequest` processing, the returned body String should always contain a valid JSON Object. If not, the router will detect that the data is malformed and return a client error as you would expect.
+
+### Example of RouterResponse deferred responses
+
+This illustrates the difference between the first chunk in a deferred response and subsequent chunks:
+
+#### First Response Chunk
+
+```json
+{
+  "version": 1,
+  "stage": "RouterResponse",
+  "id": "8dee7fe947273640a5c2c7e1da90208c",
+  "sdl": "omitted due to length",
+  "headers": {
+    "content-type": [
+      "multipart/mixed;boundary=\"graphql\";deferSpec=20220824"
+    ],
+    "vary": [
+      "origin"
+    ]
+  },
+  "body": "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":{\"id\":\"1\"}},\"hasNext\":true}\r\n--graphql\r\n",
+  "context": {
+    "entries": {
+      "apollo_telemetry::operation_kind": "query",
+      "apollo_telemetry::client_version": "",
+      "apollo_telemetry::client_name": "manual"
+    }
+  },
+  "statusCode": 200
+}
+```
+
+#### Second (and in this example, final) Response Chunk
+
+```json
+{
+  "version": 1,
+  "stage": "RouterResponse",
+  "id": "8dee7fe947273640a5c2c7e1da90208c",
+  "sdl": "omitted due to length",
+  "body": "content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":\"Ada Lovelace\"},\"path\":[\"me\"]}]}\r\n--graphql--\r\n",
+  "context": {
+    "entries": {
+      "apollo_telemetry::operation_kind": "query",
+      "apollo_telemetry::client_version": "",
+      "apollo_telemetry::client_name": "manual"
+    }
+  }
+}
+```
+
+Note that the deferred response message does not contain: `headers` or `statusCode`.
 
 ## Responding to coprocessor requests
 
