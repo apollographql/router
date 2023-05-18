@@ -639,6 +639,7 @@ where
         }
     };
 
+    // Now we process our first chunk of response
     // Encode headers, body, status, context, sdl to create a payload
     let headers_to_send = response_config
         .headers
@@ -707,7 +708,7 @@ where
     let context = response.context.clone();
     let map_context = response.context.clone();
 
-    // Map the rest of our body
+    // Map the rest of our body to process subsequent chunks of response
     let mapped_stream = rest
         .map_err(BoxError::from)
         .and_then(move |deferred_response| {
@@ -749,21 +750,35 @@ where
 
                 validate_coprocessor_output(&co_processor_output, PipelineStep::RouterResponse)?;
 
+                // Third, process our reply and act on the contents. Our processing logic is
+                // that we replace "bits" of our incoming response with the updated bits if they
+                // are present in our co_processor_output. If they aren't present, just use the
+                // bits that we sent to the co_processor.
                 let final_bytes: Bytes = match co_processor_output.body {
                     Some(bytes) => bytes.into(),
                     None => bytes.into(),
                 };
+
+                if let Some(context) = co_processor_output.context {
+                    for (key, value) in context.try_into_iter()? {
+                        generator_map_context.upsert_json_value(key, move |_current| value);
+                    }
+                }
+
+                // We return the final_bytes into our stream of response chunks
                 Ok(final_bytes)
             }
         });
 
+    // Create our response stream which consists of the bytes from our first body chained with the
+    // rest of the responses in our mapped stream.
     let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
     let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
-    let bob: http::Response<Body> =
-        http::Response::from_parts(parts, Body::wrap_stream(final_stream));
+
+    // Finally, return a response which has a Body that wraps our stream of response chunks.
     Ok(router::Response {
         context,
-        response: bob,
+        response: http::Response::from_parts(parts, Body::wrap_stream(final_stream)),
     })
 }
 // -----------------------------------------------------------------------------------------------------
