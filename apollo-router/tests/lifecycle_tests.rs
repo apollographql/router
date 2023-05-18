@@ -125,17 +125,32 @@ async fn test_graceful_shutdown() -> Result<(), BoxError> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_force_hot_reload() -> Result<(), BoxError> {
+async fn test_force_reload() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(
             "experimental_chaos:
-                force_hot_reload: 10s",
+                force_reload: 1s",
         )
         .build()
         .await;
     router.start().await;
     router.assert_started().await;
-    tokio::time::sleep(Duration::from_secs(11)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    router.assert_reloaded().await;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reload_via_sighup() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .config(HAPPY_CONFIG)
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router.send_sighup().await;
     router.assert_reloaded().await;
     router.graceful_shutdown().await;
     Ok(())
@@ -196,9 +211,9 @@ async fn test_experimental_notice() {
         .build()
         .await;
     router.start().await;
+    router.assert_started().await;
     router
         .assert_log_contains("You're using some \\\"experimental\\\" features of the Apollo Router")
         .await;
-    router.assert_started().await;
     router.graceful_shutdown().await;
 }

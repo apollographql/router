@@ -10,12 +10,16 @@ use std::time::Instant;
 use dashmap::mapref::multiple::RefMulti;
 use dashmap::mapref::multiple::RefMutMulti;
 use dashmap::DashMap;
-use futures::lock::Mutex;
+use derivative::Derivative;
+use parking_lot::Mutex;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 
+use self::extensions::Extensions;
 use crate::json_ext::Value;
+
+pub(crate) mod extensions;
 
 /// Holds [`Context`] entries.
 pub(crate) type Entries = Arc<DashMap<String, Value>>;
@@ -31,10 +35,14 @@ pub(crate) type Entries = Arc<DashMap<String, Value>>;
 /// [`crate::services::SubgraphResponse`] processing. At such times,
 /// plugins should restrict themselves to the [`Context::get`] and [`Context::upsert`]
 /// functions to minimise the possibility of mis-sequenced updates.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, Derivative)]
+#[derivative(Debug)]
 pub struct Context {
     // Allows adding custom entries to the context.
     entries: Entries,
+
+    #[serde(skip, default)]
+    pub(crate) private_entries: Arc<parking_lot::Mutex<Extensions>>,
 
     /// Creation time
     #[serde(skip)]
@@ -42,6 +50,7 @@ pub struct Context {
     pub(crate) created_at: Instant,
 
     #[serde(skip)]
+    #[derivative(Debug = "ignore")]
     busy_timer: Arc<Mutex<BusyTimer>>,
 }
 
@@ -50,6 +59,7 @@ impl Context {
     pub fn new() -> Self {
         Context {
             entries: Default::default(),
+            private_entries: Arc::new(parking_lot::Mutex::new(Extensions::default())),
             created_at: Instant::now(),
             busy_timer: Arc::new(Mutex::new(BusyTimer::new())),
         }
@@ -133,7 +143,7 @@ impl Context {
     ///    value updated).
     ///  - If the operation succeeds, the pair have either updated an existing value
     ///    or been inserted.
-    pub fn upsert<K, V>(&self, key: K, upsert: impl Fn(V) -> V) -> Result<(), BoxError>
+    pub fn upsert<K, V>(&self, key: K, upsert: impl FnOnce(V) -> V) -> Result<(), BoxError>
     where
         K: Into<String>,
         V: for<'de> serde::Deserialize<'de> + Serialize + Default,
@@ -166,13 +176,22 @@ impl Context {
     /// The resolving function must yield a value to be used in the context. It
     /// is provided with the current value to use in evaluating which value to
     /// yield.
-    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl Fn(Value) -> Value)
+    pub(crate) fn upsert_json_value<K>(&self, key: K, upsert: impl FnOnce(Value) -> Value)
     where
         K: Into<String>,
     {
         let key = key.into();
         self.entries.entry(key.clone()).or_insert(Value::Null);
         self.entries.alter(&key, |_, v| upsert(v));
+    }
+
+    /// Convert the context into an iterator.
+    pub(crate) fn try_into_iter(
+        self,
+    ) -> Result<impl IntoIterator<Item = (String, Value)>, BoxError> {
+        Ok(Arc::try_unwrap(self.entries)
+            .map_err(|_e| anyhow::anyhow!("cannot take ownership of dashmap"))?
+            .into_iter())
     }
 
     /// Iterate over the entries.
@@ -186,18 +205,18 @@ impl Context {
     }
 
     /// Notify the busy timer that we're waiting on a network request
-    pub(crate) async fn enter_active_request(&self) {
-        self.busy_timer.lock().await.increment_active_requests()
+    pub(crate) fn enter_active_request(&self) {
+        self.busy_timer.lock().increment_active_requests()
     }
 
     /// Notify the busy timer that we stopped waiting on a network request
-    pub(crate) async fn leave_active_request(&self) {
-        self.busy_timer.lock().await.decrement_active_requests()
+    pub(crate) fn leave_active_request(&self) {
+        self.busy_timer.lock().decrement_active_requests()
     }
 
     /// How much time was spent working on the request
-    pub(crate) async fn busy_time(&self) -> Duration {
-        self.busy_timer.lock().await.current()
+    pub(crate) fn busy_time(&self) -> Duration {
+        self.busy_timer.lock().current()
     }
 }
 

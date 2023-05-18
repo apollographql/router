@@ -15,7 +15,6 @@ use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
 use super::expansion::Expansion;
-use super::experimental::Discussed;
 use super::plugins;
 use super::yaml;
 use super::Configuration;
@@ -108,9 +107,6 @@ pub(crate) fn validate_yaml_configuration(
         }
     }
 
-    let discussed = Discussed::new();
-    discussed.log_experimental_used(&yaml);
-    discussed.log_preview_used(&yaml);
     let expanded_yaml = expansion.expand(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
     if let Err(errors_it) = schema.validate(&expanded_yaml) {

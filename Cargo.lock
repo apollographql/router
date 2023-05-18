@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.18.0"
+version = "1.18.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -345,6 +345,7 @@ dependencies = [
  "opentelemetry-semantic-conventions",
  "opentelemetry-zipkin",
  "p256 0.12.0",
+ "parking_lot 0.12.1",
  "paste",
  "pin-project-lite",
  "prometheus",
@@ -378,6 +379,7 @@ dependencies = [
  "test-log",
  "test-span",
  "thiserror",
+ "tikv-jemallocator",
  "tokio",
  "tokio-rustls",
  "tokio-stream",
@@ -408,7 +410,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.18.0"
+version = "1.18.1"
 dependencies = [
  "apollo-parser 0.4.1",
  "apollo-router",
@@ -424,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.18.0"
+version = "1.18.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -4840,9 +4842,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.2.2+v2.4.2"
+version = "0.2.4+v2.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3b7f46d4ce5a83664e398eebe73d5501f38523f2b96fa0ef2e0cecb8474856e"
+checksum = "cd4da971fb256903c3f1eecd56f8ad862f4a82853d94f53759c8908f5862d222"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -5881,6 +5883,26 @@ dependencies = [
  "serde_json",
  "tokio",
  "tower",
+]
+
+[[package]]
+name = "tikv-jemalloc-sys"
+version = "0.5.3+5.3.0-patched"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a678df20055b43e57ef8cddde41cdfda9a3c1a060b67f4c5836dfb1d78543ba8"
+dependencies = [
+ "cc",
+ "libc",
+]
+
+[[package]]
+name = "tikv-jemallocator"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20612db8a13a6c06d57ec83953694185a367e16945f66565e8028d2c0bd76979"
+dependencies = [
+ "libc",
+ "tikv-jemalloc-sys",
 ]
 
 [[package]]

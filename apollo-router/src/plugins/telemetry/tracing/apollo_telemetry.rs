@@ -544,10 +544,8 @@ fn extract_ftv1_trace(
 ) -> Option<Result<Box<proto::reports::Trace>, Error>> {
     if let Value::String(s) = v {
         if let Some(mut t) = decode_ftv1_trace(s.as_str()) {
-            if error_config.redact || !error_config.send {
-                if let Some(root) = &mut t.root {
-                    redact_node_errors(root, !error_config.send);
-                }
+            if let Some(root) = &mut t.root {
+                preprocess_errors(root, error_config);
             }
             return Some(Ok(Box::new(t)));
         }
@@ -556,19 +554,19 @@ fn extract_ftv1_trace(
     None
 }
 
-fn redact_node_errors(t: &mut proto::reports::trace::Node, to_delete: bool) {
-    if to_delete {
-        t.error = Vec::new();
-    } else {
+fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorConfiguration) {
+    if error_config.send {
         t.error.iter_mut().for_each(|err| {
             err.message = String::from("<redacted>");
             err.location = Vec::new();
             err.json = String::new();
         });
+    } else {
+        t.error = Vec::new();
     }
     t.child
         .iter_mut()
-        .for_each(|n| redact_node_errors(n, to_delete));
+        .for_each(|n| preprocess_errors(n, error_config));
 }
 
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
@@ -775,7 +773,7 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData, redact_node_errors};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData, preprocess_errors};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -940,7 +938,7 @@ mod test {
     }
 
     #[test]
-    fn test_redact_node_errors() {
+    fn test_preprocess_errors() {
         let sub_node = Node {
             error: vec![Error {
                 message: "this is my error".to_string(),
@@ -968,8 +966,11 @@ mod test {
             ..Default::default()
         };
         node.child.push(sub_node);
-
-        redact_node_errors(&mut node, false);
+        let error_config = ErrorConfiguration {
+            send: true,
+            redact: true,
+        };
+        preprocess_errors(&mut node, &error_config);
         assert!(node.error[0].json.is_empty());
         assert!(node.error[0].location.is_empty());
         assert_eq!(node.error[0].message.as_str(), "<redacted>");
@@ -1014,8 +1015,11 @@ mod test {
             ..Default::default()
         };
         node.child.push(sub_node);
-
-        redact_node_errors(&mut node, true);
+        let error_config = ErrorConfiguration {
+            send: false,
+            redact: true,
+        };
+        preprocess_errors(&mut node, &error_config);
         assert!(node.error.is_empty());
         assert!(node.child[0].error.is_empty());
     }
