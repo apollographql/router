@@ -21,6 +21,7 @@ macro_rules! schemar_fn {
 }
 
 mod authentication;
+mod authorization;
 mod coprocessor;
 #[cfg(test)]
 mod coprocessor_test;
