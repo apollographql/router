@@ -17,7 +17,7 @@ use crate::common::Telemetry;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_jaeger_tracing() -> Result<(), BoxError> {
+async fn test_reload() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/jaeger.router.yaml"))
@@ -28,13 +28,16 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
     router.assert_started().await;
 
     for _ in 0..2 {
-        let (id, result) = router.run_query().await;
-        assert!(!result
+        let response = router.run_query().await;
+        let trace_id = response
             .headers()
             .get("apollo-custom-trace-id")
+            .expect("trace id should have been returned")
+            .to_str()
             .unwrap()
-            .is_empty());
-        query_jaeger_for_trace(id).await?;
+            .to_string();
+        println!("trace_id: {}", trace_id);
+        query_jaeger_for_trace(trace_id, &["my_app", "router", "products"]).await?;
         router.touch_config().await;
         router.assert_reloaded().await;
     }
@@ -42,25 +45,106 @@ async fn test_jaeger_tracing() -> Result<(), BoxError> {
     Ok(())
 }
 
-async fn query_jaeger_for_trace(id: String) -> Result<(), BoxError> {
-    let tags = json!({ "unit_test": id });
+#[tokio::test(flavor = "multi_thread")]
+async fn test_remote_root() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger-no-sample.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let response = router.run_query().await;
+
+    let trace_id = response
+        .headers()
+        .get("apollo-custom-trace-id")
+        .expect("trace id should have been returned")
+        .to_str()
+        .unwrap()
+        .to_string();
+    query_jaeger_for_trace(trace_id, &["my_app", "router", "products"]).await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_local_root() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let response = router.run_untraced_query().await;
+    let trace_id = response
+        .headers()
+        .get("apollo-custom-trace-id")
+        .expect("trace id should have been returned")
+        .to_str()
+        .unwrap()
+        .to_string();
+    query_jaeger_for_trace(trace_id, &["router", "products"]).await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_local_root_no_sample() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger-no-sample.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let response = router.run_untraced_query().await;
+    // This should not have been traced
+    assert!(response.headers().get("apollo-custom-trace-id").is_none());
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_no_telemetry_sample() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/no-telemetry.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let response = router.run_untraced_query().await;
+    // This should not have been traced
+    assert!(response.headers().get("apollo-custom-trace-id").is_none());
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+async fn query_jaeger_for_trace(id: String, services: &[&'static str]) -> Result<(), BoxError> {
+    let tags = json!({ "trace_id": id });
     let params = url::form_urlencoded::Serializer::new(String::new())
-        .append_pair("service", "my_app")
+        .append_pair("service", "router")
         .append_pair("tags", &tags.to_string())
         .finish();
 
     let url = format!("http://localhost:16686/api/traces?{params}");
     for _ in 0..10 {
-        if find_valid_trace(&url).await.is_ok() {
+        if find_valid_trace(&url, services).await.is_ok() {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    find_valid_trace(&url).await?;
+    find_valid_trace(&url, services).await?;
     Ok(())
 }
 
-async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
+async fn find_valid_trace(url: &str, services: &[&'static str]) -> Result<(), BoxError> {
     // A valid trace has:
     // * All three services
     // * The correct spans
@@ -75,13 +159,13 @@ async fn find_valid_trace(url: &str) -> Result<(), BoxError> {
     tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
 
     // Verify that we got all the participants in the trace
-    verify_trace_participants(&trace)?;
+    verify_trace_participants(&trace, services)?;
 
     // Verify that we got the expected span operation names
-    verify_spans_present(&trace)?;
+    verify_spans_present(&trace, services)?;
 
     // Verify that all spans have a path to the root 'client_request' span
-    verify_span_parenting(&trace)?;
+    verify_span_parenting(&trace, services)?;
 
     // Verify that supergraph span fields are present
     verify_supergraph_span_fields(&trace)?;
@@ -130,30 +214,34 @@ fn verify_supergraph_span_fields(trace: &Value) -> Result<(), BoxError> {
     Ok(())
 }
 
-fn verify_trace_participants(trace: &Value) -> Result<(), BoxError> {
-    let services: HashSet<String> = trace
+fn verify_trace_participants(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
+    let actual_services: HashSet<String> = trace
         .select_path("$..serviceName")?
         .into_iter()
         .filter_map(|service| service.as_string())
         .collect();
-    tracing::debug!("found services {:?}", services);
+    tracing::debug!("found services {:?}", actual_services);
 
-    let expected_services = HashSet::from(["my_app", "router", "products"].map(|s| s.into()));
-    if services != expected_services {
+    let expected_services = services
+        .iter()
+        .map(|s| s.to_string())
+        .collect::<HashSet<_>>();
+    if actual_services != expected_services {
         return Err(BoxError::from(format!(
-            "incomplete traces, got {services:?} expected {expected_services:?}"
+            "incomplete traces, got {actual_services:?} expected {expected_services:?}"
         )));
     }
     Ok(())
 }
 
-fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
+fn verify_spans_present(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
     let operation_names: HashSet<String> = trace
         .select_path("$..operationName")?
         .into_iter()
         .filter_map(|span_name| span_name.as_string())
         .collect();
-    let expected_operation_names: HashSet<String> = HashSet::from(
+
+    let mut expected_operation_names: HashSet<String> = HashSet::from(
         [
             "execution",
             "HTTP POST",
@@ -163,10 +251,12 @@ fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
             //"parse_query", Parse query will only happen once
             //"query_planning", query planning will only happen once
             "subgraph",
-            "client_request",
         ]
         .map(|s| s.into()),
     );
+    if services.contains(&"my_app") {
+        expected_operation_names.insert("client_request".into());
+    }
     tracing::debug!("found spans {:?}", operation_names);
     let missing_operation_names: Vec<_> = expected_operation_names
         .iter()
@@ -180,8 +270,13 @@ fn verify_spans_present(trace: &Value) -> Result<(), BoxError> {
     Ok(())
 }
 
-fn verify_span_parenting(trace: &Value) -> Result<(), BoxError> {
-    let root_span = trace.select_path("$..spans[?(@.operationName == 'client_request')]")?[0];
+fn verify_span_parenting(trace: &Value, services: &[&'static str]) -> Result<(), BoxError> {
+    let root_span = if services.contains(&"my_app") {
+        trace.select_path("$..spans[?(@.operationName == 'client_request')]")?[0]
+    } else {
+        trace.select_path("$..spans[?(@.operationName == 'request')]")?[0]
+    };
+
     let spans = trace.select_path("$..spans[*]")?;
     for span in spans {
         let mut span_path = vec![span.select_path("$.operationName")?[0]

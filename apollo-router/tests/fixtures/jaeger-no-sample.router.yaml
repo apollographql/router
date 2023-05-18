@@ -1,5 +1,8 @@
 telemetry:
+  apollo:
+    field_level_instrumentation_sampler: always_off
   tracing:
+
     experimental_response_trace_id:
       enabled: true
       header_name: apollo-custom-trace-id
@@ -7,7 +10,7 @@ telemetry:
       jaeger: true
     trace_config:
       service_name: router
-      sampler: always_on
+      sampler: always_off
     jaeger:
       batch_processor:
         scheduled_delay: 100ms

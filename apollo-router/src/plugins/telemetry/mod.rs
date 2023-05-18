@@ -47,7 +47,6 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
-use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
@@ -67,16 +66,15 @@ use self::reload::reload_fmt;
 use self::reload::reload_metrics;
 use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
-use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
-use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::Trace;
+use crate::plugins::telemetry::config::{AttributeValue, Sampler};
+use crate::plugins::telemetry::config::{MetricsCommon, SamplerOption};
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
 use crate::plugins::telemetry::metrics::aggregation::AggregateMeterProvider;
@@ -90,6 +88,7 @@ use crate::plugins::telemetry::metrics::BasicMetrics;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
 use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::metrics::MetricsExporterHandle;
+use crate::plugins::telemetry::reload::LayeredTracer;
 use crate::plugins::telemetry::tracing::apollo_telemetry::decode_ftv1_trace;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -561,15 +560,32 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
-        let trace_config = &tracing_config.trace_config.unwrap_or_default();
-        let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, trace_config)?;
+        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
+
+        // If there's no tracers configured then set the sampler to off. This will enable the otel
+        // layer to avoid creating otel spans.
+        if tracing_config.jaeger.is_none()
+            && tracing_config.zipkin.is_none()
+            && tracing_config.datadog.is_none()
+            && tracing_config.otlp.is_none()
+            && config
+                .apollo
+                .as_ref()
+                .map(|c| c.apollo_key.is_none() || c.apollo_graph_ref.is_none())
+                .unwrap_or(true)
+        {
+            trace_config.sampler = SamplerOption::Always(Sampler::AlwaysOff);
+        }
+
+        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
+            .with_config((&trace_config).into());
+
+        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, &trace_config)?;
         // For metrics
         builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
 
@@ -614,20 +630,7 @@ impl Telemetry {
     }
 
     #[allow(clippy::type_complexity)]
-    fn create_fmt_layer(
-        config: &config::Conf,
-    ) -> Box<
-        dyn Layer<
-                ::tracing_subscriber::layer::Layered<
-                    OpenTelemetryLayer<
-                        ::tracing_subscriber::Registry,
-                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
-                    >,
-                    ::tracing_subscriber::Registry,
-                >,
-            > + Send
-            + Sync,
-    > {
+    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()

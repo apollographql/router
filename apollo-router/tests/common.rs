@@ -16,9 +16,9 @@ use mime::APPLICATION_JSON;
 use once_cell::sync::OnceCell;
 use opentelemetry::global;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::trace::Span;
 use opentelemetry::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry::trace::{Span, TraceContextExt};
 use serde_json::json;
 use serde_json::Value;
 use tokio::io::AsyncBufReadExt;
@@ -32,12 +32,12 @@ use tokio::time::Instant;
 use tower::BoxError;
 use tracing::info_span;
 use tracing_core::LevelFilter;
+use tracing_futures::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
-use uuid::Uuid;
 use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::Respond;
@@ -313,16 +313,13 @@ impl IntegrationTest {
             .expect("must be able to write config");
     }
 
-    pub fn run_query(&self) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    pub fn run_query(&self) -> impl std::future::Future<Output = reqwest::Response> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
         );
         async {
             let client = reqwest::Client::new();
-            let id = Uuid::new_v4().to_string();
-            let span = info_span!("client_request", unit_test = id.as_str());
-            let _span_guard = span.enter();
 
             let mut request = client
                 .post("http://localhost:4000")
@@ -335,13 +332,42 @@ impl IntegrationTest {
 
             global::get_text_map_propagator(|propagator| {
                 propagator.inject_context(
-                    &span.context(),
+                    &tracing::span::Span::current().context(),
                     &mut opentelemetry_http::HeaderInjector(request.headers_mut()),
                 );
             });
+
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
-                Ok(response) => (id, response),
+                Ok(response) => response,
+                Err(err) => {
+                    panic!("unable to send successful request to router, {err}")
+                }
+            }
+        }
+        .instrument(info_span!("client_request"))
+    }
+
+    pub fn run_untraced_query(&self) -> impl std::future::Future<Output = reqwest::Response> {
+        assert!(
+            self.router.is_some(),
+            "router was not started, call `router.start().await; router.assert_started().await`"
+        );
+        async {
+            let client = reqwest::Client::new();
+
+            let mut request = client
+                .post("http://localhost:4000")
+                .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
+                .header("apollographql-client-name", "custom_name")
+                .header("apollographql-client-version", "1.0")
+                .json(&json!({"query":"{topProducts{name}}","variables":{}}))
+                .build()
+                .unwrap();
+
+            request.headers_mut().remove(ACCEPT);
+            match client.execute(request).await {
+                Ok(response) => response,
                 Err(err) => {
                     panic!("unable to send successful request to router, {err}")
                 }
