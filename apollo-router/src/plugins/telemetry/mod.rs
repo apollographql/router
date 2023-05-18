@@ -3,7 +3,6 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
@@ -48,6 +47,7 @@ use tokio::runtime::Handle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::fmt::format::JsonFields;
 use tracing_subscriber::Layer;
@@ -59,17 +59,15 @@ use self::apollo::SingleReport;
 use self::apollo_exporter::proto;
 use self::apollo_exporter::Sender;
 use self::config::Conf;
-use self::config::Sampler;
 use self::formatters::text::TextFormatter;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::metrics::MetricsAttributesConf;
 use self::reload::reload_fmt;
 use self::reload::reload_metrics;
-use self::reload::LayeredTracer;
 use self::reload::NullFieldFormatter;
 use self::reload::OPENTELEMETRY_TRACER_HANDLE;
-use self::reload::SPAN_SAMPLING_RATE;
+use self::tracing::reload::ReloadTracer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -280,16 +278,16 @@ impl Plugin for Telemetry {
 
                     let expose_trace_id = config.tracing.as_ref().cloned().unwrap_or_default().response_trace_id;
                     if let Ok(response) = &response {
-                        let mut headers: HashMap<String, Vec<String>> = HashMap::new();
                         if expose_trace_id.enabled {
                             if let Some(header_name) = &expose_trace_id.header_name {
+                                let mut headers: HashMap<String, Vec<String>> = HashMap::new();
                                 if let Some(value) = response.response.headers().get(header_name) {
                                     headers.insert(header_name.to_string(), vec![value.to_str().unwrap_or_default().to_string()]);
+                                    let response_headers = serde_json::to_string(&headers).unwrap_or_default();
+                                    span.record("apollo_private.http.response_headers",&response_headers);
                                 }
                             }
                         }
-                        let response_headers = serde_json::to_string(&headers).unwrap_or_default();
-                        span.record("apollo_private.http.response_headers",&response_headers);
 
                         if response.response.status() >= StatusCode::BAD_REQUEST {
                             span.record("otel.status_code", "Error");
@@ -563,39 +561,15 @@ impl Telemetry {
         config: &config::Conf,
     ) -> Result<opentelemetry::sdk::trace::TracerProvider, BoxError> {
         let tracing_config = config.tracing.clone().unwrap_or_default();
+        let trace_config = &tracing_config.trace_config.unwrap_or_default();
+        let mut builder =
+            opentelemetry::sdk::trace::TracerProvider::builder().with_config(trace_config.into());
 
-        let mut trace_config = tracing_config.trace_config.unwrap_or_default();
-
-        let sampling_rate = if tracing_config.jaeger.is_some()
-            || tracing_config.zipkin.is_some()
-            || tracing_config.datadog.is_some()
-            || tracing_config.otlp.is_some()
-            || config
-                .apollo
-                .as_ref()
-                .map(|c| c.apollo_key.is_some() && c.apollo_graph_ref.is_some())
-                .unwrap_or(false)
-        {
-            match trace_config.sampler {
-                config::SamplerOption::TraceIdRatioBased(rate) => rate,
-                config::SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
-                config::SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
-            }
-        } else {
-            0.0
-        };
-
-        trace_config.sampler = config::SamplerOption::Always(Sampler::AlwaysOn);
-        SPAN_SAMPLING_RATE.store(f64::to_bits(sampling_rate), Ordering::Relaxed);
-
-        let mut builder = opentelemetry::sdk::trace::TracerProvider::builder()
-            .with_config((&trace_config).into());
-
-        builder = setup_tracing(builder, &tracing_config.jaeger, &trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.zipkin, &trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.datadog, &trace_config)?;
-        builder = setup_tracing(builder, &tracing_config.otlp, &trace_config)?;
-        builder = setup_tracing(builder, &config.apollo, &trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.jaeger, trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.zipkin, trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.datadog, trace_config)?;
+        builder = setup_tracing(builder, &tracing_config.otlp, trace_config)?;
+        builder = setup_tracing(builder, &config.apollo, trace_config)?;
         // For metrics
         builder = builder.with_simple_exporter(metrics::span_metrics_exporter::Exporter::default());
 
@@ -639,7 +613,21 @@ impl Telemetry {
         Ok(builder)
     }
 
-    fn create_fmt_layer(config: &config::Conf) -> Box<dyn Layer<LayeredTracer> + Send + Sync> {
+    #[allow(clippy::type_complexity)]
+    fn create_fmt_layer(
+        config: &config::Conf,
+    ) -> Box<
+        dyn Layer<
+                ::tracing_subscriber::layer::Layered<
+                    OpenTelemetryLayer<
+                        ::tracing_subscriber::Registry,
+                        ReloadTracer<::opentelemetry::sdk::trace::Tracer>,
+                    >,
+                    ::tracing_subscriber::Registry,
+                >,
+            > + Send
+            + Sync,
+    > {
         let logging = &config.logging;
         let fmt = match logging.format {
             config::LoggingFormat::Pretty => tracing_subscriber::fmt::layer()
@@ -1510,7 +1498,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
         .private_entries
         .lock()
         .contains_key::<EnableSubgraphFtv1>()
-        && !Span::current().is_disabled()
+        && Span::current().context().span().span_context().is_sampled()
     {
         req.subgraph_request.headers_mut().insert(
             "apollo-federation-include-trace",
