@@ -509,33 +509,43 @@ tls:
 
 ### Request limits
 
-> Request limits are currently in [preview](/resources/product-launch-stages#preview).
+> **Request limits are currently in [preview](/resources/product-launch-stages#preview).**
+>
+> To set request limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
 
 The Apollo Router supports enforcing two types of request limits for enhanced security:
 
-- Lexical, parser-based limits (documented here)
-- [Semantic, operation-based limits](./operation-limits/) (this is an [Enterprise feature](../enterprise-features/))
+- Lexical, parser-based limits
+- Semantic, operation-based limits (this is an [Enterprise feature](../enterprise-features/))
 
-> To set request limits, you must run v1.17 or later of the Apollo Router. [Download the latest version.](../quickstart#download-options)
-
-You can set parser-based request limits in your YAML config file like so:
+The router rejects any request that violates at least one of these limits.
 
 ```yaml title="router.yaml"
 preview_operation_limits:
-  # Default values are shown
-  parser_max_tokens: 15000
-  parser_max_recursion: 4096
+  # Parser-based limits
+  parser_max_tokens: 15000 # Default value
+  parser_max_recursion: 4096 # Default value
+
+  # Operation-based limits (Enterprise only)
+  max_depth: 100
+  max_height: 200
+  max_aliases: 30
+  max_root_fields: 20
 ```
 
-The router rejects any request that violates at least one of these limits. See below for descriptions of individual limits.
+#### Operation-based limits (Enterprise only)
 
-#### `parser_max_tokens`
+See [this article](./operation-limits/).
+
+#### Parser-based limits
+
+##### `parser_max_tokens`
 
 Limits the number of tokens a query document can include. This counts _all_ tokens, including both [lexical and ignored tokens](https://spec.graphql.org/October2021/#sec-Language.Source-Text.Lexical-Tokens).
 
 The default value is `15000`.
 
-#### `parser_max_recursion`
+##### `parser_max_recursion`
 
 Limits the deepest level of recursion allowed by the router's GraphQL parser to prevent stack overflows. This corresponds to the deepest nesting level of any single GraphQL operation or fragment defined in a query document.
 
