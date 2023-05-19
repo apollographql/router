@@ -65,6 +65,11 @@ impl Schema {
         _configuration: &Configuration,
     ) -> Result<Schema, SchemaError> {
         let mut compiler = ApolloCompiler::new();
+        let _supergraph = compiler.add_type_system(r#"
+            directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+            directive @stream(label: String, initialCount: Int = 0, if: Boolean! = true) on FIELD
+
+        "#, "supergraph_spec.graphql");
         let id = compiler.add_type_system(schema, "schema.graphql");
 
         let ast = compiler.db.ast(id);
