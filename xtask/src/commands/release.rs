@@ -97,7 +97,7 @@ impl Prepare {
         self.check_compliance()?;
 
         if let Version::Nightly = &self.version {
-            println!("Skipping various steps becasuse this is a nightly build.");
+            println!("Skipping various steps because this is a nightly build.");
         } else {
             self.update_install_script(&version)?;
             self.update_helm_charts(&version)?;
