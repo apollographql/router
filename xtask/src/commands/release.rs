@@ -6,9 +6,6 @@ use anyhow::Result;
 use cargo_metadata::MetadataCommand;
 use chrono::prelude::Utc;
 use git2::Repository;
-use octorust::types::PullsCreateRequest;
-use octorust::Client;
-use tap::TapFallible;
 use walkdir::WalkDir;
 use xtask::*;
 
@@ -56,17 +53,9 @@ impl FromStr for Version {
 
 #[derive(Debug, clap::Parser)]
 pub struct Prepare {
-    /// Release from the current branch rather than creating a new one.
-    #[clap(long)]
-    current_branch: bool,
-
     /// Skip the license check
     #[clap(long)]
     skip_license_ckeck: bool,
-
-    /// Dry run, don't commit the changes and create the PR.
-    #[clap(long)]
-    dry_run: bool,
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Version,
@@ -104,12 +93,6 @@ impl Prepare {
         self.ensure_pristine_checkout()?;
         self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
-        let github = octorust::Client::new(
-            "router-release".to_string(),
-            octorust::auth::Credentials::Token(
-                std::env::var("GITHUB_TOKEN").expect("GITHUB_TOKEN env variable must be set"),
-            ),
-        )?;
         self.update_lock()?;
         self.check_compliance()?;
 
@@ -121,16 +104,6 @@ impl Prepare {
             self.update_docs(&version)?;
             self.docker_files(&version)?;
             self.finalize_changelog(&version)?;
-
-            if !self.dry_run {
-                if !self.current_branch {
-                    self.switch_to_release_branch(&version)?;
-                }
-
-                // This also commits all changes to previously tracked files
-                // created by this script.
-                self.create_release_pr(&github, &version).await?;
-            }
         }
 
         Ok(())
@@ -185,16 +158,6 @@ impl Prepare {
         Ok(())
     }
 
-    /// Create a new branch "#.#.#" where "#.#.#" is this release's version
-    /// (release) or "#.#.#-rc.#" (release candidate)
-    fn switch_to_release_branch(&self, version: &str) -> Result<()> {
-        println!("creating release branch");
-        git!("fetch", "origin", &format!("dev:{version}"));
-        git!("checkout", version);
-        Ok(())
-    }
-
-    /// Update the `version` in `*/Cargo.toml` (do not forget the ones in scaffold templates).
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
     fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
         println!("updating Cargo.toml files");
@@ -432,46 +395,6 @@ impl Prepare {
     fn update_lock(&self) -> Result<()> {
         println!("updating lock file");
         cargo!(["check"]);
-        Ok(())
-    }
-
-    /// Create the release PR
-    async fn create_release_pr(&self, github: &Client, version: &str) -> Result<()> {
-        let git = which::which("git")?;
-        let result = std::process::Command::new(git)
-            .args(["branch", "--show-current"])
-            .output()?;
-        if !result.status.success() {
-            return Err(anyhow!("failed to get git current branch"));
-        }
-        let current_branch = String::from_utf8(result.stdout)?;
-
-        println!("creating release PR");
-        git!("add", "-u");
-        git!("commit", "-m", &format!("release {version}"));
-        git!(
-            "push",
-            "--set-upstream",
-            "origin",
-            &format!("{}:{}", current_branch.trim(), version)
-        );
-        github
-            .pulls()
-            .create(
-                "apollographql",
-                "router",
-                &PullsCreateRequest {
-                    base: "main".to_string(),
-                    body: format!("Release {version}"),
-                    draft: None,
-                    head: version.to_string(),
-                    issue: 0,
-                    maintainer_can_modify: None,
-                    title: format!("Release {version}"),
-                },
-            )
-            .await
-            .tap_err(|_| eprintln!("failed to create release PR"))?;
         Ok(())
     }
 }
