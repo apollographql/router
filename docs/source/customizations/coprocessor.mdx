@@ -592,7 +592,7 @@ If your coprocessor [returns a _different_ value](#responding-to-coprocessor-req
 This field's type depends on the coprocessor request's [`stage`](#stage):
 
 - For `SubgraphService` stages, `body` is a JSON _object_.
-- For `RouterService` stages, `body` is a _string_.
+- For `RouterService` stages, `body` is a JSON _string_.
   - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
   - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
 
