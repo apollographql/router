@@ -168,17 +168,27 @@ impl Prepare {
                 "apollo-router"
             ]),
             Version::Nightly => {
-                let head_commit: String = std::process::Command::new("git")
+                // Get the first 8 characters of the current commit hash by running
+                // the Command::new("git") command.  Be sure to take the output and
+                // run that through String::from_utf8(output.stdout) to get exactly
+                // an 8 character string.
+                let head_commit = std::process::Command::new("git")
                     .args(["rev-parse", "HEAD"])
                     .output()
                     .expect("failed to execute 'git rev-parse HEAD'")
-                    .stdout
-                    .iter()
-                    .map(|b| *b as char)
-                    .collect::<String>()
-                    .chars()
-                    .take(8)
-                    .collect();
+                    .stdout;
+
+                // If it's empty, then we're in a bad state.
+                if head_commit.is_empty() {
+                    return Err(anyhow!("failed to get the current commit hash"));
+                }
+
+                // Convert it using `String::from_utf8_lossy`, which will turn
+                // any funky characters into something really noticeable.
+                let head_commit = String::from_utf8_lossy(&head_commit);
+
+                // Just get the first 8 characters, for brevity.
+                let head_commit = head_commit.chars().take(8).collect::<String>();
 
                 replace_in_file!(
                     "./apollo-router/Cargo.toml",
