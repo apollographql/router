@@ -456,17 +456,27 @@ macro_rules! gen_map_response {
                         context: Context,
                         error_details: ErrorDetails,
                     ) -> $base::Response {
-                        let res = $base::Response::error_builder()
-                            .errors(vec![Error {
-                                // TODO
-                                message: error_details.message.unwrap_or_default(),
-                                ..Default::default()
-                            }])
-                            .status_code(error_details.status)
-                            .context(context)
-                            .build()
-                            .expect("can't fail to build our error message");
-                        res
+                        if let Some(body) = error_details.body {
+                            $base::Response::builder()
+                                .extensions(body.extensions)
+                                .errors(body.errors)
+                                .status_code(error_details.status)
+                                .context(context)
+                                .and_data(body.data)
+                                .and_label(body.label)
+                                .and_path(body.path)
+                                .build()
+                        } else {
+                            $base::Response::error_builder()
+                                .errors(vec![Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                }])
+                                .status_code(error_details.status)
+                                .context(context)
+                                .build()
+                                .expect("can't fail to build our error message")
+                        }
                     }
                     let shared_response = Shared::new(Mutex::new(Some(response)));
                     let result: Result<Dynamic, Box<EvalAltResult>> = if $callback.is_curried() {
@@ -515,18 +525,26 @@ macro_rules! gen_map_deferred_response {
                         context: Context,
                         error_details: ErrorDetails,
                     ) -> $response {
-                        let res = $response::error_builder()
-
-                        .errors(vec![Error {
-                                // TODO
-                                message: error_details.message.unwrap_or_default(),
-                                ..Default::default()
-                            }])
-                            .status_code(error_details.status)
-                            .context(context)
-                            .build()
-                            .expect("can't fail to build our error message");
-                        res
+                        if let Some(body) = error_details.body {
+                            $response::builder()
+                                .extensions(body.extensions)
+                                .errors(body.errors)
+                                .status_code(error_details.status)
+                                .context(context)
+                                .and_data(body.data)
+                                .and_label(body.label)
+                                .and_path(body.path)
+                                .build()
+                        } else {
+                            $response::error_builder()
+                                .errors(vec![Error {
+                                    message: error_details.message.unwrap_or_default(),
+                                    ..Default::default()
+                                }])
+                                .status_code(error_details.status)
+                                .context(context)
+                                .build()
+                        }.expect("can't fail to build our error message")
                     }
 
                     // we split the response stream into headers+first response, then a stream of deferred responses

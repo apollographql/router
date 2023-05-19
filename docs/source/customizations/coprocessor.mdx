@@ -671,7 +671,9 @@ The HTTP status code received by a response.
 The JSON body of the corresponding request or response, depending on this coprocessor request's [`stage`](#stage).
 
 - If a request, this usually contains a `query` property containing the GraphQL query string.
-- If a response, this usually contains `data` and/or `error` properties for the GraphQL operation result.
+- If a response, this usually contains `data` and/or `errors` properties for the GraphQL operation result.
+
+> The `RouterResponse` stage will return _redacted_ errors within the `errors` by default. If you wish to process subgraph errors manually in your coprocessor you can enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
 
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `body`, the router replaces the existing body with that value. This is common when [terminating a client request](#terminating-a-client-request).
 
