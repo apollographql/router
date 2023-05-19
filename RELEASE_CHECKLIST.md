@@ -225,7 +225,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     If those things look good, this PR is good to merge.
     EOM
     )"
-    echo "${apollo_release_pr_header}" | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --draft --body-file -
+    echo "${apollo_release_pr_header}" | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
     ```
 
 21. Use the `gh` CLI to enable **auto-merge** (**_NOT_** auto-**_squash_**):
@@ -246,27 +246,33 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
     git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}" -m "${APOLLO_ROUTER_RELEASE_VERSION}" && git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-24. Follow the process by going to CircleCI for the repository.
-
-25. Open a PR that reconciles `dev`:
+24. Open a PR that reconciles `dev`:
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}" -B dev -H main --body "Follow-up to the v${APOLLO_ROUTER_RELEASE_VERSION} being officially released, bringing version bumps and changelog updates into the \`dev\` branch."
     ```
+    
+25. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.  **Wait for `publish_github_release` to finish on this job before continuing.**
 
-26. After the CI job has finished for the tag, update the release notes (this needs to be moved to CI, but requires `this_release.md` which we created earlier):
+26. After the CI job has finished for the tag, re-run the `perl` command from Step 15, which will regenerate the `this_release.md` with changes that happened in the release review.
+
+27. Change the links from `[@username](https://github.com/username)` to `@username` (TODO: Write more `perl` here. 😄)
+
+    This ensures that contribution credit is clearly displayed using the user avatars on the GitHub Releases page when the notes are published in the next step.
+
+28. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we created earlier):
 
     ```
     gh release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-27. Publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+29. Publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     ```
     cargo publish -p apollo-router
     ```
 
-28. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (like `jq` for HTML), open the link it produces, copy the image to your clipboard:
+30. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
