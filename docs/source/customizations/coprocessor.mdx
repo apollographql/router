@@ -61,8 +61,6 @@ At _every_ stage, the router waits for your coprocessor's response before it con
 
 If your coprocessor hooks into your router's `SubgraphService`, the router sends a separate coprocessor request _for each subgraph request in its query plan._ In other words, if your router needs to query three separate subgraphs to fully resolve a client operation, it sends three separate coprocessor requests. Each coprocessor request includes the [name](#servicename) and [URL](#uri) of the subgraph being queried.
 
-> This behavior differs from hooking into `RouterService`, which can trigger exactly one coprocessor request per stage.
-
 ## Setup
 
 > **First, make sure your router is [connected to a GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features).**
@@ -85,7 +83,7 @@ coprocessor:
       sdl: false
       path: false
       method: false
-    response: # By including this key, the `RouterService` sends coprocessor requests whenever it's about to send a response chunk to a client.
+    response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
       headers: true
       body: false
       context: false
@@ -490,7 +488,7 @@ Properties of the JSON body are divided into two high-level categories:
 
 ##### `control`
 
-`string` | `object`
+`string | object`
 
 </td>
 <td>
@@ -513,6 +511,23 @@ For details, see [Terminating a client request](#terminating-a-client-request).
 <tr>
 <td>
 
+##### `id`
+
+`string`
+
+</td>
+<td>
+
+A unique ID corresponding to the client request associated with this coprocessor request.
+
+**Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
 ##### `stage`
 
 `string`
@@ -525,7 +540,7 @@ Indicates which stage of the router's [request-handling lifecycle](./rhai/#route
 This value is one of the following:
 
 - `RouterRequest`: The `RouterService` has just received a client request.
-- `RouterResponse`: The `RouterService` is about to send a client response.
+- `RouterResponse`: The `RouterService` is about to send response data to a client.
 - `SubgraphRequest`: The `SubgraphService` is about to send a request to a subgraph.
 - `SubgraphResponse`: The `SubgraphService` has just received a subgraph response.
 
@@ -553,26 +568,125 @@ Currently, this value is always `1`.
 </tr>
 
 <tr>
+<td colspan="2">
+
+**Data properties**
+
+</td>
+</tr>
+
+<tr>
 <td>
 
-##### `id`
+##### `body`
+
+`string | object`
+
+</td>
+<td>
+
+The body of the corresponding request or response.
+
+If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `body`, the router replaces the existing body with that value. This is common when [terminating a client request](#terminating-a-client-request).
+
+This field's type depends on the coprocessor request's [`stage`](#stage):
+
+- For `SubgraphService` stages, `body` is a JSON _object_.
+- For `RouterService` stages, `body` is a _string_.
+  - This is necessary to support handling [deferred queries](#handling-deferred-query-responses).
+  - If you modify `body` during the `RouterRequest` stage, the new value must be a valid string serialization of a JSON object. If it isn't, the router detects that the body is malformed and returns an error to the client.
+
+This field's structure depends on whether the coprocessor request corresponds to a request, a standard response, or a response "chunk" for a deferred query:
+
+- **If a request,** `body` usually contains a `query` property containing the GraphQL query string.
+- **If a standard response,** `body` usually contains `data` and/or `errors` properties for the GraphQL operation result.
+- **If a response "chunk",** `body` contains `data` for _some_ of the operation fields.
+
+> By default, the `RouterResponse` stage returns _redacted_ errors within the `errors` field. To process subgraph errors manually in your coprocessor, enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `context`
+
+`object`
+
+</td>
+<td>
+
+An object representing the router's shared context for the corresponding client request.
+
+If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `context`, the router replaces the existing context with that value.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `headers`
+
+`object`
+
+</td>
+<td>
+
+An object mapping of all HTTP header names and values for the corresponding request or response.
+
+If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `method`
 
 `string`
 
 </td>
 <td>
 
-A unique ID corresponding to the client request associated with this coprocessor request.
-
-**Do not return a _different_ value for this property.** If you do, the router treats the coprocessor request as if it failed.
+The HTTP method that is used by the request.
 
 </td>
 </tr>
 
 <tr>
-<td colspan="2">
+<td>
 
-**Data properties**
+##### `path`
+
+`string`
+
+</td>
+<td>
+
+The `RouterService` path that this coprocessor request pertains to.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+##### `sdl`
+
+`string`
+
+</td>
+<td>
+
+A string representation of the router's current supergraph schema.
+
+This value can be very large, so you should avoid including it in coprocessor requests if possible.
+
+The router ignores modifications to this value.
+
 
 </td>
 </tr>
@@ -599,14 +713,14 @@ This value is present only for coprocessor requests from the router's `SubgraphS
 <tr>
 <td>
 
-##### `path`
+##### `status_code`
 
-`string`
+`number`
 
 </td>
 <td>
 
-The `RouterService` path that this coprocessor request pertains to.
+The HTTP status code returned with a response.
 
 </td>
 </tr>
@@ -621,190 +735,13 @@ The `RouterService` path that this coprocessor request pertains to.
 </td>
 <td>
 
-The full URI the subgraph request will be made to.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `method`
-
-`string`
-
-</td>
-<td>
-
-The HTTP method that is used by the request.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `status_code`
-
-`number`
-
-</td>
-<td>
-
-The HTTP status code received by a response.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `body`
-
-`object`
-
-</td>
-<td>
-
-The body data type will vary according to the [`stage`](#stage) at which the coprocessor is executing:
-
- - If it is a RouterRequest or RouterResponse, the body is a JSON String.
- - If it is a SubgraphRequest or SubgraphResponse, the body is a JSON Object.
-
-The reason for this difference is to accommodate variations in behaviour required by the router's support for [deferred responses](#deferred-responses).
-
-- If a request, this usually contains a `query` property containing the GraphQL query string.
-- If a response, this usually contains `data` and/or `errors` properties for the GraphQL operation result.
-- If a deferred response, this contains a chunk of `data` for the GraphQL operation result.
-
-> The `RouterResponse` stage will return _redacted_ errors within the `errors` by default. If you wish to process subgraph errors manually in your coprocessor you can enable [subgraph error inclusion](../configuration/subgraph-error-inclusion).
-
-If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `body`, the router replaces the existing body with that value. This is common when [terminating a client request](#terminating-a-client-request).
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `headers`
-
-`object`
-
-</td>
-<td>
-
-An object mapping of all HTTP header names and values for the corresponding request or response.
-
-If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `context`
-
-`object`
-
-</td>
-<td>
-
-An object representing the router's shared context for the corresponding client request.
-
-If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `context`, the router replaces the existing context with that value.
-
-</td>
-</tr>
-
-<tr>
-<td>
-
-##### `sdl`
-
-`string`
-
-</td>
-<td>
-
-A string representation of the router's current supergraph schema.
-
-This value can be very large, so you should avoid including it in coprocessor requests if possible.
-
-The router ignores modifications to this value.
-
+When `stage` is `SubgraphRequest`, this is the full URI of the subgraph the router will query.
 
 </td>
 </tr>
 
 </tbody>
 </table>
-
-
-## Deferred Responses
-
-The router supports the [`@defer`](../executing-operations/defer-support/) schema directive which means that router extensions, including coprocessors, must deal with the fact that multiple chunks of response data will be provided for queries containing [`@defer`](../executing-operations/defer-support/) components.
-
-When processing deferred responses, the router will call a coprocessor once for each chunk of data as the data is received by the router. The different chunks are then passed for processing with the following details worthy of note:
-
- - Certain properties only makes sense to include on the first call to a coprocessor, namely: `status_code` and `headers`. The reason for this is that these values are returned to the client with the first chunk of data, so providing them to subsequent coprocessor invocations would be misleading, since there is no way that changes can be communicated back to the client at this point.
- - Because the data is presented as a JSON String, the coprocessor must return the body result as a JSON String. Many responses will not contain deferred streams and for these the body string can usually be fairly reliably transformed into a JSON Object for easy manipulation within the coprocessor. Coprocessors should be carefully coded to allow for the presence of a body which is not a valid JSON Object.
- - Because the data is a JSON String, at both `RouterRequest` and `RouterResponse`, it's entirely possible for a coprocessor to rewrite the body from invalid JSON content into valid JSON content. Indeed this is one of the primary use cases for `RouterRequest` body processing.
- - If performing `RouterRequest` processing, the returned body String should always contain a valid JSON Object. If not, the router will detect that the data is malformed and return a client error as you would expect.
-
-### Example of RouterResponse deferred responses
-
-This illustrates the difference between the first chunk in a deferred response and subsequent chunks:
-
-#### First Response Chunk
-
-```json
-{
-  "version": 1,
-  "stage": "RouterResponse",
-  "id": "8dee7fe947273640a5c2c7e1da90208c",
-  "sdl": "omitted due to length",
-  "headers": {
-    "content-type": [
-      "multipart/mixed;boundary=\"graphql\";deferSpec=20220824"
-    ],
-    "vary": [
-      "origin"
-    ]
-  },
-  "body": "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":{\"id\":\"1\"}},\"hasNext\":true}\r\n--graphql\r\n",
-  "context": {
-    "entries": {
-      "apollo_telemetry::operation_kind": "query",
-      "apollo_telemetry::client_version": "",
-      "apollo_telemetry::client_name": "manual"
-    }
-  },
-  "statusCode": 200
-}
-```
-
-#### Second (and in this example, final) Response Chunk
-
-```json
-{
-  "version": 1,
-  "stage": "RouterResponse",
-  "id": "8dee7fe947273640a5c2c7e1da90208c",
-  "sdl": "omitted due to length",
-  "body": "content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":\"Ada Lovelace\"},\"path\":[\"me\"]}]}\r\n--graphql--\r\n",
-  "context": {
-    "entries": {
-      "apollo_telemetry::operation_kind": "query",
-      "apollo_telemetry::client_version": "",
-      "apollo_telemetry::client_name": "manual"
-    }
-  }
-}
-```
-
-Note that the deferred response message does not contain: `headers` or `statusCode`.
 
 ## Responding to coprocessor requests
 
@@ -880,3 +817,85 @@ Your router considers all of the following scenarios to be a **failed response**
 - Your coprocessor responds with a non-`2xx` HTTP code.
 - Your coprocessor's response body doesn't match the JSON structure of the corresponding [request body](#example-requests-by-stage).
 - Your coprocessor's response body sets different values for [control properties](#property-reference) that must not change, such as `stage` and `version`.
+
+
+## Handling deferred query responses
+
+The Apollo Router supports the incremental delivery of query response data via [the `@defer` directive](../executing-operations/defer-support/):
+
+```mermaid
+sequenceDiagram
+  Client->>Router: Sends a query that<br/>defers some fields
+  Note over Router: Resolves non-deferred<br/>fields
+  Router->>Client: Returns data for<br/>non-deferred fields
+  Note over Router: Resolves deferred<br/>fields
+  Router->>Client: Returns data for<br/> deferred fields
+```
+
+For a single query with deferred fields, your router sends multiple "chunks" of response data to the client. If you enable coprocessor requests for the `RouterResponse` stage, your router sends a separate coprocessor request for _each chunk_ it returns as part of a deferred query.
+
+**Note the following about handling deferred response chunks:**
+
+- The [`status_code`](#status_code) and [`headers`](#headers) fields are included only in the coprocessor request for any response's _first_ chunk. These values can't change after the first chunk is returned to the client, so they're subsequently omitted.
+
+- If your coprocessor modifes the response [`body`](#body) for a response chunk, it must provide the new value as a _string_, _not_ as an object. This is because response chunk bodies include multipart boundary information in addition to the actual serialized JSON response data. [See examples.](#examples-of-deferred-response-chunks)
+  - Many responses will not contain deferred streams and for these the body string can usually be fairly reliably transformed into a JSON object for easy manipulation within the coprocessor. Coprocessors should be carefully coded to allow for the presence of a body that is not a valid JSON object.
+
+- Because the data is a JSON string at both `RouterRequest` and `RouterResponse`, it's entirely possible for a coprocessor to rewrite the body from invalid JSON content into valid JSON content. This is one of the primary use cases for `RouterRequest` body processing.
+
+### Examples of deferred response chunks
+
+The examples below illustrate the differences between the _first_ chunk of a deferred response and all subsequent chunks:
+
+#### First response chunk
+
+The first response chunk includes `headers` and `statusCode` fields:
+
+```json
+{
+  "version": 1,
+  "stage": "RouterResponse",
+  "id": "8dee7fe947273640a5c2c7e1da90208c",
+  "sdl": "...", // String omitted due to length
+  // highlight-start
+  "headers": {
+    "content-type": [
+      "multipart/mixed;boundary=\"graphql\";deferSpec=20220824"
+    ],
+    "vary": [
+      "origin"
+    ]
+  },
+  // highlight-end
+  "body": "\r\n--graphql\r\ncontent-type: application/json\r\n\r\n{\"data\":{\"me\":{\"id\":\"1\"}},\"hasNext\":true}\r\n--graphql\r\n",
+  "context": {
+    "entries": {
+      "apollo_telemetry::operation_kind": "query",
+      "apollo_telemetry::client_version": "",
+      "apollo_telemetry::client_name": "manual"
+    }
+  },
+  "statusCode": 200 //highlight-line
+}
+```
+
+#### Subsequent response chunk
+
+Subsequent response chunks omit the `headers` and `statusCode` fields:
+
+```json
+{
+  "version": 1,
+  "stage": "RouterResponse",
+  "id": "8dee7fe947273640a5c2c7e1da90208c",
+  "sdl": "...", // String omitted due to length
+  "body": "content-type: application/json\r\n\r\n{\"hasNext\":false,\"incremental\":[{\"data\":{\"name\":\"Ada Lovelace\"},\"path\":[\"me\"]}]}\r\n--graphql--\r\n",
+  "context": {
+    "entries": {
+      "apollo_telemetry::operation_kind": "query",
+      "apollo_telemetry::client_version": "",
+      "apollo_telemetry::client_name": "manual"
+    }
+  }
+}
+```
