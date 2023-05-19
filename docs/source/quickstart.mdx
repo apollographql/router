@@ -5,7 +5,9 @@ description: Run the Apollo Router with Apollo-hosted subgraphs
 
 Hello! This tutorial walks you through installing the Apollo Router and running it in front of some Apollo-hosted example subgraphs.
 
-> If you're just getting started with GraphOS, we recommend instead [creating a cloud supergraph](/graphos/quickstart/cloud/), which provisions and hosts routing capabilities for you.
+> **This quickstart helps you run a _self-hosted_ instance of the Apollo Router.** If you [create a cloud supergraph](/studio/getting-started/) with Apollo GraphOS, Apollo provisions and hosts your supergraph's router for you.
+>
+> Cloud supergraphs are recommended for organizations that don't need to host their router in their own infrastructure.
 
 ## 1. Download and extract the Apollo Router binary
 
@@ -193,34 +195,17 @@ The console output should look like the following:
 2022-06-29T22:23:25.774334Z  INFO apollo_router::axum_http_server_factory: GraphQL endpoint exposed at http://127.0.0.1:4000/ 🚀
 ```
 
-That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the Apollo Router. This flag also relaxes some defaults to provide a better development experience (e.g., it exposes subgraph error messages), so you should always _exclude_ this flag when running the router in a non-development environment.
+That's it! Running the Router with the `--dev` flag enables a development mode that exposes [Apollo Sandbox](/graphos/explorer/sandbox/) so you can run queries against the Apollo Router.
+
+> ⚠️ **Do not use the `--dev` flag in a non-development environment!** It relaxes certain default configuration options to provide an improved local development experience (e.g., it exposes subgraph error messages to clients).
+>
+> [Learn more about dev mode defaults.](./configuration/overview#dev-mode-defaults)
 
 Visit `http://127.0.0.1:4000` to open Apollo Sandbox, inspect your entire supergraph, and run your first queries!
 
-<blockquote>
-
-
-**⚠️ Do not use the `--dev` flag in production!** If you want to replicate any development mode functionality in production, modify your YAML configuration file instead.
-
-Using `--dev` is equivalent to running `./router --hot-reload` with the following configuration:
-
-```yaml
-sandbox:
-  enabled: true
-supergraph:
-  introspection: true
-include_subgraph_errors:
-  all: true
-plugins:
-  experimental.expose_query_plan: true
-```
-
-
-</blockquote>
-
 ## Next steps
 
-Now that you know how to run Apollo Router with a supergraph schema, you can:
+Now that you know how to run the Apollo Router with a supergraph schema, you can:
 
 * Set up [managed federation](./managed-federation/overview)
 * Learn about [additional configuration options](./configuration/overview)
