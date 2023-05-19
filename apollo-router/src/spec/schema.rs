@@ -86,7 +86,6 @@ impl Schema {
             .any(|err| matches!(*err.data, DiagnosticData::SyntaxError { .. }))
         {
             let errors = ValidationErrors {
-                raw_schema: schema.to_string(),
                 errors: diagnostics,
             };
             errors.print();

@@ -488,7 +488,6 @@ pub(crate) enum SchemaError {
 /// Collection of schema parsing errors.
 #[derive(Clone, Debug)]
 pub(crate) struct ValidationErrors {
-    pub(crate) raw_schema: String,
     pub(crate) errors: Vec<apollo_compiler::ApolloDiagnostic>,
 }
 
