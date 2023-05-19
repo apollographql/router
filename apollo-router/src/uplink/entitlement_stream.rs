@@ -87,6 +87,9 @@ impl From<entitlement_query::ResponseData> for UplinkResponse<Entitlement> {
                     FetchErrorCode::ACCESS_DENIED => "ACCESS_DENIED".to_string(),
                     FetchErrorCode::UNKNOWN_REF => "UNKNOWN_REF".to_string(),
                     FetchErrorCode::RETRY_LATER => "RETRY_LATER".to_string(),
+                    FetchErrorCode::NOT_IMPLEMENTED_ON_THIS_INSTANCE => {
+                        "NOT_IMPLEMENTED_ON_THIS_INSTANCE".to_string()
+                    }
                     FetchErrorCode::Other(other) => other,
                 },
                 message: error.message,
