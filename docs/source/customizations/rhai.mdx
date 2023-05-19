@@ -139,13 +139,13 @@ Before you build your Rhai script, it helps to understand how the Apollo Router 
 ```mermaid
 sequenceDiagram
     actor Client
-    participant RS as RouterService
-    participant SupergraphService
-    participant ExecutionService
-    participant SubgraphService(s)
+    participant RouterService as Router<br/>Service
+    participant SupergraphService as Supergraph<br/>Service
+    participant ExecutionService as Execution<br/>Service
+    participant SubgraphService(s) as Subgraph<br/>Service(s)
 
-    Client->>RS: Sends request
-    RS->>SupergraphService: Transforms raw HTTP<br/>request into GraphQL/JSON<br/>request
+    Client->>RouterService: Sends request
+    RouterService->>SupergraphService: Converts raw HTTP request<br/>to GraphQL/JSON request
     SupergraphService->>ExecutionService: Initiates query<br/>plan execution
     par
     ExecutionService->>SubgraphService(s): Initiates<br/>sub-operation
@@ -158,8 +158,8 @@ sequenceDiagram
     SubgraphService(s)-->>ExecutionService: 
     end
     ExecutionService-->>SupergraphService: Assembles and<br/>returns response
-    SupergraphService-->>RS: Returns GraphQL/JSON<br/>response
-    RS-->>Client: Returns HTTP<br/>response
+    SupergraphService-->>RouterService: Returns GraphQL/JSON<br/>response
+    RouterService-->>Client: Returns HTTP<br/>response
 ```
 
 As execution proceeds "left to right" from the `RouterService` to individual `SubgraphService`s, each service passes the client's original request along to the _next_ service. Similarly, as execution continues "right to left" from `SubgraphService`s to the `RouterService`, each service passes the generated response for the client.
