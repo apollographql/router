@@ -97,7 +97,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
    > For this command, `GITHUB_TOKEN` is **not used**, but it is still _required_ at the moment, so it's set here to `prep`.  This is a bug in the releasing script that needs to be changed.
 
    ```
-   GITHUB_TOKEN=prep cargo xtask release prepare $APOLLO_ROUTER_RELEASE_VERSION --current-branch --dry-run
+   cargo xtask release prepare $APOLLO_ROUTER_RELEASE_VERSION
    ```
 
    Running this command will:
