@@ -5,7 +5,6 @@ use anyhow::Error;
 use anyhow::Result;
 use cargo_metadata::MetadataCommand;
 use chrono::prelude::Utc;
-use git2::Repository;
 use walkdir::WalkDir;
 use xtask::*;
 
@@ -59,16 +58,6 @@ pub struct Prepare {
 
     /// The new version that is being created OR to bump (major|minor|patch|current).
     version: Version,
-}
-
-macro_rules! git {
-    ($( $i:expr ),*) => {
-        let git = which::which("git")?;
-        let result = std::process::Command::new(git).args([$( $i ),*]).status()?;
-        if !result.success() {
-            return Err(anyhow!("git {}", [$( $i ),*].join(",")));
-        }
-    };
 }
 
 macro_rules! replace_in_file {
@@ -179,19 +168,17 @@ impl Prepare {
                 "apollo-router"
             ]),
             Version::Nightly => {
-                let head_commit: String = match Repository::open_from_env() {
-                    Ok(repo) => {
-                        let revspec = repo.revparse("HEAD")?;
-                        if revspec.mode().contains(git2::RevparseMode::SINGLE) {
-                            let mut full_hash = revspec.from().unwrap().id().to_string();
-                            full_hash.truncate(8);
-                            full_hash
-                        } else {
-                            panic!("unexpected rev-parse HEAD");
-                        }
-                    }
-                    Err(e) => panic!("failed to open: {e}"),
-                };
+                let head_commit: String = std::process::Command::new("git")
+                    .args(["rev-parse", "HEAD"])
+                    .output()
+                    .expect("failed to execute 'git rev-parse HEAD'")
+                    .stdout
+                    .iter()
+                    .map(|b| *b as char)
+                    .collect::<String>()
+                    .chars()
+                    .take(8)
+                    .collect();
 
                 replace_in_file!(
                     "./apollo-router/Cargo.toml",
