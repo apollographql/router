@@ -31,7 +31,7 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ### Prevent span attributes from being formatted to write logs 
 
-we do not show span attributes in our logs, but the log formatter still spends some time formatting them to a string, even when there will be no logs written for the trace. This adds the `NullFieldFormatter` that entirely avoids formatting the attributes
+We do not show span attributes in our logs, but the log formatter still spends time formatting them to a string, even when there will be no logs written for the trace. This adds the `NullFieldFormatter` that entirely avoids formatting the attributes to improve performance. 
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2890
 
@@ -56,13 +56,13 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Use a parking-lot mutex in `Context` to avoid contention ([Issue #2751](https://github.com/apollographql/router/issues/2751))
 
-The context requires synchronized access to the busy timer, and previously we used a futures aware mutex for that, but those are susceptible to contention. This replaces that mutex with a parking-lot synchronous mutex that is much faster.
+Request context requires synchronized access to the busy timer, and previously we used a futures aware mutex for that, but those are susceptible to contention. This replaces that mutex with a parking-lot synchronous mutex that is much faster.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2885
 
 ### Config and schema reloads now use async IO ([Issue #2613](https://github.com/apollographql/router/issues/2613))
 
-If you were using local schema or config then previously the Router was performing blocking IO in an async thread. This could have caused stalls to serving requests and was generally bad practice.
+If you were using local schema or config then previously the Router was performing blocking IO in an async thread. This could have caused stalls to serving requests.
 The Router now uses async IO for all config and schema reloads.
 
 Fixing the above surfaced an issue with the experimental `force_hot_reload` feature introduced for testing. This has also been fixed and renamed to `force_reload`. 
@@ -79,7 +79,7 @@ By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographq
 
 Each call to a subgraph co-processor could update the entire request context as a single operation. This is racy and could lead to difficult to predict context modifications depending on the order in which subgraph requests and responses are processed by the router.
 
-This fix modifies the router so that subgraph co-processor context updates are merged within the existing context. This is still racy, but means that subgraphs are only racing to perform updates at the context key level, rather than across the entire context. This is a substantial improvement on the current situation.
+This fix modifies the router so that subgraph co-processor context updates are merged within the existing context. This is still racy, but means that subgraphs are only racing to perform updates at the context key level, rather than across the entire context.
 
 Future enhancements will provide a more comprehensive mechanism that will support some form of sequencing or change arbitration across subgraphs.
 
@@ -89,9 +89,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Add private component to the `Context` structure ([Issue #2800](https://github.com/apollographql/router/issues/2800))
 
-There's a cost in using the `Context` structure during a request's lifecycle, due to JSON serialization and deserialization incurred when doing inter-plugin communication (e.g., between Rhai/coprocessors and Rust).  For internal router usage, we can use a more efficient structure that avoids serialization costs of our private contextual properties which do not need to be exposed (and shouldn't be modified) by plugins.
-
-The new structure is based on a map indexed by type id, which means that if some part of the code can see that type, then it can access it in the map.
+There's a cost in using the `Context` structure during a request's lifecycle, due to JSON serialization and deserialization incurred when doing inter-plugin communication (e.g., between Rhai/coprocessors and Rust).  For internal router usage, we now use a more efficient structure that avoids serialization costs of our private contextual properties which do not need to be exposed to plugins.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2802
 
@@ -113,7 +111,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Improve performance by avoiding temporary allocations creating response paths ([PR #2854](https://github.com/apollographql/router/pull/2854))
 
-Response formatting generates a lot of temporary allocations to create response paths that end up unused. By making a reference based type to hold these paths, we can prevent those allocations and improve performance.
+Response formatting generated many temporary allocations while creating response paths. By making a reference based type to hold these paths, we can prevent those allocations and improve performance.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2854
 
