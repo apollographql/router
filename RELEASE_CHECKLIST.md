@@ -82,7 +82,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 7. Push this new branch to the appropriate remote.  We will open a PR for it **later**, but this will be the **base** for the PR created in the next step).  (And `--set-upstream` will of course track this locally.  This is commonly abbreviated as `-u`.)
 
    ```
-   git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
+   git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
    ```
 
 8. Create _another_ new branch called `prep-#.#.#` off of `#.#.#`.  This branch will be used for bumping version numbers and getting review on the changelog.  We'll do this using the same environment variable, so you can just run:
@@ -135,7 +135,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 14. Now push the branch up to the correct remote:
 
     ```
-    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}"
+    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 15. Programatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
