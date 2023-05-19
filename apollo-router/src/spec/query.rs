@@ -6,7 +6,9 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
+use apollo_compiler::diagnostics::DiagnosticData;
 use apollo_compiler::hir;
+use apollo_compiler::validation::ValidationDatabase;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
 use apollo_compiler::HirDatabase;
@@ -270,22 +272,43 @@ impl Query {
         let mut compiler = ApolloCompiler::new()
             .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
             .token_limit(configuration.preview_operation_limits.parser_max_tokens);
+        compiler.set_type_system_hir(schema.type_system.clone());
         let id = compiler.add_executable(&query, "query");
-        let ast = compiler.db.ast(id);
 
+        let ast = compiler.db.ast(id);
         // Trace log recursion limit data
         let recursion_limit = ast.recursion_limit();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let errors = ast
-            .errors()
-            .map(|err| format!("{err:?}"))
+        let diagnostics = compiler.db.validate_executable(id);
+        let errors = diagnostics
+            .into_iter()
+            .filter(|err| err.data.is_error())
             .collect::<Vec<_>>();
 
+        let parse_errors = errors
+            .iter()
+            .filter(|err| matches!(&*err.data, &DiagnosticData::SyntaxError { .. }))
+            .collect::<Vec<_>>();
+
+        if !parse_errors.is_empty() {
+            let text = parse_errors
+                .into_iter()
+                .map(|err| err.data.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            failfast_debug!("parsing error(s): {}", text);
+            return Err(SpecError::ParsingError(text));
+        }
+
         if !errors.is_empty() {
-            let errors = errors.join(", ");
-            failfast_debug!("parsing error(s): {}", errors);
-            return Err(SpecError::ParsingError(errors));
+            let errors = errors
+                .into_iter()
+                .map(|err| err.data.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
+            failfast_debug!("validation error(s): {}", errors);
+            return Err(SpecError::ValidationError(errors));
         }
 
         let fragments = Fragments::from_hir(&compiler, schema)?;
