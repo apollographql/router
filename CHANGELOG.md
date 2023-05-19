@@ -4,6 +4,120 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.19.0] - 2023-05-19
+
+## 🚀 Features
+
+### `require_authentication` option to reject unauthenticated requests ([Issue #2866](https://github.com/apollographql/router/issues/2866))
+
+While the authentication plugin validates queries with JWT, it does not reject unauthenticated requests, and leaves that to other layers. This allows co-processors to handle other authentication methods, and plugins at later layers to authorize the reqsuest or not. Typically, [this was done in rhai](https://www.apollographql.com/docs/router/configuration/authn-jwt#example-rejecting-unauthenticated-requests).
+
+This now adds an option to the Router's YAML configuration to reject unauthenticated requests. It can be used as follows:
+
+```yaml
+authorization:
+	require_authentication: true
+```
+
+The plugin will check for the presence of the `apollo_authentication::JWT::claims` key in the request context as proof that the request is authenticated.
+
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3002
+
+## 🐛 Fixes
+
+### prevent span attributes from being formatted to write logs 
+
+we do not show span attributes in our logs, but the log formatter still spends some time formatting them to a string, even when there will be no logs written for the trace. This adds the `NullFieldFormatter` that entirely avoids formatting the attributes
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2890
+
+## 🐛 Fixes
+
+### Federation v2.4.5
+
+This release bumps the Router's Federation support from v2.4.2 to v2.4.5, which brings in notable query planner fixes from [v2.4.3](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.4.2) and [v2.4.5](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.4.5).  **Federation v2.4.4 will not exist** due to a publishing failure.  Of note from those releases, this brings query planner fixes that:
+
+- Improves the heuristics used to try to reuse the query named fragments in subgraph fetches. Said fragment will be reused ([apollographql/federation#2541](https://github.com/apollographql/federation/pull/2541)) more often, which can lead to smaller subgraph queries (and hence overall faster processing).
+- Fix potential assertion error during query planning in some multi-field `@requires` case. This error could be triggered ([#2575](https://github.com/apollographql/federation/pull/2575)) when a field in a `@requires` depended on another field that was also part of that same requires (for instance, if a field has a `@requires(fields: "id otherField")` and that `id` is also a key necessary to reach the subgraph providing `otherField`).
+  
+  The assertion error thrown in that case contained the message `Root groups (...) should have no remaining groups unhandled (...)`
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3107
+
+### Add support for throwing graphql errors in rhai responses ([Issue #3069](https://github.com/apollographql/router/issues/3069))
+
+It's possible to throw a graphql error from rhai when processing a request. This extends the capability to include when processing a response.
+
+Refer to the `Terminating client requests` section of the [Rhai api documentation](https://www.apollographql.com/docs/router/configuration/rhai) to learn how to throw GraphQL payloads.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3089
+
+### use a parking-lot mutex in Context ([Issue #2751](https://github.com/apollographql/router/issues/2751))
+
+The context requires synchronized access to the busy timer, and precedently we used a futures aware mutex for that, but those are susceptible to contention. This replaces that mutex with a parking-lot synchronous mutex that is much faster.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2885
+
+### Config and schema reloads now use async IO ([Issue #2613](https://github.com/apollographql/router/issues/2613))
+
+If you were using local schema or config then previously the Router was performing blocking IO in an async thread. This could have caused stalls to serving requests and was generally bad practice.
+The Router now uses async IO for all config and schema reloads.
+
+Fixing the above surfaced an issue with the experimental `force_hot_reload` feature introduced for testing. This has also been fixed and renamed to `force_reload`. 
+
+```diff
+experimental_chaos:
+-    force_hot_reload: 1m
++    force_reload: 1m
+```
+
+By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/3016
+
+### Improve subgraph co-processor context processing ([Issue #3058](https://github.com/apollographql/router/issues/3058))
+
+Each call to a subgraph co-processor could update the entire request context as a single operation. This is racy and could lead to difficult to predict context modifications depending on the order in which subgraph requests and responses are processed by the router.
+
+This fix modifies the router so that subgraph co-processor context updates are merged within the existing context. This is still racy, but means that subgraphs are only racing to perform updates at the context key level, rather than across the entire context. This is a substantial improvement on the current situation.
+
+Future enhancements will provide a more comprehensive mechanism that will support some form of sequencing or change arbitration across subgraphs.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3054
+
+## 🛠 Maintenance
+
+### Add a private part to the Context structure ([Issue #2800](https://github.com/apollographql/router/issues/2800))
+
+There's a cost in using the `Context` structure throughout a request's lifecycle, due to the JSON serialization and deserialization, so it should be reserved from inter plugin communication between rhai, coprocessor and Rust. But for internal router usage, we can have a more efficient structure that avoids serialization costs, and does not expose data that should not be modified by plugins.
+
+That structure is based on a map indexed by type id, which means that if some part of the code can see that type, then it can access it in the map.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2802
+
+### Adds an integration test for all YAML configuration files in `./examples` ([Issue #2932](https://github.com/apollographql/router/issues/2932))
+
+Adds an integration test that iterates over `./examples` looking for `.yaml` files that don't have a `Cargo.toml` or `.skipconfigvalidation` sibling file, and then running `setup_router_and_registry` on them, fast failing on any errors along the way.
+
+By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3097
+
+### use jemalloc on linux
+
+Detailed memory investigations of the router in use have revealed that there is a significant amount of memory fragmentation when using the default allocator, glibc, on linux. Performance testing and flamegraph analysis suggests that jemalloc on linux can yield significant performance improvements. In our tests, this figure shows performance to be about 35% faster than the default allocator. The improvement in performance being due to less time spent managing memory fragmentation.
+
+Not everyone will see a 35% performance improvement in this release of the router. Depending on your usage pattern, you may see more or less than this. If you see a regression, please file an issue with details.
+
+We have no reason to believe that there are allocation problems on other platforms, so this change is confined to linux.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2882
+
+### lighter path manipulation in response formatting 
+
+Response formatting generates a lot of temporary allocations to create response paths that end up unused. By making a reference based type to hold these paths, we can prevent those allocations and improve performance.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2854
+
+
+
 # [1.18.1] - 2023-05-11
 
 ## 🐛 Fixes
