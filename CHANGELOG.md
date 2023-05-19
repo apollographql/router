@@ -6,17 +6,20 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 # [1.19.0] - 2023-05-19
 
+> **Note**
+> This release focused a notable amount of effort on improving both CPU usage and memory utilization/fragmentization.  Our testing and pre-release feedback has been overwhelmingly positive.  🙌 
+
 ## 🚀 Features
 
-### `require_authentication` option to reject unauthenticated requests ([Issue #2866](https://github.com/apollographql/router/issues/2866))
+### GraphOS Enterprise: `require_authentication` option to reject unauthenticated requests ([Issue #2866](https://github.com/apollographql/router/issues/2866))
 
-While the authentication plugin validates queries with JWT, it does not reject unauthenticated requests, and leaves that to other layers. This allows co-processors to handle other authentication methods, and plugins at later layers to authorize the reqsuest or not. Typically, [this was done in rhai](https://www.apollographql.com/docs/router/configuration/authn-jwt#example-rejecting-unauthenticated-requests).
+While the authentication plugin validates queries with JWT, it does not reject unauthenticated requests, and leaves that to other layers. This allows co-processors to handle other authentication methods, and plugins at later layers to authorize the request or not. Typically, [this was done in rhai](https://www.apollographql.com/docs/router/configuration/authn-jwt#example-rejecting-unauthenticated-requests).
 
 This now adds an option to the Router's YAML configuration to reject unauthenticated requests. It can be used as follows:
 
 ```yaml
 authorization:
-	require_authentication: true
+  require_authentication: true
 ```
 
 The plugin will check for the presence of the `apollo_authentication::JWT::claims` key in the request context as proof that the request is authenticated.
@@ -26,13 +29,11 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 ## 🐛 Fixes
 
-### prevent span attributes from being formatted to write logs 
+### Prevent span attributes from being formatted to write logs 
 
 we do not show span attributes in our logs, but the log formatter still spends some time formatting them to a string, even when there will be no logs written for the trace. This adds the `NullFieldFormatter` that entirely avoids formatting the attributes
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2890
-
-## 🐛 Fixes
 
 ### Federation v2.4.5
 
@@ -45,17 +46,17 @@ This release bumps the Router's Federation support from v2.4.2 to v2.4.5, which 
 
 By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3107
 
-### Add support for throwing graphql errors in rhai responses ([Issue #3069](https://github.com/apollographql/router/issues/3069))
+### Add support for throwing GraphQL errors in Rhai responses ([Issue #3069](https://github.com/apollographql/router/issues/3069))
 
-It's possible to throw a graphql error from rhai when processing a request. This extends the capability to include when processing a response.
+It's possible to throw a GraphQL error from Rhai when processing a request. This extends the capability to include errors when processing a response.
 
-Refer to the `Terminating client requests` section of the [Rhai api documentation](https://www.apollographql.com/docs/router/configuration/rhai) to learn how to throw GraphQL payloads.
+Refer to the _Terminating client requests_ section of the [Rhai api documentation](https://www.apollographql.com/docs/router/configuration/rhai) to learn how to throw GraphQL payloads.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3089
 
-### use a parking-lot mutex in Context ([Issue #2751](https://github.com/apollographql/router/issues/2751))
+### Use a parking-lot mutex in `Context` to avoid contention ([Issue #2751](https://github.com/apollographql/router/issues/2751))
 
-The context requires synchronized access to the busy timer, and precedently we used a futures aware mutex for that, but those are susceptible to contention. This replaces that mutex with a parking-lot synchronous mutex that is much faster.
+The context requires synchronized access to the busy timer, and previously we used a futures aware mutex for that, but those are susceptible to contention. This replaces that mutex with a parking-lot synchronous mutex that is much faster.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2885
 
@@ -74,7 +75,7 @@ experimental_chaos:
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/3016
 
-### Improve subgraph co-processor context processing ([Issue #3058](https://github.com/apollographql/router/issues/3058))
+### Improve subgraph coprocessor context processing ([Issue #3058](https://github.com/apollographql/router/issues/3058))
 
 Each call to a subgraph co-processor could update the entire request context as a single operation. This is racy and could lead to difficult to predict context modifications depending on the order in which subgraph requests and responses are processed by the router.
 
@@ -86,11 +87,11 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ## 🛠 Maintenance
 
-### Add a private part to the Context structure ([Issue #2800](https://github.com/apollographql/router/issues/2800))
+### Add private component to the `Context` structure ([Issue #2800](https://github.com/apollographql/router/issues/2800))
 
-There's a cost in using the `Context` structure throughout a request's lifecycle, due to the JSON serialization and deserialization, so it should be reserved from inter plugin communication between rhai, coprocessor and Rust. But for internal router usage, we can have a more efficient structure that avoids serialization costs, and does not expose data that should not be modified by plugins.
+There's a cost in using the `Context` structure during a request's lifecycle, due to JSON serialization and deserialization incurred when doing inter-plugin communication (e.g., between Rhai/coprocessors and Rust).  For internal router usage, we can use a more efficient structure that avoids serialization costs of our private contextual properties which do not need to be exposed (and shouldn't be modified) by plugins.
 
-That structure is based on a map indexed by type id, which means that if some part of the code can see that type, then it can access it in the map.
+The new structure is based on a map indexed by type id, which means that if some part of the code can see that type, then it can access it in the map.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/2802
 
@@ -100,17 +101,17 @@ Adds an integration test that iterates over `./examples` looking for `.yaml` fil
 
 By [@EverlastingBugstopper](https://github.com/EverlastingBugstopper) in https://github.com/apollographql/router/pull/3097
 
-### use jemalloc on linux
+### Improve memory fragmentation and resource consumption by switching to `jemalloc` as the memory allocator on Linux ([PR #2882](https://github.com/apollographql/router/pull/2882)) 
 
-Detailed memory investigations of the router in use have revealed that there is a significant amount of memory fragmentation when using the default allocator, glibc, on linux. Performance testing and flamegraph analysis suggests that jemalloc on linux can yield significant performance improvements. In our tests, this figure shows performance to be about 35% faster than the default allocator. The improvement in performance being due to less time spent managing memory fragmentation.
+Detailed memory investigation revealed significant memory fragmentation when using the default allocator, `glibc`, on Linux. Performance testing and flame-graph analysis suggested that using `jemalloc` on Linux would yield notable performance improvements. In our tests, this figure shows performance to be about 35% faster than the default allocator, on account of spending less time managing memory fragmentation.
 
-Not everyone will see a 35% performance improvement in this release of the router. Depending on your usage pattern, you may see more or less than this. If you see a regression, please file an issue with details.
+Not everyone will see a 35% performance improvement. Depending on your usage patterns, you may see more or less than this. If you see a regression, please file an issue with details.
 
-We have no reason to believe that there are allocation problems on other platforms, so this change is confined to linux.
+We have no reason to believe that there are allocation problems on other platforms, so this change is confined to Linux.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/2882
 
-### lighter path manipulation in response formatting 
+### Improve performance by avoiding temporary allocations creating response paths ([PR #2854](https://github.com/apollographql/router/pull/2854))
 
 Response formatting generates a lot of temporary allocations to create response paths that end up unused. By making a reference based type to hold these paths, we can prevent those allocations and improve performance.
 
