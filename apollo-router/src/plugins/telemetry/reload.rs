@@ -1,24 +1,15 @@
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
-
 use anyhow::anyhow;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
 use opentelemetry::metrics::noop::NoopMeterProvider;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
-use rand::thread_rng;
-use rand::Rng;
 use tower::BoxError;
-use tracing::Subscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
-use tracing_subscriber::layer::Filter;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
-use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::reload::Handle;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
@@ -31,22 +22,13 @@ use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
-pub(super) type LayeredTracer = Layered<
-    Filtered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, SamplingFilter, Registry>,
-    Registry,
->;
+type LayeredTracer = Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>;
 
 // These handles allow hot tracing of layers. They have complex type definitions because tracing has
 // generic types in the layer definition.
 pub(super) static OPENTELEMETRY_TRACER_HANDLE: OnceCell<
     ReloadTracer<opentelemetry::sdk::trace::Tracer>,
 > = OnceCell::new();
-
-static FMT_LAYER_HANDLE: OnceCell<
-    Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
-> = OnceCell::new();
-
-pub(super) static SPAN_SAMPLING_RATE: AtomicU64 = AtomicU64::new(0);
 
 #[allow(clippy::type_complexity)]
 static METRICS_LAYER_HANDLE: OnceCell<
@@ -62,13 +44,15 @@ static METRICS_LAYER_HANDLE: OnceCell<
     >,
 > = OnceCell::new();
 
+static FMT_LAYER_HANDLE: OnceCell<
+    Handle<Box<dyn Layer<LayeredTracer> + Send + Sync>, LayeredTracer>,
+> = OnceCell::new();
+
 pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     let hot_tracer = ReloadTracer::new(
         opentelemetry::sdk::trace::TracerProvider::default().versioned_tracer("noop", None, None),
     );
-    let opentelemetry_layer = tracing_opentelemetry::layer()
-        .with_tracer(hot_tracer.clone())
-        .with_filter(SamplingFilter::new());
+    let opentelemetry_layer = tracing_opentelemetry::layer().with_tracer(hot_tracer.clone());
 
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
@@ -141,45 +125,16 @@ pub(super) fn reload_metrics(layer: MetricsLayer) {
     }
 }
 
-pub(super) fn reload_fmt(layer: Box<dyn Layer<LayeredTracer> + Send + Sync>) {
+#[allow(clippy::type_complexity)]
+pub(super) fn reload_fmt(
+    layer: Box<
+        dyn Layer<Layered<OpenTelemetryLayer<Registry, ReloadTracer<Tracer>>, Registry>>
+            + Send
+            + Sync,
+    >,
+) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
-    }
-}
-
-pub(crate) struct SamplingFilter {}
-
-impl SamplingFilter {
-    pub(crate) fn new() -> Self {
-        Self {}
-    }
-
-    fn sample(&self) -> bool {
-        let s: f64 = thread_rng().gen_range(0.0..=1.0);
-        s <= f64::from_bits(SPAN_SAMPLING_RATE.load(Ordering::Relaxed))
-    }
-}
-
-impl<S> Filter<S> for SamplingFilter
-where
-    S: Subscriber + for<'span> LookupSpan<'span>,
-{
-    fn enabled(
-        &self,
-        meta: &tracing::Metadata<'_>,
-        cx: &tracing_subscriber::layer::Context<'_, S>,
-    ) -> bool {
-        let current_span = cx.current_span();
-
-        //
-        !meta.is_span()
-            // this span is enabled if:
-            || current_span
-                .id()
-                // - there's a parent span and it was enabled
-                .map(|id| cx.span(id).is_some())
-                // - there's no parent span (it's the root), so we make the sampling decision
-                .unwrap_or_else(|| self.sample())
     }
 }
 
