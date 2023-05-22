@@ -22,7 +22,7 @@ use displaydoc::Display as DisplayDoc;
 #[cfg(test)]
 use futures::channel::mpsc::SendError;
 #[cfg(test)]
-use futures::channel::mpsc::{self};
+use futures::channel::mpsc;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
@@ -1032,6 +1032,7 @@ impl TestRouterHttpServer {
         result
     }
 
+    #[track_caller]
     async fn shutdown(mut self) -> Result<(), ApolloRouterError> {
         self.send_event(Event::Shutdown).await.unwrap();
         self.router_http_server.shutdown().await
