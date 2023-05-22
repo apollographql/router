@@ -12,7 +12,7 @@ jobs:
       - name: Install Rover
         run: |
           curl -sSL https://rover.apollo.dev/nix/v0.14.1 | sh
-          echo "/home/runner/.rover/bin" >> $GITHUB_PATH
+          echo "$HOME/.rover/bin" >> $GITHUB_PATH
       - name: Make changes to pull request
         run: |
           rover graph introspect https://uplink.api.apollographql.com/ | perl -pe 'chomp if eof' > ./apollo-router/src/uplink/uplink.graphql
