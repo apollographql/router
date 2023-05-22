@@ -1032,7 +1032,6 @@ impl TestRouterHttpServer {
         result
     }
 
-    #[track_caller]
     async fn shutdown(mut self) -> Result<(), ApolloRouterError> {
         self.send_event(Event::Shutdown).await.unwrap();
         self.router_http_server.shutdown().await
