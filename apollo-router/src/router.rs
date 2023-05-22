@@ -20,9 +20,9 @@ use derive_more::Display;
 use derive_more::From;
 use displaydoc::Display as DisplayDoc;
 #[cfg(test)]
-use futures::channel::mpsc::SendError;
-#[cfg(test)]
 use futures::channel::mpsc;
+#[cfg(test)]
+use futures::channel::mpsc::SendError;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
