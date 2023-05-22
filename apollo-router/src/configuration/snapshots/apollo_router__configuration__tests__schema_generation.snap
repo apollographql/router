@@ -1129,10 +1129,18 @@ expression: "&schema"
         "max_aliases": null,
         "warn_only": false,
         "parser_max_recursion": 4096,
-        "parser_max_tokens": 15000
+        "parser_max_tokens": 15000,
+        "http_max_request_bytes": 2000000
       },
       "type": "object",
       "properties": {
+        "http_max_request_bytes": {
+          "description": "Limit the size of incoming HTTP requests read from the network, to protect against running out of memory. Default: 2000000 (2 MB)",
+          "default": 2000000,
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0.0
+        },
         "max_aliases": {
           "description": "If set, requests with operations with more aliases than this maximum are rejected with a HTTP 400 Bad Request response and GraphQL error with `\"extensions\": {\"code\": \"MAX_ALIASES_LIMIT\"}`",
           "default": null,

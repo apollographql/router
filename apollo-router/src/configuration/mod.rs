@@ -621,6 +621,10 @@ pub(crate) struct OperationLimits {
 
     /// Limit the number of tokens the GraphQL parser processes before aborting.
     pub(crate) parser_max_tokens: usize,
+
+    /// Limit the size of incoming HTTP requests read from the network,
+    /// to protect against running out of memory. Default: 2000000 (2 MB)
+    pub(crate) http_max_request_bytes: usize,
 }
 
 impl Default for OperationLimits {
@@ -632,12 +636,13 @@ impl Default for OperationLimits {
             max_root_fields: None,
             max_aliases: None,
             warn_only: false,
+            http_max_request_bytes: 2_000_000,
+            parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow
             // but is still very high for "reasonable" queries.
             // https://docs.rs/apollo-parser/0.2.8/src/apollo_parser/parser/mod.rs.html#368
             parser_max_recursion: 4096,
-            parser_max_tokens: 15_000,
         }
     }
 }
