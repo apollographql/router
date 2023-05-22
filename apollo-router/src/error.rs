@@ -313,6 +313,14 @@ impl IntoGraphQLErrors for QueryPlannerError {
                 .iter()
                 .map(|p_err| Error::from(p_err.clone()))
                 .collect()),
+            QueryPlannerError::Introspection(introspection_error) => Ok(vec![Error::builder()
+                .message(
+                    introspection_error
+                        .message
+                        .unwrap_or_else(|| "introspection error".to_string()),
+                )
+                .extension_code("INTROSPECTION_ERROR")
+                .build()]),
             QueryPlannerError::LimitExceeded(OperationLimits {
                 depth,
                 height,
