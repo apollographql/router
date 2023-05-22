@@ -1548,6 +1548,16 @@ mod tests {
         context
     }
 
+    fn simple_query_context() -> Context {
+        let context = Context::new();
+        context.private_entries.lock().insert(ClientRequestAccepts {
+            json: true,
+            ..Default::default()
+        });
+
+        context
+    }
+
     #[tokio::test]
     async fn interface_object_typename_rewrites() {
         let schema = r#"
@@ -2354,5 +2364,166 @@ mod tests {
         let mut stream = service.oneshot(request).await.unwrap();
 
         insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn errors_on_required_fields() {
+        let schema = r#"
+        schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+      {
+        query: Query
+      }
+      
+      directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+      
+      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+      
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+      
+      directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+      
+      directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+      
+      directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+      
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      
+      scalar join__FieldSet
+      
+      enum join__Graph {
+        THINGS @join__graph(name: "things", url: "http://localhost:8001")
+        THINGSBAR @join__graph(name: "thingsbar", url: "http://localhost:8002")
+      }
+      
+      scalar link__Import
+      
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+      
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      
+      type Query
+        @join__type(graph: THINGS)
+        @join__type(graph: THINGSBAR)
+      {
+        things: [Thing] @join__field(graph: THINGS)
+      }
+      
+      type Thing
+        @join__type(graph: THINGS, key: "id")
+        @join__type(graph: THINGSBAR, key: "id")
+      {
+        id: ID!
+        foo: String! @join__field(graph: THINGS) @join__field(graph: THINGSBAR, external: true)
+        bar: String! @join__field(graph: THINGSBAR, requires: "foo")
+      }
+        "#;
+
+        let query = r#"
+            query Things {
+                things {
+                    bar
+                    id
+                }
+            }
+        "#;
+
+        // the things subgraph is missing foo, so it will raise an error
+        // that prevents the thingsbar api call
+        let subgraphs = MockedSubgraphs(
+            [
+        ("things", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"query Things__things__0{things{__typename id foo}}", "operationName": "Things__things__0"}},
+                serde_json::json!{{
+                    "data": {
+                      "things": [
+                        null,
+                        null
+                      ]
+                    },
+                    "errors": [
+                      {
+                        "message": "Cannot return null for non-nullable field Thing.foo.",
+                        "locations": [
+                          {
+                            "line": 1,
+                            "column": 46
+                          }
+                        ],
+                        "path": [
+                          "things",
+                          0,
+                          "foo"
+                        ],
+                        "extensions": {
+                          "code": "INTERNAL_SERVER_ERROR",
+                          "stacktrace": [
+                            "Error: Cannot return null for non-nullable field Thing.foo.",
+                          ]
+                        }
+                      },
+                      {
+                        "message": "Cannot return null for non-nullable field Thing.foo.",
+                        "locations": [
+                          {
+                            "line": 1,
+                            "column": 46
+                          }
+                        ],
+                        "path": [
+                          "things",
+                          1,
+                          "foo"
+                        ],
+                        "extensions": {
+                          "code": "INTERNAL_SERVER_ERROR",
+                          "stacktrace": [
+                            "Error: Cannot return null for non-nullable field Thing.foo.",
+                          ]
+                        }
+                      }
+                    ]
+                  }}
+            )
+          .build()),
+    ]
+            .into_iter()
+            .collect(),
+        );
+
+        let service = TestHarness::builder()
+            .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+            .unwrap()
+            .schema(schema)
+            .extra_plugin(subgraphs)
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .context(simple_query_context())
+            .query(query)
+            .build()
+            .unwrap();
+
+        let response = service
+            .oneshot(request)
+            .await
+            .unwrap()
+            .next_response()
+            .await
+            .unwrap();
+
+        assert_eq!(2, response.errors.len());
+        insta::assert_json_snapshot!(response);
     }
 }
