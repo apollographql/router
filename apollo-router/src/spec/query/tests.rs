@@ -1204,126 +1204,257 @@ macro_rules! assert_validation_error {
 
 #[test]
 fn variable_validation() {
-    let schema = "type Query { x: String }";
+    let schema = r#"
+        type Query {
+            int(a: Int): String
+            float(a: Float): String
+            str(a: String): String
+            bool(a: Boolean): String
+            id(a: ID): String
+            intList(a: [Int]): String
+            intListList(a: [[Int]]): String
+            strList(a: [String]): String
+        }
+    "#;
     // https://spec.graphql.org/June2018/#sec-Int
-    assert_validation!(schema, "query($foo:Int){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:Int!){x}", json!({}));
-    assert_validation!(schema, "query($foo:Int=1){x}", json!({}));
-    assert_validation!(schema, "query($foo:Int!=1){x}", json!({}));
+    assert_validation!(schema, "query($foo:Int){int(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:Int!){int(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:Int=1){int(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:Int!=1){int(a:$foo)}", json!({}));
     // When expected as an input type, only integer input values are accepted.
-    assert_validation!(schema, "query($foo:Int){x}", json!({"foo":2}));
-    assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MAX }));
-    assert_validation!(schema, "query($foo:Int){x}", json!({ "foo": i32::MIN }));
+    assert_validation!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2}));
+    assert_validation!(
+        schema,
+        "query($foo:Int){int(a:$foo)}",
+        json!({ "foo": i32::MAX })
+    );
+    assert_validation!(
+        schema,
+        "query($foo:Int){int(a:$foo)}",
+        json!({ "foo": i32::MIN })
+    );
     // All other input values, including strings with numeric content, must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":"2"}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":2.0}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":"str"}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:Int){x}", json!({"foo":{}}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"2"}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":2.0}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":"str"}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":true}));
+    assert_validation_error!(schema, "query($foo:Int){int(a:$foo)}", json!({"foo":{}}));
     //  If the integer input value represents a value less than -231 or greater than or equal to 231, a query error should be raised.
     assert_validation_error!(
         schema,
-        "query($foo:Int){x}",
+        "query($foo:Int){int(a:$foo)}",
         json!({ "foo": i32::MAX as i64 + 1 })
     );
     assert_validation_error!(
         schema,
-        "query($foo:Int){x}",
+        "query($foo:Int){int(a:$foo)}",
         json!({ "foo": i32::MIN as i64 - 1 })
     );
 
     // https://spec.graphql.org/draft/#sec-Float.Input-Coercion
-    assert_validation!(schema, "query($foo:Float){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:Float!){x}", json!({}));
+    assert_validation!(schema, "query($foo:Float){float(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:Float!){float(a:$foo)}", json!({}));
 
     // When expected as an input type, both integer and float input values are accepted.
-    assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2}));
-    assert_validation!(schema, "query($foo:Float){x}", json!({"foo":2.0}));
+    assert_validation!(schema, "query($foo:Float){float(a:$foo)}", json!({"foo":2}));
+    assert_validation!(
+        schema,
+        "query($foo:Float){float(a:$foo)}",
+        json!({"foo":2.0})
+    );
     // double precision floats are valid
     assert_validation!(
         schema,
-        "query($foo:Float){x}",
+        "query($foo:Float){float(a:$foo)}",
         json!({"foo":1600341978193i64})
     );
     assert_validation!(
         schema,
-        "query($foo:Float){x}",
+        "query($foo:Float){float(a:$foo)}",
         json!({"foo":1600341978193f64})
     );
     // All other input values, including strings with numeric content,
     // must raise a request error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2.0"}));
-    assert_validation_error!(schema, "query($foo:Float){x}", json!({"foo":"2"}));
+    assert_validation_error!(
+        schema,
+        "query($foo:Float){float(a:$foo)}",
+        json!({"foo":"2.0"})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Float){float(a:$foo)}",
+        json!({"foo":"2"})
+    );
 
     // https://spec.graphql.org/June2018/#sec-String
-    assert_validation!(schema, "query($foo:String){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:String!){x}", json!({}));
+    assert_validation!(schema, "query($foo:String){str(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:String!){str(a:$foo)}", json!({}));
 
     // When expected as an input type, only valid UTF‐8 string input values are accepted.
-    assert_validation!(schema, "query($foo:String){x}", json!({"foo": "str"}));
+    assert_validation!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": "str"})
+    );
 
     // All other input values must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo": 0}));
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo": 42.0}));
-    assert_validation_error!(schema, "query($foo:String){x}", json!({"foo": {}}));
+    assert_validation_error!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo":true})
+    );
+    assert_validation_error!(schema, "query($foo:String){str(a:$foo)}", json!({"foo": 0}));
+    assert_validation_error!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": 42.0})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": {}})
+    );
 
     // https://spec.graphql.org/June2018/#sec-Boolean
-    assert_validation!(schema, "query($foo:Boolean){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean){bool(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:Boolean!){bool(a:$foo)}", json!({}));
     // When expected as an input type, only boolean input values are accepted.
     // All other input values must raise a query error indicating an incorrect type.
-    assert_validation!(schema, "query($foo:Boolean!){x}", json!({"foo":true}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo":"true"}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": 0}));
-    assert_validation_error!(schema, "query($foo:Boolean!){x}", json!({"foo": "no"}));
+    assert_validation!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo":true})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo":"true"})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo": 0})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:Boolean!){bool(a:$foo)}",
+        json!({"foo": "no"})
+    );
 
-    assert_validation!(schema, "query($foo:Boolean=true){x}", json!({}));
-    assert_validation!(schema, "query($foo:Boolean!=true){x}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean=true){bool(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:Boolean!=true){bool(a:$foo)}", json!({}));
 
     // https://spec.graphql.org/June2018/#sec-ID
-    assert_validation!(schema, "query($foo:ID){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:ID!){x}", json!({}));
+    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({}));
+    assert_validation_error!(schema, "query($foo:ID!){id(a:$foo)}", json!({}));
     // When expected as an input type, any string (such as "4") or integer (such as 4)
     // input value should be coerced to ID as appropriate for the ID formats a given GraphQL server expects.
-    assert_validation!(schema, "query($foo:ID){x}", json!({"foo": 4}));
-    assert_validation!(schema, "query($foo:ID){x}", json!({"foo": "4"}));
-    assert_validation!(schema, "query($foo:String){x}", json!({"foo": "str"}));
-    assert_validation!(schema, "query($foo:String){x}", json!({"foo": "4.0"}));
+    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4}));
+    assert_validation!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": "4"}));
+    assert_validation!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": "str"})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:String){str(a:$foo)}",
+        json!({"foo": "4.0"})
+    );
     // Any other input value, including float input values (such as 4.0), must raise a query error indicating an incorrect type.
-    assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": 4.0}));
-    assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": true}));
-    assert_validation_error!(schema, "query($foo:ID){x}", json!({"foo": {}}));
+    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": 4.0}));
+    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": true}));
+    assert_validation_error!(schema, "query($foo:ID){id(a:$foo)}", json!({"foo": {}}));
 
     // https://spec.graphql.org/June2018/#sec-Type-System.List
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({}));
-    assert_validation!(schema, "query($foo:[Int!]){x}", json!({}));
-    assert_validation!(schema, "query($foo:[Int!]){x}", json!({ "foo": null }));
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":1}));
-    assert_validation!(schema, "query($foo:[String]){x}", json!({"foo":"bar"}));
-    assert_validation!(schema, "query($foo:[[Int]]){x}", json!({"foo":1}));
+    assert_validation!(schema, "query($foo:[Int]){intList(a:$foo)}", json!({}));
+    assert_validation!(schema, "query($foo:[Int!]){intList(a:$foo)}", json!({}));
     assert_validation!(
         schema,
-        "query($foo:[[Int]]){x}",
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({ "foo": null })
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":1})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[String]){strList(a:$foo)}",
+        json!({"foo":"bar"})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[[Int]]){intListList(a:$foo)}",
+        json!({"foo":1})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[[Int]]){intListList(a:$foo)}",
         json!({"foo":[[1], [2, 3]]})
     );
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":"str"}));
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":{}}));
-    assert_validation_error!(schema, "query($foo:[Int]!){x}", json!({}));
-    assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1, null]}));
-    assert_validation!(schema, "query($foo:[Int]!){x}", json!({"foo":[]}));
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,2,3]}));
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":["f","o","o"]}));
-    assert_validation_error!(schema, "query($foo:[Int]){x}", json!({"foo":["1","2","3"]}));
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":"str"})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":{}})
+    );
+    assert_validation_error!(schema, "query($foo:[Int]!){intList(a:$foo)}", json!({}));
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({"foo":[1, null]})
+    );
     assert_validation!(
         schema,
-        "query($foo:[String]){x}",
+        "query($foo:[Int]!){intList(a:$foo)}",
+        json!({"foo":[]})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":[1,2,3]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":["f","o","o"]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
         json!({"foo":["1","2","3"]})
     );
-    assert_validation_error!(schema, "query($foo:[String]){x}", json!({"foo":[1,2,3]}));
-    assert_validation!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,2,3]}));
-    assert_validation_error!(schema, "query($foo:[Int!]){x}", json!({"foo":[1,null,3]}));
-    assert_validation!(schema, "query($foo:[Int]){x}", json!({"foo":[1,null,3]}));
+    assert_validation!(
+        schema,
+        "query($foo:[String]){strList(a:$foo)}",
+        json!({"foo":["1","2","3"]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[String]){strList(a:$foo)}",
+        json!({"foo":[1,2,3]})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({"foo":[1,2,3]})
+    );
+    assert_validation_error!(
+        schema,
+        "query($foo:[Int!]){intList(a:$foo)}",
+        json!({"foo":[1,null,3]})
+    );
+    assert_validation!(
+        schema,
+        "query($foo:[Int]){intList(a:$foo)}",
+        json!({"foo":[1,null,3]})
+    );
 
     // https://spec.graphql.org/June2018/#sec-Input-Objects
     assert_validation!(
