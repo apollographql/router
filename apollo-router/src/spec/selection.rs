@@ -299,8 +299,8 @@ impl IncludeSkip {
 impl Condition {
     pub(crate) fn parse(directive: &hir::Directive) -> Option<Self> {
         match directive.argument_by_name("if")? {
-            hir::Value::Boolean(true) => Some(Condition::Yes),
-            hir::Value::Boolean(false) => Some(Condition::No),
+            hir::Value::Boolean { value: true, .. } => Some(Condition::Yes),
+            hir::Value::Boolean { value: false, .. } => Some(Condition::No),
             hir::Value::Variable(variable) => Some(Condition::Variable(variable.name().to_owned())),
             _ => None,
         }

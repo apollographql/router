@@ -207,12 +207,12 @@ dependencies = [
 
 [[package]]
 name = "apollo-compiler"
-version = "0.8.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adfb4c7364494ca41e3fec600b6a4570320db83ae0aa938ca70036632bb9365e"
+checksum = "e5d13aea1a230f5527635fd2d80d0750b2fff886ffcc909fb8d489c1fad124b9"
 dependencies = [
  "apollo-ariadne",
- "apollo-parser 0.5.1",
+ "apollo-parser 0.5.3",
  "indexmap",
  "ordered-float 2.10.0",
  "rowan",
@@ -262,9 +262,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-parser"
-version = "0.5.1"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cee3beb80302b36d9d1d3d2feaf3d4a47a4da18d8a4088e71948989a494999"
+checksum = "ec05c087cc9d21576b18337d9dbaadc87cea1b33c4f2b8d59e735ed90e880984"
 dependencies = [
  "rowan",
  "thiserror",
@@ -277,7 +277,7 @@ dependencies = [
  "access-json",
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.5.1",
+ "apollo-parser 0.5.3",
  "arc-swap",
  "askama",
  "async-compression",

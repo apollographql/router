@@ -1144,14 +1144,14 @@ impl From<hir::OperationType> for OperationKind {
 pub(crate) fn parse_hir_value(value: &hir::Value) -> Option<Value> {
     match value {
         hir::Value::Variable(_) => None,
-        hir::Value::Int(val) => Some((val.get() as i64).into()),
-        hir::Value::Float(val) => Some(val.get().into()),
-        hir::Value::Null => Some(Value::Null),
-        hir::Value::String(val) => Some(val.as_str().into()),
-        hir::Value::Boolean(val) => Some((*val).into()),
-        hir::Value::Enum(name) => Some(name.src().into()),
-        hir::Value::List(list) => list.iter().map(parse_hir_value).collect(),
-        hir::Value::Object(obj) => obj
+        hir::Value::Int { value, .. } => Some((value.get() as i64).into()),
+        hir::Value::Float { value, .. } => Some(value.get().into()),
+        hir::Value::Null { .. } => Some(Value::Null),
+        hir::Value::String { value, .. } => Some(value.as_str().into()),
+        hir::Value::Boolean { value, .. } => Some((*value).into()),
+        hir::Value::Enum { value, .. } => Some(value.src().into()),
+        hir::Value::List { value, .. } => value.iter().map(parse_hir_value).collect(),
+        hir::Value::Object { value, .. } => value
             .iter()
             .map(|(k, v)| Some((k.src(), parse_hir_value(v)?)))
             .collect(),
