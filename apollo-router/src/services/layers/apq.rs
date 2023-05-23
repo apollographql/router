@@ -14,8 +14,9 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use crate::cache::DeduplicatingCache;
-use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+
+use super::query_parsing::PartialSupergraphRequest;
 
 const DONT_CACHE_RESPONSE_VALUE: &str = "private, no-cache, must-revalidate";
 
@@ -30,7 +31,7 @@ pub(crate) struct PersistedQuery {
 
 impl PersistedQuery {
     /// Attempt to extract a `PersistedQuery` from a `&SupergraphRequest`
-    pub(crate) fn maybe_from_request(request: &SupergraphRequest) -> Option<Self> {
+    pub(crate) fn maybe_from_request(request: &PartialSupergraphRequest) -> Option<Self> {
         request
             .supergraph_request
             .body()
@@ -65,8 +66,8 @@ impl APQLayer {
 
     pub(crate) async fn supergraph_request(
         &self,
-        request: SupergraphRequest,
-    ) -> Result<SupergraphRequest, SupergraphResponse> {
+        request: PartialSupergraphRequest,
+    ) -> Result<PartialSupergraphRequest, SupergraphResponse> {
         match self.cache.as_ref() {
             Some(cache) => apq_request(cache, request).await,
             None => disabled_apq_request(request).await,
@@ -76,8 +77,8 @@ impl APQLayer {
 
 async fn apq_request(
     cache: &DeduplicatingCache<String, String>,
-    mut request: SupergraphRequest,
-) -> Result<SupergraphRequest, SupergraphResponse> {
+    mut request: PartialSupergraphRequest,
+) -> Result<PartialSupergraphRequest, SupergraphResponse> {
     let maybe_query_hash =
         PersistedQuery::maybe_from_request(&request).and_then(PersistedQuery::decode_hash);
 
@@ -155,8 +156,8 @@ pub(crate) fn calculate_hash_for_query(query: &str) -> String {
 }
 
 async fn disabled_apq_request(
-    request: SupergraphRequest,
-) -> Result<SupergraphRequest, SupergraphResponse> {
+    request: PartialSupergraphRequest,
+) -> Result<PartialSupergraphRequest, SupergraphResponse> {
     if request
         .supergraph_request
         .body()
@@ -205,6 +206,8 @@ mod apq_tests {
     use crate::services::router::ClientRequestAccepts;
     use crate::services::router_service::from_supergraph_mock_callback;
     use crate::services::router_service::from_supergraph_mock_callback_and_configuration;
+    use crate::services::SupergraphRequest;
+
     use crate::Configuration;
     use crate::Context;
 
@@ -283,7 +286,7 @@ mod apq_tests {
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
-        let with_query = SupergraphRequest::fake_builder()
+        let with_query = PartialSupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .query("{__typename}".to_string())
             .context(new_context())
@@ -305,7 +308,7 @@ mod apq_tests {
         // runs the Drop implementation of the deduplicating cache Entry.
         tokio::task::yield_now().await;
 
-        let second_hash_only = SupergraphRequest::fake_builder()
+        let second_hash_only = PartialSupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .context(new_context())
             .build()
@@ -363,7 +366,7 @@ mod apq_tests {
         });
 
         let request_builder =
-            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
+            PartialSupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let hash_only = request_builder
             .context(new_context())
@@ -373,7 +376,7 @@ mod apq_tests {
             .unwrap();
 
         let request_builder =
-            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
+            PartialSupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let second_hash_only = request_builder
             .context(new_context())
@@ -383,7 +386,7 @@ mod apq_tests {
             .unwrap();
 
         let request_builder =
-            SupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
+            PartialSupergraphRequest::fake_builder().extension("persistedQuery", persisted.clone());
 
         let with_query = request_builder
             .query("{__typename}".to_string())
@@ -464,7 +467,7 @@ mod apq_tests {
             "sha256Hash" : "ecf4edb46db40b5132295c0291d62fb65d6759a9eedfa4d5d612dd5ec54a6b38"
         });
 
-        let hash_only = SupergraphRequest::fake_builder()
+        let hash_only = PartialSupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .context(new_context())
             .build()
@@ -483,7 +486,7 @@ mod apq_tests {
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
-        let with_query = SupergraphRequest::fake_builder()
+        let with_query = PartialSupergraphRequest::fake_builder()
             .extension("persistedQuery", persisted.clone())
             .query("{__typename}".to_string())
             .context(new_context())
@@ -504,7 +507,7 @@ mod apq_tests {
 
         assert_error_matches(&expected_apq_miss_error, apq_error);
 
-        let without_apq = SupergraphRequest::fake_builder()
+        let without_apq = PartialSupergraphRequest::fake_builder()
             .query("{__typename}".to_string())
             .context(new_context())
             .build()

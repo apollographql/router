@@ -226,7 +226,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             }
         }
 
-        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), &configuration).await)
+        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), configuration).await)
     }
 }
 

@@ -968,7 +968,7 @@ impl Query {
         })
     }
 
-    pub(crate) fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+    pub(crate) fn operation(&self, operation_name: Option<impl AsRef<str>>) -> Option<&Operation> {
         match operation_name {
             Some(name) => self
                 .operations
@@ -976,7 +976,7 @@ impl Query {
                 // we should have an error if the only operation is anonymous but the query specifies a name
                 .find(|op| {
                     if let Some(op_name) = op.name.as_deref() {
-                        op_name == name
+                        op_name == name.as_ref()
                     } else {
                         false
                     }
@@ -1038,6 +1038,10 @@ pub(crate) struct Variable {
 }
 
 impl Operation {
+    pub(crate) fn name(&self) -> Option<String> {
+        self.name.clone()
+    }
+
     fn from_hir(operation: &hir::OperationDefinition, schema: &Schema) -> Result<Self, SpecError> {
         let name = operation.name().map(|s| s.to_owned());
         let kind = operation.operation_ty().into();

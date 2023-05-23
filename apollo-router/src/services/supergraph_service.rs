@@ -394,6 +394,16 @@ impl HasPlugins for SupergraphCreator {
     }
 }
 
+pub(crate) trait HasSchema {
+    fn schema(&self) -> Arc<Schema>;
+}
+
+impl HasSchema for SupergraphCreator {
+    fn schema(&self) -> Arc<Schema> {
+        Arc::clone(&self.schema)
+    }
+}
+
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
     type Service = supergraph::BoxService;
     fn create(&self) -> Self::Service {
@@ -471,6 +481,7 @@ impl SupergraphCreator {
 pub(crate) struct MockSupergraphCreator {
     supergraph_service: MockSupergraphService,
     plugins: Arc<Plugins>,
+    schema: Arc<Schema>,
 }
 
 #[cfg(test)]
@@ -478,21 +489,18 @@ impl MockSupergraphCreator {
     pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
         let canned_schema = include_str!("../../testing_schema.graphql");
         let configuration = Configuration::builder().build().unwrap();
-
+        let schema = Schema::parse_test(canned_schema, &configuration).unwrap();
         use crate::router_factory::create_plugins;
-        let plugins = create_plugins(
-            &configuration,
-            &Schema::parse_test(canned_schema, &configuration).unwrap(),
-            None,
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .collect();
+        let plugins = create_plugins(&configuration, &schema, None)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
 
         Self {
             supergraph_service,
             plugins: Arc::new(plugins),
+            schema: Arc::new(schema),
         }
     }
 }
@@ -501,6 +509,13 @@ impl MockSupergraphCreator {
 impl HasPlugins for MockSupergraphCreator {
     fn plugins(&self) -> Arc<Plugins> {
         self.plugins.clone()
+    }
+}
+
+#[cfg(test)]
+impl HasSchema for MockSupergraphCreator {
+    fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
     }
 }
 

@@ -24,6 +24,7 @@ use crate::http_ext::header_map;
 use crate::http_ext::TryIntoHeaderName;
 use crate::http_ext::TryIntoHeaderValue;
 use crate::json_ext::Path;
+use crate::spec::Query;
 use crate::Context;
 
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -41,6 +42,8 @@ pub struct Request {
 
     /// Context for extension
     pub context: Context,
+
+    pub(crate) query: Option<Query>,
 }
 
 impl From<http::Request<graphql::Request>> for Request {
@@ -48,6 +51,7 @@ impl From<http::Request<graphql::Request>> for Request {
         Self {
             supergraph_request,
             context: Context::new(),
+            query: None,
         }
     }
 }
@@ -93,6 +97,7 @@ impl Request {
         Ok(Self {
             supergraph_request,
             context,
+            query: None,
         })
     }
 
