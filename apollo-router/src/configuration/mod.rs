@@ -1037,7 +1037,7 @@ pub(crate) struct Chaos {
     /// at a regular time interval.
     #[serde(with = "humantime_serde")]
     #[schemars(with = "Option<String>")]
-    pub(crate) force_hot_reload: Option<std::time::Duration>,
+    pub(crate) force_reload: Option<std::time::Duration>,
 }
 
 /// Listening address.

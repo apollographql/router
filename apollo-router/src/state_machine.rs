@@ -6,13 +6,15 @@ use std::sync::Arc;
 
 use futures::prelude::*;
 use tokio::sync::mpsc;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
-use Event::ForcedHotReload;
 use Event::NoMoreConfiguration;
 use Event::NoMoreEntitlement;
 use Event::NoMoreSchema;
+use Event::Reload;
 use Event::Shutdown;
 
 use super::http_server_factory::HttpServerFactory;
@@ -28,9 +30,9 @@ use super::state_machine::State::Running;
 use super::state_machine::State::Startup;
 use super::state_machine::State::Stopped;
 use crate::configuration::Configuration;
+use crate::configuration::Discussed;
 use crate::configuration::ListenAddr;
 use crate::router::Event::UpdateEntitlement;
-use crate::router::ForcedHotReloadConfig;
 use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::spec::Schema;
@@ -301,10 +303,6 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             entitlement
         };
 
-        state_machine
-            .forced_hot_reload_config
-            .set_period(configuration.experimental_chaos.force_hot_reload);
-
         let router_service_factory = state_machine
             .router_configurator
             .create(
@@ -354,6 +352,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         listen_addresses_guard.graphql_listen_address =
             server_handle.graphql_listen_address().clone();
 
+        // Log that we are using experimental features. It is best to do this here rather than config
+        // validation as it will actually log issues rather than return structured validation errors.
+        // Logging here also means that this is actually configuration that took effect
+        if let Some(yaml) = &configuration.validated_yaml {
+            let discussed = Discussed::new();
+            discussed.log_experimental_used(yaml);
+            discussed.log_preview_used(yaml);
+        }
+
         Ok(Running {
             configuration,
             schema,
@@ -380,7 +387,8 @@ where
     router_configurator: FA,
     pub(crate) listen_addresses: Arc<RwLock<ListenAddresses>>,
     listen_addresses_guard: Option<OwnedRwLockWriteGuard<ListenAddresses>>,
-    forced_hot_reload_config: Arc<ForcedHotReloadConfig>,
+    #[cfg(test)]
+    notify_updated: Arc<Notify>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -389,10 +397,30 @@ where
     FA: RouterSuperServiceFactory + Send,
     FA::RouterFactory: RouterFactory,
 {
-    pub(crate) fn new(
+    pub(crate) fn new(http_server_factory: S, router_factory: FA) -> Self {
+        // Listen address is created locked so that if a consumer tries to examine the listen address before the state machine has reached running state they are blocked.
+        let listen_addresses: Arc<RwLock<ListenAddresses>> = Default::default();
+        let listen_addresses_guard = Some(
+            listen_addresses
+                .clone()
+                .try_write_owned()
+                .expect("lock just created, qed"),
+        );
+        Self {
+            http_server_factory,
+            router_configurator: router_factory,
+            listen_addresses,
+            listen_addresses_guard,
+            #[cfg(test)]
+            notify_updated: Default::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests(
         http_server_factory: S,
         router_factory: FA,
-        forced_hot_reload_config: Arc<ForcedHotReloadConfig>,
+        notify_updated: Arc<Notify>,
     ) -> Self {
         // Listen address is created locked so that if a consumer tries to examine the listen address before the state machine has reached running state they are blocked.
         let listen_addresses: Arc<RwLock<ListenAddresses>> = Default::default();
@@ -407,7 +435,7 @@ where
             router_configurator: router_factory,
             listen_addresses,
             listen_addresses_guard,
-            forced_hot_reload_config,
+            notify_updated,
         }
     }
 
@@ -449,16 +477,20 @@ where
                         .update_inputs(&mut self, None, None, Some(entitlement))
                         .await
                 }
-                ForcedHotReload => state.update_inputs(&mut self, None, None, None).await,
+                Reload => state.update_inputs(&mut self, None, None, None).await,
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
+
+            #[cfg(test)]
+            self.notify_updated.notify_one();
+
             tracing::debug!(
                 "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
             );
 
             // If we've errored then exit even if there are potentially more messages
-            if matches!(&state, Errored(_)) {
+            if matches!(&state, Stopped | Errored(_)) {
                 break;
             }
         }
@@ -523,7 +555,12 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![NoMoreConfiguration],).await,
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![NoMoreConfiguration])
+            )
+            .await,
             Err(NoConfiguration)
         );
     }
@@ -533,7 +570,12 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![NoMoreSchema],).await,
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![NoMoreSchema])
+            )
+            .await,
             Err(NoSchema)
         );
     }
@@ -543,7 +585,12 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![NoMoreEntitlement],).await,
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![NoMoreEntitlement])
+            )
+            .await,
             Err(NoEntitlement)
         );
     }
@@ -563,12 +610,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -585,12 +632,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::EntitledHalt),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -607,12 +654,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::EntitledWarn),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -630,14 +677,14 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     UpdateEntitlement(EntitlementState::Unentitled),
                     UpdateConfiguration(test_config_restricted()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -654,12 +701,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Unentitled),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Err(ApolloRouterError::EntitlementViolation)
@@ -676,14 +723,14 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Unentitled),
                     UpdateConfiguration(test_config_restricted()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -695,7 +742,7 @@ mod tests {
     async fn listen_addresses_are_locked() {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
-        let state_machine = StateMachine::new(server_factory, router_factory, Default::default());
+        let state_machine = StateMachine::new(server_factory, router_factory);
         assert!(state_machine.listen_addresses.try_read().is_err());
     }
 
@@ -704,7 +751,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![Shutdown],).await,
+            execute(server_factory, router_factory, stream::iter(vec![Shutdown])).await,
             Ok(())
         );
     }
@@ -718,12 +765,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -740,13 +787,13 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateEntitlement(EntitlementState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -763,13 +810,13 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateEntitlement(EntitlementState::default()),
                     UpdateEntitlement(EntitlementState::default()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -786,7 +833,7 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
@@ -801,7 +848,7 @@ mod tests {
                             .unwrap()
                     ),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -818,12 +865,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -845,11 +892,11 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
-                ],
+                ])
             )
             .await,
             Err(ApolloRouterError::ServiceCreationError(_))
@@ -883,13 +930,13 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -934,7 +981,7 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
@@ -946,7 +993,7 @@ mod tests {
                     ),
                     UpdateSchema(example_schema()),
                     Shutdown
-                ],
+                ]),
             )
             .await,
             Ok(())
@@ -1052,12 +1099,10 @@ mod tests {
     async fn execute(
         server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterConfigurator,
-        events: Vec<Event>,
+        events: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), ApolloRouterError> {
-        let state_machine = StateMachine::new(server_factory, router_factory, Default::default());
-        state_machine
-            .process_events(stream::iter(events).boxed())
-            .await
+        let state_machine = StateMachine::new(server_factory, router_factory);
+        state_machine.process_events(events).await
     }
 
     fn create_mock_server_factory(

@@ -141,50 +141,18 @@ After the Apollo Router validates a client request's JWT, it adds that token's *
 > - If no JWT is present for a client request, this context value is the empty tuple, `()`.
 > - If a JWT _is_ present but validation of the JWT fails, the router _rejects_ the request.
 
+If unauthenticated requests should be rejected, the router can be configured like this:
+
+```yaml title="router.yaml"
+authorization:
+  require_authentication: true
+```
+
 **Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
 
 Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Customizations for the Apollo Router](../customizations/overview/)).
 
-Below are three example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
-
-### Example: Rejecting unauthenticated requests
-
-Below is an example [Rhai script](../customizations/rhai/) that rejects requests that don't present a valid JWT.
-
-> This script hooks into the router's `SupergraphService`, which executes before the router begins generating the query plan for an operation. [Learn more about router services.](../customizations/rhai#router-request-lifecycle)
-
-<ExpansionPanel title="Click to expand">
-
-```rhai title="require_authentication.rhai"
-fn supergraph_service(service) {
-    const request_callback = Fn("process_request");
-    service.map_request(request_callback);
-}
-
-// This will examine our context to determine if our user is authenticated.
-fn process_request(request) {
-    // Router.APOLLO_AUTHENTICATION_JWT_CLAIMS is a Rhai-scope
-    // constant with value `apollo_authentication::JWT::claims`
-    let claims = request.context[Router.APOLLO_AUTHENTICATION_JWT_CLAIMS];
-    if claims == () {
-        throw #{
-            status: 401,
-            body: #{
-                errors: [#{
-                    message: "The request is not authenticated",
-                    extensions: #{
-                        code: "AUTH_ERROR"
-                    }
-                }]
-            }
-        };
-    }
-    // We are happy we are authenticated.
-}
-```
-
-</ExpansionPanel>
-
+Below are 2 example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
 ### Example: Forwarding claims to subgraphs
 

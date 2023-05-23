@@ -3195,9 +3195,12 @@ fn it_parses_default_floats() {
     );
 
     let schema = Schema::parse_test(&schema, &Default::default()).unwrap();
-    let (_field_type, value) =
-        &schema.input_types["WithAllKindsOfFloats"].fields["a_float_that_doesnt_fit_an_int"];
-    assert_eq!(value.as_ref().unwrap().as_i64().unwrap(), 9876543210);
+    let value = schema.type_system.definitions.input_objects["WithAllKindsOfFloats"]
+        .field("a_float_that_doesnt_fit_an_int")
+        .unwrap()
+        .default_value()
+        .unwrap();
+    assert_eq!(f64::try_from(value).unwrap() as i64, 9876543210);
 }
 
 #[test]
@@ -5436,9 +5439,10 @@ fn test_query_not_named_query() {
         matches!(
             selection,
             Selection::Field {
-                field_type: FieldType::Boolean,
+                field_type: FieldType(hir::Type::Named { name, .. }),
                 ..
             }
+            if name == "Boolean"
         ),
         "unexpected selection {selection:?}"
     );

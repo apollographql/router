@@ -24,7 +24,7 @@ impl Fragments {
             .iter()
             .map(|(name, fragment)| {
                 let type_condition = fragment.type_condition().to_owned();
-                let current_type = FieldType::Named(type_condition.clone());
+                let current_type = FieldType::new_named(type_condition.clone());
                 let include_skip = IncludeSkip::parse(fragment.directives());
                 let fragment = Fragment {
                     type_condition,
