@@ -60,7 +60,6 @@ type User
   @join__type(graph: REVIEWS, key: "id")
 {
   id: ID! @join__field(graph: ACCOUNTS)
-  name: String @join__field(graph: ACCOUNTS)
   username: String @join__field(graph: ACCOUNTS)
   reviews: [Review] @join__field(graph: REVIEWS)
 }
