@@ -49,6 +49,7 @@ use crate::axum_factory::listeners::get_extra_listeners;
 use crate::axum_factory::listeners::serve_router_on_listen_addr;
 use crate::configuration::Configuration;
 use crate::configuration::ListenAddr;
+use crate::error::ContextError;
 use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
@@ -459,11 +460,26 @@ async fn handle_graphql(
                 return Elapsed::new().into_response();
             }
 
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "router service call failed",
-            )
-                .into_response()
+            if let Ok(context_error) = e.downcast::<ContextError>() {
+                let graphql_response = crate::graphql::Response::builder()
+                    .errors(vec![crate::error::Error::builder()
+                        .message(format!("{context_error}"))
+                        .extension_code(context_error.extension)
+                        .build()])
+                    .build();
+                let mut http_response = http::Response::new(graphql_response);
+                *http_response.status_mut() = context_error.status;
+                let http_ext_response = crate::http_ext::Response {
+                    inner: http_response,
+                };
+                http_ext_response.into_response()
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "router service call failed",
+                )
+                    .into_response()
+            }
         }
         Ok(response) => {
             tracing::info!(counter.apollo_router_session_count_active = -1,);
