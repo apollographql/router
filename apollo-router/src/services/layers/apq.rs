@@ -97,7 +97,15 @@ async fn apq_request(
                     message: "provided sha does not match query".to_string(),
                     locations: Default::default(),
                     path: Default::default(),
-                    extensions: Default::default(),
+                    extensions: serde_json_bytes::from_value(json!({
+                          "code": "PERSISTED_QUERY_SHA_MISSMATCH",
+                          "exception": {
+                          "stacktrace": [
+                              "PersistedQueryRegisterError: PersistedQueryShaMissmatch",
+                          ],
+                      },
+                    }))
+                    .unwrap(),
                 }];
                 let res = SupergraphResponse::builder()
                     .status_code(StatusCode::BAD_REQUEST)
@@ -442,7 +450,15 @@ mod apq_tests {
             message: "provided sha does not match query".to_string(),
             locations: Default::default(),
             path: Default::default(),
-            extensions: Default::default(),
+            extensions: serde_json_bytes::from_value(json!({
+                  "code": "PERSISTED_QUERY_SHA_MISSMATCH",
+                  "exception": {
+                  "stacktrace": [
+                      "PersistedQueryRegisterError: PersistedQueryShaMissmatch",
+                  ],
+              },
+            }))
+            .unwrap(),
         };
         assert_eq!(graphql_response.errors[0], expected_apq_insert_failed_error);
 
