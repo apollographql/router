@@ -95,6 +95,10 @@ expression: get_spans()
                 0
               ],
               [
+                "apollo_private.http.response_headers",
+                "{}"
+              ],
+              [
                 "otel.status_code",
                 "Ok"
               ]
@@ -275,6 +279,10 @@ expression: get_spans()
                       [
                         "otel.kind",
                         "INTERNAL"
+                      ],
+                      [
+                        "graphql.operation.type",
+                        "query"
                       ]
                     ],
                     "metadata": {
@@ -284,7 +292,8 @@ expression: get_spans()
                       "module_path": "apollo_router::plugins::telemetry",
                       "fields": {
                         "names": [
-                          "otel.kind"
+                          "otel.kind",
+                          "graphql.operation.type"
                         ]
                       }
                     }
