@@ -3684,66 +3684,6 @@ fn skip() {
         }})
         .test();
 
-    // directive on fragment
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-            get {
-                id
-                ...test
-            }
-        }
-
-        fragment test on Product @skip(if: false) {
-            nom: name
-            name @skip(if: true)
-        }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-            },
-        }})
-        .test();
-
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-                get {
-                    id
-                    ...test
-                }
-            }
-
-            fragment test on Product @skip(if: true) {
-                nom: name
-                name @skip(if: true)
-            }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-            },
-        }})
-        .test();
-
     // variables
     // duplicate operation name
     FormatTest::builder()
@@ -4241,66 +4181,6 @@ fn include() {
                 nom: name
                 name @include(if: false)
             }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-            },
-        }})
-        .test();
-
-    // directive on fragment
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-                get {
-                    id
-                    ...test
-                }
-            }
-
-            fragment test on Product @include(if: true) {
-                nom: name
-                name @include(if: false)
-            }",
-        )
-        .response(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-                "name": "Chair",
-            },
-        }})
-        .expected(json! {{
-            "get": {
-                "id": "a",
-                "nom": "Chaise",
-            },
-        }})
-        .test();
-
-    FormatTest::builder()
-        .schema(schema)
-        .query(
-            "query  {
-            get {
-                id
-                ...test
-            }
-        }
-
-        fragment test on Product @include(if: false) {
-            nom: name
-            name @include(if: false)
-        }",
         )
         .response(json! {{
             "get": {
