@@ -344,7 +344,6 @@ fn typename_with_alias() {
 fn inline_fragment_on_top_level_operation() {
     let schema = "type Query {
         get: Test
-        getStuff: Stuff
       }
 
       type Stuff {
@@ -363,12 +362,12 @@ fn inline_fragment_on_top_level_operation() {
     // to know the type in advance
     FormatTest::builder()
         .schema(schema)
-        .query("{ getStuff { ... on Stuff { stuff{bar}} ... on Thing { id }} }")
+        .query("{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }")
         .response(json! {
-            {"getStuff": { "stuff": {"bar": "2"}}}
+            {"get": { "stuff": {"bar": "2"}}}
         })
         .expected(json! {{
-             "getStuff": {
+             "get": {
                 "stuff": {"bar": "2"},
             }
         }})
