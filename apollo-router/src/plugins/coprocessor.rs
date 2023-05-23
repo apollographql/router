@@ -11,6 +11,7 @@ use bytes::Bytes;
 use http::header::HeaderName;
 use http::HeaderMap;
 use http::HeaderValue;
+use http::StatusCode;
 use hyper::client::HttpConnector;
 use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
@@ -25,6 +26,7 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::error::ContextError;
 use crate::error::Error;
 use crate::layers::async_checkpoint::AsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
@@ -43,6 +45,10 @@ use crate::tracer::TraceId;
 pub(crate) const EXTERNAL_SPAN_NAME: &str = "external_plugin";
 
 type HTTPClientService = tower::timeout::Timeout<hyper::Client<HttpsConnector<HttpConnector>>>;
+
+const JSON_PARSE_ERROR: &str = "could not parse response body into JSON value";
+
+const EXTERNAL_DESERIALIZATION_ERROR: &str = "EXTERNAL_DESERIALIZATION_ERROR";
 
 #[async_trait::async_trait]
 impl Plugin for CoprocessorPlugin<HTTPClientService> {
@@ -624,7 +630,16 @@ where
         .transpose()?;
     let body_to_send = response_config
         .body
-        .then(|| serde_json::from_slice::<serde_json::Value>(&bytes))
+        .then(|| {
+            serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
+                ContextError::builder()
+                    .status(StatusCode::OK)
+                    .context(JSON_PARSE_ERROR)
+                    .extension(EXTERNAL_DESERIALIZATION_ERROR)
+                    .source(BoxError::from(e))
+                    .build()
+            })
+        })
         .transpose()?;
     let status_to_send = response_config.status_code.then(|| parts.status.as_u16());
     let context_to_send = response_config.context.then(|| response.context.clone());

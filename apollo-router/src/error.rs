@@ -2,6 +2,7 @@
 use std::sync::Arc;
 
 use displaydoc::Display;
+use http::StatusCode;
 use lazy_static::__Deref;
 use miette::Diagnostic;
 use miette::NamedSource;
@@ -14,6 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 use tokio::task::JoinError;
+use tower::BoxError;
 use tracing::level_filters::LevelFilter;
 
 pub(crate) use crate::configuration::ConfigurationError;
@@ -533,6 +535,31 @@ impl ParseErrors {
                 println!("{r:#?}");
             });
         };
+    }
+}
+#[derive(Debug, Error)]
+#[error("{context} ({source})")]
+pub(crate) struct ContextError {
+    /// HTTP StatusCode
+    pub(crate) status: StatusCode,
+    /// Context Error
+    pub(crate) context: String,
+    /// Extension Error
+    pub(crate) extension: String,
+    /// Source Error
+    pub(crate) source: BoxError,
+}
+
+#[buildstructor::buildstructor]
+impl ContextError {
+    #[builder(visibility = "pub(crate)")]
+    fn new(status: StatusCode, context: String, extension: String, source: BoxError) -> Self {
+        Self {
+            status,
+            context,
+            extension,
+            source,
+        }
     }
 }
 
