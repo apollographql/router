@@ -98,12 +98,7 @@ async fn apq_request(
                     locations: Default::default(),
                     path: Default::default(),
                     extensions: serde_json_bytes::from_value(json!({
-                          "code": "PERSISTED_QUERY_SHA_MISSMATCH",
-                          "exception": {
-                          "stacktrace": [
-                              "PersistedQueryRegisterError: PersistedQueryShaMissmatch",
-                          ],
-                      },
+                      "code": "PERSISTED_QUERY_HASH_MISMATCH",
                     }))
                     .unwrap(),
                 }];
@@ -131,12 +126,7 @@ async fn apq_request(
                     locations: Default::default(),
                     path: Default::default(),
                     extensions: serde_json_bytes::from_value(json!({
-                          "code": "PERSISTED_QUERY_NOT_FOUND",
-                          "exception": {
-                          "stacktrace": [
-                              "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                          ],
-                      },
+                      "code": "PERSISTED_QUERY_NOT_FOUND",
                     }))
                     .unwrap(),
                 }];
@@ -191,12 +181,7 @@ async fn disabled_apq_request(
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_SUPPORTED",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotSupportedError: PersistedQueryNotSupported",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_SUPPORTED",
             }))
             .unwrap(),
         }];
@@ -242,12 +227,7 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_FOUND",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_FOUND",
             }))
             .unwrap(),
         };
@@ -353,12 +333,7 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_FOUND",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotFoundError: PersistedQueryNotFound",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_FOUND",
             }))
             .unwrap(),
         };
@@ -451,12 +426,7 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_SHA_MISSMATCH",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryRegisterError: PersistedQueryShaMissmatch",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_HASH_MISMATCH",
             }))
             .unwrap(),
         };
@@ -484,12 +454,7 @@ mod apq_tests {
             locations: Default::default(),
             path: Default::default(),
             extensions: serde_json_bytes::from_value(json!({
-                  "code": "PERSISTED_QUERY_NOT_SUPPORTED",
-                  "exception": {
-                  "stacktrace": [
-                      "PersistedQueryNotSupportedError: PersistedQueryNotSupported",
-                  ],
-              },
+              "code": "PERSISTED_QUERY_NOT_SUPPORTED",
             }))
             .unwrap(),
         };
