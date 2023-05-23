@@ -364,7 +364,7 @@ fn inline_fragment_on_top_level_operation() {
         .schema(schema)
         .query("{ get { ... on Stuff { stuff{bar}} ... on Thing { id }} }")
         .response(json! {
-            {"get": { "stuff": {"bar": "2"}}}
+            {"get": { "__typename": "Stuff", "stuff": {"bar": "2"}}}
         })
         .expected(json! {{
              "get": {
