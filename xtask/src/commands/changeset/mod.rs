@@ -39,7 +39,6 @@ use dialoguer::Confirm;
 use dialoguer::Editor;
 use dialoguer::Input;
 use dialoguer::Select;
-use git2;
 use itertools::Itertools;
 use matching_pull_request::matching_pull_request::ResponseData;
 use matching_pull_request::matching_pull_request::Variables;
@@ -284,12 +283,16 @@ impl Create {
                     selection == 0
                 };
 
-                let branch_name: Option<String> = match git2::Repository::open_from_env() {
-                    Ok(repo) => {
-                        let refr = repo.head().unwrap();
-                        if refr.is_branch() {
-                            Some(refr.shorthand()
-                            .expect("no shorthand Git branch name available").to_string())
+                // Get the branch name, optionally, using `git rev-parse --abbrev-ref HEAD`.
+                let branch_name: Option<String> = match std::process::Command::new("git")
+                    .arg("rev-parse")
+                    .arg("--abbrev-ref")
+                    .arg("HEAD")
+                    .output()
+                {
+                    Ok(output) => {
+                        if output.status.success() {
+                            Some(String::from_utf8(output.stdout).unwrap().trim().to_string())
                         } else {
                             None
                         }

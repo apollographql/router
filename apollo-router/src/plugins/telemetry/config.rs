@@ -611,6 +611,15 @@ impl Conf {
                 (_, SamplerOption::TraceIdRatioBased(ratio)) if ratio == 0.0 => 0.0,
                 (SamplerOption::TraceIdRatioBased(ratio), _) if ratio == 0.0 => 0.0,
                 (_, SamplerOption::Always(Sampler::AlwaysOn)) => 1.0,
+                // the `field_ratio` should be a ratio of the entire set of requests. But FTV1 would only be reported
+                // if a trace was generated with the Apollo exporter, which has its own sampling `global_ratio`.
+                // in telemetry::request_ftv1, we activate FTV1 if the current trace is sampled and depending on
+                // the ratio returned by this function.
+                // This means that:
+                // - field_ratio cannot be larger than global_ratio (see above, we return an error in that case)
+                // - we have to divide field_ratio by global_ratio
+                // Example: we want to measure FTV1 on 30% of total requests, but we the Apollo tracer samples at 50%.
+                // If we measure FTV1 on 60% (0.3 / 0.5) of these sampled requests, that amounts to 30% of the total traffic
                 (
                     SamplerOption::TraceIdRatioBased(global_ratio),
                     SamplerOption::TraceIdRatioBased(field_ratio),
