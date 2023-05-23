@@ -6,6 +6,7 @@ use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TracerProvider;
 use tower::BoxError;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Layer;
 use tracing_subscriber::layer::Layered;
 use tracing_subscriber::layer::SubscriberExt;
@@ -14,6 +15,10 @@ use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::Registry;
 
+use crate::plugins::telemetry::formatters::filter_metric_events;
+use crate::plugins::telemetry::formatters::text::TextFormatter;
+use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::metrics::layer::MetricsLayer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 
@@ -52,10 +57,29 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
     // We choose json or plain based on tty
     let fmt = if atty::is(atty::Stream::Stdout) {
         tracing_subscriber::fmt::Layer::new()
-            .with_target(false)
+            .event_format(FilteringFormatter::new(
+                TextFormatter::new()
+                    .with_filename(false)
+                    .with_line(false)
+                    .with_target(false),
+                filter_metric_events,
+            ))
+            .fmt_fields(NullFieldFormatter)
             .boxed()
     } else {
-        tracing_subscriber::fmt::Layer::new().json().boxed()
+        tracing_subscriber::fmt::Layer::new()
+            .json()
+            .map_event_format(|e| {
+                FilteringFormatter::new(
+                    e.json()
+                        .with_current_span(true)
+                        .with_span_list(true)
+                        .flatten_event(true),
+                    filter_metric_events,
+                )
+            })
+            .fmt_fields(NullFieldFormatter)
+            .boxed()
     };
 
     let (fmt_layer, fmt_handle) = tracing_subscriber::reload::Layer::new(fmt);
@@ -93,6 +117,8 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
 
 pub(super) fn reload_metrics(layer: MetricsLayer) {
     if let Some(handle) = METRICS_LAYER_HANDLE.get() {
+        // If we are now going live with a new controller then maybe stash it.
+        metrics::prometheus::commit_new_controller();
         handle
             .reload(layer)
             .expect("metrics layer reload must succeed");
@@ -109,5 +135,18 @@ pub(super) fn reload_fmt(
 ) {
     if let Some(handle) = FMT_LAYER_HANDLE.get() {
         handle.reload(layer).expect("fmt layer reload must succeed");
+    }
+}
+
+/// prevents span fields from being formatted to a string when writing logs
+pub(crate) struct NullFieldFormatter;
+
+impl<'writer> FormatFields<'writer> for NullFieldFormatter {
+    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
+        &self,
+        _writer: tracing_subscriber::fmt::format::Writer<'writer>,
+        _fields: R,
+    ) -> std::fmt::Result {
+        Ok(())
     }
 }

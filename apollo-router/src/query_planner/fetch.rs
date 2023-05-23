@@ -50,6 +50,15 @@ impl OperationKind {
             OperationKind::Subscription => "Subscription",
         }
     }
+
+    /// Only for apollo studio exporter
+    pub(crate) const fn as_apollo_operation_type(&self) -> &'static str {
+        match self {
+            OperationKind::Query => "query",
+            OperationKind::Mutation => "mutation",
+            OperationKind::Subscription => "subscription",
+        }
+    }
 }
 
 impl Default for OperationKind {
@@ -257,9 +266,20 @@ impl FetchNode {
             // when errors have been redacted in the include_subgraph_errors module.
             // Unfortunately, not easy to fix here, because at this point we don't
             // know if we should be redacting errors for this subgraph...
-            .map_err(|e| FetchError::SubrequestHttpError {
-                service: service_name.to_string(),
-                reason: e.to_string(),
+            .map_err(|e| match e.downcast::<FetchError>() {
+                Ok(inner) => match *inner {
+                    FetchError::SubrequestHttpError { .. } => *inner,
+                    _ => FetchError::SubrequestHttpError {
+                        status_code: None,
+                        service: service_name.to_string(),
+                        reason: inner.to_string(),
+                    },
+                },
+                Err(e) => FetchError::SubrequestHttpError {
+                    status_code: None,
+                    service: service_name.to_string(),
+                    reason: e.to_string(),
+                },
             })?
             .response
             .into_parts();
@@ -329,9 +349,13 @@ impl FetchNode {
                                     })
                                 }
                             }
-                            _ => errors.push(error),
+                            _ => {
+                                error.path = Some(current_dir.clone());
+                                errors.push(error)
+                            }
                         }
                     } else {
+                        error.path = Some(current_dir.clone());
                         errors.push(error);
                     }
                 } else {

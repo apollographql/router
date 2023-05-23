@@ -4,13 +4,13 @@
 
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::fs;
 use std::net::IpAddr;
 use std::path::Path;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::task::Context;
 use std::task::Poll;
 use std::time::Duration;
@@ -19,14 +19,21 @@ use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use displaydoc::Display as DisplayDoc;
+#[cfg(test)]
+use futures::channel::mpsc;
+#[cfg(test)]
+use futures::channel::mpsc::SendError;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
 use http_body::Body as _;
 use hyper::Body;
 use thiserror::Error;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
+use tokio_util::time::DelayQueue;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing_futures::WithSubscriber;
@@ -34,6 +41,7 @@ use url::Url;
 
 use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreSchema;
+use self::Event::Reload;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateSchema;
@@ -50,12 +58,11 @@ use crate::router_factory::RouterFactory;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::router;
-use crate::spec::Schema;
 use crate::state_machine::ListenAddresses;
 use crate::state_machine::StateMachine;
 use crate::uplink::entitlement::Entitlement;
 use crate::uplink::entitlement::EntitlementState;
-use crate::uplink::entitlement_stream::EntitlementRequest;
+use crate::uplink::entitlement_stream::EntitlementQuery;
 use crate::uplink::entitlement_stream::EntitlementStreamExt;
 use crate::uplink::schema_stream::SupergraphSdlQuery;
 use crate::uplink::stream_from_uplink;
@@ -73,9 +80,13 @@ async fn make_router_service<RF>(
     extra_plugins: Vec<(String, Box<dyn DynPlugin>)>,
     entitlement: EntitlementState,
 ) -> Result<router::BoxCloneService, BoxError> {
-    let schema = Arc::new(Schema::parse(schema, &configuration)?);
     let service_factory = YamlRouterFactory
-        .create(configuration.clone(), schema, None, Some(extra_plugins))
+        .create(
+            configuration.clone(),
+            schema.to_string(),
+            None,
+            Some(extra_plugins),
+        )
         .await?;
     let web_endpoints = service_factory.web_endpoints();
     let routers = make_axum_router(service_factory, &configuration, web_endpoints, entitlement)?;
@@ -228,9 +239,17 @@ impl SchemaSource {
                             if watch {
                                 crate::files::watch(&path)
                                     .filter_map(move |_| {
-                                        future::ready(std::fs::read_to_string(&path).ok())
+                                        let path = path.clone();
+                                        async move {
+                                            match tokio::fs::read_to_string(&path).await {
+                                                Ok(schema) => Some(UpdateSchema(schema)),
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
+                                            }
+                                        }
                                     })
-                                    .map(UpdateSchema)
                                     .boxed()
                             } else {
                                 stream::once(future::ready(UpdateSchema(schema))).boxed()
@@ -255,7 +274,7 @@ impl SchemaSource {
                 stream_from_uplink::<SupergraphSdlQuery, String>(
                     apollo_key,
                     apollo_graph_ref,
-                    urls.map(Endpoints::round_robin),
+                    urls.map(Endpoints::fallback),
                     poll_interval,
                     timeout,
                 )
@@ -338,59 +357,35 @@ impl ConfigurationSource {
                         path.to_string_lossy()
                     );
                     stream::empty().boxed()
-                } else if watch {
-                    crate::files::watch(&path)
-                        .map(move |_| match ConfigurationSource::read_config(&path) {
-                            Ok(config) => UpdateConfiguration(config),
-                            Err(err) => {
-                                tracing::error!("{}", err);
-                                NoMoreConfiguration
-                            }
-                        })
-                        .boxed()
                 } else {
                     match ConfigurationSource::read_config(&path) {
                         Ok(configuration) => {
-                            #[cfg(any(test, not(unix)))]
-                            {
+                            if watch {
+                                crate::files::watch(&path)
+                                    .filter_map(move |_| {
+                                        let path = path.clone();
+                                        async move {
+                                            match ConfigurationSource::read_config_async(&path)
+                                                .await
+                                            {
+                                                Ok(configuration) => {
+                                                    Some(UpdateConfiguration(configuration))
+                                                }
+                                                Err(err) => {
+                                                    tracing::error!("{}", err);
+                                                    None
+                                                }
+                                            }
+                                        }
+                                    })
+                                    .boxed()
+                            } else {
                                 stream::once(future::ready(UpdateConfiguration(configuration)))
                                     .boxed()
                             }
-
-                            #[cfg(all(not(test), unix))]
-                            {
-                                let mut sighup_stream = tokio::signal::unix::signal(
-                                    tokio::signal::unix::SignalKind::hangup(),
-                                )
-                                .expect("Failed to install SIGHUP signal handler");
-
-                                let (mut tx, rx) = futures::channel::mpsc::channel(1);
-                                tokio::task::spawn(async move {
-                                    while let Some(()) = sighup_stream.recv().await {
-                                        tx.send(()).await.unwrap();
-                                    }
-                                });
-                                futures::stream::select(
-                                    stream::once(future::ready(UpdateConfiguration(configuration)))
-                                        .boxed(),
-                                    rx.filter_map(
-                                        move |()| match ConfigurationSource::read_config(&path) {
-                                            Ok(configuration) => future::ready(Some(
-                                                UpdateConfiguration(configuration),
-                                            )),
-                                            Err(err) => {
-                                                tracing::error!("{}", err);
-                                                future::ready(None)
-                                            }
-                                        },
-                                    )
-                                    .boxed(),
-                                )
-                                .boxed()
-                            }
                         }
                         Err(err) => {
-                            tracing::error!("{}", err);
+                            tracing::error!("Failed to read configuration: {}", err);
                             stream::empty().boxed()
                         }
                     }
@@ -402,7 +397,11 @@ impl ConfigurationSource {
     }
 
     fn read_config(path: &Path) -> Result<Configuration, ReadConfigError> {
-        let config = fs::read_to_string(path)?;
+        let config = std::fs::read_to_string(path)?;
+        config.parse().map_err(ReadConfigError::Validation)
+    }
+    async fn read_config_async(path: &Path) -> Result<Configuration, ReadConfigError> {
+        let config = tokio::fs::read_to_string(path).await?;
         config.parse().map_err(ReadConfigError::Validation)
     }
 }
@@ -414,18 +413,19 @@ type EntitlementStream = Pin<Box<dyn Stream<Item = Entitlement> + Send>>;
 #[derivative(Debug)]
 #[non_exhaustive]
 pub enum EntitlementSource {
-    /// A static entitlement.
+    /// A static entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Static")]
     Static { entitlement: Entitlement },
 
+    /// An entitlement supplied via APOLLO_ROUTER_ENTITLEMENT. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Env")]
     Env,
 
-    /// A stream of entitlement.
+    /// A stream of entitlement. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "Stream")]
     Stream(#[derivative(Debug = "ignore")] EntitlementStream),
 
-    /// A raw file that may be watched for changes.
+    /// A raw file that may be watched for changes. EXPERIMENTAL and not subject to semver.
     #[display(fmt = "File")]
     File {
         /// The path of the entitlement file.
@@ -530,10 +530,10 @@ impl EntitlementSource {
                 urls,
                 poll_interval,
                 timeout,
-            } => stream_from_uplink::<EntitlementRequest, Entitlement>(
+            } => stream_from_uplink::<EntitlementQuery, Entitlement>(
                 apollo_key,
                 apollo_graph_ref,
-                urls.map(Endpoints::round_robin),
+                urls.map(Endpoints::fallback),
                 poll_interval,
                 timeout,
             )
@@ -548,6 +548,7 @@ impl EntitlementSource {
             })
             .boxed(),
             EntitlementSource::Env => {
+                // EXPERIMENTAL and not subject to semver.
                 match std::env::var("APOLLO_ROUTER_ENTITLEMENT").map(|e| Entitlement::from_str(&e))
                 {
                     Ok(Ok(entitlement)) => stream::once(future::ready(entitlement)).boxed(),
@@ -570,6 +571,65 @@ enum ReadConfigError {
     Io(std::io::Error),
     /// {0}
     Validation(crate::configuration::ConfigurationError),
+}
+
+#[derive(Default)]
+struct ReloadSourceInner {
+    queue: DelayQueue<()>,
+    period: Option<Duration>,
+}
+
+/// Reload source is an internal event emitter for the state machine that will send reload events on SIGUP and/or on a timer.
+#[derive(Clone, Default)]
+pub(crate) struct ReloadSource {
+    inner: Arc<Mutex<ReloadSourceInner>>,
+}
+
+impl ReloadSource {
+    fn set_period(&self, period: &Option<Duration>) {
+        let mut inner = self.inner.lock().unwrap();
+        // Clear the queue before setting the period
+        inner.queue.clear();
+        inner.period = *period;
+        if let Some(period) = period {
+            inner.queue.insert((), *period);
+        }
+    }
+
+    fn into_stream(self) -> impl Stream<Item = Event> {
+        #[cfg(unix)]
+        let signal_stream = {
+            let mut signal = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::hangup())
+                .expect("Failed to install SIGHUP signal handler");
+
+            futures::stream::poll_fn(move |cx| match signal.poll_recv(cx) {
+                Poll::Ready(Some(_)) => Poll::Ready(Some(Event::Reload)),
+                Poll::Ready(None) => Poll::Ready(None),
+                Poll::Pending => Poll::Pending,
+            })
+            .boxed()
+        };
+        #[cfg(not(unix))]
+        let signal_stream = futures::stream::empty().boxed();
+
+        let periodic_reload = futures::stream::poll_fn(move |cx| {
+            let mut inner = self.inner.lock().unwrap();
+            match inner.queue.poll_expired(cx) {
+                Poll::Ready(Some(_expired)) => {
+                    if let Some(period) = inner.period {
+                        inner.queue.insert((), period);
+                    }
+                    Poll::Ready(Some(Event::Reload))
+                }
+                // We must return pending even if the queue is empty, otherwise the stream will never be polled again
+                // The waker will still be used, so this won't end up in a hot loop.
+                Poll::Ready(None) => Poll::Pending,
+                Poll::Pending => Poll::Pending,
+            }
+        });
+
+        futures::stream::select(signal_stream, periodic_reload)
+    }
 }
 
 type ShutdownFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -809,6 +869,9 @@ pub(crate) enum Event {
     /// There were no more updates to entitlement.
     NoMoreEntitlement,
 
+    /// Artificial hot reload for chaos testing
+    Reload,
+
     /// The server should gracefully shutdown.
     Shutdown,
 }
@@ -833,6 +896,9 @@ impl Debug for Event {
             }
             NoMoreEntitlement => {
                 write!(f, "NoMoreEntitlement")
+            }
+            Reload => {
+                write!(f, "ForcedHotReload")
             }
             Shutdown => {
                 write!(f, "Shutdown")
@@ -867,17 +933,109 @@ fn generate_event_stream(
     entitlement: EntitlementSource,
     shutdown_receiver: oneshot::Receiver<()>,
 ) -> impl Stream<Item = Event> {
-    // Chain is required so that the final shutdown message is sent.
-    stream::select_all(vec![
+    let reload_source = ReloadSource::default();
+
+    let stream = stream::select_all(vec![
         shutdown.into_stream().boxed(),
-        configuration.into_stream().boxed(),
         schema.into_stream().boxed(),
         entitlement.into_stream().boxed(),
+        reload_source.clone().into_stream().boxed(),
+        configuration
+            .into_stream()
+            .map(move |config_event| {
+                if let Event::UpdateConfiguration(config) = &config_event {
+                    reload_source.set_period(&config.experimental_chaos.force_reload)
+                }
+                config_event
+            })
+            .boxed(),
         shutdown_receiver.into_stream().map(|_| Shutdown).boxed(),
     ])
     .take_while(|msg| future::ready(!matches!(msg, Shutdown)))
+    // Chain is required so that the final shutdown message is sent.
     .chain(stream::iter(vec![Shutdown]))
-    .boxed()
+    .boxed();
+    stream
+}
+
+#[cfg(test)]
+struct TestRouterHttpServer {
+    router_http_server: RouterHttpServer,
+    event_sender: mpsc::UnboundedSender<Event>,
+    state_machine_update_notifier: Arc<Notify>,
+}
+
+#[cfg(test)]
+impl TestRouterHttpServer {
+    fn new() -> Self {
+        let (event_sender, event_receiver) = mpsc::unbounded();
+        let state_machine_update_notifier = Arc::new(Notify::new());
+
+        let server_factory = AxumHttpServerFactory::new();
+        let router_factory: OrbiterRouterSuperServiceFactory<YamlRouterFactory> =
+            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
+        let state_machine = StateMachine::for_tests(
+            server_factory,
+            router_factory,
+            Arc::clone(&state_machine_update_notifier),
+        );
+
+        let listen_addresses = state_machine.listen_addresses.clone();
+        let result = spawn(
+            async move { state_machine.process_events(event_receiver).await }
+                .with_current_subscriber(),
+        )
+        .map(|r| match r {
+            Ok(Ok(ok)) => Ok(ok),
+            Ok(Err(err)) => Err(err),
+            Err(err) => {
+                tracing::error!("{}", err);
+                Err(ApolloRouterError::StartupError)
+            }
+        })
+        .with_current_subscriber()
+        .boxed();
+
+        TestRouterHttpServer {
+            router_http_server: RouterHttpServer {
+                result,
+                shutdown_sender: None,
+                listen_addresses,
+            },
+            event_sender,
+            state_machine_update_notifier,
+        }
+    }
+
+    async fn request(
+        &self,
+        request: crate::graphql::Request,
+    ) -> Result<crate::graphql::Response, crate::error::FetchError> {
+        Ok(reqwest::Client::new()
+            .post(format!("{}/", self.listen_address().await.unwrap()))
+            .json(&request)
+            .send()
+            .await
+            .expect("couldn't send request")
+            .json()
+            .await
+            .expect("couldn't deserialize into json"))
+    }
+
+    async fn listen_address(&self) -> Option<ListenAddr> {
+        self.router_http_server.listen_address().await
+    }
+
+    async fn send_event(&mut self, event: Event) -> Result<(), SendError> {
+        let result = self.event_sender.send(event).await;
+        self.state_machine_update_notifier.notified().await;
+        result
+    }
+
+    async fn shutdown(mut self) -> Result<(), ApolloRouterError> {
+        self.send_event(Event::Shutdown).await.unwrap();
+        self.router_http_server.shutdown().await
+    }
 }
 
 #[cfg(test)]
@@ -1070,5 +1228,167 @@ mod tests {
         .into_stream();
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn basic_event_stream_test() {
+        let mut router_handle = TestRouterHttpServer::new();
+
+        let configuration =
+            Configuration::from_str(include_str!("testdata/supergraph_config.router.yaml"))
+                .unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+
+        // let's push a valid configuration to the state machine, so it can start up
+        router_handle
+            .send_event(UpdateConfiguration(configuration))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateSchema(schema.to_string()))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateEntitlement(EntitlementState::Unentitled))
+            .await
+            .unwrap();
+
+        let request = Request::builder().query(r#"{ me { username } }"#).build();
+
+        let response = router_handle.request(request).await.unwrap();
+        assert_eq!(
+            "@ada",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("username")
+                .unwrap()
+        );
+
+        // shut the router down
+        router_handle
+            .send_event(Event::NoMoreConfiguration)
+            .await
+            .unwrap();
+        router_handle.send_event(Event::NoMoreSchema).await.unwrap();
+        router_handle.send_event(Event::Shutdown).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn schema_update_test() {
+        let mut router_handle = TestRouterHttpServer::new();
+        // let's push a valid configuration to the state machine, so it can start up
+        router_handle
+            .send_event(UpdateConfiguration(
+                Configuration::from_str(include_str!("testdata/supergraph_config.router.yaml"))
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateSchema(
+                include_str!("testdata/supergraph_missing_name.graphql").to_string(),
+            ))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateEntitlement(EntitlementState::Unentitled))
+            .await
+            .unwrap();
+
+        // let's send a valid query
+        let request = Request::builder().query(r#"{ me { username } }"#).build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "@ada",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("username")
+                .unwrap()
+        );
+
+        // the name field is not present yet
+        let request = Request::builder()
+            .query(r#"{ me { username name } }"#)
+            .build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "cannot query field 'name' on type 'User'",
+            response.errors[0].message
+        );
+        assert_eq!(
+            "INVALID_FIELD",
+            response.errors[0].extensions.get("code").unwrap()
+        );
+
+        // let's update the schema to add the field
+        router_handle
+            .send_event(UpdateSchema(
+                include_str!("testdata/supergraph.graphql").to_string(),
+            ))
+            .await
+            .unwrap();
+
+        // the request should now make it through
+        let request = Request::builder()
+            .query(r#"{ me { username name } }"#)
+            .build();
+
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "Ada Lovelace",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("name")
+                .unwrap()
+        );
+
+        // let's go back and remove the field
+        router_handle
+            .send_event(UpdateSchema(
+                include_str!("testdata/supergraph_missing_name.graphql").to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let request = Request::builder().query(r#"{ me { username } }"#).build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "@ada",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("username")
+                .unwrap()
+        );
+
+        let request = Request::builder()
+            .query(r#"{ me { username name } }"#)
+            .build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "cannot query field 'name' on type 'User'",
+            response.errors[0].message
+        );
+        assert_eq!(
+            "INVALID_FIELD",
+            response.errors[0].extensions.get("code").unwrap()
+        );
+        router_handle.shutdown().await.unwrap();
     }
 }

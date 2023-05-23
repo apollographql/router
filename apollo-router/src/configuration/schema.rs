@@ -15,7 +15,6 @@ use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
 use super::expansion::Expansion;
-use super::experimental::log_used_experimental_conf;
 use super::plugins;
 use super::yaml;
 use super::Configuration;
@@ -107,7 +106,7 @@ pub(crate) fn validate_yaml_configuration(
             tracing::warn!("configuration could not be upgraded automatically as it had errors")
         }
     }
-    log_used_experimental_conf(&yaml);
+
     let expanded_yaml = expansion.expand(&yaml)?;
     let parsed_yaml = super::yaml::parse(raw_yaml)?;
     if let Err(errors_it) = schema.validate(&expanded_yaml) {

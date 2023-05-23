@@ -13,20 +13,16 @@ use serde_json::Value;
 use tower::BoxError;
 
 use crate::common::IntegrationTest;
+use crate::common::Telemetry;
 use crate::common::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_jaeger_tracing() -> Result<(), BoxError> {
-    let tracer = opentelemetry_jaeger::new_agent_pipeline()
-        .with_service_name("my_app")
-        .install_simple()?;
-
-    let mut router = IntegrationTest::new(
-        tracer,
-        opentelemetry_jaeger::Propagator::new(),
-        include_str!("fixtures/jaeger.router.yaml"),
-    )
-    .await;
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger.router.yaml"))
+        .build()
+        .await;
 
     router.start().await;
     router.assert_started().await;

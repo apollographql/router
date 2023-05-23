@@ -6,6 +6,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
+use crate::plugins::telemetry::apollo::OperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
@@ -13,7 +14,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,
     pub(crate) stats: HashMap<String, SingleStats>,
-    pub(crate) operation_count: u64,
+    pub(crate) operation_count_by_type: Option<OperationCountByType>,
 }
 
 #[derive(Default, Debug, Serialize)]
@@ -75,7 +76,7 @@ pub(crate) struct SingleFieldStat {
     pub(crate) latency: DurationHistogram<f64>,
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct ContextualizedStats {
     context: StatsContext,
     query_latency_stats: QueryLatencyStats,
@@ -92,7 +93,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct QueryLatencyStats {
     request_latencies: DurationHistogram,
     persisted_query_hits: u64,
@@ -129,7 +130,7 @@ impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct PathErrorStats {
     children: HashMap<String, PathErrorStats>,
     errors_count: u64,
@@ -146,7 +147,7 @@ impl AddAssign<SinglePathErrorStats> for PathErrorStats {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct TypeStat {
     per_field_stat: HashMap<String, FieldStat>,
 }
@@ -159,7 +160,7 @@ impl AddAssign<SingleTypeStat> for TypeStat {
     }
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
@@ -269,6 +270,7 @@ mod test {
 
     use super::*;
     use crate::plugins::telemetry::apollo::Report;
+    use crate::query_planner::OperationKind;
 
     #[test]
     fn test_aggregation() {
@@ -317,7 +319,12 @@ mod test {
 
         SingleStatsReport {
             request_id: Uuid::default(),
-            operation_count: count.inc_u64(),
+            operation_count_by_type: OperationCountByType {
+                r#type: OperationKind::Query,
+                subtype: None,
+                operation_count: count.inc_u64(),
+            }
+            .into(),
             stats: HashMap::from([(
                 stats_report_key.to_string(),
                 SingleStats {
@@ -325,6 +332,8 @@ mod test {
                         context: StatsContext {
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
+                            operation_type: String::new(),
+                            operation_subtype: String::new(),
                         },
                         query_latency_stats: SingleQueryLatencyStats {
                             latency: Duration::from_secs(1),

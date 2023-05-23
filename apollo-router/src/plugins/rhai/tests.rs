@@ -18,6 +18,7 @@ use uuid::Uuid;
 
 use super::process_error;
 use super::subgraph;
+use super::PathBuf;
 use super::Rhai;
 use super::RhaiExecutionDeferredResponse;
 use super::RhaiExecutionResponse;
@@ -154,7 +155,7 @@ async fn rhai_plugin_execution_service_error() -> Result<(), BoxError> {
 // A Rhai engine suitable for minimal testing. There are no scripts and the SDL is an empty
 // string.
 fn new_rhai_test_engine() -> Engine {
-    Rhai::new_rhai_engine(None, "".to_string())
+    Rhai::new_rhai_engine(None, "".to_string(), PathBuf::new())
 }
 
 // Some of these tests rely extensively on internal implementation details of the tracing_test crate.
@@ -408,10 +409,26 @@ async fn it_can_process_supergraph_response() {
 }
 
 #[tokio::test]
+async fn it_can_process_supergraph_response_is_primary() {
+    gen_response_test!(
+        RhaiSupergraphResponse,
+        "process_supergraph_response_is_primary"
+    );
+}
+
+#[tokio::test]
 async fn it_can_process_supergraph_deferred_response() {
     gen_response_test!(
         RhaiSupergraphDeferredResponse,
         "process_supergraph_response"
+    );
+}
+
+#[tokio::test]
+async fn it_can_process_supergraph_deferred_response_is_not_primary() {
+    gen_response_test!(
+        RhaiSupergraphDeferredResponse,
+        "process_supergraph_deferred_response_is_not_primary"
     );
 }
 
@@ -421,8 +438,24 @@ async fn it_can_process_execution_response() {
 }
 
 #[tokio::test]
+async fn it_can_process_execution_response_is_primary() {
+    gen_response_test!(
+        RhaiExecutionResponse,
+        "process_execution_response_is_primary"
+    );
+}
+
+#[tokio::test]
 async fn it_can_process_execution_deferred_response() {
     gen_response_test!(RhaiExecutionDeferredResponse, "process_execution_response");
+}
+
+#[tokio::test]
+async fn it_can_process_execution_deferred_response_is_not_primary() {
+    gen_response_test!(
+        RhaiExecutionDeferredResponse,
+        "process_execution_deferred_response_is_not_primary"
+    );
 }
 
 #[tokio::test]
@@ -505,8 +538,8 @@ fn it_can_create_unix_now() {
     let st = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .expect("can get system time")
-        .as_secs();
-    let unix_now: u64 = engine
+        .as_secs() as i64;
+    let unix_now: i64 = engine
         .eval(r#"unix_now()"#)
         .expect("can get unix_now() timestamp");
     // Always difficult to do timing tests. unix_now() should execute within a second of st,

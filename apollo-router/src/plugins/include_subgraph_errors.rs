@@ -63,6 +63,7 @@ impl Plugin for IncludeSubgraphErrors {
                     // Create a redacted error to replace whatever error we have
                     tracing::info!("redacted subgraph({sub_name_error}) error");
                     _error = Box::new(crate::error::FetchError::SubrequestHttpError {
+                        status_code: None,
                         service: "redacted".to_string(),
                         reason: "redacted".to_string(),
                     });
@@ -89,12 +90,12 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
+    use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
-    use crate::spec::Schema;
     use crate::Configuration;
 
     static UNREDACTED_PRODUCT_RESPONSE: Lazy<Bytes> = Lazy::new(|| {
@@ -186,9 +187,12 @@ mod test {
 
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
+        let planner = BridgeQueryPlanner::new(schema.to_string(), Default::default())
+            .await
+            .unwrap();
+        let schema = planner.schema();
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(schema.clone());
+        let mut builder = PluggableSupergraphServiceBuilder::new(planner);
 
         let plugins = create_plugins(&Configuration::default(), &schema, None)
             .await

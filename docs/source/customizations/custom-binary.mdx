@@ -4,7 +4,14 @@ title: Creating a custom Apollo Router binary
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-To use [custom plugins](./native/) that aren't bundled with the default Apollo Router distribution, you need to compile your own custom router binary. This page walks you through creating that binary from scratch and adding a plugin to it.
+> ⚠️ **Native Rust plugins are an advanced feature of the Apollo Router.** We _do not recommend_ creating them for the following reasons:
+>
+> - Native plugins require familiarity with programming in Rust.
+> - Native plugins require compiling a custom router binary from source, which can introduce unexpected behavior in your router that's difficult to diagnose and support.
+>
+> **For most router customizations,** we recommend instead creating a [Rhai script](./rhai/) or [external coprocessor](./coprocessor/). Both of these customization types provide strong separation of concerns and fault isolation.
+>
+> **If a native plugin seems necessary for your use case,** please [open an issue](https://github.com/apollographql/router/issues) so we can investigate adding the required functionality to the stock router binary.
 
 <ElasticNotice />
 

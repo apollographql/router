@@ -6,16 +6,16 @@ use std::sync::Arc;
 use std::task;
 
 use futures::future::BoxFuture;
+use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
-use serde::Serialize;
-use serde_json_bytes::value::Serializer;
 use tower::ServiceExt;
 use tracing::Instrument;
 
-use super::USAGE_REPORTING;
 use crate::cache::DeduplicatingCache;
 use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
+use crate::query_planner::BridgeQueryPlanner;
+use crate::query_planner::QueryPlanResult;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -111,6 +111,12 @@ where
     }
 }
 
+impl CachingQueryPlanner<BridgeQueryPlanner> {
+    pub(crate) fn planner(&self) -> Arc<Planner<QueryPlanResult>> {
+        self.delegate.planner()
+    }
+}
+
 impl<T: Clone + Send + 'static> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
 where
     T: tower::Service<
@@ -160,17 +166,10 @@ where
                                 }
 
                                 if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                                    match (plan.usage_reporting).serialize(Serializer) {
-                                        Ok(v) => {
-                                            context.insert_json_value(USAGE_REPORTING, v);
-                                        }
-                                        Err(e) => {
-                                            tracing::error!(
-                                            "usage reporting was not serializable to context, {}",
-                                            e
-                                        );
-                                        }
-                                    }
+                                    context
+                                        .private_entries
+                                        .lock()
+                                        .insert(plan.usage_reporting.clone());
                                 }
                                 Ok(QueryPlannerResponse {
                                     content,
@@ -202,17 +201,10 @@ where
                 match res {
                     Ok(content) => {
                         if let QueryPlannerContent::Plan { plan, .. } = &content {
-                            match (plan.usage_reporting).serialize(Serializer) {
-                                Ok(v) => {
-                                    context.insert_json_value(USAGE_REPORTING, v);
-                                }
-                                Err(e) => {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        e
-                                    );
-                                }
-                            }
+                            context
+                                .private_entries
+                                .lock()
+                                .insert(plan.usage_reporting.clone());
                         }
 
                         Ok(QueryPlannerResponse::builder()
@@ -223,29 +215,21 @@ where
                     Err(error) => {
                         match error.deref() {
                             QueryPlannerError::PlanningErrors(pe) => {
-                                if let Err(inner_e) = request
+                                request
                                     .context
-                                    .insert(USAGE_REPORTING, pe.usage_reporting.clone())
-                                {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        inner_e
-                                    );
-                                }
+                                    .private_entries
+                                    .lock()
+                                    .insert(pe.usage_reporting.clone());
                             }
                             QueryPlannerError::SpecError(e) => {
-                                if let Err(inner_e) = request.context.insert(
-                                    USAGE_REPORTING,
-                                    UsageReporting {
+                                request
+                                    .context
+                                    .private_entries
+                                    .lock()
+                                    .insert(UsageReporting {
                                         stats_report_key: e.get_error_key().to_string(),
                                         referenced_fields_by_type: HashMap::new(),
-                                    },
-                                ) {
-                                    tracing::error!(
-                                        "usage reporting was not serializable to context, {}",
-                                        inner_e
-                                    );
-                                }
+                                    });
                             }
                             _ => {}
                         }
@@ -418,10 +402,9 @@ mod tests {
                 .await
                 .unwrap()
                 .context
-                .get::<_, UsageReporting>(USAGE_REPORTING)
-                .ok()
-                .flatten()
-                .is_some());
+                .private_entries
+                .lock()
+                .contains_key::<UsageReporting>());
         }
     }
 }

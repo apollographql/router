@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Tower fetcher for subgraphs.
 
 use std::collections::HashMap;
@@ -254,6 +256,11 @@ async fn call_http(
         subgraph_request, ..
     } = request;
 
+    let operation_name = subgraph_request
+        .body()
+        .operation_name
+        .clone()
+        .unwrap_or_default();
     let (parts, _) = subgraph_request.into_parts();
 
     let body = serde_json::to_string(&body).expect("JSON serialization should not fail");
@@ -280,8 +287,8 @@ async fn call_http(
         .headers_mut()
         .insert(ACCEPT_ENCODING, ACCEPTED_ENCODINGS);
 
-    let schema_uri = request.uri().clone();
-    let host = schema_uri.host().map(String::from).unwrap_or_default();
+    let schema_uri = request.uri();
+    let host = schema_uri.host().unwrap_or_default();
     let port = schema_uri.port_u16().unwrap_or_else(|| {
         let scheme = schema_uri.scheme_str();
         if scheme == Some("https") {
@@ -301,16 +308,17 @@ async fn call_http(
         tracing::info!(http.request.body = ?request.body(), apollo.subgraph.name = %service_name, "Request body to subgraph {service_name:?}");
     }
 
-    let path = schema_uri.path().to_string();
+    let path = schema_uri.path();
 
     let subgraph_req_span = tracing::info_span!("subgraph_request",
         "otel.kind" = "CLIENT",
-        "net.peer.name" = &display(host),
-        "net.peer.port" = &display(port),
-        "http.route" = &display(path),
-        "http.url" = &display(schema_uri),
+        "net.peer.name" = %host,
+        "net.peer.port" = %port,
+        "http.route" = %path,
+        "http.url" = %schema_uri,
         "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %service_name
+        "apollo.subgraph.name" = %service_name,
+        "graphql.operation.name" = %operation_name,
     );
     get_text_map_propagator(|propagator| {
         propagator.inject_context(
@@ -321,15 +329,16 @@ async fn call_http(
     let cloned_service_name = service_name.clone();
     let cloned_context = context.clone();
     let (parts, body) = async move {
-        cloned_context.enter_active_request().await;
+        cloned_context.enter_active_request();
         let response = match client
             .call(request)
             .await {
                 Err(err) => {
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
-                    cloned_context.leave_active_request().await;
+                    cloned_context.leave_active_request();
 
                     return Err(FetchError::SubrequestHttpError {
+                        status_code: None,
                         service: service_name.clone(),
                         reason: err.to_string(),
                     }.into());
@@ -350,12 +359,13 @@ async fn call_http(
                 if !content_type_str.contains(APPLICATION_JSON.essence_str())
                     && !content_type_str.contains(GRAPHQL_JSON_RESPONSE_HEADER_VALUE)
                 {
-                    cloned_context.leave_active_request().await;
+                    cloned_context.leave_active_request();
 
                     return if !parts.status.is_success() {
 
                         Err(BoxError::from(FetchError::SubrequestHttpError {
                             service: service_name.clone(),
+                            status_code: Some(parts.status.as_u16()),
                             reason: format!(
                                 "{}: {}",
                                 parts.status.as_str(),
@@ -364,6 +374,7 @@ async fn call_http(
                         }))
                     } else {
                         Err(BoxError::from(FetchError::SubrequestHttpError {
+                            status_code: Some(parts.status.as_u16()),
                             service: service_name.clone(),
                             reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {GRAPHQL_JSON_RESPONSE_HEADER_VALUE}; found content-type: {content_type:?})", APPLICATION_JSON.essence_str()),
                         }))
@@ -376,11 +387,12 @@ async fn call_http(
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await {
                 Err(err) => {
-                    cloned_context.leave_active_request().await;
+                    cloned_context.leave_active_request();
 
                     tracing::error!(fetch_error = format!("{err:?}").as_str());
 
                 return Err(FetchError::SubrequestHttpError {
+                    status_code: None,
                     service: service_name.clone(),
                     reason: err.to_string(),
                 }.into())
@@ -388,7 +400,7 @@ async fn call_http(
                 }, Ok(body) => body,
             };
 
-            cloned_context.leave_active_request().await;
+            cloned_context.leave_active_request();
 
         Ok((parts, body))
     }.instrument(subgraph_req_span).await?;

@@ -1,3 +1,5 @@
+// With regards to ELv2 licensing, this entire file is license key functionality
+
 //! Plugin system for the router.
 //!
 //! Provides a customization mechanism for the router.

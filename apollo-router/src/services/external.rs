@@ -40,6 +40,7 @@ pub(crate) enum PipelineStep {
 }
 
 #[derive(Clone, Debug, Display, Deserialize, PartialEq, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub(crate) enum Control {
     Continue,
     Break(u16),
@@ -86,7 +87,13 @@ pub(crate) struct Externalizable<T> {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) uri: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) method: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) service_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) status_code: Option<u16>,
 }
 
 impl<T> Externalizable<T>

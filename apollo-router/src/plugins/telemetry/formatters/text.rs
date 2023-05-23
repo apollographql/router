@@ -1,7 +1,7 @@
 use std::fmt;
 
-use ansi_term::Color;
-use ansi_term::Style;
+use nu_ansi_term::Color;
+use nu_ansi_term::Style;
 use opentelemetry::trace::TraceContextExt;
 use tracing_core::Event;
 use tracing_core::Level;
@@ -34,8 +34,8 @@ impl Default for TextFormatter {
 impl TextFormatter {
     const TRACE_STR: &'static str = "TRACE";
     const DEBUG_STR: &'static str = "DEBUG";
-    const INFO_STR: &'static str = " INFO";
-    const WARN_STR: &'static str = " WARN";
+    const INFO_STR: &'static str = "INFO";
+    const WARN_STR: &'static str = "WARN";
     const ERROR_STR: &'static str = "ERROR";
 
     pub(crate) fn new() -> Self {

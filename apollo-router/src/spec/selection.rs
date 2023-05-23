@@ -58,24 +58,25 @@ impl Selection {
                     return Ok(None);
                 }
                 let field_type = match field.name() {
-                    TYPENAME => FieldType::String,
-                    "__schema" => FieldType::Introspection("__Schema".to_string()),
-                    "__type" => FieldType::Introspection("__Type".to_string()),
+                    TYPENAME => FieldType::new_named("String"),
+                    "__schema" => FieldType::new_named("__Schema"),
+                    "__type" => FieldType::new_named("__Type"),
                     field_name => {
                         let name = current_type
                             .inner_type_name()
                             .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
+                        let definitions = &schema.type_system.definitions;
                         //looking into object types
-                        schema
-                            .object_types
+                        definitions
+                            .objects
                             .get(name)
-                            .and_then(|ty| ty.fields.get(field_name))
+                            .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
                             // otherwise, it might be an interface
                             .or_else(|| {
-                                schema
+                                definitions
                                     .interfaces
                                     .get(name)
-                                    .and_then(|ty| ty.fields.get(field_name))
+                                    .and_then(|ty| ty.fields().find(|f| f.name() == field_name))
                             })
                             .ok_or_else(|| {
                                 SpecError::InvalidField(
@@ -83,7 +84,8 @@ impl Selection {
                                     current_type.to_string(),
                                 )
                             })?
-                            .clone()
+                            .ty()
+                            .into()
                     }
                 };
 
@@ -131,7 +133,7 @@ impl Selection {
                     .or_else(|| current_type.inner_type_name().map(|s| s.to_string()))
                     .ok_or_else(|| SpecError::InvalidType(current_type.to_string()))?;
 
-                let fragment_type = FieldType::Named(type_condition.clone());
+                let fragment_type = FieldType::new_named(type_condition.clone());
 
                 let selection_set = inline_fragment
                     .selection_set()
@@ -167,6 +169,15 @@ impl Selection {
 
     pub(crate) fn is_typename_field(&self) -> bool {
         matches!(self, Selection::Field {name, ..} if name.as_str() == TYPENAME)
+    }
+
+    pub(crate) fn output_key_if_typename_field(&self) -> Option<ByteString> {
+        match self {
+            Selection::Field { name, alias, .. } if name.as_str() == TYPENAME => {
+                alias.as_ref().or(Some(name)).cloned()
+            }
+            _ => None,
+        }
     }
 
     pub(crate) fn contains_error_path(&self, path: &[PathElement], fragments: &Fragments) -> bool {

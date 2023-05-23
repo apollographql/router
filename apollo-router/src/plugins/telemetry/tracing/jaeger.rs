@@ -72,7 +72,7 @@ impl TracingConfigurator for Config {
                 agent,
                 batch_processor,
             } => {
-                tracing::info!("configuring Jaeger tracing: {}", batch_processor);
+                tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
                 let socket = match &agent.endpoint {
                     AgentEndpoint::Default(_) => None,
                     AgentEndpoint::Url(u) => {
@@ -99,7 +99,7 @@ impl TracingConfigurator for Config {
                 collector,
                 batch_processor,
             } => {
-                tracing::info!("configuring Jaeger tracing: {}", batch_processor);
+                tracing::info!("Configuring Jaeger tracing: {}", batch_processor);
                 // We are waiting for a release of https://github.com/open-telemetry/opentelemetry-rust/issues/894
                 // Until that time we need to wrap a tracer provider with Jeager in.
                 let tracer_provider = opentelemetry_jaeger::new_collector_pipeline()

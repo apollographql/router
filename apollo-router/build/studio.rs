@@ -18,8 +18,8 @@ pub fn main() -> Result<(), Box<dyn Error>> {
     let message = "\nmessage";
     let msg_index = content.find(message).ok_or("cannot find message string")?;
     content.insert_str(msg_index, "\npackage Reports;\n");
-    content = content.replace("[(js_use_toArray)=true]", "");
-    content = content.replace("[(js_preEncoded)=true]", "");
+    content = content.replace("[(js_use_toArray) = true]", "");
+    content = content.replace("[(js_preEncoded) = true]", "");
     std::fs::write(&reports_out, &content)?;
 
     println!("cargo:rerun-if-changed={}", reports_src.to_str().unwrap());

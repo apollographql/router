@@ -17,13 +17,15 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap::Subcommand;
 use directories::ProjectDirs;
+#[cfg(any(feature = "dhat-heap", feature = "dhat-ad-hoc"))]
+use once_cell::sync::OnceCell;
 use url::ParseError;
 use url::Url;
 
-use crate::configuration;
 use crate::configuration::generate_config_schema;
 use crate::configuration::generate_upgrade;
 use crate::configuration::ConfigurationError;
+use crate::configuration::Discussed;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
 use crate::router::RouterHttpServer;
@@ -125,6 +127,8 @@ enum ConfigSubcommand {
     },
     /// List all the available experimental configurations with related GitHub discussion
     Experimental,
+    /// List all the available preview configurations with related GitHub discussion
+    Preview,
 }
 
 /// Options for the router
@@ -194,6 +198,7 @@ pub struct Opt {
     apollo_graph_ref: Option<String>,
 
     /// Your Apollo Router entitlement.
+    /// EXPERIMENTAL and not subject to semver.
     #[clap(skip = std::env::var("APOLLO_ROUTER_ENTITLEMENT").ok())]
     apollo_router_entitlement: Option<String>,
 
@@ -227,7 +232,7 @@ pub struct Opt {
     pub(crate) version: bool,
 }
 
-/// Wrapper so that structop can display the default config path in the help message.
+/// Wrapper so that clap can display the default config path in the help message.
 /// Uses ProjectDirs to get the default location.
 #[derive(Debug)]
 struct ProjectDir {
@@ -381,7 +386,13 @@ impl Executable {
             Some(Commands::Config(ConfigSubcommandArgs {
                 command: ConfigSubcommand::Experimental,
             })) => {
-                configuration::print_all_experimental_conf();
+                Discussed::new().print_experimental();
+                Ok(())
+            }
+            Some(Commands::Config(ConfigSubcommandArgs {
+                command: ConfigSubcommand::Preview,
+            })) => {
+                Discussed::new().print_preview();
                 Ok(())
             }
             None => Self::inner_start(shutdown, schema, config, entitlement, opt).await,
@@ -498,7 +509,7 @@ impl Executable {
 
       $ ./router --supergraph <file_path>
 
-  * Fetch a registered schema from Apollo Studio by setting
+  * Fetch a registered schema from GraphOS by setting
     these environment variables:
 
       $ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router

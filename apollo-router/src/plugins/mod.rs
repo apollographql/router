@@ -21,11 +21,12 @@ macro_rules! schemar_fn {
 }
 
 mod authentication;
+mod authorization;
+mod coprocessor;
+#[cfg(test)]
+mod coprocessor_test;
 pub(crate) mod csrf;
 mod expose_query_plan;
-mod external;
-#[cfg(test)]
-mod external_tests;
 mod forbid_mutations;
 mod headers;
 mod include_subgraph_errors;

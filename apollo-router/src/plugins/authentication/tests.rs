@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 
 use jsonwebtoken::encode;
@@ -22,28 +23,10 @@ fn create_an_url(filename: &str) -> String {
     let jwks_base = Path::new("tests");
 
     let jwks_path = jwks_base.join("fixtures").join(filename);
-    #[cfg(target_os = "windows")]
-    let mut jwks_file = std::fs::canonicalize(jwks_path).unwrap();
-    #[cfg(not(target_os = "windows"))]
-    let jwks_file = std::fs::canonicalize(jwks_path).unwrap();
 
-    #[cfg(target_os = "windows")]
-    {
-        // We need to manipulate our canonicalized file if we are on Windows.
-        // We replace windows path separators with posix path separators
-        // We also drop the first 3 characters from the path since they will be
-        // something like (drive letter may vary) '\\?\C:' and that isn't
-        // a valid URI
-        let mut file_string = jwks_file.display().to_string();
-        file_string = file_string.replace("\\", "/");
-        let len = file_string
-            .char_indices()
-            .nth(3)
-            .map_or(0, |(idx, _ch)| idx);
-        jwks_file = file_string[len..].into();
-    }
+    let jwks_absolute_path = std::fs::canonicalize(jwks_path).unwrap();
 
-    format!("file://{}", jwks_file.display())
+    Url::from_file_path(jwks_absolute_path).unwrap().to_string()
 }
 
 async fn build_a_default_test_harness() -> router::BoxCloneService {
@@ -82,44 +65,38 @@ async fn build_a_test_harness(
     let mut config = if multiple_jwks {
         serde_json::json!({
             "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks": [
-                            {
-                                "url": &jwks_url
-                            },
-                            {
-                                "url": &jwks_url
-                            }
-                        ]
-                    }
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        },
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
                 }
             }
         })
     } else {
         serde_json::json!({
             "authentication": {
-                "experimental" : {
-                    "jwt" : {
-                        "jwks": [
-                            {
-                                "url": &jwks_url
-                            }
-                        ]
-                    }
+                "jwt" : {
+                    "jwks": [
+                        {
+                            "url": &jwks_url
+                        }
+                    ]
                 }
             }
         })
     };
 
     if let Some(hn) = header_name {
-        config["authentication"]["experimental"]["jwt"]["header_name"] =
-            serde_json::Value::String(hn);
+        config["authentication"]["jwt"]["header_name"] = serde_json::Value::String(hn);
     }
 
     if let Some(hp) = header_value_prefix {
-        config["authentication"]["experimental"]["jwt"]["header_value_prefix"] =
-            serde_json::Value::String(hp);
+        config["authentication"]["jwt"]["header_value_prefix"] = serde_json::Value::String(hp);
     }
 
     crate::TestHarness::builder()
@@ -149,14 +126,12 @@ async fn it_rejects_when_there_is_no_auth_header() {
 
     let config = serde_json::json!({
         "authentication": {
-            "experimental" : {
-                "jwt" : {
-                    "jwks": [
-                        {
-                            "url": &jwks_url
-                        }
-                    ]
-                }
+            "jwt" : {
+                "jwks": [
+                    {
+                        "url": &jwks_url
+                    }
+                ]
             }
         },
         "rhai": {
@@ -306,7 +281,9 @@ async fn it_rejects_when_auth_prefix_has_invalid_format_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-        .message("'header.payload' is not a valid JWT header: InvalidToken")
+        .message(format!(
+            "'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: InvalidToken"
+        ))
         .extension_code("AUTH_ERROR")
         .build();
 
@@ -346,7 +323,7 @@ async fn it_rejects_when_auth_prefix_has_correct_format_but_invalid_jwt() {
     .unwrap();
 
     let expected_error = graphql::Error::builder()
-            .message("'header.payload.signature' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5.")
+            .message(format!("'{HEADER_TOKEN_TRUNCATED}' is not a valid JWT header: Base64 error: Invalid last symbol 114, offset 5."))
             .extension_code("AUTH_ERROR")
             .build();
 
@@ -573,7 +550,11 @@ async fn build_jwks_search_components() -> JwksManager {
 
     for s_url in &sets {
         let url: Url = Url::from_str(s_url).expect("created a valid url");
-        urls.push(JwksConfig { url, issuer: None });
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: None,
+        });
     }
 
     JwksManager::new(urls).await.unwrap()
@@ -589,8 +570,9 @@ async fn it_finds_key_with_criteria_kid_and_algorithm() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
     assert_eq!("key2", key.common.key_id.unwrap());
 }
@@ -605,8 +587,9 @@ async fn it_finds_best_matching_key_with_criteria_algorithm() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::HS256, key.common.algorithm.unwrap());
     assert_eq!("key1", key.common.key_id.unwrap());
 }
@@ -620,9 +603,7 @@ async fn it_fails_to_find_key_with_criteria_algorithm_not_in_set() {
         alg: Algorithm::RS512,
     };
 
-    assert!(search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .is_none());
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }
 
 #[tokio::test]
@@ -635,8 +616,9 @@ async fn it_finds_key_with_criteria_algorithm_ec() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::ES256, key.common.algorithm.unwrap());
     assert_eq!(
         "afda85e09a320cf748177874592de64d",
@@ -654,8 +636,9 @@ async fn it_finds_key_with_criteria_algorithm_rsa() {
     };
 
     let (_issuer, key) = search_jwks(&jwks_manager, &criteria)
-        .expect("search worked")
-        .expect("found a key");
+        .expect("found a key")
+        .pop()
+        .expect("list isn't empty");
     assert_eq!(Algorithm::RS256, key.common.algorithm.unwrap());
     assert_eq!(
         "022516583d56b68faf40260fda72978a",
@@ -679,6 +662,7 @@ fn make_manager(jwk: &Jwk, issuer: Option<String>) -> JwksManager {
     let list = vec![JwksConfig {
         url: url.clone(),
         issuer,
+        algorithms: None,
     }];
     let map = HashMap::from([(url, jwks); 1]);
 
@@ -862,4 +846,33 @@ async fn issuer_check() {
             println!("claims: {claims:?}");
         }
     }
+}
+
+#[tokio::test]
+async fn it_rejects_key_with_restricted_algorithm() {
+    let mut sets = vec![];
+    let mut urls = vec![];
+
+    let jwks_url = create_an_url("jwks.json");
+
+    sets.push(jwks_url);
+
+    for s_url in &sets {
+        let url: Url = Url::from_str(s_url).expect("created a valid url");
+        urls.push(JwksConfig {
+            url,
+            issuer: None,
+            algorithms: Some(HashSet::from([Algorithm::RS256])),
+        });
+    }
+
+    let jwks_manager = JwksManager::new(urls).await.unwrap();
+
+    // the JWT contains a HMAC key but we configured a restriction to RSA signing
+    let criteria = JWTCriteria {
+        kid: None,
+        alg: Algorithm::HS256,
+    };
+
+    assert!(search_jwks(&jwks_manager, &criteria).is_none());
 }

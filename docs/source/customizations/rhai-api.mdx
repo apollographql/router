@@ -9,7 +9,7 @@ This article documents symbols and behaviors that are specific to [Rhai customiz
 
 ## Entry point hooks
 
-Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling pipeline](./overview/#how-customizations-work). To do so, it defines whichever combination of the following entry point hooks it requires:
+Your Rhai script's [main file](./rhai/#the-main-file) hooks into the individual services of the Apollo Router's [request-handling lifecycle](./rhai/#router-request-lifecycle). To do so, it defines whichever combination of the following entry point hooks it requires:
 
 ```rhai
 fn supergraph_service(service) {}
@@ -108,6 +108,7 @@ fn supergraph_service(service) {
                 }]
             }
         };
+    };
     // Map our request using our closure
     service.map_request(f);
 }
@@ -275,8 +276,6 @@ The context is a generic key/value store that exists for the entire lifespan of 
 
 Keys must be strings, but values can be any Rhai object.
 
-For more information, see [Define necessary context](./native#5-define-necessary-context).
-
 ```rhai
 // You can interact with request.context as an indexed variable
 request.context["contextual"] = 42; // Adds value 42 to the context with key "contextual"
@@ -436,6 +435,16 @@ The following fields are identical in behavior to their `request` counterparts:
 * [`context`](#requestcontext)
 * [`headers`](#requestheaders)
 * [`body.extensions`](#requestbodyextensions)
+
+Note: Be particularly careful when interacting with headers in a response context. For supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+
+```rhai
+    if response.is_primary() {
+        print(`all response headers: ${response.headers}`);
+    } else {
+        print(`don't try to access headers`);
+    }
+```
 
 Other fields are described below.
 
