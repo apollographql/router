@@ -72,7 +72,13 @@ JSON-formatted logging provides compatibility with common searchable logging too
 > If you want to give feedback or participate in that feature feel free to join [this discussion on GitHub](https://github.com/apollographql/router/discussions/1961).
 
 By default some of our logs containing sensitive data (like request body, response body, headers) are not displayed even if we are in the right log level.
-For example if you need to display raw responses from one of your subgraph it won't be displayed by default. To enable them you have to configure it with the `when_header` setting.
+By default, the router _doesn't_ log certain values that might contain sensitive data, even if a sufficient log level is set:
+
+ - Request bodies
+ - Response bodies
+ - Headers 
+
+You can enable selective logging of these values via the `when_header` option:
 Here is an example on how you can configure it:
 
 ```yaml title="router.yaml"
