@@ -263,7 +263,7 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan\0{}\0{}\0{}",
+            "plan.{}.{}.{}",
             self.schema_id.as_deref().unwrap_or("-"),
             query,
             operation
