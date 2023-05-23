@@ -4838,10 +4838,6 @@ fn fragment_on_interface() {
 
         fragment FragmentA on MyTypeA {
             something
-        }
-
-        fragment FragmentB on MyTypeB {
-            somethingElse
         }",
         )
         .response(json! {{
@@ -4932,10 +4928,6 @@ fn fragment_on_interface() {
                 foo
                 ...FragmentB
             }
-        }
-
-        fragment FragmentA on MyTypeA {
-            something
         }
 
         fragment FragmentB on MyTypeB {
