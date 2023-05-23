@@ -3225,7 +3225,9 @@ fn it_statically_includes() {
     let query = Query::parse(
         "query  {
             name @include(if: false)
-            review @include(if: false)
+            review @include(if: false) {
+                body
+            }
             product @include(if: true) {
                 name
             }
@@ -3245,7 +3247,9 @@ fn it_statically_includes() {
     let query = Query::parse(
         "query  {
             name @include(if: false)
-            review
+            review {
+                body
+            }
             product @include(if: true) {
                 name
             }
@@ -3272,7 +3276,9 @@ fn it_statically_includes() {
         "query  {
             name @include(if: false)
             ... @include(if: false) {
-                review
+                review {
+                    body
+                }
             }
             product @include(if: true) {
                 name
@@ -3306,7 +3312,9 @@ fn it_statically_includes() {
         }
         query  {
             name @include(if: false)
-            review
+            review {
+                body
+            }
             product @include(if: true) {
                 ...ProductName @include(if: false)
             }
@@ -3361,7 +3369,9 @@ fn it_statically_skips() {
     let query = Query::parse(
         "query  {
             name @skip(if: true)
-            review @skip(if: true)
+            review @skip(if: true) {
+                body
+            }
             product @skip(if: false) {
                 name
             }
@@ -3381,7 +3391,9 @@ fn it_statically_skips() {
     let query = Query::parse(
         "query  {
             name @skip(if: true)
-            review
+            review {
+                body
+            }
             product @skip(if: false) {
                 name
             }
@@ -3408,7 +3420,9 @@ fn it_statically_skips() {
         "query  {
             name @skip(if: true)
             ... @skip(if: true) {
-                review
+                review {
+                    body
+                }
             }
             product @skip(if: false) {
                 name
@@ -3442,7 +3456,9 @@ fn it_statically_skips() {
         }
         query  {
             name @skip(if: true)
-            review
+            review {
+                body
+            }
             product @skip(if: false) {
                 ...ProductName @skip(if: true)
             }
