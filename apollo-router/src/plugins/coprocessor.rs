@@ -582,7 +582,7 @@ where
     // are present in our co_processor_output.
 
     let new_body = match co_processor_output.body {
-        Some(bytes) => Body::from(serde_json::to_vec(&bytes)?),
+        Some(bytes) => Body::from(bytes),
         None => Body::from(bytes),
     };
 
