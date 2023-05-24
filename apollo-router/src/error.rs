@@ -569,4 +569,38 @@ mod tests {
 
         assert_eq!(expected_gql_error, error.to_graphql_error(None));
     }
+
+    #[test]
+    fn test_into_graphql_error_introspection_with_message_handled_correctly() {
+        let expected_message = "no can introspect".to_string();
+        let ie = IntrospectionError {
+            message: Some(expected_message.clone()),
+        };
+        let error = QueryPlannerError::Introspection(ie);
+        let mut graphql_errors = error.into_graphql_errors().expect("vec of graphql errors");
+        assert_eq!(graphql_errors.len(), 1);
+        let first_error = graphql_errors.pop().expect("has to be one error");
+        assert_eq!(first_error.message, expected_message);
+        assert_eq!(first_error.extensions.len(), 1);
+        assert_eq!(
+            first_error.extensions.get("code").expect("has code"),
+            "INTROSPECTION_ERROR"
+        );
+    }
+
+    #[test]
+    fn test_into_graphql_error_introspection_without_message_handled_correctly() {
+        let expected_message = "introspection error".to_string();
+        let ie = IntrospectionError { message: None };
+        let error = QueryPlannerError::Introspection(ie);
+        let mut graphql_errors = error.into_graphql_errors().expect("vec of graphql errors");
+        assert_eq!(graphql_errors.len(), 1);
+        let first_error = graphql_errors.pop().expect("has to be one error");
+        assert_eq!(first_error.message, expected_message);
+        assert_eq!(first_error.extensions.len(), 1);
+        assert_eq!(
+            first_error.extensions.get("code").expect("has code"),
+            "INTROSPECTION_ERROR"
+        );
+    }
 }
