@@ -66,7 +66,6 @@ impl Control {
     }
 }
 
-// TODO: Builder
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Externalizable<T> {
@@ -96,10 +95,85 @@ pub(crate) struct Externalizable<T> {
     pub(crate) status_code: Option<u16>,
 }
 
+#[buildstructor::buildstructor]
 impl<T> Externalizable<T>
 where
     T: Debug + DeserializeOwned + Serialize + Send + Sync,
 {
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Router
+    /// `Externalizable`.
+    ///
+    fn router_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: Option<String>,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        path: Option<String>,
+        sdl: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::RouterRequest | PipelineStep::RouterResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id,
+            headers,
+            body,
+            context,
+            status_code,
+            sdl,
+            uri: None,
+            path,
+            method,
+            service_name: None,
+        }
+    }
+
+    #[builder(visibility = "pub(crate)")]
+    /// This is the constructor (or builder) to use when constructing a Subgraph
+    /// `Externalizable`.
+    ///
+    fn subgraph_new(
+        stage: PipelineStep,
+        control: Option<Control>,
+        id: Option<String>,
+        headers: Option<HashMap<String, Vec<String>>>,
+        body: Option<T>,
+        context: Option<Context>,
+        status_code: Option<u16>,
+        method: Option<String>,
+        service_name: Option<String>,
+        uri: Option<String>,
+    ) -> Self {
+        assert!(matches!(
+            stage,
+            PipelineStep::SubgraphRequest | PipelineStep::SubgraphResponse
+        ));
+        Externalizable {
+            version: EXTERNALIZABLE_VERSION,
+            stage: stage.to_string(),
+            control,
+            id,
+            headers,
+            body,
+            context,
+            status_code,
+            sdl: None,
+            uri,
+            path: None,
+            method,
+            service_name,
+        }
+    }
+
     pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
         C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
@@ -129,5 +203,52 @@ where
             .await
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn it_will_build_router_externalizable_correctly() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::RouterRequest)
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::RouterResponse)
+            .build();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_router_externalizable_incorrectly() {
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SubgraphRequest)
+            .build();
+        Externalizable::<String>::router_builder()
+            .stage(PipelineStep::SubgraphResponse)
+            .build();
+    }
+
+    #[test]
+    fn it_will_build_subgraph_externalizable_correctly() {
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::SubgraphRequest)
+            .build();
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::SubgraphResponse)
+            .build();
+    }
+
+    #[test]
+    #[should_panic]
+    fn it_will_not_build_subgraph_externalizable_incorrectly() {
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::RouterRequest)
+            .build();
+        Externalizable::<String>::subgraph_builder()
+            .stage(PipelineStep::RouterResponse)
+            .build();
     }
 }
