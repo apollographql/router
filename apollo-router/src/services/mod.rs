@@ -22,6 +22,7 @@ pub(crate) use crate::services::subgraph::Request as SubgraphRequest;
 pub(crate) use crate::services::subgraph::Response as SubgraphResponse;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
+pub(crate) use crate::services::supergraph_service::HasSchema;
 pub(crate) use crate::services::supergraph_service::SupergraphCreator;
 
 pub mod execution;

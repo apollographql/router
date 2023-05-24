@@ -258,7 +258,7 @@ async fn plan_query(
     planning
         .call(
             QueryPlannerRequest::builder()
-                .query(query.expect("the query presence was already checked by a plugin"))
+                .query(query.expect("query presence was already checked by a plugin"))
                 .and_operation_name(operation_name)
                 .context(context)
                 .build(),

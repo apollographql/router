@@ -293,6 +293,8 @@ mod tests {
     use crate::error::PlanErrors;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::Configuration;
 
     mock! {
         #[derive(Debug)]
@@ -355,7 +357,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    "query1".into(),
+                    parse_query("query Me { me { firstName } }".to_string(), None).await,
                     Some("".into()),
                     Context::new()
                 ))
@@ -364,7 +366,7 @@ mod tests {
         }
         assert!(planner
             .call(QueryPlannerRequest::new(
-                "query2".into(),
+                parse_query("query Me { me { lastName } }".to_string(), None).await,
                 Some("".into()),
                 Context::new()
             ))
@@ -415,7 +417,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    "".into(),
+                    parse_query("query Me { me { firstName } }".to_string(), None).await,
                     Some("".into()),
                     Context::new()
                 ))
@@ -426,5 +428,24 @@ mod tests {
                 .lock()
                 .contains_key::<UsageReporting>());
         }
+    }
+
+    async fn parse_query(query: String, operation_name: Option<String>) -> Query {
+        let configuration: Arc<Configuration> = Default::default();
+        let api_schema = None;
+
+        let parser = QueryParsingLayer::new(
+            Arc::new(
+                Schema::parse(
+                    include_str!("testdata/schema.graphql"),
+                    &configuration,
+                    api_schema,
+                )
+                .unwrap(),
+            ),
+            Arc::clone(&configuration),
+        );
+
+        parser.parse((query, operation_name)).await.unwrap()
     }
 }

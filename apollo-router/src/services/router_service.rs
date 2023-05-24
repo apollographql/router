@@ -112,6 +112,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     });
 
     RouterCreator::new(
+        QueryParsingLayer::new(supergraph_service.schema(), Arc::clone(&configuration)),
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         configuration,
     )
@@ -152,6 +153,7 @@ pub(crate) async fn empty() -> impl Service<
         .returning(MockSupergraphService::new);
 
     RouterCreator::new(
+        QueryParsingLayer::new(supergraph_service.schema(), Default::default()),
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
         Default::default(),
     )

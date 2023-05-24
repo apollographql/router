@@ -92,8 +92,10 @@ mod test {
     use crate::plugin::DynPlugin;
     use crate::query_planner::BridgeQueryPlanner;
     use crate::router_factory::create_plugins;
+    use crate::services::layers::query_parsing::QueryParsingLayer;
     use crate::services::router;
     use crate::services::router_service::RouterCreator;
+    use crate::services::HasSchema;
     use crate::services::PluggableSupergraphServiceBuilder;
     use crate::services::SupergraphRequest;
     use crate::Configuration;
@@ -208,8 +210,10 @@ mod test {
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());
 
+        let supergraph_creator = builder.build().await.expect("should build");
         RouterCreator::new(
-            Arc::new(builder.build().await.expect("should build")),
+            QueryParsingLayer::new(supergraph_creator.schema(), Default::default()),
+            Arc::new(supergraph_creator),
             Default::default(),
         )
         .await

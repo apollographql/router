@@ -294,18 +294,16 @@ mod tests {
     use test_log::test;
 
     use super::*;
+    use crate::services::layers::query_parsing::QueryParsingLayer;
 
     const EXAMPLE_SCHEMA: &str = include_str!("testdata/schema.graphql");
 
     #[test(tokio::test)]
     async fn test_plan() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+        let result = plan(EXAMPLE_SCHEMA, include_str!("testdata/query.graphql"), None)
             .await
             .unwrap();
-        let result = planner
-            .get((include_str!("testdata/query.graphql").into(), None))
-            .await
-            .unwrap();
+
         if let QueryPlannerContent::Plan { plan, .. } = result {
             insta::with_settings!({sort_maps => true}, {
                 insta::assert_json_snapshot!("plan_usage_reporting", plan.usage_reporting);
@@ -318,16 +316,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_invalid_query() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
-        let err = planner
-            .get((
-                "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
-                None,
-            ))
-            .await
-            .unwrap_err();
+        let err = plan(
+            EXAMPLE_SCHEMA,
+            "fragment UnusedTestFragment on User { id } query { me { id } }",
+            None,
+        )
+        .await
+        .unwrap_err();
 
         match err {
             QueryPlannerError::PlanningErrors(plan_errors) => {
@@ -352,20 +347,13 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let err = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap()
-            // test the planning part separately because it is a valid introspection query
-            // it should be caught by the introspection part, but just in case, we check
-            // that the query planner would return an empty plan error if it received an
-            // introspection query
-            .plan(
-                include_str!("testdata/unknown_introspection_query.graphql").into(),
-                None,
-                Query::default(),
-            )
-            .await
-            .unwrap_err();
+        let err = plan(
+            EXAMPLE_SCHEMA,
+            include_str!("testdata/unknown_introspection_query.graphql"),
+            None,
+        )
+        .await
+        .unwrap_err();
 
         match err {
             QueryPlannerError::EmptyPlan(usage_reporting) => {
@@ -381,10 +369,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_plan_error() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
-        let result = planner.get(("".into(), None)).await;
+        let result = plan(EXAMPLE_SCHEMA, "", None).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
@@ -394,11 +379,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_single_aliased_root_typename() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
-        let result = planner
-            .get(("{ x: __typename }".into(), None))
+        let result = plan(EXAMPLE_SCHEMA, "{ x: __typename }", None)
             .await
             .unwrap();
         if let QueryPlannerContent::Introspection { response } = result {
@@ -413,11 +394,7 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_two_root_typenames() {
-        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
-            .await
-            .unwrap();
-        let result = planner
-            .get(("{ x: __typename __typename }".into(), None))
+        let result = plan(EXAMPLE_SCHEMA, "{ x: __typename __typename }", None)
             .await
             .unwrap();
         if let QueryPlannerContent::Introspection { response } = result {
@@ -428,5 +405,31 @@ mod tests {
         } else {
             panic!();
         }
+    }
+
+    async fn plan(
+        schema: &str,
+        query: &str,
+        operation_name: Option<String>,
+    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let configuration: Arc<Configuration> = Default::default();
+        let api_schema = None;
+        let parser = QueryParsingLayer::new(
+            Arc::new(Schema::parse(schema, &configuration, api_schema).unwrap()),
+            Arc::clone(&configuration),
+        );
+        let planner = BridgeQueryPlanner::new(schema.to_string(), configuration)
+            .await
+            .unwrap();
+
+        planner
+            .get(
+                parser
+                    .parse((query.to_string(), operation_name.clone()))
+                    .await
+                    .unwrap(),
+                operation_name,
+            )
+            .await
     }
 }
