@@ -22,7 +22,7 @@ mod test {
             .expect("got redis connection");
 
         connection
-        .del::<&'static str, ()>("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-").await.unwrap();
+        .del::<&'static str, ()>("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112").await.unwrap();
 
         let supergraph = apollo_router::TestHarness::builder()
             .with_subgraph_network_requests()
@@ -52,7 +52,7 @@ mod test {
         let _ = supergraph.oneshot(request).await?.next_response().await;
 
         let s:String = connection
-          .get("plan\x005abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76\x00{ topProducts { name name2:name } }\x00-")
+          .get("plan.5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76.4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec.3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112")
           .await
           .unwrap();
         let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();

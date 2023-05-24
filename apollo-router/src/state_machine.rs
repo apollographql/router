@@ -6,6 +6,8 @@ use std::sync::Arc;
 
 use futures::prelude::*;
 use tokio::sync::mpsc;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::OwnedRwLockWriteGuard;
 use tokio::sync::RwLock;
 use ApolloRouterError::ServiceCreationError;
@@ -385,6 +387,8 @@ where
     router_configurator: FA,
     pub(crate) listen_addresses: Arc<RwLock<ListenAddresses>>,
     listen_addresses_guard: Option<OwnedRwLockWriteGuard<ListenAddresses>>,
+    #[cfg(test)]
+    notify_updated: Arc<Notify>,
 }
 
 impl<S, FA> StateMachine<S, FA>
@@ -407,6 +411,31 @@ where
             router_configurator: router_factory,
             listen_addresses,
             listen_addresses_guard,
+            #[cfg(test)]
+            notify_updated: Default::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_tests(
+        http_server_factory: S,
+        router_factory: FA,
+        notify_updated: Arc<Notify>,
+    ) -> Self {
+        // Listen address is created locked so that if a consumer tries to examine the listen address before the state machine has reached running state they are blocked.
+        let listen_addresses: Arc<RwLock<ListenAddresses>> = Default::default();
+        let listen_addresses_guard = Some(
+            listen_addresses
+                .clone()
+                .try_write_owned()
+                .expect("lock just created, qed"),
+        );
+        Self {
+            http_server_factory,
+            router_configurator: router_factory,
+            listen_addresses,
+            listen_addresses_guard,
+            notify_updated,
         }
     }
 
@@ -452,12 +481,16 @@ where
                 NoMoreEntitlement => state.no_more_entitlement().await,
                 Shutdown => state.shutdown().await,
             };
+
+            #[cfg(test)]
+            self.notify_updated.notify_one();
+
             tracing::debug!(
                 "state machine event: {event_name}, transitioned from: {last_state} to: {state:?}"
             );
 
             // If we've errored then exit even if there are potentially more messages
-            if matches!(&state, Errored(_)) {
+            if matches!(&state, Stopped | Errored(_)) {
                 break;
             }
         }
@@ -522,7 +555,12 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![NoMoreConfiguration],).await,
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![NoMoreConfiguration])
+            )
+            .await,
             Err(NoConfiguration)
         );
     }
@@ -532,7 +570,12 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![NoMoreSchema],).await,
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![NoMoreSchema])
+            )
+            .await,
             Err(NoSchema)
         );
     }
@@ -542,7 +585,12 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![NoMoreEntitlement],).await,
+            execute(
+                server_factory,
+                router_factory,
+                stream::iter(vec![NoMoreEntitlement])
+            )
+            .await,
             Err(NoEntitlement)
         );
     }
@@ -562,12 +610,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -584,12 +632,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::EntitledHalt),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -606,12 +654,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::EntitledWarn),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -629,14 +677,14 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     UpdateEntitlement(EntitlementState::Unentitled),
                     UpdateConfiguration(test_config_restricted()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -653,12 +701,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(test_config_restricted()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Unentitled),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Err(ApolloRouterError::EntitlementViolation)
@@ -675,14 +723,14 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::Unentitled),
                     UpdateConfiguration(test_config_restricted()),
                     UpdateEntitlement(EntitlementState::Entitled),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -703,7 +751,7 @@ mod tests {
         let router_factory = create_mock_router_configurator(0);
         let (server_factory, _) = create_mock_server_factory(0);
         assert_matches!(
-            execute(server_factory, router_factory, vec![Shutdown],).await,
+            execute(server_factory, router_factory, stream::iter(vec![Shutdown])).await,
             Ok(())
         );
     }
@@ -717,12 +765,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -739,13 +787,13 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateEntitlement(EntitlementState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -762,13 +810,13 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(minimal_schema.to_owned()),
                     UpdateEntitlement(EntitlementState::default()),
                     UpdateEntitlement(EntitlementState::default()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -785,7 +833,7 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
@@ -800,7 +848,7 @@ mod tests {
                             .unwrap()
                     ),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -817,12 +865,12 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -844,11 +892,11 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
-                ],
+                ])
             )
             .await,
             Err(ApolloRouterError::ServiceCreationError(_))
@@ -882,13 +930,13 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
                     UpdateSchema(example_schema()),
                     Shutdown
-                ],
+                ])
             )
             .await,
             Ok(())
@@ -933,7 +981,7 @@ mod tests {
             execute(
                 server_factory,
                 router_factory,
-                vec![
+                stream::iter(vec![
                     UpdateConfiguration(Configuration::builder().build().unwrap()),
                     UpdateSchema(example_schema()),
                     UpdateEntitlement(EntitlementState::default()),
@@ -945,7 +993,7 @@ mod tests {
                     ),
                     UpdateSchema(example_schema()),
                     Shutdown
-                ],
+                ]),
             )
             .await,
             Ok(())
@@ -1051,12 +1099,10 @@ mod tests {
     async fn execute(
         server_factory: MockMyHttpServerFactory,
         router_factory: MockMyRouterConfigurator,
-        events: Vec<Event>,
+        events: impl Stream<Item = Event> + Unpin,
     ) -> Result<(), ApolloRouterError> {
         let state_machine = StateMachine::new(server_factory, router_factory);
-        state_machine
-            .process_events(stream::iter(events).boxed())
-            .await
+        state_machine.process_events(events).await
     }
 
     fn create_mock_server_factory(
