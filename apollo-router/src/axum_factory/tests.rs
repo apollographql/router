@@ -456,7 +456,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let response = client
         .post(url.as_str())
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -480,7 +480,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
     let response = client
         .get(url.as_str())
         .header(ACCEPT_ENCODING, HeaderValue::from_static("gzip"))
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { username } }" }))
         .send()
         .await
         .unwrap()
@@ -511,7 +511,7 @@ async fn it_compress_response_body() -> Result<(), ApolloRouterError> {
 
 #[tokio::test]
 async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
-    let original_body = json!({ "query": "query" });
+    let original_body = json!({ "query": "query { me { username } }" });
     let mut encoder = GzipEncoder::new(Vec::new());
     encoder
         .write_all(original_body.to_string().as_bytes())
@@ -611,7 +611,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -626,7 +626,7 @@ async fn response() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { username } }" }))
         .send()
         .await
         .unwrap()
@@ -655,7 +655,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
     // Post query
     let err = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -668,7 +668,7 @@ async fn bad_response() -> Result<(), ApolloRouterError> {
     // Get query
     let err = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { username } }" }))
         .send()
         .await
         .unwrap()
@@ -716,7 +716,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -737,7 +737,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
                 .unwrap()
                 .to_string(),
         )
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -752,7 +752,7 @@ async fn response_with_root_wildcard() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { username } }" }))
         .send()
         .await
         .unwrap()
@@ -802,7 +802,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -817,7 +817,7 @@ async fn response_with_custom_endpoint() -> Result<(), ApolloRouterError> {
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { username } }" }))
         .send()
         .await
         .unwrap()
@@ -866,7 +866,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     // Post query
     let response = client
         .post(url.as_str())
-        .body(json!({ "query": "query" }).to_string())
+        .body(json!({ "query": "query { me { username } }" }).to_string())
         .send()
         .await
         .unwrap()
@@ -881,7 +881,7 @@ async fn response_with_custom_prefix_endpoint() -> Result<(), ApolloRouterError>
     // Get query
     let response = client
         .get(url.as_str())
-        .query(&json!({ "query": "query" }))
+        .query(&json!({ "query": "query { me { username } }" }))
         .send()
         .await
         .unwrap()
@@ -936,7 +936,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         // Post query
         let response = client
             .post(url.as_str())
-            .body(json!({ "query": "query" }).to_string())
+            .body(json!({ "query": "query { me { username } }" }).to_string())
             .send()
             .await
             .unwrap()
@@ -951,7 +951,7 @@ async fn response_with_custom_endpoint_wildcard() -> Result<(), ApolloRouterErro
         // Get query
         let response = client
             .get(url.as_str())
-            .query(&json!({ "query": "query" }))
+            .query(&json!({ "query": "query { me { username } }" }))
             .send()
             .await
             .unwrap()
@@ -994,7 +994,7 @@ async fn response_failure() -> Result<(), ApolloRouterError> {
         .body(
             json!(
             {
-              "query": "query",
+              "query": "query { me { username } }",
             })
             .to_string(),
         )
@@ -2061,7 +2061,7 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::POST,
-        r#"{"query":"query"}"#,
+        r#"{"query":"query { me { username } }"}"#,
     )
     .await;
 
