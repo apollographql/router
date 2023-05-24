@@ -47,20 +47,15 @@ use super::HasSchema;
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
 use crate::cache::DeduplicatingCache;
-use crate::error::QueryPlannerError;
 use crate::graphql;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
-use crate::query_planner::QueryKey;
 use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
 use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
-use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
-use crate::spec::Query;
-use crate::spec::Schema;
 use crate::Configuration;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -118,7 +113,7 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
 
     RouterCreator::new(
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &configuration,
+        configuration,
     )
     .await
     .make()
@@ -158,7 +153,7 @@ pub(crate) async fn empty() -> impl Service<
 
     RouterCreator::new(
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &Configuration::default(),
+        Default::default(),
     )
     .await
     .make()
@@ -513,6 +508,7 @@ where
         Send,
 {
     pub(crate) async fn new(
+        query_parsing_layer: QueryParsingLayer,
         supergraph_creator: Arc<SF>,
         configuration: Arc<Configuration>,
     ) -> Self {
@@ -527,10 +523,7 @@ where
         };
 
         Self {
-            query_parsing_layer: QueryParsingLayer::new(
-                supergraph_creator.schema(),
-                Arc::clone(&configuration),
-            ),
+            query_parsing_layer,
             supergraph_creator,
             static_page,
             apq_layer,
@@ -581,6 +574,7 @@ mod tests {
 
     use super::*;
     use crate::services::supergraph;
+    use crate::services::supergraph::Request as SupergraphRequest;
     use crate::Context;
 
     // Test Vary processing

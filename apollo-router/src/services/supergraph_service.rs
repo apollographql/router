@@ -20,6 +20,7 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::layers::content_negociation;
+use super::layers::query_parsing::QueryParsingLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
 use super::subgraph_service::MakeSubgraphService;
@@ -45,6 +46,7 @@ use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -143,7 +145,14 @@ where
         content,
         context,
         errors,
-    } = match plan_query(planning, body, context.clone()).await {
+    } = match plan_query(
+        planning,
+        req.query,
+        body.operation_name.clone(),
+        context.clone(),
+    )
+    .await
+    {
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
@@ -242,18 +251,15 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    body: &graphql::Request,
+    query: Option<Query>,
+    operation_name: Option<String>,
     context: Context,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     planning
         .call(
             QueryPlannerRequest::builder()
-                .query(
-                    body.query
-                        .clone()
-                        .expect("the query presence was already checked by a plugin"),
-                )
-                .and_operation_name(body.operation_name.clone())
+                .query(query.expect("the query presence was already checked by a plugin"))
+                .and_operation_name(operation_name)
                 .context(context)
                 .build(),
         )
@@ -462,9 +468,12 @@ impl SupergraphCreator {
 
     pub(crate) async fn warm_up_query_planner(
         &mut self,
+        query_parser: &QueryParsingLayer,
         cache_keys: Vec<(String, Option<String>)>,
     ) {
-        self.query_planner_service.warm_up(cache_keys).await
+        self.query_planner_service
+            .warm_up(query_parser, cache_keys)
+            .await
     }
 
     /// Create a test service.

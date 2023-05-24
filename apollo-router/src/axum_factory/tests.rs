@@ -2306,7 +2306,7 @@ async fn test_supergraph_timeout() {
     let plugins = create_plugins(&conf, &schema, None).await.unwrap();
 
     let mut builder = PluggableSupergraphServiceBuilder::new(planner)
-        .with_configuration(conf.clone())
+        .with_configuration(Arc::clone(&conf))
         .with_subgraph_service("accounts", MockSubgraph::new(HashMap::new()));
 
     for (name, plugin) in plugins.into_iter() {
@@ -2314,12 +2314,12 @@ async fn test_supergraph_timeout() {
     }
     let supergraph_creator = builder.build().await.unwrap();
 
-    let service = RouterCreator::new(Arc::new(supergraph_creator), &conf)
+    let service = RouterCreator::new(Arc::new(supergraph_creator), Arc::clone(&conf))
         .await
         .make();
 
     // keep the server handle around otherwise it will immediately shutdown
-    let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
+    let (_server, client) = init_with_config(service, conf, MultiMap::new())
         .await
         .unwrap();
     let url = "http://localhost:4000/";

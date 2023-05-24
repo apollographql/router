@@ -6,7 +6,6 @@
 // This entire file is license key functionality
 use std::sync::Arc;
 
-use sha2::Digest;
 use tracing_futures::Instrument;
 
 use crate::error::QueryPlannerError;
@@ -49,7 +48,7 @@ impl QueryParsingLayer {
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         let op_name = request.supergraph_request.body().operation_name.as_ref();
         let query = self
-            .parse_query((
+            .parse((
                 request.supergraph_request.body().query.clone().unwrap(),
                 op_name.cloned(),
             ))
@@ -71,7 +70,7 @@ impl QueryParsingLayer {
         })
     }
 
-    async fn parse_query(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
+    pub(crate) async fn parse(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
         let (query, operation_name) = key;
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();

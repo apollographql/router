@@ -25,10 +25,12 @@ use crate::plugin::PluginFactory;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
+use crate::services::layers::query_parsing::QueryParsingLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::transport;
+use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::SubgraphService;
 use crate::services::SupergraphCreator;
@@ -209,6 +211,10 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         // Final creation after this line we must NOT fail to go live with the new router from this point as some plugins may interact with globals.
         let mut supergraph_creator = builder.build().await?;
 
+        // Instantiate the parser here so we can use it to warm up the planner below
+        let query_parsing_layer =
+            QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&configuration));
+
         if let Some(router) = previous_router {
             if configuration.supergraph.query_planning.warmed_up_queries > 0 {
                 let cache_keys = router
@@ -221,12 +227,19 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
                         cache_keys.len()
                     );
 
-                    supergraph_creator.warm_up_query_planner(cache_keys).await;
+                    supergraph_creator
+                        .warm_up_query_planner(&query_parsing_layer, cache_keys)
+                        .await;
                 }
             }
         }
 
-        Ok(Self::RouterFactory::new(Arc::new(supergraph_creator), configuration).await)
+        Ok(Self::RouterFactory::new(
+            query_parsing_layer,
+            Arc::new(supergraph_creator),
+            configuration,
+        )
+        .await)
     }
 }
 

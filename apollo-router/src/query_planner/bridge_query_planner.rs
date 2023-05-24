@@ -15,10 +15,8 @@ use serde::Deserialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
-use tracing::Instrument;
 
 use super::PlanNode;
-use super::QueryKey;
 use crate::error::QueryPlannerError;
 use crate::error::ServiceBuildError;
 use crate::graphql;
@@ -38,7 +36,6 @@ pub(crate) struct BridgeQueryPlanner {
     planner: Arc<Planner<QueryPlanResult>>,
     schema: Arc<Schema>,
     introspection: Option<Arc<Introspection>>,
-    configuration: Arc<Configuration>,
 }
 
 impl BridgeQueryPlanner {
@@ -74,7 +71,6 @@ impl BridgeQueryPlanner {
             planner,
             schema,
             introspection,
-            configuration,
         })
     }
 
@@ -114,7 +110,6 @@ impl BridgeQueryPlanner {
             planner,
             schema,
             introspection,
-            configuration,
         })
     }
 
@@ -124,23 +119,6 @@ impl BridgeQueryPlanner {
 
     pub(crate) fn schema(&self) -> Arc<Schema> {
         self.schema.clone()
-    }
-
-    async fn parse_selections(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
-        let (query, operation_name) = key;
-        let schema = self.schema.clone();
-        let configuration = self.configuration.clone();
-        let task_result = tokio::task::spawn_blocking(move || {
-            let mut query = Query::parse(query, &schema, &configuration)?;
-            crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
-            Ok::<_, QueryPlannerError>(query)
-        })
-        .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"))
-        .await;
-        if let Err(err) = &task_result {
-            failfast_debug!("parsing query task failed: {}", err);
-        }
-        task_result?
     }
 
     async fn introspection(&self, query: String) -> Result<QueryPlannerContent, QueryPlannerError> {
@@ -161,13 +139,12 @@ impl BridgeQueryPlanner {
 
     async fn plan(
         &self,
-        query: String,
+        mut query: Query,
         operation: Option<String>,
-        mut selections: Query,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let planner_result = self
             .planner
-            .plan(query, operation)
+            .plan(query.string.clone(), operation)
             .await
             .map_err(QueryPlannerError::RouterBridgeError)?
             .into_result()
@@ -183,13 +160,13 @@ impl BridgeQueryPlanner {
                 usage_reporting,
             } => {
                 let subselections = node.parse_subselections(&self.schema)?;
-                selections.subselections = subselections;
+                query.subselections = subselections;
                 Ok(QueryPlannerContent::Plan {
                     plan: Arc::new(super::QueryPlan {
                         usage_reporting,
                         root: node,
                         formatted_query_plan,
-                        query: Arc::new(selections),
+                        query: Arc::new(query),
                     }),
                 })
             }
@@ -227,9 +204,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let this = self.clone();
         let fut = async move {
             let start = Instant::now();
-            let res = this
-                .get((req.query.clone(), req.operation_name.to_owned()))
-                .await;
+            let res = this.get(req.query, req.operation_name.to_owned()).await;
             let duration = start.elapsed().as_secs_f64();
             tracing::info!(histogram.apollo_router_query_planning_time = duration,);
 
@@ -265,19 +240,21 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 }
 
 impl BridgeQueryPlanner {
-    async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = self.parse_selections(key.clone()).await?;
-
-        if selections.contains_introspection() {
+    async fn get(
+        &self,
+        query: Query,
+        operation_name: Option<String>,
+    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        if query.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
             // (possibly aliased or repeated). (This does mean we fail to properly support
             // {"query": "query A {__typename} query B{somethingElse}", "operationName":"A"}.)
-            if let Some(output_keys) = selections
+            if let Some(output_keys) = query
                 .operations
                 .get(0)
                 .and_then(|op| op.is_only_typenames_with_output_keys())
             {
-                let operation_name = selections.operations[0].kind().to_string();
+                let operation_name = query.operations[0].kind().to_string();
                 let data: Value = Value::Object(Map::from_iter(
                     output_keys
                         .into_iter()
@@ -287,11 +264,11 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
-                return self.introspection(key.0).await;
+                return self.introspection(query.string.clone()).await;
             }
         }
 
-        self.plan(key.0, key.1, selections).await
+        self.plan(query, operation_name).await
     }
 }
 

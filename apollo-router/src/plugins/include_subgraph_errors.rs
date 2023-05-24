@@ -210,7 +210,7 @@ mod test {
 
         RouterCreator::new(
             Arc::new(builder.build().await.expect("should build")),
-            &Configuration::default(),
+            Default::default(),
         )
         .await
         .make()

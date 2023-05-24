@@ -18,6 +18,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::query_parsing::QueryParsingLayer;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -68,42 +69,51 @@ where
             .collect()
     }
 
-    pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
+    pub(crate) async fn warm_up(
+        &mut self,
+        query_parser: &QueryParsingLayer,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
         let schema_id = self.schema_id.clone();
 
         let mut count = 0usize;
-        for (query, operation) in cache_keys {
-            let caching_key = CachingQueryKey {
-                schema_id: schema_id.clone(),
-                query: query.clone(),
-                operation: operation.to_owned(),
-            };
-            let context = Context::new();
-
-            let entry = self.cache.get(&caching_key).await;
-            if entry.is_first() {
-                let request = QueryPlannerRequest {
-                    query,
-                    operation_name: operation,
-                    context: context.clone(),
+        for (query_string, operation) in cache_keys {
+            if let Ok(query) = query_parser
+                .parse((query_string.clone(), operation.clone()))
+                .await
+            {
+                let caching_key = CachingQueryKey {
+                    schema_id: schema_id.clone(),
+                    query: query_string,
+                    operation: operation.clone(),
                 };
+                let context = Context::new();
 
-                let res = match self.delegate.ready().await {
-                    Ok(service) => service.call(request).await,
-                    Err(_) => break,
-                };
+                let entry = self.cache.get(&caching_key).await;
+                if entry.is_first() {
+                    let request = QueryPlannerRequest {
+                        query,
+                        operation_name: operation,
+                        context: context.clone(),
+                    };
 
-                match res {
-                    Ok(QueryPlannerResponse { content, .. }) => {
-                        if let Some(content) = &content {
-                            count += 1;
-                            entry.insert(Ok(content.clone())).await;
+                    let res = match self.delegate.ready().await {
+                        Ok(service) => service.call(request).await,
+                        Err(_) => break,
+                    };
+
+                    match res {
+                        Ok(QueryPlannerResponse { content, .. }) => {
+                            if let Some(content) = &content {
+                                count += 1;
+                                entry.insert(Ok(content.clone())).await;
+                            }
                         }
-                    }
-                    Err(error) => {
-                        count += 1;
-                        let e = Arc::new(error);
-                        entry.insert(Err(e.clone())).await;
+                        Err(error) => {
+                            count += 1;
+                            let e = Arc::new(error);
+                            entry.insert(Err(e.clone())).await;
+                        }
                     }
                 }
             }
@@ -142,7 +152,7 @@ where
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
-                query: request.query.clone(),
+                query: request.query.string.clone(),
                 operation: request.operation_name.to_owned(),
             };
 

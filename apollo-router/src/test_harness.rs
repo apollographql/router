@@ -17,10 +17,12 @@ use crate::plugin::PluginInit;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::execution;
+use crate::services::layers::query_parsing::QueryParsingLayer;
 use crate::services::router;
 use crate::services::router_service::RouterCreator;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::HasSchema;
 use crate::services::SupergraphCreator;
 
 #[cfg(test)]
@@ -255,7 +257,12 @@ impl<'a> TestHarness<'a> {
     /// Builds the router service
     pub async fn build_router(self) -> Result<router::BoxCloneService, BoxError> {
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator = RouterCreator::new(Arc::new(supergraph_creator), config).await;
+        let router_creator = RouterCreator::new(
+            QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
+            Arc::new(supergraph_creator),
+            config,
+        )
+        .await;
 
         Ok(tower::service_fn(move |request: router::Request| {
             let router = ServiceBuilder::new().service(router_creator.make()).boxed();
@@ -273,8 +280,12 @@ impl<'a> TestHarness<'a> {
         use crate::uplink::entitlement::EntitlementState;
 
         let (config, supergraph_creator) = self.build_common().await?;
-        let router_creator =
-            RouterCreator::new(Arc::new(supergraph_creator), Arc::new(self.schema), config).await;
+        let router_creator = RouterCreator::new(
+            QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&config)),
+            Arc::new(supergraph_creator),
+            Arc::clone(&config),
+        )
+        .await;
         let web_endpoints = router_creator.web_endpoints();
 
         let routers = make_axum_router(

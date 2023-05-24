@@ -10,13 +10,14 @@ use static_assertions::assert_impl_all;
 
 use crate::graphql;
 use crate::query_planner::QueryPlan;
+use crate::spec::Query;
 use crate::Context;
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Request {
-    pub(crate) query: String,
+    pub(crate) query: Query,
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
 }
@@ -27,7 +28,7 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
-    pub(crate) fn new(query: String, operation_name: Option<String>, context: Context) -> Request {
+    pub(crate) fn new(query: Query, operation_name: Option<String>, context: Context) -> Request {
         Self {
             query,
             operation_name,
