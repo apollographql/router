@@ -1253,7 +1253,9 @@ mod tests {
             .await
             .unwrap();
 
-        let request = Request::builder().query(r#"{ me { username } }"#).build();
+        let request = Request::builder()
+            .query(r#"query { me { username } }"#)
+            .build();
 
         let response = router_handle.request(request).await.unwrap();
         assert_eq!(
@@ -1299,7 +1301,9 @@ mod tests {
             .unwrap();
 
         // let's send a valid query
-        let request = Request::builder().query(r#"{ me { username } }"#).build();
+        let request = Request::builder()
+            .query(r#"query { me { username } }"#)
+            .build();
         let response = router_handle.request(request).await.unwrap();
 
         assert_eq!(
@@ -1315,7 +1319,7 @@ mod tests {
 
         // the name field is not present yet
         let request = Request::builder()
-            .query(r#"{ me { username name } }"#)
+            .query(r#"query { me { username name } }"#)
             .build();
         let response = router_handle.request(request).await.unwrap();
 
@@ -1338,7 +1342,7 @@ mod tests {
 
         // the request should now make it through
         let request = Request::builder()
-            .query(r#"{ me { username name } }"#)
+            .query(r#"query { me { username name } }"#)
             .build();
 
         let response = router_handle.request(request).await.unwrap();

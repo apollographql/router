@@ -357,7 +357,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    parse_query("query Me { me { firstName } }".to_string(), None).await,
+                    parse_query("query Me { me { username } }".to_string(), None).await,
                     Some("".into()),
                     Context::new()
                 ))
@@ -366,7 +366,7 @@ mod tests {
         }
         assert!(planner
             .call(QueryPlannerRequest::new(
-                parse_query("query Me { me { lastName } }".to_string(), None).await,
+                parse_query("query Me { me { name { first } } }".to_string(), None).await,
                 Some("".into()),
                 Context::new()
             ))
@@ -417,7 +417,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    parse_query("query Me { me { firstName } }".to_string(), None).await,
+                    parse_query("query Me { me { firstname } }".to_string(), None).await,
                     Some("".into()),
                     Context::new()
                 ))

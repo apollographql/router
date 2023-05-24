@@ -617,7 +617,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_extracts_query_and_operation_name() {
-        let query = "query";
+        let query = "query { me { firstname } }";
         let expected_query = query;
         let operation_name = "operationName";
         let expected_operation_name = operation_name;
