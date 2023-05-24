@@ -1,4 +1,4 @@
-### Fix router deferred response and body type issues ([Issue #3015](https://github.com/apollographql/router/issues/3015))
+### Fix router coprocessor deferred response buffering and change JSON body type from Object to String ([Issue #3015](https://github.com/apollographql/router/issues/3015))
 
 The current implementation of the `RouterResponse` processing for coprocessors forces buffering of response data before passing the data to a coprocessor. This is a bug, because deferred responses should be processed progressively with a stream of calls to the coprocessor as each chunk of data becomes available.
 
