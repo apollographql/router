@@ -1591,7 +1591,7 @@ async fn response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test }",
+      "query": "query { me { username } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let response = client
@@ -1652,7 +1652,7 @@ async fn deferred_response_shape() -> Result<(), ApolloRouterError> {
     let (server, client) = init(router_service).await;
     let query = json!(
     {
-      "query": "query { test ... @defer { other } }",
+      "query": "query { me { username ...@defer { name { first last } } } }",
     });
     let url = format!("{}/", server.graphql_listen_address().as_ref().unwrap());
     let mut response = client
