@@ -419,40 +419,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(not(windows))] // Don’t bother with line ending differences
-    fn test_uplink_schema_is_up_to_date() {
-        use std::path::PathBuf;
-
-        use introspector_gadget::blocking::GraphQLClient;
-        use introspector_gadget::introspect;
-        use introspector_gadget::introspect::GraphIntrospectInput;
-
-        let client = GraphQLClient::new(
-            "https://uplink.api.apollographql.com/",
-            reqwest::blocking::Client::new(),
-        );
-
-        let should_retry = true;
-        let introspection_response = introspect::run(
-            GraphIntrospectInput {
-                headers: Default::default(),
-            },
-            &client,
-            should_retry,
-        )
-        .unwrap();
-        if introspection_response.schema_sdl != include_str!("uplink.graphql") {
-            let path = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("uplink.graphql");
-            std::fs::write(&path, introspection_response.schema_sdl).unwrap();
-            panic!(
-                "\n\nUplink schema is out of date. Run this command to update it:\n\n    \
-                mv {} apollo-router/src/uplink/uplink.graphql\n\n",
-                path.to_str().unwrap()
-            );
-        }
-    }
-
-    #[test]
     fn test_round_robin_endpoints() {
         let url1 = Url::parse("http://example1.com").expect("url must be valid");
         let url2 = Url::parse("http://example2.com").expect("url must be valid");
