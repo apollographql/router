@@ -103,6 +103,7 @@ use crate::services::subgraph::Request;
 use crate::services::subgraph::Response;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
+use crate::services::RouterRequest;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
@@ -231,6 +232,8 @@ impl Plugin for Telemetry {
     fn router_service(&self, service: router::BoxService) -> router::BoxService {
         let config = self.config.clone();
         let config_later = self.config.clone();
+        let config_even_later = self.config.clone();
+        let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
 
         ServiceBuilder::new()
             .instrument(move |request: &router::Request| {
@@ -263,9 +266,13 @@ impl Plugin for Telemetry {
                 );
                 span
             })
-            .map_future(move |fut| {
+            .map_future_with_request_data( move |req: &router::Request| {
+                Self::populate_context(config_later.clone(), field_level_instrumentation_ratio, req);
+                req.context.clone()
+            },
+            move |_ctx: Context, fut| {
                 let start = Instant::now();
-                let config = config_later.clone();
+                let config = config_even_later.clone();
                 async move {
                     let span = Span::current();
                     let response: Result<router::Response, BoxError> = fut.await;
@@ -355,7 +362,6 @@ impl Plugin for Telemetry {
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
-                    Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
                     req.context.clone()
                 },
                 move |ctx: Context, fut| {
@@ -818,11 +824,11 @@ impl Telemetry {
     fn populate_context(
         config: Arc<Conf>,
         field_level_instrumentation_ratio: f64,
-        req: &SupergraphRequest,
+        req: &RouterRequest,
     ) {
         let apollo_config = config.apollo.clone().unwrap_or_default();
         let context = &req.context;
-        let http_request = &req.supergraph_request;
+        let http_request = &req.router_request;
         let headers = http_request.headers();
         let client_name_header = &apollo_config.client_name_header;
         let client_version_header = &apollo_config.client_version_header;
@@ -848,12 +854,12 @@ impl Telemetry {
         );
         let (should_log_headers, should_log_body) = config.logging.should_log(req);
         if should_log_headers {
-            ::tracing::info!(http.request.headers = ?req.supergraph_request.headers(), "Supergraph request headers");
+            ::tracing::info!(http.request.headers = ?http_request.headers(), "Supergraph request headers");
 
             let _ = req.context.insert(LOGGING_DISPLAY_HEADERS, true);
         }
         if should_log_body {
-            ::tracing::info!(http.request.body = ?req.supergraph_request.body(), "Supergraph request body");
+            ::tracing::info!(http.request.body = ?http_request.body(), "Supergraph request body");
 
             let _ = req.context.insert(LOGGING_DISPLAY_BODY, true);
         }
@@ -861,12 +867,13 @@ impl Telemetry {
         if let Some(metrics_conf) = &config.metrics {
             // List of custom attributes for metrics
             let mut attributes: HashMap<String, AttributeValue> = HashMap::new();
-            if let Some(operation_name) = &req.supergraph_request.body().operation_name {
-                attributes.insert(
-                    "operation_name".to_string(),
-                    AttributeValue::String(operation_name.clone()),
-                );
-            }
+            // TODO[igni]: use the actual operation name we got at the supergraph request lvl
+            // if let Some(operation_name) = &http_request.body().operation_name {
+            //     attributes.insert(
+            //         "operation_name".to_string(),
+            //         AttributeValue::String(operation_name.clone()),
+            //     );
+            // }
 
             if let Some(router_attributes_conf) = metrics_conf
                 .common
@@ -874,10 +881,11 @@ impl Telemetry {
                 .and_then(|c| c.attributes.as_ref())
                 .and_then(|a| a.supergraph.as_ref())
             {
-                attributes.extend(
-                    router_attributes_conf
-                        .get_attributes_from_request(headers, req.supergraph_request.body()),
-                );
+                // TODO[igni]: do this at the supergraph request lvl
+                // attributes.extend(
+                //     router_attributes_conf
+                //         .get_attributes_from_request(headers, req.supergraph_request.body()),
+                // );
                 attributes.extend(router_attributes_conf.get_attributes_from_context(context));
             }
 

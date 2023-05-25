@@ -150,8 +150,8 @@ impl Logging {
         }
     }
 
-    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
-    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
+    /// Returns if we should display the request/response headers and body given the `RouterRequest`
+    pub(crate) fn should_log(&self, req: &RouterRequest) -> (bool, bool) {
         self.when_header
             .iter()
             .fold((false, false), |(log_headers, log_body), current| {
@@ -198,8 +198,8 @@ pub(crate) enum HeaderLoggingCondition {
 }
 
 impl HeaderLoggingCondition {
-    /// Returns if we should display the request/response headers and body given the `SupergraphRequest`
-    pub(crate) fn should_log(&self, req: &SupergraphRequest) -> (bool, bool) {
+    /// Returns if we should display the request/response headers and body given the `RouterRequest`
+    pub(crate) fn should_log(&self, req: &RouterRequest) -> (bool, bool) {
         match self {
             HeaderLoggingCondition::Matching {
                 name,
@@ -208,7 +208,7 @@ impl HeaderLoggingCondition {
                 body,
             } => {
                 let header_match = req
-                    .supergraph_request
+                    .router_request
                     .headers()
                     .get(name)
                     .and_then(|h| h.to_str().ok())
@@ -228,7 +228,7 @@ impl HeaderLoggingCondition {
                 body,
             } => {
                 let header_match = req
-                    .supergraph_request
+                    .router_request
                     .headers()
                     .get(name)
                     .and_then(|h| h.to_str().ok())
@@ -692,6 +692,8 @@ mod tests {
         let req = SupergraphRequest::fake_builder()
             .header("test", "foobar")
             .build()
+            .unwrap()
+            .try_into()
             .unwrap();
         assert_eq!(logging_conf.should_log(&req), (true, false));
 
