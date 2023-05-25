@@ -26,6 +26,9 @@ use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::Query;
+use crate::spec::Schema;
+use crate::Configuration;
 use crate::Context;
 
 /// An [`IndexMap`] of available plugins.
@@ -40,8 +43,9 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
         DeduplicatingCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>,
     >,
     delegate: T,
-    schema_id: Option<String>,
+    schema: Arc<Schema>,
     plugins: Arc<Plugins>,
+    configuration: Arc<Configuration>,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -56,18 +60,22 @@ where
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(
         delegate: T,
-        schema_id: Option<String>,
-        config: &crate::configuration::QueryPlanning,
+        schema: Arc<Schema>,
+        configuration: Arc<Configuration>,
         plugins: Plugins,
     ) -> CachingQueryPlanner<T> {
         let cache = Arc::new(
-            DeduplicatingCache::from_configuration(&config.experimental_cache, "query planner")
-                .await,
+            DeduplicatingCache::from_configuration(
+                &configuration.supergraph.query_planning.experimental_cache,
+                "query planner",
+            )
+            .await,
         );
         Self {
             cache,
             delegate,
-            schema_id,
+            schema,
+            configuration,
             plugins: Arc::new(plugins),
         }
     }
@@ -81,7 +89,7 @@ where
     }
 
     pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
-        let schema_id = self.schema_id.clone();
+        let schema_id = self.schema.schema_id.clone();
 
         let mut service = ServiceBuilder::new().service(
             self.plugins
@@ -103,10 +111,15 @@ where
 
             let entry = self.cache.get(&caching_key).await;
             if entry.is_first() {
+                let (compiler, file_id) =
+                    Query::make_compiler(&query, &self.schema, &self.configuration);
+
                 let request = QueryPlannerRequest {
                     query,
                     operation_name: operation,
                     context: context.clone(),
+                    compiler,
+                    file_id,
                 };
 
                 let res = match service.ready().await {
@@ -160,7 +173,9 @@ where
 
     fn call(&mut self, request: query_planner::CachingRequest) -> Self::Future {
         let mut qp = self.clone();
-        let schema_id = self.schema_id.clone();
+        let schema_id = self.schema.schema_id.clone();
+        let schema = self.schema.clone();
+        let configuration = self.configuration.clone();
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
@@ -176,10 +191,15 @@ where
                     operation_name,
                     context,
                 } = request;
+
+                let (compiler, file_id) = Query::make_compiler(&query, &schema, &configuration);
+
                 let request = QueryPlannerRequest::builder()
                     .query(query)
                     .and_operation_name(operation_name)
                     .context(context)
+                    .compiler(compiler)
+                    .file_id(file_id)
                     .build();
 
                 // some clients might timeout and cancel the request before query planning is finished,
@@ -368,27 +388,33 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
-            None,
-            &crate::configuration::QueryPlanning::default(),
-            IndexMap::new(),
-        )
-        .await;
+        let configuration = Arc::new(crate::Configuration::default());
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("testdata/schema.graphql"),
+                &configuration,
+                None,
+            )
+            .unwrap(),
+        );
+
+        let mut planner =
+            CachingQueryPlanner::new(delegate, schema, configuration, IndexMap::new()).await;
 
         for _ in 0..5 {
             assert!(planner
                 .call(query_planner::CachingRequest::new(
-                    "query1".into(),
+                    "{ me { id } }".into(),
                     Some("".into()),
                     Context::new()
                 ))
                 .await
                 .is_err());
         }
+
         assert!(planner
             .call(query_planner::CachingRequest::new(
-                "query2".into(),
+                "{ me { id name } }".into(),
                 Some("".into()),
                 Context::new()
             ))
@@ -429,18 +455,22 @@ mod tests {
             planner
         });
 
-        let mut planner = CachingQueryPlanner::new(
-            delegate,
-            None,
-            &crate::configuration::QueryPlanning::default(),
-            IndexMap::new(),
-        )
-        .await;
+        let configuration = Arc::new(crate::Configuration::default());
+        let schema = Arc::new(
+            Schema::parse(
+                include_str!("testdata/schema.graphql"),
+                &configuration,
+                None,
+            )
+            .unwrap(),
+        );
+        let mut planner =
+            CachingQueryPlanner::new(delegate, schema, configuration, IndexMap::new()).await;
 
         for _ in 0..5 {
             assert!(planner
                 .call(query_planner::CachingRequest::new(
-                    "".into(),
+                    "{ me { id } }".into(),
                     Some("".into()),
                     Context::new()
                 ))

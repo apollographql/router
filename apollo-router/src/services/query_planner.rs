@@ -4,7 +4,10 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::ApolloCompiler;
+use apollo_compiler::FileId;
 use async_trait::async_trait;
+use derivative::Derivative;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
@@ -16,11 +19,15 @@ use crate::Context;
 
 assert_impl_all!(Request: Send);
 /// [`Context`] for the request.
-#[derive(Clone, Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) operation_name: Option<String>,
     pub(crate) context: Context,
+    #[derivative(Debug = "ignore")]
+    pub(crate) compiler: ApolloCompiler,
+    pub(crate) file_id: FileId,
 }
 
 #[buildstructor::buildstructor]
@@ -29,11 +36,19 @@ impl Request {
     ///
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
-    pub(crate) fn new(query: String, operation_name: Option<String>, context: Context) -> Request {
+    pub(crate) fn new(
+        query: String,
+        operation_name: Option<String>,
+        context: Context,
+        compiler: ApolloCompiler,
+        file_id: FileId,
+    ) -> Request {
         Self {
             query,
             operation_name,
             context,
+            compiler,
+            file_id,
         }
     }
 }

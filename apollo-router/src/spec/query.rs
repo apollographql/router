@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
 use apollo_compiler::AstDatabase;
+use apollo_compiler::FileId;
 use apollo_compiler::HirDatabase;
 use derivative::Derivative;
 use serde::de::Visitor;
@@ -261,16 +262,26 @@ impl Query {
         vec![]
     }
 
+    pub(crate) fn make_compiler(
+        query: &str,
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> (ApolloCompiler, FileId) {
+        let mut compiler = ApolloCompiler::new()
+            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
+            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
+        compiler.set_type_system_hir(schema.type_system.clone());
+        let id = compiler.add_executable(&query, "query");
+        (compiler, id)
+    }
+
     pub(crate) fn parse(
         query: impl Into<String>,
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Self, SpecError> {
         let query = query.into();
-        let mut compiler = ApolloCompiler::new()
-            .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
-            .token_limit(configuration.preview_operation_limits.parser_max_tokens);
-        let id = compiler.add_executable(&query, "query");
+        let (compiler, id) = Self::make_compiler(&query, schema, configuration);
         let ast = compiler.db.ast(id);
 
         // Trace log recursion limit data
