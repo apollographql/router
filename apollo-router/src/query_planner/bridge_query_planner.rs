@@ -5,6 +5,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Instant;
 
+use apollo_compiler::InputDatabase;
 use futures::future::BoxFuture;
 use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanSuccess;
@@ -224,11 +225,20 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
     }
 
     fn call(&mut self, req: QueryPlannerRequest) -> Self::Future {
+        let QueryPlannerRequest {
+            query,
+            operation_name,
+            context,
+            compiler,
+            file_id,
+        } = req;
+        let filtered_query = compiler.db.source_code(file_id);
+
         let this = self.clone();
         let fut = async move {
             let start = Instant::now();
             let res = this
-                .get((req.query.clone(), req.operation_name.to_owned()))
+                .get((filtered_query.to_string(), operation_name.to_owned()))
                 .await;
             let duration = start.elapsed().as_secs_f64();
             tracing::info!(histogram.apollo_router_query_planning_time = duration,);
@@ -236,18 +246,18 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             match res {
                 Ok(query_planner_content) => Ok(QueryPlannerResponse::builder()
                     .content(query_planner_content)
-                    .context(req.context)
+                    .context(context)
                     .build()),
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
-                            req.context
+                            context
                                 .private_entries
                                 .lock()
                                 .insert(pe.usage_reporting.clone());
                         }
                         QueryPlannerError::SpecError(e) => {
-                            req.context.private_entries.lock().insert(UsageReporting {
+                            context.private_entries.lock().insert(UsageReporting {
                                 stats_report_key: e.get_error_key().to_string(),
                                 referenced_fields_by_type: HashMap::new(),
                             });
