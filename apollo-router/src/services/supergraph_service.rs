@@ -38,10 +38,10 @@ use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::query_planner;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
-use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -247,7 +247,7 @@ async fn plan_query(
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
     planning
         .call(
-            QueryPlannerRequest::builder()
+            query_planner::CachingRequest::builder()
                 .query(
                     body.query
                         .clone()
@@ -325,6 +325,7 @@ impl PluggableSupergraphServiceBuilder {
             self.planner,
             schema.schema_id.clone(),
             &configuration.supergraph.query_planning,
+            IndexMap::new(),
         )
         .await;
 

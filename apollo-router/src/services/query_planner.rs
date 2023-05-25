@@ -4,10 +4,12 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
 
+use crate::error::QueryPlannerError;
 use crate::graphql;
 use crate::query_planner::QueryPlan;
 use crate::Context;
@@ -28,6 +30,33 @@ impl Request {
     /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
     #[builder]
     pub(crate) fn new(query: String, operation_name: Option<String>, context: Context) -> Request {
+        Self {
+            query,
+            operation_name,
+            context,
+        }
+    }
+}
+
+/// [`Context`] for the request.
+#[derive(Clone, Debug)]
+pub(crate) struct CachingRequest {
+    pub(crate) query: String,
+    pub(crate) operation_name: Option<String>,
+    pub(crate) context: Context,
+}
+
+#[buildstructor::buildstructor]
+impl CachingRequest {
+    /// This is the constructor (or builder) to use when constructing a real QueryPlannerRequest.
+    ///
+    /// Required parameters are required in non-testing code to create a QueryPlannerRequest.
+    #[builder]
+    pub(crate) fn new(
+        query: String,
+        operation_name: Option<String>,
+        context: Context,
+    ) -> CachingRequest {
         Self {
             query,
             operation_name,
@@ -70,4 +99,18 @@ impl Response {
             errors,
         }
     }
+}
+
+pub(crate) type BoxService = tower::util::BoxService<Request, Response, QueryPlannerError>;
+pub(crate) type BoxCloneService =
+    tower::util::BoxCloneService<Request, Response, QueryPlannerError>;
+pub(crate) type ServiceResult = Result<Response, QueryPlannerError>;
+pub(crate) type Body = hyper::Body;
+pub(crate) type Error = hyper::Error;
+
+#[async_trait]
+pub(crate) trait QueryPlannerPlugin: Send + Sync + 'static {
+    /// This service runs right after the query planner cache, which means that it will be called once per unique
+    /// query, unless the cache entry was evicted
+    fn query_planner_service(&self, service: BoxService) -> BoxService;
 }

@@ -6,11 +6,15 @@ use std::sync::Arc;
 use std::task;
 
 use futures::future::BoxFuture;
+use indexmap::IndexMap;
+use query_planner::QueryPlannerPlugin;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
+use tower::ServiceBuilder;
 use tower::ServiceExt;
+use tower_service::Service;
 use tracing::Instrument;
 
 use crate::cache::DeduplicatingCache;
@@ -18,10 +22,14 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::query_planner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::Context;
+
+/// An [`IndexMap`] of available plugins.
+pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 
 /// A query planner wrapper that caches results.
 ///
@@ -33,21 +41,24 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     >,
     delegate: T,
     schema_id: Option<String>,
+    plugins: Arc<Plugins>,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
 where
     T: tower::Service<
-        QueryPlannerRequest,
-        Response = QueryPlannerResponse,
-        Error = QueryPlannerError,
-    >,
+            QueryPlannerRequest,
+            Response = QueryPlannerResponse,
+            Error = QueryPlannerError,
+        > + Send,
+    <T as tower::Service<QueryPlannerRequest>>::Future: Send,
 {
     /// Creates a new query planner that caches the results of another [`QueryPlanner`].
     pub(crate) async fn new(
         delegate: T,
         schema_id: Option<String>,
         config: &crate::configuration::QueryPlanning,
+        plugins: Plugins,
     ) -> CachingQueryPlanner<T> {
         let cache = Arc::new(
             DeduplicatingCache::from_configuration(&config.experimental_cache, "query planner")
@@ -57,6 +68,7 @@ where
             cache,
             delegate,
             schema_id,
+            plugins: Arc::new(plugins),
         }
     }
 
@@ -70,6 +82,15 @@ where
 
     pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
         let schema_id = self.schema_id.clone();
+
+        let mut service = ServiceBuilder::new().service(
+            self.plugins
+                .iter()
+                .rev()
+                .fold(self.delegate.clone().boxed(), |acc, (_, e)| {
+                    e.query_planner_service(acc)
+                }),
+        );
 
         let mut count = 0usize;
         for (query, operation) in cache_keys {
@@ -88,7 +109,7 @@ where
                     context: context.clone(),
                 };
 
-                let res = match self.delegate.ready().await {
+                let res = match service.ready().await {
                     Ok(service) => service.call(request).await,
                     Err(_) => break,
                 };
@@ -119,7 +140,8 @@ impl CachingQueryPlanner<BridgeQueryPlanner> {
     }
 }
 
-impl<T: Clone + Send + 'static> tower::Service<QueryPlannerRequest> for CachingQueryPlanner<T>
+impl<T: Clone + Send + 'static> tower::Service<query_planner::CachingRequest>
+    for CachingQueryPlanner<T>
 where
     T: tower::Service<
         QueryPlannerRequest,
@@ -136,7 +158,7 @@ where
         task::Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: QueryPlannerRequest) -> Self::Future {
+    fn call(&mut self, request: query_planner::CachingRequest) -> Self::Future {
         let mut qp = self.clone();
         let schema_id = self.schema_id.clone();
         Box::pin(async move {
@@ -149,6 +171,17 @@ where
             let context = request.context.clone();
             let entry = qp.cache.get(&caching_key).await;
             if entry.is_first() {
+                let query_planner::CachingRequest {
+                    query,
+                    operation_name,
+                    context,
+                } = request;
+                let request = QueryPlannerRequest::builder()
+                    .query(query)
+                    .and_operation_name(operation_name)
+                    .context(context)
+                    .build();
+
                 // some clients might timeout and cancel the request before query planning is finished,
                 // so we execute it in a task that can continue even after the request was canceled and
                 // the join handle was dropped. That way, the next similar query will use the cache instead
@@ -339,12 +372,13 @@ mod tests {
             delegate,
             None,
             &crate::configuration::QueryPlanning::default(),
+            IndexMap::new(),
         )
         .await;
 
         for _ in 0..5 {
             assert!(planner
-                .call(QueryPlannerRequest::new(
+                .call(query_planner::CachingRequest::new(
                     "query1".into(),
                     Some("".into()),
                     Context::new()
@@ -353,7 +387,7 @@ mod tests {
                 .is_err());
         }
         assert!(planner
-            .call(QueryPlannerRequest::new(
+            .call(query_planner::CachingRequest::new(
                 "query2".into(),
                 Some("".into()),
                 Context::new()
@@ -399,12 +433,13 @@ mod tests {
             delegate,
             None,
             &crate::configuration::QueryPlanning::default(),
+            IndexMap::new(),
         )
         .await;
 
         for _ in 0..5 {
             assert!(planner
-                .call(QueryPlannerRequest::new(
+                .call(query_planner::CachingRequest::new(
                     "".into(),
                     Some("".into()),
                     Context::new()
