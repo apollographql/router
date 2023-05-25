@@ -556,11 +556,13 @@ fn extract_ftv1_trace(
 
 fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorConfiguration) {
     if error_config.send {
-        t.error.iter_mut().for_each(|err| {
-            err.message = String::from("<redacted>");
-            err.location = Vec::new();
-            err.json = String::new();
-        });
+        if error_config.redact {
+            t.error.iter_mut().for_each(|err| {
+                err.message = String::from("<redacted>");
+                err.location = Vec::new();
+                err.json = String::new();
+            });
+        }
     } else {
         t.error = Vec::new();
     }
@@ -983,6 +985,48 @@ mod test {
         assert!(node.child[0].error[0].json.is_empty());
         assert!(node.child[0].error[0].location.is_empty());
         assert_eq!(node.child[0].error[0].message.as_str(), "<redacted>");
+        assert_eq!(node.child[0].error[0].time_ns, 5u64);
+
+        let sub_node = Node {
+            error: vec![Error {
+                message: "this is my error".to_string(),
+                location: Vec::new(),
+                time_ns: 5,
+                json: String::from(r#"{"foo": "bar"}"#),
+            }],
+            ..Default::default()
+        };
+        let mut node = Node {
+            error: vec![
+                Error {
+                    message: "this is my error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+                Error {
+                    message: "this is my other error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+            ],
+            ..Default::default()
+        };
+        node.child.push(sub_node);
+        let error_config = ErrorConfiguration {
+            send: true,
+            redact: false,
+        };
+        preprocess_errors(&mut node, &error_config);
+        assert_eq!(node.error[0].message.as_str(), "this is my error");
+        assert_eq!(node.error[0].time_ns, 5u64);
+        assert!(!node.error[1].json.is_empty());
+        assert_eq!(node.error[1].message.as_str(), "this is my other error");
+        assert_eq!(node.error[1].time_ns, 5u64);
+
+        assert!(!node.child[0].error[0].json.is_empty());
+        assert_eq!(node.child[0].error[0].message.as_str(), "this is my error");
         assert_eq!(node.child[0].error[0].time_ns, 5u64);
     }
 
