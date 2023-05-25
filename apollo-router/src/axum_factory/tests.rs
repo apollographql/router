@@ -525,7 +525,10 @@ async fn it_decompress_request_body() -> Result<(), ApolloRouterError> {
     let example_response = expected_response.clone();
     let router_service = router_service::from_supergraph_mock_callback(move |req| {
         let example_response = example_response.clone();
-        assert_eq!(req.supergraph_request.into_body().query.unwrap(), "query");
+        assert_eq!(
+            req.supergraph_request.into_body().query.unwrap(),
+            "query { me { username } }"
+        );
         Ok(SupergraphResponse::new_from_graphql_response(
             example_response,
             req.context,
@@ -2074,7 +2077,7 @@ async fn listening_to_unix_socket() {
     let output = send_to_unix_socket(
         server.graphql_listen_address().as_ref().unwrap(),
         Method::GET,
-        r#"query=query"#,
+        r#"query="query { me { username } }""#,
     )
     .await;
 

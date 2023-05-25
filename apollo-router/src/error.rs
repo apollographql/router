@@ -21,6 +21,7 @@ pub(crate) use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
+use crate::graphql::TryIntoGraphQLErrors;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::spec::operation_limits::OperationLimits;
@@ -208,13 +209,13 @@ pub(crate) enum CacheResolverError {
     RetrievalError(Arc<QueryPlannerError>),
 }
 
-impl IntoGraphQLErrors for CacheResolverError {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+impl TryIntoGraphQLErrors for CacheResolverError {
+    fn try_into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         let CacheResolverError::RetrievalError(retrieval_error) = self;
         retrieval_error
             .deref()
             .clone()
-            .into_graphql_errors()
+            .try_into_graphql_errors()
             .map_err(|_err| CacheResolverError::RetrievalError(retrieval_error))
     }
 }
@@ -253,44 +254,19 @@ impl From<router_bridge::error::Error> for ServiceBuildError {
     }
 }
 
-/// Error types for QueryPlanner
 #[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
-pub(crate) enum QueryPlannerError {
-    /// couldn't instantiate query planner; invalid schema: {0}
-    SchemaValidationErrors(PlannerErrors),
-
-    /// couldn't plan query: {0}
-    PlanningErrors(PlanErrors),
-
-    /// query planning panicked: {0}
-    JoinError(String),
-
-    /// Cache resolution failed: {0}
-    CacheResolverError(Arc<CacheResolverError>),
-
-    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
-    EmptyPlan(UsageReporting), // usage_reporting_signature
-
-    /// unhandled planner result
-    UnhandledPlannerResult,
-
-    /// router bridge error: {0}
-    RouterBridgeError(router_bridge::error::Error),
-
+pub(crate) enum QueryParserError {
     /// spec error: {0}
     SpecError(SpecError),
-
-    /// introspection error: {0}
-    Introspection(IntrospectionError),
 
     /// complexity limit exceeded
     LimitExceeded(OperationLimits<bool>),
 }
 
-impl IntoGraphQLErrors for QueryPlannerError {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+impl IntoGraphQLErrors for QueryParserError {
+    fn into_graphql_errors(self) -> Vec<Error> {
         match self {
-            QueryPlannerError::SpecError(err) => {
+            Self::SpecError(err) => {
                 let gql_err = match err.custom_extension_details() {
                     Some(extension_details) => Error::builder()
                         .message(err.to_string())
@@ -303,17 +279,9 @@ impl IntoGraphQLErrors for QueryPlannerError {
                         .build(),
                 };
 
-                Ok(vec![gql_err])
+                vec![gql_err]
             }
-            QueryPlannerError::SchemaValidationErrors(errs) => errs
-                .into_graphql_errors()
-                .map_err(QueryPlannerError::SchemaValidationErrors),
-            QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
-                .errors
-                .iter()
-                .map(|p_err| Error::from(p_err.clone()))
-                .collect()),
-            QueryPlannerError::LimitExceeded(OperationLimits {
+            Self::LimitExceeded(OperationLimits {
                 depth,
                 height,
                 root_fields,
@@ -350,7 +318,68 @@ impl IntoGraphQLErrors for QueryPlannerError {
                     "MAX_ALIASES_LIMIT",
                     "Maximum aliases limit exceeded in this operation",
                 );
-                Ok(errors)
+                errors
+            }
+        }
+    }
+}
+
+/// Error types for QueryPlanner
+#[derive(Error, Debug, Display, Clone, Serialize, Deserialize)]
+pub(crate) enum QueryPlannerError {
+    /// couldn't instantiate query planner; invalid schema: {0}
+    SchemaValidationErrors(PlannerErrors),
+
+    /// couldn't plan query: {0}
+    PlanningErrors(PlanErrors),
+
+    /// query planning panicked: {0}
+    JoinError(String),
+
+    /// Cache resolution failed: {0}
+    CacheResolverError(Arc<CacheResolverError>),
+
+    /// empty query plan. This often means an unhandled Introspection query was sent. Please file an issue to apollographql/router.
+    EmptyPlan(UsageReporting), // usage_reporting_signature
+
+    /// unhandled planner result
+    UnhandledPlannerResult,
+
+    /// router bridge error: {0}
+    RouterBridgeError(router_bridge::error::Error),
+
+    /// introspection error: {0}
+    Introspection(IntrospectionError),
+
+    /// spec error: {0}
+    SpecError(SpecError),
+}
+
+impl TryIntoGraphQLErrors for QueryPlannerError {
+    fn try_into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        match self {
+            QueryPlannerError::SchemaValidationErrors(errs) => errs
+                .try_into_graphql_errors()
+                .map_err(QueryPlannerError::SchemaValidationErrors),
+            QueryPlannerError::PlanningErrors(planning_errors) => Ok(planning_errors
+                .errors
+                .iter()
+                .map(|p_err| Error::from(p_err.clone()))
+                .collect()),
+            Self::SpecError(err) => {
+                let gql_err = match err.custom_extension_details() {
+                    Some(extension_details) => Error::builder()
+                        .message(err.to_string())
+                        .extension_code(err.extension_code())
+                        .extensions(extension_details)
+                        .build(),
+                    None => Error::builder()
+                        .message(err.to_string())
+                        .extension_code(err.extension_code())
+                        .build(),
+                };
+
+                Ok(vec![gql_err])
             }
             err => Err(err),
         }
@@ -361,8 +390,8 @@ impl IntoGraphQLErrors for QueryPlannerError {
 /// Container for planner setup errors
 pub(crate) struct PlannerErrors(Arc<Vec<PlannerError>>);
 
-impl IntoGraphQLErrors for PlannerErrors {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+impl TryIntoGraphQLErrors for PlannerErrors {
+    fn try_into_graphql_errors(self) -> Result<Vec<Error>, Self> {
         let errors = self.0.iter().map(|e| Error::from(e.clone())).collect();
 
         Ok(errors)
@@ -412,6 +441,12 @@ impl From<CacheResolverError> for QueryPlannerError {
     }
 }
 
+impl From<SpecError> for QueryParserError {
+    fn from(err: SpecError) -> Self {
+        QueryParserError::SpecError(err)
+    }
+}
+
 impl From<SpecError> for QueryPlannerError {
     fn from(err: SpecError) -> Self {
         QueryPlannerError::SpecError(err)
@@ -423,9 +458,9 @@ impl From<router_bridge::error::Error> for QueryPlannerError {
         QueryPlannerError::RouterBridgeError(error)
     }
 }
-impl From<OperationLimits<bool>> for QueryPlannerError {
+impl From<OperationLimits<bool>> for QueryParserError {
     fn from(error: OperationLimits<bool>) -> Self {
-        QueryPlannerError::LimitExceeded(error)
+        QueryParserError::LimitExceeded(error)
     }
 }
 

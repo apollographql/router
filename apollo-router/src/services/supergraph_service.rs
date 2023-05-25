@@ -29,7 +29,7 @@ use super::ExecutionServiceFactory;
 use super::QueryPlannerContent;
 use crate::error::CacheResolverError;
 use crate::graphql;
-use crate::graphql::IntoGraphQLErrors;
+use crate::graphql::TryIntoGraphQLErrors;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::plugin::DynPlugin;
@@ -154,7 +154,7 @@ where
     .await
     {
         Ok(resp) => resp,
-        Err(err) => match err.into_graphql_errors() {
+        Err(err) => match err.try_into_graphql_errors() {
             Ok(gql_errors) => {
                 return Ok(SupergraphResponse::builder()
                     .context(context)

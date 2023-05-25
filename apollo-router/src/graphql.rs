@@ -167,12 +167,20 @@ impl fmt::Display for Error {
     }
 }
 
+/// Trait used to try to convert expected errors into a list of GraphQL errors
+pub(crate) trait TryIntoGraphQLErrors
+where
+    Self: Sized,
+{
+    fn try_into_graphql_errors(self) -> Result<Vec<Error>, Self>;
+}
+
 /// Trait used to convert expected errors into a list of GraphQL errors
 pub(crate) trait IntoGraphQLErrors
 where
     Self: Sized,
 {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self>;
+    fn into_graphql_errors(self) -> Vec<Error>;
 }
 
 /// Trait used to get extension type from an error

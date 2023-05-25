@@ -1,15 +1,12 @@
-//!  (A)utomatic (P)ersisted (Q)ueries cache.
-//!
-//!  For more information on QueryParsing see:
-//!  <https://www.apollographql.com/docs/apollo-server/performance/QueryParsing/>
-
-// This entire file is license key functionality
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use tracing_futures::Instrument;
+use http::StatusCode;
+use router_bridge::planner::UsageReporting;
 
-use crate::error::QueryPlannerError;
+use crate::error::QueryParserError;
 use crate::graphql;
+use crate::graphql::IntoGraphQLErrors;
 use crate::query_planner::QueryKey;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
@@ -47,13 +44,35 @@ impl QueryParsingLayer {
         request: PartialSupergraphRequest,
     ) -> Result<SupergraphRequest, SupergraphResponse> {
         let op_name = request.supergraph_request.body().operation_name.as_ref();
-        let query = self
+        let query = match self
             .parse((
                 request.supergraph_request.body().query.clone().unwrap(),
                 op_name.cloned(),
             ))
             .await
-            .expect("TODO[igni]");
+        {
+            Err(error) => {
+                if let QueryParserError::SpecError(e) = &error {
+                    request
+                        .context
+                        .private_entries
+                        .lock()
+                        .insert(UsageReporting {
+                            stats_report_key: e.get_error_key().to_string(),
+                            referenced_fields_by_type: HashMap::new(),
+                        });
+                }
+                let gql_errors = error.into_graphql_errors();
+
+                Err(SupergraphResponse::builder()
+                    .context(request.context.clone())
+                    .errors(gql_errors)
+                    .status_code(StatusCode::BAD_REQUEST) // If it's a graphql error we return a status code 400
+                    .build()
+                    .expect("this response build must not fail"))
+            }
+            Ok(query) => Ok(query),
+        }?;
 
         request
             .context
@@ -70,20 +89,15 @@ impl QueryParsingLayer {
         })
     }
 
-    pub(crate) async fn parse(&self, key: QueryKey) -> Result<Query, QueryPlannerError> {
+    pub(crate) async fn parse(&self, key: QueryKey) -> Result<Query, QueryParserError> {
         let (query, operation_name) = key;
         let schema = self.schema.clone();
         let configuration = self.configuration.clone();
-        let task_result = tokio::task::spawn_blocking(move || {
+        // TODO[igni]: profile and benchmark with and without the blocking task spawn
+        tracing::info_span!("parse_query", "otel.kind" = "INTERNAL").in_scope(|| {
             let mut query = Query::parse(query, &schema, &configuration)?;
             crate::spec::operation_limits::check(&configuration, &mut query, operation_name)?;
-            Ok::<_, QueryPlannerError>(query)
+            Ok(query)
         })
-        .instrument(tracing::info_span!("parse_query", "otel.kind" = "INTERNAL"))
-        .await;
-        if let Err(err) = &task_result {
-            failfast_debug!("parsing query task failed: {}", err);
-        }
-        task_result?
     }
 }
