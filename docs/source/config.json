@@ -52,11 +52,11 @@
         "Privacy and data collection": "/privacy"
       }
     },
-    "Monitoring & Metrics": {
-      "Health check": "/configuration/health-checks",
-      "Apollo Studio reporting": "/configuration/apollo-telemetry",
-      "Collecting metrics": "/configuration/metrics",
-      "Tracing": "/configuration/tracing"
+    "Metrics & Monitoring": {
+      "GraphOS reporting": "/configuration/apollo-telemetry",
+      "OpenTelemetry tracing": "/configuration/tracing",
+      "Configuring metrics collectors": "/configuration/metrics",
+      "Health check": "/configuration/health-checks"
     },
     "Containerization": {
       "Overview": "/containerization/overview",
