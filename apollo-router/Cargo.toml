@@ -17,21 +17,34 @@ name = "router"
 path = "src/main.rs"
 
 [features]
+default = ["global-allocator"]
+
+# Set the Rust global allocator on some platforms
+# https://doc.rust-lang.org/std/alloc/index.html#the-global_allocator-attribute
+# Enabled by default. Disable default features in library crates or to set it yourself:
+# ```
+# [dependencies]
+# apollo-router = {version = "1.20", default-features = false}
+# ```
+global-allocator = []
+
 # if you are doing heap profiling
 dhat-heap = ["dhat"]
 dhat-ad-hoc = ["dhat"]
+
 # Prevents the query execution to continue if any error occurs while fetching
 # the data of a subgraph. This is useful in development as you want to be
 # alerted early when something is wrong instead of receiving an invalid result.
 failfast = []
+
 # Enables usage of tokio-console with the router
 # tokio-console also requires at build time the environment variable
 # RUSTFLAGS="--cfg tokio_unstable"
 console = ["tokio/tracing", "console-subscriber"]
+
 # "fake" feature to disable V8 usage when building on docs.rs
 # See https://github.com/apollographql/federation-rs/pull/185
 docs_rs = ["router-bridge/docs_rs"]
-default = []
 
 [package.metadata.docs.rs]
 features = ["docs_rs"]
