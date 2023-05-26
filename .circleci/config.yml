@@ -22,7 +22,7 @@ executors:
     docker:
       - image: cimg/base:stable
       - image: cimg/redis:7.0.11
-      - image: jaegertracing/all-in-one:1.42.0
+      - image: jaegertracing/all-in-one:1.45.0
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
