@@ -4,6 +4,75 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.19.1] - 2023-05-26
+
+## 🐛 Fixes
+
+### Fix router coprocessor deferred response buffering and change JSON body type from Object to String ([Issue #3015](https://github.com/apollographql/router/issues/3015))
+
+The current implementation of the `RouterResponse` processing for coprocessors forces buffering of response data before passing the data to a coprocessor. This is a bug, because deferred responses should be processed progressively with a stream of calls to the coprocessor as each chunk of data becomes available.
+
+Furthermore, the data type was assumed to be valid JSON for both `RouterRequest` and `RouterResponse` coprocessor processing. This is also a bug, because data at this stage of processing was never necessarily valid JSON. This is a particular issue when dealing with deferred (when using `@defer`) `RouterResponses`.
+
+This change fixes both of these bugs by modifying the router so that coprocessors are invoked with a `body` payload which is a JSON `String`, not a JSON `Object`. Furthermore, the router now processes each chunk of response data separately so that a coprocessor will receive multiple calls (once for each chunk) for a deferred response.
+
+For more details about how this works see the [coprocessor documentation](https://www.apollographql.com/docs/router/customizations/coprocessor/).
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/3104
+
+### Hash the query and operation name in the query plan cache key ([Issue #2998](https://github.com/apollographql/router/issues/2998))
+
+The query and operation name can be too large to transmit as part of a Redis cache key. They will now be hashed with SHA256 before writing them as part of the cache key.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3101
+
+### Update the query planner to 2.4.6 ([Issue #3133](https://github.com/apollographql/router/issues/3133))
+
+This [fixes some errors in query planning](https://github.com/apollographql/federation/releases/tag/%40apollo%2Fquery-planner%402.4.6) on fragments with overlapping subselections, with a message of the form "Cannot add selection of field X to selection set of parent type Y".
+
+The new router-bridge version also allows updating some dependencies that were fixed to older versions: bytes, regex, once_cell, tokio, uuid
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3135
+
+### Fix the redact error feature for Studio ([PR #3137](https://github.com/apollographql/router/pull/3137)
+
+If you were using `tracing.apollo.errors.subgraph.all.redact` and set it to `false` it was still readacting the error until this fix.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/3137
+
+### Evaluate multiple keys matching a JWT criteria ([Issue #3017](https://github.com/apollographql/router/issues/3017))
+
+In some cases, multiple keys could match what a JWT asks for (both the algorithm, `alg`, and optional key identifier, `kid`). Previously, we scored each possible match and only took the one with the highest score. But even then, we could have multiple keys with the same score (e.g., colliding `kid` between multiple JWKS in tests).
+
+The improved behavior will:
+
+- Return a list of those matching `key` instead of the one with the highest score.
+- Try them one by one until the JWT is validated, or return an error.
+- If some keys were found with the highest possible score (matching `alg`, with `kid` present and matching, too), then we only test those keys.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/3031
+
+## 🛠 Maintenance
+
+### chore(deps): `xtask/` dependency updates ([PR #3149](https://github.com/apollographql/router/pull/3149))
+
+This is effectively running `cargo update` in the `xtask/` directory (our
+directory of tooling; not runtime components) to bring things more up to
+date.
+
+This changeset takes extra care to update `chrono`'s features to remove the
+`time` dependency which is impacted by [CVE-2020-26235](https://github.com/time-rs/time/security/advisories/GHSA-wcg3-cvx6-7396).
+
+By [@abernix](https://github.com/abernix) in https://github.com/apollographql/router/pull/3149
+
+### Improve the way we can test the state_machine in integration
+
+This changeset provides an internal TestRouterHttpServer for finer grained integration tests.
+
+By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/3099
+
+
+
 # [1.19.0] - 2023-05-19
 
 > **Note**
