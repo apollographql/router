@@ -86,13 +86,14 @@ fn as_object<E: Error>(value: Value, null_is_default: bool) -> Result<Object, E>
     use serde::de::Unexpected;
 
     let exp = if null_is_default {
-        // Similar to `deserialize_null_default`
         "a map or null"
     } else {
         "a map"
     };
     match value {
         Value::Object(object) => Ok(object),
+        // Similar to `deserialize_null_default`:
+        Value::Null if null_is_default => Ok(Object::default()),
         Value::Null => Err(E::invalid_type(Unexpected::Unit, &exp)),
         Value::Bool(value) => Err(E::invalid_type(Unexpected::Bool(value), &exp)),
         Value::Number(_) => Err(E::invalid_type(Unexpected::Other("a number"), &exp)),
