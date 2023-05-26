@@ -41,3 +41,6 @@ tokio = "1.25.0"
 which = "4"
 zip = { version = "0.6", default-features = false }
 walkdir = "2.3.2"
+
+[dev-dependencies]
+insta = { version = "1.26.0", features = ["json", "redactions", "yaml"] }
