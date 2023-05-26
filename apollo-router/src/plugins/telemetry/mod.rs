@@ -104,6 +104,7 @@ use crate::services::subgraph::Response;
 use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::RouterRequest;
+use crate::services::RouterResponse;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
@@ -233,6 +234,10 @@ impl Plugin for Telemetry {
         let config = self.config.clone();
         let config_later = self.config.clone();
         let config_even_later = self.config.clone();
+        let map_response_config = self.config.clone();
+
+        let metrics_sender = self.apollo_metrics_sender.clone();
+        let metrics = self.metrics.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
 
         ServiceBuilder::new()
@@ -266,16 +271,49 @@ impl Plugin for Telemetry {
                 );
                 span
             })
+            .map_response(move |mut response: router::Response| {
+                if let Some(usage_reporting) =
+                response.context.private_entries.lock().get::<UsageReporting>()
+                {
+                    // Record the operation signature on the router span
+                    Span::current().record(
+                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
+                        usage_reporting.stats_report_key.as_str(),
+                    );
+                }
+                // To expose trace_id or not
+                let expose_trace_id_header = map_response_config.tracing.as_ref().and_then(|t| {
+                    t.response_trace_id.enabled.then(|| {
+                        t.response_trace_id
+                            .header_name
+                            .clone()
+                            .unwrap_or(HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER))
+                    })
+                });
+                if let (Some(header_name), Some(trace_id)) = (
+                    expose_trace_id_header,
+                    TraceId::maybe_new().and_then(|t| HeaderValue::from_str(&t.to_string()).ok()),
+                ) {
+                    response.response.headers_mut().append(header_name, trace_id);
+                }
+
+                if response.context.contains_key(LOGGING_DISPLAY_HEADERS) {
+                    ::tracing::info!(http.response.headers = ?response.response.headers(), "Supergraph response headers");
+                }
+                response
+            })
             .map_future_with_request_data( move |req: &router::Request| {
                 Self::populate_context(config_later.clone(), field_level_instrumentation_ratio, req);
                 req.context.clone()
             },
-            move |_ctx: Context, fut| {
+            move |ctx: Context, fut| {
                 let start = Instant::now();
                 let config = config_even_later.clone();
+                let metrics = metrics.clone();
+                let metrics_sender = metrics_sender.clone();
                 async move {
                     let span = Span::current();
-                    let response: Result<router::Response, BoxError> = fut.await;
+                    let mut response: Result<router::Response, BoxError> = fut.await;
 
                     span.record(
                         "apollo_private.duration_ns",
@@ -284,6 +322,18 @@ impl Plugin for Telemetry {
 
 
                     let expose_trace_id = config.tracing.as_ref().cloned().unwrap_or_default().response_trace_id;
+
+                    response = Self::update_router_otel_metrics(
+                        config.clone(),
+                        ctx.clone(),
+                        metrics,
+                        response,
+                        start.elapsed(),
+                        field_level_instrumentation_ratio,
+                        metrics_sender
+                    )
+                    .await;
+
                     if let Ok(response) = &response {
                         if expose_trace_id.enabled {
                             if let Some(header_name) = &expose_trace_id.header_name {
@@ -301,7 +351,6 @@ impl Plugin for Telemetry {
                         } else {
                             span.record("otel.status_code", "Ok");
                         }
-
                     }
                     response
                 }
@@ -312,9 +361,7 @@ impl Plugin for Telemetry {
 
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         let metrics_sender = self.apollo_metrics_sender.clone();
-        let metrics = self.metrics.clone();
         let config = self.config.clone();
-        let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         ServiceBuilder::new()
@@ -322,43 +369,16 @@ impl Plugin for Telemetry {
                 self.field_level_instrumentation_ratio,
                 config.apollo.clone().unwrap_or_default(),
             ))
-            .map_response(move |mut resp: SupergraphResponse| {
-                let config = config_map_res_first.clone();
-                if let Some(usage_reporting) =
-                    resp.context.private_entries.lock().get::<UsageReporting>()
-                {
-                    // Record the operation signature on the router span
-                    Span::current().record(
-                        APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
-                        usage_reporting.stats_report_key.as_str(),
-                    );
-                }
-                // To expose trace_id or not
-                let expose_trace_id_header = config.tracing.as_ref().and_then(|t| {
-                    t.response_trace_id.enabled.then(|| {
-                        t.response_trace_id
-                            .header_name
-                            .clone()
-                            .unwrap_or(HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER))
-                    })
-                });
-                if let (Some(header_name), Some(trace_id)) = (
-                    expose_trace_id_header,
-                    TraceId::maybe_new().and_then(|t| HeaderValue::from_str(&t.to_string()).ok()),
-                ) {
-                    resp.response.headers_mut().append(header_name, trace_id);
-                }
-
-                if resp.context.contains_key(LOGGING_DISPLAY_HEADERS) {
-                    ::tracing::info!(http.response.headers = ?resp.response.headers(), "Supergraph response headers");
-                }
+            .map_response(move |resp: SupergraphResponse| {
                 let display_body = resp.context.contains_key(LOGGING_DISPLAY_BODY);
+                if display_body {
                 resp.map_stream(move |gql_response| {
-                    if display_body {
                         ::tracing::info!(http.response.body = ?gql_response, "Supergraph GraphQL response");
-                    }
-                    gql_response
-                })
+                        gql_response
+                    })
+                } else {
+                    resp
+                }
             })
             .map_future_with_request_data(
                 move |req: &SupergraphRequest| {
@@ -366,7 +386,6 @@ impl Plugin for Telemetry {
                 },
                 move |ctx: Context, fut| {
                     let config = config_map_res.clone();
-                    let metrics = metrics.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
@@ -375,13 +394,11 @@ impl Plugin for Telemetry {
                         result = Self::update_otel_metrics(
                             config.clone(),
                             ctx.clone(),
-                            metrics.clone(),
                             result,
-                            start.elapsed(),
                         )
                         .await;
                         Self::update_metrics_on_response_events(
-                            &ctx, config, field_level_instrumentation_ratio, metrics, sender, start, result,
+                            &ctx, field_level_instrumentation_ratio,  sender, start, result,
                         )
                     }
                 },
@@ -737,13 +754,21 @@ impl Telemetry {
         }
     }
 
-    async fn update_otel_metrics(
+    async fn update_router_otel_metrics(
         config: Arc<Conf>,
         context: Context,
         metrics: BasicMetrics,
-        result: Result<SupergraphResponse, BoxError>,
+        result: Result<RouterResponse, BoxError>,
         request_duration: Duration,
-    ) -> Result<SupergraphResponse, BoxError> {
+        field_level_instrumentation_ratio: f64,
+        sender: Sender,
+    ) -> Result<RouterResponse, BoxError> {
+        let operation_kind: OperationKind = context
+            .get(OPERATION_KIND)
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+
         let mut metric_attrs = {
             context
                 .private_entries
@@ -766,6 +791,97 @@ impl Telemetry {
                     response.response.status().as_u16().to_string(),
                 ));
 
+                if !response.response.status().is_success() {
+                    metric_attrs.push(KeyValue::new(
+                        "error",
+                        response.response.status().to_string(),
+                    ));
+
+                    if !matches!(sender, Sender::Noop) {
+                        Self::update_apollo_metrics(
+                            &context,
+                            field_level_instrumentation_ratio,
+                            sender,
+                            true,
+                            request_duration,
+                            operation_kind,
+                            None,
+                        );
+                    }
+                }
+
+                Ok(response)
+            }
+            Err(err) => {
+                metric_attrs.push(KeyValue::new("status", "500"));
+
+                if !matches!(sender, Sender::Noop) {
+                    Self::update_apollo_metrics(
+                        &context,
+                        field_level_instrumentation_ratio,
+                        sender,
+                        true,
+                        request_duration,
+                        operation_kind,
+                        None,
+                    );
+                }
+                // Fill attributes from error
+                if let Some(subgraph_attributes_conf) = config
+                    .metrics
+                    .as_ref()
+                    .and_then(|m| m.common.as_ref())
+                    .and_then(|c| c.attributes.as_ref())
+                    .and_then(|c| c.supergraph.as_ref())
+                {
+                    metric_attrs.extend(
+                        subgraph_attributes_conf
+                            .get_attributes_from_error(&err)
+                            .into_iter()
+                            .map(|(k, v)| KeyValue::new(k, v)),
+                    );
+                }
+
+                Err(err)
+            }
+        };
+
+        // http_requests_total - the total number of HTTP requests received
+        metrics
+            .http_requests_total
+            .add(&opentelemetry::Context::current(), 1, &metric_attrs);
+
+        metrics.http_requests_duration.record(
+            &opentelemetry::Context::current(),
+            request_duration.as_secs_f64(),
+            &metric_attrs,
+        );
+
+        res
+    }
+
+    async fn update_otel_metrics(
+        config: Arc<Conf>,
+        context: Context,
+        result: Result<SupergraphResponse, BoxError>,
+    ) -> Result<SupergraphResponse, BoxError> {
+        let mut metric_attrs = {
+            context
+                .private_entries
+                .lock()
+                .get::<MetricsAttributes>()
+                .cloned()
+        }
+        .map(|attrs| {
+            attrs
+                .0
+                .into_iter()
+                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                .collect::<Vec<KeyValue>>()
+        })
+        .unwrap_or_default();
+        let res = match result {
+            Ok(response) => {
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
                 let (first_response, rest) = stream.into_future().await;
@@ -788,9 +904,6 @@ impl Telemetry {
                     metric_attrs.extend(attributes.into_iter().map(|(k, v)| KeyValue::new(k, v)));
                 }
 
-                if !parts.status.is_success() {
-                    metric_attrs.push(KeyValue::new("error", parts.status.to_string()));
-                }
                 let response = http::Response::from_parts(
                     parts,
                     once(ready(first_response.unwrap_or_default()))
@@ -806,17 +919,6 @@ impl Telemetry {
                 Err(err)
             }
         };
-
-        // http_requests_total - the total number of HTTP requests received
-        metrics
-            .http_requests_total
-            .add(&opentelemetry::Context::current(), 1, &metric_attrs);
-
-        metrics.http_requests_duration.record(
-            &opentelemetry::Context::current(),
-            request_duration.as_secs_f64(),
-            &metric_attrs,
-        );
 
         res
     }
@@ -1075,61 +1177,21 @@ impl Telemetry {
     #[allow(clippy::too_many_arguments)]
     fn update_metrics_on_response_events(
         ctx: &Context,
-        config: Arc<Conf>,
         field_level_instrumentation_ratio: f64,
-        metrics: BasicMetrics,
         sender: Sender,
         start: Instant,
         result: Result<supergraph::Response, BoxError>,
     ) -> Result<supergraph::Response, BoxError> {
-        let operation_kind: OperationKind =
-            ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
-
-        match result {
-            Err(e) => {
-                if !matches!(sender, Sender::Noop) {
-                    Self::update_apollo_metrics(
-                        ctx,
-                        field_level_instrumentation_ratio,
-                        sender,
-                        true,
-                        start.elapsed(),
-                        operation_kind,
-                        None,
-                    );
-                }
-                let mut metric_attrs = Vec::new();
-                // Fill attributes from error
-                if let Some(subgraph_attributes_conf) = config
-                    .metrics
-                    .as_ref()
-                    .and_then(|m| m.common.as_ref())
-                    .and_then(|c| c.attributes.as_ref())
-                    .and_then(|c| c.supergraph.as_ref())
-                {
-                    metric_attrs.extend(
-                        subgraph_attributes_conf
-                            .get_attributes_from_error(&e)
-                            .into_iter()
-                            .map(|(k, v)| KeyValue::new(k, v)),
-                    );
-                }
-
-                metrics.http_requests_total.add(
-                    &opentelemetry::Context::current(),
-                    1,
-                    &metric_attrs,
-                );
-
-                Err(e)
-            }
-            Ok(router_response) => {
-                let mut has_errors = !router_response.response.status().is_success();
-
+        // the Err path and non success() http codes are dealt with by the router_service
+        if let Ok(router_response) = result {
+            let operation_kind: OperationKind =
+                ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
+            let is_http_success = router_response.response.status().is_success();
+            if is_http_success {
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
-
+                    let mut has_errors = false;
                     response_stream
                         .map(move |response| {
                             if !response.errors.is_empty() {
@@ -1154,7 +1216,11 @@ impl Telemetry {
                         })
                         .boxed()
                 }))
+            } else {
+                Ok(router_response)
             }
+        } else {
+            result
         }
     }
 
