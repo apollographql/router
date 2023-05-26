@@ -1505,13 +1505,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "custom-global-allocator"
-version = "0.1.0"
-dependencies = [
- "apollo-router",
-]
-
-[[package]]
 name = "daggy"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
