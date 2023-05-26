@@ -56,7 +56,8 @@
       "Health check": "/configuration/health-checks",
       "Apollo Studio reporting": "/configuration/apollo-telemetry",
       "Collecting metrics": "/configuration/metrics",
-      "Tracing": "/configuration/tracing"
+      "Tracing": "/configuration/tracing",
+      "Client awareness": "/managed-federation/client-awareness"
     },
     "Containerization": {
       "Overview": "/containerization/overview",
@@ -69,9 +70,8 @@
       "Request format": "/executing-operations/requests"
     },
     "Managed Federation": {
-      "Overview": "/managed-federation/overview",
-      "Setup": "/managed-federation/setup",
-      "Client awareness": "/managed-federation/client-awareness",
+      "Overview": "/federation/managed-federation/overview",
+      "Setup": "/federation/managed-federation/setup",
       "Studio features": "https://www.apollographql.com/docs/studio/federated-graphs/"
     },
     "Customizations": {
