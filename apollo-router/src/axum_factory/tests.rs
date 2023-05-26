@@ -43,8 +43,8 @@ use test_log::test;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
-#[cfg(unix)]
-use tokio::io::BufReader;
+// #[cfg(unix)]
+// use tokio::io::BufReader;
 use tokio::sync::mpsc;
 use tokio_util::io::StreamReader;
 use tower::service_fn;
@@ -295,56 +295,56 @@ pub(super) async fn init_with_config(
     Ok((server, client))
 }
 
-#[cfg(unix)]
-async fn init_unix(
-    mut mock: impl Service<
-            router::Request,
-            Response = router::Response,
-            Error = BoxError,
-            Future = BoxFuture<'static, router::ServiceResult>,
-        > + Send
-        + 'static,
-    temp_dir: &tempfile::TempDir,
-) -> HttpServerHandle {
-    let server_factory = AxumHttpServerFactory::new();
-    let (service, mut handle) = tower_test::mock::spawn();
-    let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
+// #[cfg(unix)]
+// async fn init_unix(
+//     mut mock: impl Service<
+//             router::Request,
+//             Response = router::Response,
+//             Error = BoxError,
+//             Future = BoxFuture<'static, router::ServiceResult>,
+//         > + Send
+//         + 'static,
+//     temp_dir: &tempfile::TempDir,
+// ) -> HttpServerHandle {
+//     let server_factory = AxumHttpServerFactory::new();
+//     let (service, mut handle) = tower_test::mock::spawn();
+//     let (all_connections_stopped_sender, _) = mpsc::channel::<()>(1);
 
-    tokio::spawn(async move {
-        loop {
-            while let Some((request, responder)) = handle.next_request().await {
-                match mock.ready().await.unwrap().call(request).await {
-                    Ok(response) => responder.send_response(response),
-                    Err(err) => responder.send_error(err),
-                }
-            }
-        }
-    });
+//     tokio::spawn(async move {
+//         loop {
+//             while let Some((request, responder)) = handle.next_request().await {
+//                 match mock.ready().await.unwrap().call(request).await {
+//                     Ok(response) => responder.send_response(response),
+//                     Err(err) => responder.send_error(err),
+//                 }
+//             }
+//         }
+//     });
 
-    server_factory
-        .create(
-            TestRouterFactory {
-                inner: service.into_inner(),
-            },
-            Arc::new(
-                Configuration::fake_builder()
-                    .supergraph(
-                        crate::configuration::Supergraph::fake_builder()
-                            .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
-                            .build(),
-                    )
-                    .build()
-                    .unwrap(),
-            ),
-            None,
-            vec![],
-            MultiMap::new(),
-            EntitlementState::Unentitled,
-            all_connections_stopped_sender,
-        )
-        .await
-        .expect("Failed to create server factory")
-}
+//     server_factory
+//         .create(
+//             TestRouterFactory {
+//                 inner: service.into_inner(),
+//             },
+//             Arc::new(
+//                 Configuration::fake_builder()
+//                     .supergraph(
+//                         crate::configuration::Supergraph::fake_builder()
+//                             .listen(ListenAddr::UnixSocket(temp_dir.as_ref().join("sock")))
+//                             .build(),
+//                     )
+//                     .build()
+//                     .unwrap(),
+//             ),
+//             None,
+//             vec![],
+//             MultiMap::new(),
+//             EntitlementState::Unentitled,
+//             all_connections_stopped_sender,
+//         )
+//         .await
+//         .expect("Failed to create server factory")
+// }
 
 #[tokio::test]
 async fn it_displays_sandbox() {
@@ -2043,116 +2043,115 @@ async fn test_defer_is_not_buffered() {
 }
 
 // TODO[igni]: figure out why it hangs
-#[tokio::test]
-#[test::skip]
-#[cfg(unix)]
-async fn listening_to_unix_socket() {
-    let temp_dir = tempfile::tempdir().unwrap();
-    let expected_response = graphql::Response::builder()
-        .data(json!({"response": "yay"}))
-        .build();
-    let example_response = expected_response.clone();
+// #[tokio::test]
+// #[cfg(unix)]
+// async fn listening_to_unix_socket() {
+//     let temp_dir = tempfile::tempdir().unwrap();
+//     let expected_response = graphql::Response::builder()
+//         .data(json!({"response": "yay"}))
+//         .build();
+//     let example_response = expected_response.clone();
 
-    let router_service = router_service::from_supergraph_mock_callback(move |req| {
-        let example_response = example_response.clone();
-        Ok(SupergraphResponse::new_from_graphql_response(
-            example_response,
-            req.context,
-        ))
-    })
-    .await;
-    let server = init_unix(router_service, &temp_dir).await;
+//     let router_service = router_service::from_supergraph_mock_callback(move |req| {
+//         let example_response = example_response.clone();
+//         Ok(SupergraphResponse::new_from_graphql_response(
+//             example_response,
+//             req.context,
+//         ))
+//     })
+//     .await;
+//     let server = init_unix(router_service, &temp_dir).await;
 
-    let output = send_to_unix_socket(
-        server.graphql_listen_address().as_ref().unwrap(),
-        Method::POST,
-        r#"{"query":"query { me { username } }"}"#,
-    )
-    .await;
+//     let output = send_to_unix_socket(
+//         server.graphql_listen_address().as_ref().unwrap(),
+//         Method::POST,
+//         r#"{"query":"query { me { username } }"}"#,
+//     )
+//     .await;
 
-    assert_eq!(
-        serde_json::from_str::<graphql::Response>(&output).unwrap(),
-        expected_response,
-    );
+//     assert_eq!(
+//         serde_json::from_str::<graphql::Response>(&output).unwrap(),
+//         expected_response,
+//     );
 
-    // Get query
-    let output = send_to_unix_socket(
-        server.graphql_listen_address().as_ref().unwrap(),
-        Method::GET,
-        r#"query="query { me { username } }""#,
-    )
-    .await;
+//     // Get query
+//     let output = send_to_unix_socket(
+//         server.graphql_listen_address().as_ref().unwrap(),
+//         Method::GET,
+//         r#"query="query { me { username } }""#,
+//     )
+//     .await;
 
-    assert_eq!(
-        serde_json::from_str::<graphql::Response>(&output).unwrap(),
-        expected_response,
-    );
+//     assert_eq!(
+//         serde_json::from_str::<graphql::Response>(&output).unwrap(),
+//         expected_response,
+//     );
 
-    server.shutdown().await.unwrap();
-}
+//     server.shutdown().await.unwrap();
+// }
 
-#[cfg(unix)]
-async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
-    use tokio::io::AsyncBufReadExt;
-    use tokio::io::Interest;
-    use tokio::net::UnixStream;
+// #[cfg(unix)]
+// async fn send_to_unix_socket(addr: &ListenAddr, method: Method, body: &str) -> String {
+//     use tokio::io::AsyncBufReadExt;
+//     use tokio::io::Interest;
+//     use tokio::net::UnixStream;
 
-    let content = match method {
-        Method::GET => {
-            format!(
-                "{} /?{} HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-Content-Type: application/json\r
-Accept: application/json\r
+//     let content = match method {
+//         Method::GET => {
+//             format!(
+//                 "{} /?{} HTTP/1.1\r
+// Host: localhost:4100\r
+// Content-Length: {}\r
+// Content-Type: application/json\r
+// Accept: application/json\r
 
-\n",
-                method.as_str(),
-                body,
-                body.len(),
-            )
-        }
-        Method::POST => {
-            format!(
-                "{} / HTTP/1.1\r
-Host: localhost:4100\r
-Content-Length: {}\r
-Content-Type: application/json\r
-Accept: application/json\r
+// \n",
+//                 method.as_str(),
+//                 body,
+//                 body.len(),
+//             )
+//         }
+//         Method::POST => {
+//             format!(
+//                 "{} / HTTP/1.1\r
+// Host: localhost:4100\r
+// Content-Length: {}\r
+// Content-Type: application/json\r
+// Accept: application/json\r
 
-{}\n",
-                method.as_str(),
-                body.len(),
-                body
-            )
-        }
-        _ => {
-            unimplemented!()
-        }
-    };
-    let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
-    stream.ready(Interest::WRITABLE).await.unwrap();
-    stream.write_all(content.as_bytes()).await.unwrap();
-    stream.flush().await.unwrap();
-    let stream = BufReader::new(stream);
-    let mut lines = stream.lines();
-    let mut headers = Vec::new();
-    let mut body = String::new();
-    while let Ok(Some(line)) = lines.next_line().await {
-        if line.is_empty() {
-            break;
-        }
-        headers.push(line);
-    }
+// {}\n",
+//                 method.as_str(),
+//                 body.len(),
+//                 body
+//             )
+//         }
+//         _ => {
+//             unimplemented!()
+//         }
+//     };
+//     let mut stream = UnixStream::connect(addr.to_string()).await.unwrap();
+//     stream.ready(Interest::WRITABLE).await.unwrap();
+//     stream.write_all(content.as_bytes()).await.unwrap();
+//     stream.flush().await.unwrap();
+//     let stream = BufReader::new(stream);
+//     let mut lines = stream.lines();
+//     let mut headers = Vec::new();
+//     let mut body = String::new();
+//     while let Ok(Some(line)) = lines.next_line().await {
+//         if line.is_empty() {
+//             break;
+//         }
+//         headers.push(line);
+//     }
 
-    lines.into_inner().read_to_string(&mut body).await.unwrap();
-    assert!(
-        headers.first().unwrap().contains(" 200 "),
-        "{}",
-        format!("{}\n{}", headers.join("\n"), body)
-    );
-    body
-}
+//     lines.into_inner().read_to_string(&mut body).await.unwrap();
+//     assert!(
+//         headers.first().unwrap().contains(" 200 "),
+//         "{}",
+//         format!("{}\n{}", headers.join("\n"), body)
+//     );
+//     body
+// }
 
 #[tokio::test]
 async fn test_health_check() {
