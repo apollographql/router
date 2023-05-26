@@ -9,6 +9,7 @@ members = [
     "examples/cache-control/rhai",
     "examples/context/rust",
     "examples/cookies-to-headers/rhai",
+    "examples/custom-global-allocator",
     "examples/data-response-mutate/rhai",
     "examples/error-response-mutate/rhai",
     "examples/forbid-anonymous-operations/rhai",
