@@ -625,8 +625,6 @@ impl TryFrom<&DirEntry> for Changeset {
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -637,22 +635,34 @@ mod tests {
             title: String::from("TITLE"),
             issues: vec![
                 TemplateResource {
-                    url: format!("https://github.com/{}/issues/ISSUE_NUMBER1", String::from("REPO_WITH_OWNER")),
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
                     number: String::from("ISSUE_NUMBER1"),
                 },
                 TemplateResource {
-                    url: format!("https://github.com/{}/issues/ISSUE_NUMBER2", String::from("REPO_WITH_OWNER")),
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
                     number: String::from("ISSUE_NUMBER2"),
                 },
             ],
             pulls: vec![
                 TemplateResource {
-                   url: format!("https://github.com/{}/pull/PULL_NUMBER1", String::from("REPO_WITH_OWNER")),
-                   number: String::from("PULL_NUMBER1"),
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER1"),
                 },
                 TemplateResource {
-                   url: format!("https://github.com/{}/pull/PULL_NUMBER2", String::from("REPO_WITH_OWNER")),
-                   number: String::from("PULL_NUMBER2"),
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER2"),
                 },
             ],
             author: String::from("AUTHOR"),
@@ -662,7 +672,10 @@ mod tests {
         let mut tt = TinyTemplate::new();
         tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
         tt.set_default_formatter(&format_unescaped);
-        let rendered_template = tt.render("message", &test_context).unwrap().replace('\r', "");
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
         insta::assert_snapshot!(rendered_template);
     }
 
@@ -670,18 +683,27 @@ mod tests {
     fn it_templatizes_with_multiple_prs_in_footer() {
         let test_context = TemplateContext {
             title: String::from("TITLE"),
-            issues: vec!(TemplateResource {
-                url: format!("https://github.com/{}/issues/ISSUE_NUMBER", String::from("REPO_WITH_OWNER")),
+            issues: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/issues/ISSUE_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
                 number: String::from("ISSUE_NUMBER"),
-            }),
+            }],
             pulls: vec![
                 TemplateResource {
-                   url: format!("https://github.com/{}/pull/PULL_NUMBER1", String::from("REPO_WITH_OWNER")),
-                   number: String::from("PULL_NUMBER1"),
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER1"),
                 },
                 TemplateResource {
-                   url: format!("https://github.com/{}/pull/PULL_NUMBER2", String::from("REPO_WITH_OWNER")),
-                   number: String::from("PULL_NUMBER2"),
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER2"),
                 },
             ],
             author: String::from("AUTHOR"),
@@ -691,7 +713,10 @@ mod tests {
         let mut tt = TinyTemplate::new();
         tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
         tt.set_default_formatter(&format_unescaped);
-        let rendered_template = tt.render("message", &test_context).unwrap().replace('\r', "");
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
         insta::assert_snapshot!(rendered_template);
     }
 
@@ -701,18 +726,27 @@ mod tests {
             title: String::from("TITLE"),
             issues: vec![
                 TemplateResource {
-                   url: format!("https://github.com/{}/issues/ISSUE_NUMBER1", String::from("REPO_WITH_OWNER")),
-                   number: String::from("ISSUE_NUMBER1"),
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER1"),
                 },
                 TemplateResource {
-                   url: format!("https://github.com/{}/issues/ISSUE_NUMBER2", String::from("REPO_WITH_OWNER")),
-                   number: String::from("ISSUE_NUMBER2"),
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER2"),
                 },
             ],
-            pulls: vec!(TemplateResource {
-                url: format!("https://github.com/{}/pull/PULL_NUMBER", String::from("REPO_WITH_OWNER")),
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
                 number: String::from("PULL_NUMBER"),
-            }),
+            }],
             author: String::from("AUTHOR"),
             body: String::from("BODY"),
         };
@@ -720,7 +754,10 @@ mod tests {
         let mut tt = TinyTemplate::new();
         tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
         tt.set_default_formatter(&format_unescaped);
-        let rendered_template = tt.render("message", &test_context).unwrap().replace('\r', "");
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
         insta::assert_snapshot!(rendered_template);
     }
 
@@ -728,11 +765,14 @@ mod tests {
     fn it_templatizes_with_prs_in_title_when_empty_issues() {
         let test_context = TemplateContext {
             title: String::from("TITLE"),
-            issues: vec!(),
-            pulls: vec!(TemplateResource {
-                url: format!("https://github.com/{}/pull/PULL_NUMBER", String::from("REPO_WITH_OWNER")),
+            issues: vec![],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
                 number: String::from("PULL_NUMBER"),
-            }),
+            }],
             author: String::from("AUTHOR"),
             body: String::from("BODY"),
         };
@@ -740,7 +780,10 @@ mod tests {
         let mut tt = TinyTemplate::new();
         tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
         tt.set_default_formatter(&format_unescaped);
-        let rendered_template = tt.render("message", &test_context).unwrap().replace('\r', "");
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
         insta::assert_snapshot!(rendered_template);
     }
 
@@ -748,14 +791,20 @@ mod tests {
     fn it_templatizes_without_prs_in_title_when_issues_present() {
         let test_context = TemplateContext {
             title: String::from("TITLE"),
-            issues: vec!(TemplateResource {
-                url: format!("https://github.com/{}/pull/ISSUE_NUMBER", String::from("REPO_WITH_OWNER")),
+            issues: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/ISSUE_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
                 number: String::from("ISSUE_NUMBER"),
-            }),
-            pulls: vec!(TemplateResource {
-                url: format!("https://github.com/{}/pull/PULL_NUMBER", String::from("REPO_WITH_OWNER")),
+            }],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
                 number: String::from("PULL_NUMBER"),
-            }),
+            }],
             author: String::from("AUTHOR"),
             body: String::from("BODY"),
         };
@@ -763,7 +812,10 @@ mod tests {
         let mut tt = TinyTemplate::new();
         tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
         tt.set_default_formatter(&format_unescaped);
-        let rendered_template = tt.render("message", &test_context).unwrap().replace('\r', "");
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
         insta::assert_snapshot!(rendered_template);
     }
 
@@ -771,8 +823,8 @@ mod tests {
     fn it_templatizes_with_neither_issues_or_prs() {
         let test_context = TemplateContext {
             title: String::from("TITLE"),
-            issues: vec!(),
-            pulls: vec!(),
+            issues: vec![],
+            pulls: vec![],
             author: String::from("AUTHOR"),
             body: String::from("BODY"),
         };
@@ -780,8 +832,10 @@ mod tests {
         let mut tt = TinyTemplate::new();
         tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
         tt.set_default_formatter(&format_unescaped);
-        let rendered_template = tt.render("message", &test_context).unwrap().replace('\r', "");
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
         insta::assert_snapshot!(rendered_template);
     }
-
 }
