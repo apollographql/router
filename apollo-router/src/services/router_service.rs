@@ -33,7 +33,7 @@ use tower_service::Service;
 use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
@@ -49,7 +49,7 @@ use crate::graphql;
 use crate::plugin::test::MockSupergraphService;
 use crate::query_planner::QueryPlanResult;
 use crate::router_factory::RouterFactory;
-use crate::services::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use crate::services::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
 use crate::services::SupergraphRequest;
@@ -497,7 +497,7 @@ where
         Error = BoxError,
         Future = BoxFuture<'static, router::ServiceResult>,
     > + Send {
-        let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
+        let router_service = content_negotiation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
         ));

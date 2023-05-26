@@ -19,7 +19,7 @@ use tower::ServiceExt;
 use tower_service::Service;
 use tracing_futures::Instrument;
 
-use super::layers::content_negociation;
+use super::layers::content_negotiation;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
 use super::subgraph_service::MakeSubgraphService;
@@ -431,7 +431,7 @@ impl SupergraphCreator {
         };
 
         ServiceBuilder::new()
-            .layer(content_negociation::SupergraphLayer::default())
+            .layer(content_negotiation::SupergraphLayer::default())
             .service(
                 self.plugins
                     .iter()

@@ -41,7 +41,7 @@ use tower_http::decompression::DecompressionLayer;
 use tracing::Instrument;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
-use super::layers::content_negociation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
 use super::Plugins;
 use crate::error::FetchError;
 use crate::graphql;
