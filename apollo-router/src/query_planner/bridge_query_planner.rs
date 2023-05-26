@@ -336,13 +336,28 @@ mod tests {
 
     #[test(tokio::test)]
     async fn empty_query_plan_should_be_a_planner_error() {
-        let err = plan(
-            EXAMPLE_SCHEMA,
-            include_str!("testdata/unknown_introspection_query.graphql"),
-            None,
-        )
-        .await
-        .unwrap_err();
+        let parser = QueryParsingLayer::new(
+            Arc::new(Schema::parse(EXAMPLE_SCHEMA, &Default::default(), None).unwrap()),
+            Arc::clone(&Default::default()),
+        );
+
+        let query = parser
+            .parse((
+                include_str!("testdata/unknown_introspection_query.graphql").into(),
+                None,
+            ))
+            .await
+            .unwrap();
+        let err = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
+            .await
+            .unwrap()
+            // test the planning part separately because it is a valid introspection query
+            // it should be caught by the introspection part, but just in case, we check
+            // that the query planner would return an empty plan error if it received an
+            // introspection query
+            .plan(query, None)
+            .await
+            .unwrap_err();
 
         match err {
             QueryPlannerError::EmptyPlan(usage_reporting) => {
@@ -401,7 +416,9 @@ mod tests {
         query: &str,
         operation_name: Option<String>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let configuration: Arc<Configuration> = Default::default();
+        let mut configuration: Configuration = Default::default();
+        configuration.supergraph.introspection = true;
+        let configuration = Arc::new(configuration);
         let api_schema = None;
         let parser = QueryParsingLayer::new(
             Arc::new(Schema::parse(schema, &configuration, api_schema).unwrap()),

@@ -150,6 +150,12 @@ where
         req.query,
         body.operation_name.clone(),
         context.clone(),
+        schema.clone(),
+        req.supergraph_request
+            .body()
+            .query
+            .clone()
+            .expect("query presence was checked before"),
     )
     .await
     {
@@ -251,10 +257,20 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    query: Option<Query>,
+    mut query: Option<Query>,
     operation_name: Option<String>,
     context: Context,
+    schema: Arc<Schema>,
+    query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
+    if query.is_none() {
+        query = Some(
+            QueryParsingLayer::new(schema, Default::default())
+                .parse((query_str, operation_name.clone()))
+                .await
+                .unwrap(),
+        );
+    }
     planning
         .call(
             QueryPlannerRequest::builder()
