@@ -89,14 +89,18 @@ impl<'a> TestHarness<'a> {
     /// Specifies the logging level. Note that this function may not be called more than once.
     /// log_level is in RUST_LOG format.
     pub fn log_level(self, log_level: &'a str) -> Self {
-        init_telemetry(log_level).expect("failed to setup logging");
+        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+        let log_level = format!("{log_level},salsa=error");
+        init_telemetry(&log_level).expect("failed to setup logging");
         self
     }
 
     /// Specifies the logging level. Note that this function will silently fail if called more than once.
     /// log_level is in RUST_LOG format.
     pub fn try_log_level(self, log_level: &'a str) -> Self {
-        let _ = init_telemetry(log_level);
+        // manually filter salsa logs because some of them run at the INFO level https://github.com/salsa-rs/salsa/issues/425
+        let log_level = format!("{log_level},salsa=error");
+        let _ = init_telemetry(&log_level);
         self
     }
 
