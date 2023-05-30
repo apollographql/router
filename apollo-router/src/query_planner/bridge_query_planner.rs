@@ -238,7 +238,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
         let fut = async move {
             let start = Instant::now();
             let res = this
-                .get((filtered_query.to_string(), operation_name.to_owned()))
+                .get(query, filtered_query.to_string(), operation_name.to_owned())
                 .await;
             let duration = start.elapsed().as_secs_f64();
             tracing::info!(histogram.apollo_router_query_planning_time = duration,);
@@ -275,8 +275,15 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 }
 
 impl BridgeQueryPlanner {
-    async fn get(&self, key: QueryKey) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let selections = self.parse_selections(key.clone()).await?;
+    async fn get(
+        &self,
+        query: String,
+        filtered_query: String,
+        operation_name: Option<String>,
+    ) -> Result<QueryPlannerContent, QueryPlannerError> {
+        let mut selections = self
+            .parse_selections((query.clone(), operation_name.clone()))
+            .await?;
 
         if selections.contains_introspection() {
             // If we have only one operation containing only the root field `__typename`
@@ -297,11 +304,18 @@ impl BridgeQueryPlanner {
                     response: Box::new(graphql::Response::builder().data(data).build()),
                 });
             } else {
-                return self.introspection(key.0).await;
+                return self.introspection(query).await;
             }
         }
 
-        self.plan(key.0, key.1, selections).await
+        if filtered_query != query {
+            selections.filtered_query = Some(Arc::new(
+                self.parse_selections((filtered_query.clone(), operation_name.clone()))
+                    .await?,
+            ));
+        }
+
+        self.plan(filtered_query, operation_name, selections).await
     }
 }
 
@@ -336,7 +350,11 @@ mod tests {
             .await
             .unwrap();
         let result = planner
-            .get((include_str!("testdata/query.graphql").into(), None))
+            .get(
+                include_str!("testdata/query.graphql").into(),
+                include_str!("testdata/query.graphql").into(),
+                None,
+            )
             .await
             .unwrap();
         if let QueryPlannerContent::Plan { plan, .. } = result {
@@ -355,10 +373,11 @@ mod tests {
             .await
             .unwrap();
         let err = planner
-            .get((
+            .get(
+                "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
                 "fragment UnusedTestFragment on User { id } query { me { id } }".to_string(),
                 None,
-            ))
+            )
             .await
             .unwrap_err();
 
@@ -417,7 +436,7 @@ mod tests {
         let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), Default::default())
             .await
             .unwrap();
-        let result = planner.get(("".into(), None)).await;
+        let result = planner.get("".into(), "".into(), None).await;
 
         assert_eq!(
             "couldn't plan query: query validation errors: Syntax Error: Unexpected <EOF>.",
@@ -431,7 +450,7 @@ mod tests {
             .await
             .unwrap();
         let result = planner
-            .get(("{ x: __typename }".into(), None))
+            .get("{ x: __typename }".into(), "{ x: __typename }".into(), None)
             .await
             .unwrap();
         if let QueryPlannerContent::Introspection { response } = result {
@@ -450,7 +469,11 @@ mod tests {
             .await
             .unwrap();
         let result = planner
-            .get(("{ x: __typename __typename }".into(), None))
+            .get(
+                "{ x: __typename __typename }".into(),
+                "{ x: __typename __typename }".into(),
+                None,
+            )
             .await
             .unwrap();
         if let QueryPlannerContent::Introspection { response } = result {

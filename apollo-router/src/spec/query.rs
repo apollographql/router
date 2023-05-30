@@ -5,6 +5,7 @@
 
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use apollo_compiler::hir;
 use apollo_compiler::ApolloCompiler;
@@ -54,6 +55,8 @@ pub(crate) struct Query {
     pub(crate) operations: Vec<Operation>,
     #[derivative(PartialEq = "ignore", Hash = "ignore")]
     pub(crate) subselections: HashMap<SubSelection, Query>,
+    #[derivative(PartialEq = "ignore", Hash = "ignore")]
+    pub(crate) filtered_query: Option<Arc<Query>>,
 }
 
 #[derive(Debug, Derivative, Default)]
@@ -314,6 +317,7 @@ impl Query {
             fragments,
             operations,
             subselections: HashMap::new(),
+            filtered_query: None,
         })
     }
 
