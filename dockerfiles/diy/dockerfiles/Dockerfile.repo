@@ -36,11 +36,8 @@ ARG DEBUG_IMAGE=false
 
 WORKDIR /dist
 
-# Install curl
-RUN \
-  apt-get update -y \
-  && apt-get install -y \
-    curl
+# Update apt
+RUN apt-get update -y
 
 # Copy in the required files from our build image
 COPY --from=build --chown=root:root /dist /dist
