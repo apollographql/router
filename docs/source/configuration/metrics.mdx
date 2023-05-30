@@ -233,6 +233,26 @@ To fetch the value of the field `x`, the corresponding path is `.items[0].wanted
 
 JSON path queries always begin with a period `.`
 
+## Changing default buckets for histograms
+
+You can customize the buckets for all generated histograms:
+
+```yaml title="router.yaml"
+telemetry:
+  metrics:
+    common:
+      buckets:
+        - 0.05
+        - 0.10
+        - 0.25
+        - 0.50
+        - 1.00
+        - 2.50
+        - 5.00
+        - 10.00
+        - 20.00
+```
+
 ## Adding custom resources
 
 Resources are similar to [attributes](#adding-custom-attributeslabels), but there are more globals. They're configured directly on the metrics exporter, which means they're always present on each of your metrics.

@@ -1,0 +1,33 @@
+name: Update Uplink Schema
+run-name: ${{ github.actor }} is updating the Uplink schema 🚀
+on:
+  workflow_dispatch:
+  schedule:
+    # On the 5 of every hour
+    - cron:  '5 * * * *'
+jobs:
+  Update-Uplink-Schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rover
+        run: |
+          curl -sSL https://rover.apollo.dev/nix/v0.14.1 | sh
+          echo "$HOME/.rover/bin" >> $GITHUB_PATH
+      - name: Make changes to pull request
+        run: |
+          rover graph introspect https://uplink.api.apollographql.com/ | perl -pe 'chomp if eof' > ./apollo-router/src/uplink/uplink.graphql
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v5
+        with:
+          commit-message: Update Uplink schema
+          committer: GitHub <noreply@github.com>
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          branch: create-pull-request/uplink-schema-updates
+          add-paths: |
+            apollo-router/src/uplink/uplink.graphql
+          delete-branch: true
+          title: 'chore: Update Uplink schema'
+          body: |
+            This updates the copy of `uplink.graphql` which this repository relies on with the latest copy fetched via `rover graph introspect`.
