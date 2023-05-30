@@ -271,7 +271,7 @@ impl Query {
             .recursion_limit(configuration.preview_operation_limits.parser_max_recursion)
             .token_limit(configuration.preview_operation_limits.parser_max_tokens);
         compiler.set_type_system_hir(schema.type_system.clone());
-        let id = compiler.add_executable(&query, "query");
+        let id = compiler.add_executable(query, "query");
         (compiler, id)
     }
 
