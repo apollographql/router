@@ -36,8 +36,11 @@ ARG DEBUG_IMAGE=false
 
 WORKDIR /dist
 
-# Update apt
-RUN apt-get update -y
+# Update apt and install ca-certificates
+RUN \
+  apt-get update -y \
+  && apt-get install -y \
+    ca-certificates
 
 # Copy in the required files from our build image
 COPY --from=build --chown=root:root /dist /dist
