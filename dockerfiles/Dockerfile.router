@@ -19,8 +19,11 @@ WORKDIR /dist
 
 COPY --from=downloader /dist/router /dist
 
-# Update apt
-RUN apt-get update -y
+# Update apt and install ca-certificates
+RUN \
+  apt-get update -y \
+  && apt-get install -y \
+    ca-certificates
 
 # If debug image, install heaptrack and make a data directory
 RUN \
