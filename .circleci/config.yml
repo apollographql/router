@@ -21,7 +21,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.0.9
+      - image: cimg/redis:7.0.11
       - image: jaegertracing/all-in-one:1.42.0
     resource_class: xlarge
     environment:
