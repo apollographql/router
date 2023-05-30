@@ -524,7 +524,7 @@ The router rejects any request that violates at least one of these limits.
 ```yaml title="router.yaml"
 preview_operation_limits:
   # Network-based limits
-  http_max_request_bytes: 2000000 # Default value: 2 MB
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
 
   # Parser-based limits
   parser_max_tokens: 15000 # Default value
@@ -544,6 +544,8 @@ See [this article](./operation-limits/).
 #### Network-based limits
 
 ##### `http_max_request_bytes`
+
+> **This configuration is currently [experimental](/resources/product-launch-stages#experimental-features).**
 
 Limits the amount of data read from the network for the body of HTTP requests,
 to protects against unbounded memory consumption.

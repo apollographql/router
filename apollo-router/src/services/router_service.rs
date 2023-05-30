@@ -66,7 +66,7 @@ where
 {
     supergraph_creator: Arc<SF>,
     apq_layer: APQLayer,
-    http_max_request_bytes: usize,
+    experimental_http_max_request_bytes: usize,
 }
 
 impl<SF> RouterService<SF>
@@ -76,12 +76,12 @@ where
     pub(crate) fn new(
         supergraph_creator: Arc<SF>,
         apq_layer: APQLayer,
-        http_max_request_bytes: usize,
+        experimental_http_max_request_bytes: usize,
     ) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
-            http_max_request_bytes,
+            experimental_http_max_request_bytes,
         }
     }
 }
@@ -183,7 +183,7 @@ where
 
         let supergraph_creator = self.supergraph_creator.clone();
         let apq = self.apq_layer.clone();
-        let http_max_request_bytes = self.http_max_request_bytes;
+        let experimental_http_max_request_bytes = self.experimental_http_max_request_bytes;
 
         let fut = async move {
             let graphql_request: Result<graphql::Request, (StatusCode, &str, String)> = if parts
@@ -220,14 +220,14 @@ where
                         .parse()
                         .ok()
                 })();
-                if content_length.unwrap_or(0) > http_max_request_bytes {
+                if content_length.unwrap_or(0) > experimental_http_max_request_bytes {
                     Err((
                         StatusCode::PAYLOAD_TOO_LARGE,
-                        "payload too large for the `http_max_request_bytes` configuration",
+                        "payload too large for the `experimental_http_max_request_bytes` configuration",
                         "payload too large".to_string(),
                     ))
                 } else {
-                    let body = http_body::Limited::new(body, http_max_request_bytes);
+                    let body = http_body::Limited::new(body, experimental_http_max_request_bytes);
                     hyper::body::to_bytes(body)
                         .instrument(tracing::debug_span!("receive_body"))
                         .await
@@ -235,7 +235,7 @@ where
                             if e.is::<http_body::LengthLimitError>() {
                                 (
                                     StatusCode::PAYLOAD_TOO_LARGE,
-                                    "payload too large for the `http_max_request_bytes` configuration",
+                                    "payload too large for the `experimental_http_max_request_bytes` configuration",
                                     "payload too large".to_string(),
                                 )
                             } else {
@@ -466,7 +466,7 @@ where
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
-    http_max_request_bytes: usize,
+    experimental_http_max_request_bytes: usize,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
@@ -530,9 +530,9 @@ where
             supergraph_creator,
             static_page,
             apq_layer,
-            http_max_request_bytes: configuration
+            experimental_http_max_request_bytes: configuration
                 .preview_operation_limits
-                .http_max_request_bytes,
+                .experimental_http_max_request_bytes,
         }
     }
 
@@ -547,7 +547,7 @@ where
         let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
-            self.http_max_request_bytes,
+            self.experimental_http_max_request_bytes,
         ));
 
         ServiceBuilder::new()
@@ -741,12 +741,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_http_max_request_bytes() {
+    async fn test_experimental_http_max_request_bytes() {
         /// Size of the JSON serialization of the request created by `fn canned_new`
         /// in `apollo-router/src/services/supergraph.rs`
         const CANNED_REQUEST_LEN: usize = 391;
 
-        async fn with_config(http_max_request_bytes: usize) -> router::Response {
+        async fn with_config(experimental_http_max_request_bytes: usize) -> router::Response {
             let http_request = supergraph::Request::canned_builder()
                 .build()
                 .unwrap()
@@ -764,7 +764,7 @@ mod tests {
                 });
             let config = serde_json::json!({
                 "preview_operation_limits": {
-                    "http_max_request_bytes": http_max_request_bytes
+                    "experimental_http_max_request_bytes": experimental_http_max_request_bytes
                 }
             });
             crate::TestHarness::builder()

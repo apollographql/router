@@ -624,7 +624,7 @@ pub(crate) struct OperationLimits {
 
     /// Limit the size of incoming HTTP requests read from the network,
     /// to protect against running out of memory. Default: 2000000 (2 MB)
-    pub(crate) http_max_request_bytes: usize,
+    pub(crate) experimental_http_max_request_bytes: usize,
 }
 
 impl Default for OperationLimits {
@@ -636,7 +636,7 @@ impl Default for OperationLimits {
             max_root_fields: None,
             max_aliases: None,
             warn_only: false,
-            http_max_request_bytes: 2_000_000,
+            experimental_http_max_request_bytes: 2_000_000,
             parser_max_tokens: 15_000,
 
             // This is `apollo-parser`’s default, which protects against stack overflow

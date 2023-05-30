@@ -8,7 +8,7 @@ The limit is now restored to help protect against unbounded memory usage, but is
 
 ```yaml
 preview_operation_limits:
-  http_max_request_bytes: 2000000 # Default value: 2 MB
+  experimental_http_max_request_bytes: 2000000 # Default value: 2 MB
 ```
 
 This limit is checked while reading from the network, before JSON parsing.
