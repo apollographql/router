@@ -191,14 +191,12 @@ async fn report(
 
 async fn get_trace_report(request: supergraph::Request) -> Report {
     get_report(false, request, |r| {
-        let r = !r
-            .traces_per_query
+        !r.traces_per_query
             .values()
             .next()
             .expect("traces and stats required")
             .trace
-            .is_empty();
-        r
+            .is_empty()
     })
     .await
 }
