@@ -33,6 +33,14 @@ use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
 use crate::EntitlementSource;
 
+#[cfg(all(
+    feature = "global-allocator",
+    not(feature = "dhat-heap"),
+    target_os = "linux"
+))]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 // Note: the dhat-heap and dhat-ad-hoc features should not be both enabled. We name our functions
 // and variables identically to prevent this from happening.
 

@@ -39,7 +39,6 @@ use dialoguer::Confirm;
 use dialoguer::Editor;
 use dialoguer::Input;
 use dialoguer::Select;
-use git2;
 use itertools::Itertools;
 use matching_pull_request::matching_pull_request::ResponseData;
 use matching_pull_request::matching_pull_request::Variables;
@@ -67,15 +66,29 @@ struct TemplateContext {
 
 const REPO_WITH_OWNER: &'static str = "apollographql/router";
 
-const EXAMPLE_TEMPLATE: &'static str = "### {title} {{ for issue in issues -}}
-([Issue #{issue.number}]({issue.url})){{ if not @last }}, {{ endif }}
-{{- endfor }}
+const EXAMPLE_TEMPLATE: &'static str = "### { title }
+{{- if issues -}}
+  {{- if issues }} {{ endif -}}
+  {{- for issue in issues -}}
+    ([Issue #{issue.number}]({issue.url}))
+    {{- if not @last }}, {{ endif -}}
+  {{- endfor -}}
+{{ else -}}
+  {{- if pulls -}}
+    {{- if pulls }} {{ endif -}}
+    {{- for pull in pulls -}}
+      ([PR #{pull.number}]({pull.url}))
+      {{- if not @last }}, {{ endif -}}
+    {{- endfor -}}
+  {{- else -}}
+  {{- endif -}}
+{{- endif }}
 
 {body}
 
-By [@{author}](https://github.com/{author}) in {{ for pull in pulls -}}
+By [@{author}](https://github.com/{author}){{ if pulls }} in {{ for pull in pulls -}}
 {pull.url}{{ if not @last }}, {{ endif }}
-{{- endfor }}
+{{- endfor }}{{ endif }}
 ";
 
 impl Command {
@@ -284,12 +297,16 @@ impl Create {
                     selection == 0
                 };
 
-                let branch_name: Option<String> = match git2::Repository::open_from_env() {
-                    Ok(repo) => {
-                        let refr = repo.head().unwrap();
-                        if refr.is_branch() {
-                            Some(refr.shorthand()
-                            .expect("no shorthand Git branch name available").to_string())
+                // Get the branch name, optionally, using `git rev-parse --abbrev-ref HEAD`.
+                let branch_name: Option<String> = match std::process::Command::new("git")
+                    .arg("rev-parse")
+                    .arg("--abbrev-ref")
+                    .arg("HEAD")
+                    .output()
+                {
+                    Ok(output) => {
+                        if output.status.success() {
+                            Some(String::from_utf8(output.stdout).unwrap().trim().to_string())
                         } else {
                             None
                         }
@@ -605,5 +622,220 @@ impl TryFrom<&DirEntry> for Changeset {
             content,
             path,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn it_templatizes_with_multiple_issues_in_title_and_multiple_prs_in_footer() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER2"),
+                },
+            ],
+            pulls: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER2"),
+                },
+            ],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_multiple_prs_in_footer() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/issues/ISSUE_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("ISSUE_NUMBER"),
+            }],
+            pulls: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/pull/PULL_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("PULL_NUMBER2"),
+                },
+            ],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_multiple_issues_in_title() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER1",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER1"),
+                },
+                TemplateResource {
+                    url: format!(
+                        "https://github.com/{}/issues/ISSUE_NUMBER2",
+                        String::from("REPO_WITH_OWNER")
+                    ),
+                    number: String::from("ISSUE_NUMBER2"),
+                },
+            ],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("PULL_NUMBER"),
+            }],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_prs_in_title_when_empty_issues() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("PULL_NUMBER"),
+            }],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_without_prs_in_title_when_issues_present() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/ISSUE_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("ISSUE_NUMBER"),
+            }],
+            pulls: vec![TemplateResource {
+                url: format!(
+                    "https://github.com/{}/pull/PULL_NUMBER",
+                    String::from("REPO_WITH_OWNER")
+                ),
+                number: String::from("PULL_NUMBER"),
+            }],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
+    }
+
+    #[test]
+    fn it_templatizes_with_neither_issues_or_prs() {
+        let test_context = TemplateContext {
+            title: String::from("TITLE"),
+            issues: vec![],
+            pulls: vec![],
+            author: String::from("AUTHOR"),
+            body: String::from("BODY"),
+        };
+
+        let mut tt = TinyTemplate::new();
+        tt.add_template("message", EXAMPLE_TEMPLATE).unwrap();
+        tt.set_default_formatter(&format_unescaped);
+        let rendered_template = tt
+            .render("message", &test_context)
+            .unwrap()
+            .replace('\r', "");
+        insta::assert_snapshot!(rendered_template);
     }
 }
