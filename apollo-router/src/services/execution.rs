@@ -31,8 +31,7 @@ pub struct Request {
     /// It normally also contains type information from the schema,
     /// but might not if this `Request` was created in tests
     /// with `fake_builder()` without providing a `schema` parameter.
-    #[allow(unused)] // TODO: find some uses
-    pub(crate) compiler: apollo_compiler::Snapshot,
+    pub compiler: apollo_compiler::Snapshot,
 
     pub context: Context,
 }
