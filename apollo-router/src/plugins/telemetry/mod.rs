@@ -199,6 +199,7 @@ impl Drop for Telemetry {
                     if let Err(e) = controller.stop(&cx) {
                         ::tracing::error!("error during basic controller stop: {e}");
                     }
+                    ::tracing::debug!("stopped basic controller: {controller:?}");
                 });
             }
         }
