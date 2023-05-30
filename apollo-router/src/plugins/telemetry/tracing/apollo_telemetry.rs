@@ -365,7 +365,13 @@ impl Exporter {
                         .and_then(|t| extract_ftv1_trace(t, error_configuration)),
                 )]
             }
-            SUPERGRAPH_SPAN_NAME => {
+            SUPERGRAPH_SPAN_NAME => child_nodes,
+            REQUEST_SPAN_NAME => {
+                vec![TreeData::Request(
+                    self.extract_root_trace(span, child_nodes),
+                )]
+            }
+            ROUTER_SPAN_NAME => {
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
                     operation_signature: span
@@ -384,14 +390,6 @@ impl Exporter {
                         .and_then(extract_json)
                         .unwrap_or_default(),
                 });
-                child_nodes
-            }
-            REQUEST_SPAN_NAME => {
-                vec![TreeData::Request(
-                    self.extract_root_trace(span, child_nodes),
-                )]
-            }
-            ROUTER_SPAN_NAME => {
                 child_nodes.push(TreeData::Router {
                     http: Box::new(extract_http_data(span)),
                     client_name: span.attributes.get(&CLIENT_NAME).and_then(extract_string),
