@@ -59,8 +59,9 @@ impl ExportError for ApolloExportError {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) enum Sender {
+    #[default]
     Noop,
     Apollo(mpsc::Sender<SingleReport>),
 }
@@ -78,12 +79,6 @@ impl Sender {
                 }
             }
         }
-    }
-}
-
-impl Default for Sender {
-    fn default() -> Self {
-        Sender::Noop
     }
 }
 
