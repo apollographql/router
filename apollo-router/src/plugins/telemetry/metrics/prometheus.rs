@@ -85,9 +85,7 @@ impl MetricsConfigurator for Config {
         if self.enabled {
             let mut controller = controllers::basic(
                 processors::factory(
-                    selectors::simple::histogram([
-                        0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
-                    ]),
+                    selectors::simple::histogram(metrics_config.buckets.clone()),
                     aggregation::stateless_temporality_selector(),
                 )
                 .with_memory(true),

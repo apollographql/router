@@ -19,12 +19,18 @@ use derivative::Derivative;
 use derive_more::Display;
 use derive_more::From;
 use displaydoc::Display as DisplayDoc;
+#[cfg(test)]
+use futures::channel::mpsc;
+#[cfg(test)]
+use futures::channel::mpsc::SendError;
 use futures::channel::oneshot;
 use futures::prelude::*;
 use futures::FutureExt;
 use http_body::Body as _;
 use hyper::Body;
 use thiserror::Error;
+#[cfg(test)]
+use tokio::sync::Notify;
 use tokio::sync::RwLock;
 use tokio::task::spawn;
 use tokio_util::time::DelayQueue;
@@ -953,6 +959,86 @@ fn generate_event_stream(
 }
 
 #[cfg(test)]
+struct TestRouterHttpServer {
+    router_http_server: RouterHttpServer,
+    event_sender: mpsc::UnboundedSender<Event>,
+    state_machine_update_notifier: Arc<Notify>,
+}
+
+#[cfg(test)]
+impl TestRouterHttpServer {
+    fn new() -> Self {
+        let (event_sender, event_receiver) = mpsc::unbounded();
+        let state_machine_update_notifier = Arc::new(Notify::new());
+
+        let server_factory = AxumHttpServerFactory::new();
+        let router_factory: OrbiterRouterSuperServiceFactory<YamlRouterFactory> =
+            OrbiterRouterSuperServiceFactory::new(YamlRouterFactory::default());
+        let state_machine = StateMachine::for_tests(
+            server_factory,
+            router_factory,
+            Arc::clone(&state_machine_update_notifier),
+        );
+
+        let listen_addresses = state_machine.listen_addresses.clone();
+        let result = spawn(
+            async move { state_machine.process_events(event_receiver).await }
+                .with_current_subscriber(),
+        )
+        .map(|r| match r {
+            Ok(Ok(ok)) => Ok(ok),
+            Ok(Err(err)) => Err(err),
+            Err(err) => {
+                tracing::error!("{}", err);
+                Err(ApolloRouterError::StartupError)
+            }
+        })
+        .with_current_subscriber()
+        .boxed();
+
+        TestRouterHttpServer {
+            router_http_server: RouterHttpServer {
+                result,
+                shutdown_sender: None,
+                listen_addresses,
+            },
+            event_sender,
+            state_machine_update_notifier,
+        }
+    }
+
+    async fn request(
+        &self,
+        request: crate::graphql::Request,
+    ) -> Result<crate::graphql::Response, crate::error::FetchError> {
+        Ok(reqwest::Client::new()
+            .post(format!("{}/", self.listen_address().await.unwrap()))
+            .json(&request)
+            .send()
+            .await
+            .expect("couldn't send request")
+            .json()
+            .await
+            .expect("couldn't deserialize into json"))
+    }
+
+    async fn listen_address(&self) -> Option<ListenAddr> {
+        self.router_http_server.listen_address().await
+    }
+
+    async fn send_event(&mut self, event: Event) -> Result<(), SendError> {
+        let result = self.event_sender.send(event).await;
+        self.state_machine_update_notifier.notified().await;
+        result
+    }
+
+    async fn shutdown(mut self) -> Result<(), ApolloRouterError> {
+        self.send_event(Event::Shutdown).await.unwrap();
+        self.router_http_server.shutdown().await
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::env::temp_dir;
 
@@ -1142,5 +1228,167 @@ mod tests {
         .into_stream();
         assert!(matches!(stream.next().await.unwrap(), UpdateSchema(_)));
         assert!(matches!(stream.next().await.unwrap(), NoMoreSchema));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn basic_event_stream_test() {
+        let mut router_handle = TestRouterHttpServer::new();
+
+        let configuration =
+            Configuration::from_str(include_str!("testdata/supergraph_config.router.yaml"))
+                .unwrap();
+        let schema = include_str!("testdata/supergraph.graphql");
+
+        // let's push a valid configuration to the state machine, so it can start up
+        router_handle
+            .send_event(UpdateConfiguration(configuration))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateSchema(schema.to_string()))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateEntitlement(EntitlementState::Unentitled))
+            .await
+            .unwrap();
+
+        let request = Request::builder().query(r#"{ me { username } }"#).build();
+
+        let response = router_handle.request(request).await.unwrap();
+        assert_eq!(
+            "@ada",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("username")
+                .unwrap()
+        );
+
+        // shut the router down
+        router_handle
+            .send_event(Event::NoMoreConfiguration)
+            .await
+            .unwrap();
+        router_handle.send_event(Event::NoMoreSchema).await.unwrap();
+        router_handle.send_event(Event::Shutdown).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn schema_update_test() {
+        let mut router_handle = TestRouterHttpServer::new();
+        // let's push a valid configuration to the state machine, so it can start up
+        router_handle
+            .send_event(UpdateConfiguration(
+                Configuration::from_str(include_str!("testdata/supergraph_config.router.yaml"))
+                    .unwrap(),
+            ))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateSchema(
+                include_str!("testdata/supergraph_missing_name.graphql").to_string(),
+            ))
+            .await
+            .unwrap();
+        router_handle
+            .send_event(UpdateEntitlement(EntitlementState::Unentitled))
+            .await
+            .unwrap();
+
+        // let's send a valid query
+        let request = Request::builder().query(r#"{ me { username } }"#).build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "@ada",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("username")
+                .unwrap()
+        );
+
+        // the name field is not present yet
+        let request = Request::builder()
+            .query(r#"{ me { username name } }"#)
+            .build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "cannot query field 'name' on type 'User'",
+            response.errors[0].message
+        );
+        assert_eq!(
+            "INVALID_FIELD",
+            response.errors[0].extensions.get("code").unwrap()
+        );
+
+        // let's update the schema to add the field
+        router_handle
+            .send_event(UpdateSchema(
+                include_str!("testdata/supergraph.graphql").to_string(),
+            ))
+            .await
+            .unwrap();
+
+        // the request should now make it through
+        let request = Request::builder()
+            .query(r#"{ me { username name } }"#)
+            .build();
+
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "Ada Lovelace",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("name")
+                .unwrap()
+        );
+
+        // let's go back and remove the field
+        router_handle
+            .send_event(UpdateSchema(
+                include_str!("testdata/supergraph_missing_name.graphql").to_string(),
+            ))
+            .await
+            .unwrap();
+
+        let request = Request::builder().query(r#"{ me { username } }"#).build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "@ada",
+            response
+                .data
+                .unwrap()
+                .get("me")
+                .unwrap()
+                .get("username")
+                .unwrap()
+        );
+
+        let request = Request::builder()
+            .query(r#"{ me { username name } }"#)
+            .build();
+        let response = router_handle.request(request).await.unwrap();
+
+        assert_eq!(
+            "cannot query field 'name' on type 'User'",
+            response.errors[0].message
+        );
+        assert_eq!(
+            "INVALID_FIELD",
+            response.errors[0].extensions.get("code").unwrap()
+        );
+        router_handle.shutdown().await.unwrap();
     }
 }
