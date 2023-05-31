@@ -308,20 +308,22 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()
         {
             Ok(operations) => operations,
-            Err(errors) => {
-                parse_errors.extend(errors);
+            // TODO: maybe we want to collect all of them
+            // for display purposes?
+            Err(error) => {
+                parse_errors.push(error);
                 Default::default()
             }
         };
 
-        Ok(Query {
+        Query {
             string: query,
             compiler: OnceCell::from(Mutex::new(compiler)),
             fragments,
             operations,
             subselections: HashMap::new(),
             errors: parse_errors,
-        })
+        }
     }
 
     pub(crate) fn parse(
