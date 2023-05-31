@@ -515,15 +515,17 @@ impl MockSupergraphCreator {
         let schema = supergraph_service.schema();
         let configuration = Configuration::builder().build().unwrap();
         use crate::router_factory::create_plugins;
-        let plugins = create_plugins(&configuration, &schema, None)
-            .await
-            .unwrap()
-            .into_iter()
-            .collect();
+        let plugins = Arc::new(
+            create_plugins(&configuration, &schema, None)
+                .await
+                .unwrap()
+                .into_iter()
+                .collect(),
+        );
 
         Self {
             supergraph_service,
-            plugins: Arc::new(plugins),
+            plugins,
             schema: Arc::clone(&schema),
         }
     }

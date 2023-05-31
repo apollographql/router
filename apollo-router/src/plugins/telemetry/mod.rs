@@ -1722,11 +1722,13 @@ mod tests {
     use crate::graphql::Request;
     use crate::http_ext;
     use crate::json_ext::Object;
+    use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::plugins::telemetry::handle_error;
-    use crate::services::router_service;
+    use crate::services::RouterRequest;
+    use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
     use crate::services::SubgraphResponse;
     use crate::services::SupergraphRequest;
@@ -1892,7 +1894,6 @@ mod tests {
             .await
             .unwrap();
     }
-
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics() {
         let mut mock_service = MockSupergraphService::new();
@@ -2175,6 +2176,32 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn it_test_prometheus_metrics_custom_buckets() {
+        let mut mock_service = MockRouterService::new();
+        mock_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                Ok(RouterResponse::builder()
+                    .context(req.context)
+                    .header("x-custom", "coming_from_header")
+                    .data(json!({"data": {"my_value": 2usize}}))
+                    .build()
+                    .unwrap())
+            });
+
+        let mut mock_bad_request_service = MockRouterService::new();
+        mock_bad_request_service
+            .expect_call()
+            .times(1)
+            .returning(move |req: RouterRequest| {
+                Ok(RouterResponse::builder()
+                    .context(req.context)
+                    .status_code(StatusCode::BAD_REQUEST)
+                    .data(json!({"errors": [{"message": "nope"}]}))
+                    .build()
+                    .unwrap())
+            });
+
         let mut mock_subgraph_service = MockSubgraphService::new();
         mock_subgraph_service
             .expect_call()
@@ -2314,24 +2341,19 @@ mod tests {
             )
             .await
             .unwrap();
-        let mut router_service =
-            router_service::from_supergraph_mock_callback(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .header("x-custom", "coming_from_header")
-                    .data(json!({"data": {"my_value": 2usize}}))
-                    .build()
-                    .unwrap())
-            })
-            .await;
-
-        let router_req = SupergraphRequest::fake_builder().header("test", "my_value_set");
+        let mut router_service = dyn_plugin.router_service(BoxService::new(mock_service));
+        let router_req = SupergraphRequest::fake_builder()
+            .header("test", "my_value_set")
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         let _router_response = router_service
             .ready()
             .await
             .unwrap()
-            .call(router_req.build().unwrap().try_into().unwrap())
+            .call(router_req)
             .await
             .unwrap()
             .next_response()
@@ -2339,32 +2361,24 @@ mod tests {
             .unwrap();
 
         let mut bad_request_router_service =
-            router_service::from_supergraph_mock_callback(move |req: SupergraphRequest| {
-                Ok(SupergraphResponse::fake_builder()
-                    .context(req.context)
-                    .status_code(StatusCode::BAD_REQUEST)
-                    .data(json!({"errors": [{"message": "nope"}]}))
-                    .build()
-                    .unwrap())
-            })
-            .await;
-
+            dyn_plugin.router_service(BoxService::new(mock_bad_request_service));
         let router_req = SupergraphRequest::fake_builder()
             .header("test", "my_value_set")
-            .query("query Me { me { username } }");
+            .build()
+            .unwrap()
+            .try_into()
+            .unwrap();
 
         let _router_response = bad_request_router_service
             .ready()
             .await
             .unwrap()
-            .call(router_req.build().unwrap().try_into().unwrap())
+            .call(router_req)
             .await
             .unwrap()
             .next_response()
             .await
             .unwrap();
-
-        dbg!(_router_response.unwrap());
 
         let mut subgraph_service =
             dyn_plugin.subgraph_service("my_subgraph_name", BoxService::new(mock_subgraph_service));
@@ -2442,12 +2456,8 @@ mod tests {
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
         let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
-        let s = String::from_utf8_lossy(&body).to_string();
-
-        for l in s.lines() {
-            println!("{}", l);
-        }
-        let prom_metrics = s
+        let prom_metrics = String::from_utf8_lossy(&body)
+            .to_string()
             .split('\n')
             .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
             .sorted()

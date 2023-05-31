@@ -133,11 +133,7 @@ pub(crate) async fn from_supergraph_mock_callback(
     Error = BoxError,
     Future = BoxFuture<'static, router::ServiceResult>,
 > + Send {
-    from_supergraph_mock_callback_and_configuration(
-        supergraph_callback,
-        Arc::new(Configuration::default()),
-    )
-    .await
+    from_supergraph_mock_callback_and_configuration(supergraph_callback, Default::default()).await
 }
 
 #[cfg(test)]
