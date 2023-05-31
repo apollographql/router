@@ -87,8 +87,7 @@ impl MetricsConfigurator for Config {
                 processors::factory(
                     selectors::simple::histogram(metrics_config.buckets.clone()),
                     aggregation::stateless_temporality_selector(),
-                )
-                .with_memory(true),
+                ), // .with_memory(true),
             )
             .with_resource(Resource::new(
                 metrics_config
