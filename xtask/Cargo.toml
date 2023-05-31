@@ -17,9 +17,9 @@ cargo_metadata = "0.15"
 # Only use the `clock` features of `chrono` to avoid the `time` dependency
 # impacted by CVE-2020-26235.  https://github.com/chronotope/chrono/issues/602
 # and https://github.com/chronotope/chrono/issues/1073 will explain more.
-chrono = { version = "0.4.24", default-features = false, features = ["clock"] }
-console = "0.15.5"
-dialoguer = "0.10.3"
+chrono = { version = "0.4.26", default-features = false, features = ["clock"] }
+console = "0.15.7"
+dialoguer = "0.10.4"
 flate2 = "1"
 graphql_client = { version = "0.12.0", features = ["reqwest-rustls"] }
 itertools = "0.10.5"
