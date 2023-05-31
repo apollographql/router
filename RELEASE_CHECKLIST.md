@@ -135,7 +135,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 14. Now push the branch up to the correct remote:
 
     ```
-    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
+    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 15. Programatically create a small temporary file called `this_release.md` with the changelog details of _precisely this release_ from the `CHANGELOG.md`:
