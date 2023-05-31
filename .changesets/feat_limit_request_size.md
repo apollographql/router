@@ -14,7 +14,7 @@ preview_operation_limits:
 This limit is checked while reading from the network, before JSON parsing.
 Both the GraphQL document and associated variables count toward it.
 
-Before increasing this limit significantly consider doing performance testing
+Before increasing this limit significantly consider testing performance
 in an environment similar to your production, especially if some clients are untrusted.
 Many concurrent large requests could cause the Router to run out of memory.
 
