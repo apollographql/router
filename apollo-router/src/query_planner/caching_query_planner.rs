@@ -1,13 +1,11 @@
 // This entire file is license key functionality
 
-use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
 
 use futures::future::BoxFuture;
 use router_bridge::planner::Planner;
-use router_bridge::planner::UsageReporting;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::ServiceExt;
@@ -18,6 +16,7 @@ use crate::error::CacheResolverError;
 use crate::error::QueryPlannerError;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::services::layers::query_parsing::QueryParsingLayer;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
@@ -68,15 +67,21 @@ where
             .collect()
     }
 
-    pub(crate) async fn warm_up(&mut self, cache_keys: Vec<(String, Option<String>)>) {
+    pub(crate) async fn warm_up(
+        &mut self,
+        query_parser: &QueryParsingLayer,
+        cache_keys: Vec<(String, Option<String>)>,
+    ) {
         let schema_id = self.schema_id.clone();
 
         let mut count = 0usize;
-        for (query, operation) in cache_keys {
+        for (query_string, operation) in cache_keys {
+            let query = query_parser.parse((query_string.clone(), operation.clone()));
+
             let caching_key = CachingQueryKey {
                 schema_id: schema_id.clone(),
-                query: query.clone(),
-                operation: operation.to_owned(),
+                query: query_string,
+                operation: operation.clone(),
             };
             let context = Context::new();
 
@@ -142,7 +147,7 @@ where
         Box::pin(async move {
             let caching_key = CachingQueryKey {
                 schema_id,
-                query: request.query.clone(),
+                query: request.query.string.clone(),
                 operation: request.operation_name.to_owned(),
             };
 
@@ -215,25 +220,12 @@ where
                             .build())
                     }
                     Err(error) => {
-                        match error.deref() {
-                            QueryPlannerError::PlanningErrors(pe) => {
-                                request
-                                    .context
-                                    .private_entries
-                                    .lock()
-                                    .insert(pe.usage_reporting.clone());
-                            }
-                            QueryPlannerError::SpecError(e) => {
-                                request
-                                    .context
-                                    .private_entries
-                                    .lock()
-                                    .insert(UsageReporting {
-                                        stats_report_key: e.get_error_key().to_string(),
-                                        referenced_fields_by_type: HashMap::new(),
-                                    });
-                            }
-                            _ => {}
+                        if let QueryPlannerError::PlanningErrors(pe) = error.deref() {
+                            request
+                                .context
+                                .private_entries
+                                .lock()
+                                .insert(pe.usage_reporting.clone());
                         }
 
                         Err(CacheResolverError::RetrievalError(error))
@@ -283,6 +275,8 @@ mod tests {
     use crate::error::PlanErrors;
     use crate::query_planner::QueryPlan;
     use crate::spec::Query;
+    use crate::spec::Schema;
+    use crate::Configuration;
 
     mock! {
         #[derive(Debug)]
@@ -345,7 +339,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    "query1".into(),
+                    parse_query("query Me { me { username } }".to_string(), None),
                     Some("".into()),
                     Context::new()
                 ))
@@ -354,7 +348,7 @@ mod tests {
         }
         assert!(planner
             .call(QueryPlannerRequest::new(
-                "query2".into(),
+                parse_query("query Me { me { name { first } } }".to_string(), None),
                 Some("".into()),
                 Context::new()
             ))
@@ -405,7 +399,7 @@ mod tests {
         for _ in 0..5 {
             assert!(planner
                 .call(QueryPlannerRequest::new(
-                    "".into(),
+                    parse_query("query Me { me { username } }".to_string(), None),
                     Some("".into()),
                     Context::new()
                 ))
@@ -416,5 +410,24 @@ mod tests {
                 .lock()
                 .contains_key::<UsageReporting>());
         }
+    }
+
+    fn parse_query(query: String, operation_name: Option<String>) -> Query {
+        let configuration: Arc<Configuration> = Default::default();
+        let api_schema = None;
+
+        let parser = QueryParsingLayer::new(
+            Arc::new(
+                Schema::parse(
+                    include_str!("testdata/schema.graphql"),
+                    &configuration,
+                    api_schema,
+                )
+                .unwrap(),
+            ),
+            Arc::clone(&configuration),
+        );
+
+        parser.parse((query, operation_name))
     }
 }

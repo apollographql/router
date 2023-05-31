@@ -20,6 +20,7 @@ use tower_service::Service;
 use tracing_futures::Instrument;
 
 use super::layers::content_negociation;
+use super::layers::query_parsing::QueryParsingLayer;
 use super::new_service::ServiceFactory;
 use super::router::ClientRequestAccepts;
 use super::subgraph_service::MakeSubgraphService;
@@ -45,6 +46,7 @@ use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -143,7 +145,20 @@ where
         content,
         context,
         errors,
-    } = match plan_query(planning, body, context.clone()).await {
+    } = match plan_query(
+        planning,
+        req.query,
+        body.operation_name.clone(),
+        context.clone(),
+        schema.clone(),
+        req.supergraph_request
+            .body()
+            .query
+            .clone()
+            .expect("query presence was checked before"),
+    )
+    .await
+    {
         Ok(resp) => resp,
         Err(err) => match err.into_graphql_errors() {
             Ok(gql_errors) => {
@@ -242,18 +257,24 @@ where
 
 async fn plan_query(
     mut planning: CachingQueryPlanner<BridgeQueryPlanner>,
-    body: &graphql::Request,
+    mut query: Option<Query>,
+    operation_name: Option<String>,
     context: Context,
+    schema: Arc<Schema>,
+    query_str: String,
 ) -> Result<QueryPlannerResponse, CacheResolverError> {
+    if query.is_none() {
+        query = Some(
+            // TODO[igni]: no
+            QueryParsingLayer::new(schema, Default::default())
+                .parse((query_str, operation_name.clone())),
+        );
+    }
     planning
         .call(
             QueryPlannerRequest::builder()
-                .query(
-                    body.query
-                        .clone()
-                        .expect("the query presence was already checked by a plugin"),
-                )
-                .and_operation_name(body.operation_name.clone())
+                .query(query.expect("query presence was already checked by a plugin"))
+                .and_operation_name(operation_name)
                 .context(context)
                 .build(),
         )
@@ -263,7 +284,6 @@ async fn plan_query(
         ))
         .await
 }
-
 /// Builder which generates a plugin pipeline.
 ///
 /// This is at the heart of the delegation of responsibility model for the router. A schema,
@@ -394,6 +414,16 @@ impl HasPlugins for SupergraphCreator {
     }
 }
 
+pub(crate) trait HasSchema {
+    fn schema(&self) -> Arc<Schema>;
+}
+
+impl HasSchema for SupergraphCreator {
+    fn schema(&self) -> Arc<Schema> {
+        Arc::clone(&self.schema)
+    }
+}
+
 impl ServiceFactory<supergraph::Request> for SupergraphCreator {
     type Service = supergraph::BoxService;
     fn create(&self) -> Self::Service {
@@ -452,9 +482,12 @@ impl SupergraphCreator {
 
     pub(crate) async fn warm_up_query_planner(
         &mut self,
+        query_parser: &QueryParsingLayer,
         cache_keys: Vec<(String, Option<String>)>,
     ) {
-        self.query_planner_service.warm_up(cache_keys).await
+        self.query_planner_service
+            .warm_up(query_parser, cache_keys)
+            .await
     }
 
     /// Create a test service.
@@ -471,28 +504,27 @@ impl SupergraphCreator {
 pub(crate) struct MockSupergraphCreator {
     supergraph_service: MockSupergraphService,
     plugins: Arc<Plugins>,
+    schema: Arc<Schema>,
 }
 
 #[cfg(test)]
 impl MockSupergraphCreator {
     pub(crate) async fn new(supergraph_service: MockSupergraphService) -> Self {
-        let canned_schema = include_str!("../../testing_schema.graphql");
         let configuration = Configuration::builder().build().unwrap();
-
+        let schema = supergraph_service.schema();
         use crate::router_factory::create_plugins;
-        let plugins = create_plugins(
-            &configuration,
-            &Schema::parse_test(canned_schema, &configuration).unwrap(),
-            None,
-        )
-        .await
-        .unwrap()
-        .into_iter()
-        .collect();
+        let plugins = Arc::new(
+            create_plugins(&configuration, &schema, None)
+                .await
+                .unwrap()
+                .into_iter()
+                .collect(),
+        );
 
         Self {
             supergraph_service,
-            plugins: Arc::new(plugins),
+            plugins,
+            schema: Arc::clone(&schema),
         }
     }
 }
@@ -501,6 +533,13 @@ impl MockSupergraphCreator {
 impl HasPlugins for MockSupergraphCreator {
     fn plugins(&self) -> Arc<Plugins> {
         self.plugins.clone()
+    }
+}
+
+#[cfg(test)]
+impl HasSchema for MockSupergraphCreator {
+    fn schema(&self) -> Arc<Schema> {
+        self.schema.clone()
     }
 }
 

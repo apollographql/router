@@ -34,12 +34,14 @@ use tracing::Instrument;
 
 use super::layers::apq::APQLayer;
 use super::layers::content_negociation;
+use super::layers::query_parsing::QueryParsingLayer;
 use super::layers::static_page::StaticPageLayer;
 use super::new_service::ServiceFactory;
 use super::router;
 use super::router::ClientRequestAccepts;
 use super::supergraph;
 use super::HasPlugins;
+use super::HasSchema;
 #[cfg(test)]
 use super::SupergraphCreator;
 use super::MULTIPART_DEFER_CONTENT_TYPE;
@@ -66,16 +68,22 @@ where
 {
     supergraph_creator: Arc<SF>,
     apq_layer: APQLayer,
+    query_parsing_layer: QueryParsingLayer,
 }
 
 impl<SF> RouterService<SF>
 where
     SF: ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
 {
-    pub(crate) fn new(supergraph_creator: Arc<SF>, apq_layer: APQLayer) -> Self {
+    pub(crate) fn new(
+        supergraph_creator: Arc<SF>,
+        apq_layer: APQLayer,
+        query_parsing_layer: QueryParsingLayer,
+    ) -> Self {
         RouterService {
             supergraph_creator,
             apq_layer,
+            query_parsing_layer,
         }
     }
 }
@@ -104,8 +112,9 @@ pub(crate) async fn from_supergraph_mock_callback_and_configuration(
     });
 
     RouterCreator::new(
+        QueryParsingLayer::new(supergraph_service.schema(), Arc::clone(&configuration)),
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &configuration,
+        configuration,
     )
     .await
     .make()
@@ -144,8 +153,9 @@ pub(crate) async fn empty() -> impl Service<
         .returning(MockSupergraphService::new);
 
     RouterCreator::new(
+        QueryParsingLayer::new(supergraph_service.schema(), Default::default()),
         Arc::new(SupergraphCreator::for_tests(supergraph_service).await),
-        &Configuration::default(),
+        Default::default(),
     )
     .await
     .make()
@@ -177,6 +187,7 @@ where
 
         let supergraph_creator = self.supergraph_creator.clone();
         let apq = self.apq_layer.clone();
+        let query_parsing = self.query_parsing_layer.clone();
 
         let fut = async move {
             let graphql_request: Result<graphql::Request, (&str, String)> = if parts.method
@@ -228,6 +239,8 @@ where
 
                     let SupergraphResponse { response, context } =
                         match request_res.and_then(|request| {
+                            let request = query_parsing.supergraph_request(request);
+
                             let query = request.supergraph_request.body().query.as_ref();
 
                             if query.is_none() || query.unwrap().trim().is_empty() {
@@ -424,11 +437,18 @@ where
     supergraph_creator: Arc<SF>,
     static_page: StaticPageLayer,
     apq_layer: APQLayer,
+    query_parsing_layer: QueryParsingLayer,
 }
 
 impl<SF> ServiceFactory<router::Request> for RouterCreator<SF>
 where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasSchema
+        + HasPlugins
+        + ServiceFactory<supergraph::Request>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -442,7 +462,13 @@ where
 
 impl<SF> RouterFactory for RouterCreator<SF>
 where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasSchema
+        + HasPlugins
+        + ServiceFactory<supergraph::Request>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
@@ -466,14 +492,24 @@ where
 
 impl<SF> RouterCreator<SF>
 where
-    SF: HasPlugins + ServiceFactory<supergraph::Request> + Clone + Send + Sync + 'static,
+    SF: HasSchema
+        + HasPlugins
+        + ServiceFactory<supergraph::Request>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     <SF as ServiceFactory<supergraph::Request>>::Service:
         Service<supergraph::Request, Response = supergraph::Response, Error = BoxError> + Send,
     <<SF as ServiceFactory<supergraph::Request>>::Service as Service<supergraph::Request>>::Future:
         Send,
 {
-    pub(crate) async fn new(supergraph_creator: Arc<SF>, configuration: &Configuration) -> Self {
-        let static_page = StaticPageLayer::new(configuration);
+    pub(crate) async fn new(
+        query_parsing_layer: QueryParsingLayer,
+        supergraph_creator: Arc<SF>,
+        configuration: Arc<Configuration>,
+    ) -> Self {
+        let static_page = StaticPageLayer::new(&configuration);
         let apq_layer = if configuration.apq.enabled {
             APQLayer::with_cache(
                 DeduplicatingCache::from_configuration(&configuration.apq.router.cache, "APQ")
@@ -487,6 +523,7 @@ where
             supergraph_creator,
             static_page,
             apq_layer,
+            query_parsing_layer,
         }
     }
 
@@ -501,6 +538,7 @@ where
         let router_service = content_negociation::RouterLayer::default().layer(RouterService::new(
             self.supergraph_creator.clone(),
             self.apq_layer.clone(),
+            self.query_parsing_layer.clone(),
         ));
 
         ServiceBuilder::new()

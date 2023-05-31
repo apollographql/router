@@ -68,6 +68,7 @@ use crate::query_planner::BridgeQueryPlanner;
 use crate::router_factory::create_plugins;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
+use crate::services::layers::query_parsing::QueryParsingLayer;
 use crate::services::layers::static_page::home_page_content;
 use crate::services::layers::static_page::sandbox_page_content;
 use crate::services::new_service::ServiceFactory;
@@ -75,6 +76,7 @@ use crate::services::router;
 use crate::services::router_service;
 use crate::services::router_service::RouterCreator;
 use crate::services::supergraph;
+use crate::services::HasSchema;
 use crate::services::PluggableSupergraphServiceBuilder;
 use crate::services::RouterRequest;
 use crate::services::RouterResponse;
@@ -2314,10 +2316,13 @@ async fn test_supergraph_timeout() {
     }
     let supergraph_creator = builder.build().await.unwrap();
 
-    let service = RouterCreator::new(Arc::new(supergraph_creator), &conf)
-        .await
-        .make();
-
+    let service = RouterCreator::new(
+        QueryParsingLayer::new(supergraph_creator.schema(), Arc::clone(&conf)),
+        Arc::new(supergraph_creator),
+        Arc::clone(&conf),
+    )
+    .await
+    .make();
     // keep the server handle around otherwise it will immediately shutdown
     let (_server, client) = init_with_config(service, conf.clone(), MultiMap::new())
         .await

@@ -1035,7 +1035,7 @@ impl Query {
         })
     }
 
-    pub(crate) fn operation(&self, operation_name: Option<&str>) -> Option<&Operation> {
+    pub(crate) fn operation(&self, operation_name: Option<impl AsRef<str>>) -> Option<&Operation> {
         match operation_name {
             Some(name) => self
                 .operations
@@ -1043,7 +1043,7 @@ impl Query {
                 // we should have an error if the only operation is anonymous but the query specifies a name
                 .find(|op| {
                     if let Some(op_name) = op.name.as_deref() {
-                        op_name == name
+                        op_name == name.as_ref()
                     } else {
                         false
                     }
@@ -1138,6 +1138,10 @@ impl Operation {
             variables,
             kind,
         })
+    }
+
+    pub(crate) fn name(&self) -> Option<String> {
+        self.name.clone()
     }
 
     /// Checks to see if this is a query or mutation containing only
