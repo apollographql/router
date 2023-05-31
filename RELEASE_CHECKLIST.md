@@ -64,7 +64,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
 
    ```
    APOLLO_ROUTER_RELEASE_VERSION=#.#.#
-   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=public
+   APOLLO_ROUTER_RELEASE_GIT_ORIGIN=origin
    APOLLO_ROUTER_RELEASE_GITHUB_REPO=apollographql/router
    ```
 
@@ -107,7 +107,7 @@ A release can be cut from any branch, but we assume you'll be doing it from `dev
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-10. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` with the latest version info. Use https://github.com/apollographql/version_matrix to generate the version matrix.
+10. **MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.  This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).
 
 11. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
