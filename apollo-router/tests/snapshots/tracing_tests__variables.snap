@@ -9,7 +9,7 @@ expression: get_spans()
     "metadata": {
       "name": "root",
       "target": "tracing_tests",
-      "level": "INFO",
+      "level": "ERROR",
       "module_path": "tracing_tests",
       "fields": {
         "names": []
