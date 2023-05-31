@@ -39,6 +39,7 @@ async fn make_request(request: supergraph::Request) {
 
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
+#[target(salsa=tracing::Level::ERROR)]
 async fn traced_basic_request() {
     make_request(
         supergraph::Request::fake_builder()
@@ -52,6 +53,7 @@ async fn traced_basic_request() {
 
 #[test_span(tokio::test)]
 #[target(apollo_router=tracing::Level::DEBUG)]
+#[target(salsa=tracing::Level::ERROR)]
 async fn traced_basic_composition() {
     make_request(
         supergraph::Request::fake_builder()
