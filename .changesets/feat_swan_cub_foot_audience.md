@@ -1,6 +1,6 @@
 ### Configurable histogram buckets for metrics ([Issue #2333](https://github.com/apollographql/router/issues/2333))
 
-You can customize the buckets for all generated histograms:
+It is now possible to change the default bucketing for histograms generated for metrics:
 
 ```yaml title="router.yaml"
 telemetry:
